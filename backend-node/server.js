@@ -25,7 +25,7 @@ app.post("/upload", auth, upload.single("invoice"), async (req, res) => {
   try {
     const fileUrl = req.file.location;
     console.log("File uploaded to S3:", fileUrl);
-    const response = await axios.post("http://127.0.0.1:8000/process", {
+    const response = await axios.post("https://lorrey-ai-worker.onrender.com", {
       file: fileUrl
     });
     res.json({
