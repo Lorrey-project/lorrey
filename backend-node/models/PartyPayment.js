@@ -18,9 +18,9 @@ const partyPaymentSchema = new mongoose.Schema({
   // Manual Entries
   gstFcm: { type: Number, default: 0 },
   withholdAmount: { type: Number, default: 0 },
+  withholdReason: { type: String, default: '' },
+  otherReason: { type: String, default: '' },
   prevMonthDue: { type: Number, default: 0 },
-  creditDa: { type: Number, default: 0 },
-  creditDac: { type: Number, default: 0 },
   recoveredToDac: { type: Number, default: 0 },
   creditRefund: { type: Number, default: 0 },
   paidToParty: { type: Number, default: 0 },

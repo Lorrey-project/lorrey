@@ -71,13 +71,14 @@ export const COLUMNS = [
   { key: 'BILLING ER 95%', label: 'BILLING ER 95%\n(PARTY PAYABLE)', width: 130, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.95) },
   { key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.05) },
   { key: 'TDS@1%', label: 'TDS@1%', width: 80, type: 'calc', group: 'billing', formula: r => fmt2(num(r['BILLING ER 95%']) * num(r._tds_percent) / 100) },
-  { key: 'ADVANCE', label: 'ADVANCE', width: 90, type: 'auto', group: 'billing' },
-  { key: 'Site Cash', label: 'SITE CASH', width: 160, type: 'auto', group: 'billing', hasAttach: 'site_cash_auto' },
-  { key: 'OFFICE CASH', label: 'OFFICE CASH', width: 160, type: 'auto', group: 'billing', hasAttach: 'office_cash_auto' },
-  { key: 'Bank TF', label: 'BANK TF', width: 90, type: 'manual', group: 'billing' },
+  { key: 'ADVANCE', label: 'LOADING ADVANCE', width: 110, type: 'auto', group: 'billing' },
+  { key: 'Site Cash', label: 'SITE CASH ADVANCE', width: 160, type: 'auto', group: 'billing', hasAttach: 'site_cash_auto' },
+  { key: 'OFFICE CASH', label: 'OFFICE CASH ADVANCE', width: 160, type: 'auto', group: 'billing', hasAttach: 'office_cash_auto' },
+  { key: 'Bank TF', label: 'ADVANCE (BANK TF)', width: 120, type: 'manual', group: 'billing' },
 
   // ── Group 3: Deductions ────────────────────────────────────────────────────
   { key: 'Others deduction', label: 'OTHERS\nDEDUCTION', width: 130, type: 'manual', group: 'deductions' },
+  { key: 'Other', label: 'OTHER', width: 100, type: 'manual', group: 'deductions' },
   { key: 'GPS Monitoring Charge', label: 'GPS MONITORING\nCHARGE', width: 150, type: 'manual', group: 'deductions' },
   { key: 'GPS DEVICE', label: 'GPS DEVICE', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
   { key: 'RFID TAG', label: 'RFID TAG', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
@@ -129,12 +130,13 @@ export const COLUMNS = [
       - num(r['HSD AMOUNT'])
       - num(r['TRAVELLING EXP'])
       - num(r['SHORTAGE (AMOUNT)'])
+      - num(r['Other'])
     )
   },
   { key: 'UP TOLL', label: 'UP TOLL', width: 100, type: 'manual', group: 'net' },
   { key: 'DOWN TOLL', label: 'DOWN TOLL', width: 110, type: 'manual', group: 'net' },
   { key: 'EXTRA UNLOADING', label: 'EXTRA UNLOADING', width: 140, type: 'manual', group: 'net' },
-  { key: 'DEDICATED', label: 'DEDICATED', width: 120, type: 'auto', group: 'net', hint: '9.5% billing (ATO) or 8.5% party rate (non-ATO)' },
+  { key: 'DEDICATED', label: 'DEDICATED', width: 120, type: 'dropdown', options: ['Project', 'Actual', ''], group: 'net', hint: '9.5% billing (ATO) or 8.5% party rate (non-ATO)' },
   { key: '10W EXTRA 8.5%', label: '10W EXTRA 8.5%', width: 130, type: 'auto', group: 'net', hint: 'Non-STO only' },
   {
     key: 'INCENTIVE TDS', label: 'INCENTIVE TDS', width: 120, type: 'calc', group: 'net',
@@ -167,7 +169,13 @@ export const COLUMNS = [
       return Math.max(1, Math.round((unl - load) / (1000 * 60 * 60 * 24)) + 1);
     }
   },
-  { key: 'Detention', label: 'DETENTION', width: 110, type: 'manual', group: 'owner' },
+  {
+    key: 'Detention', label: 'DETENTION', width: 110, type: 'calc', group: 'owner',
+    formula: r => {
+      const d = num(r['Duration']);
+      return d > 0 ? 'D ' + (d - 1) : '';
+    }
+  },
   { key: 'Transporting Coast', label: 'TRANSPORTING COAST', width: 160, type: 'manual', group: 'owner' },
 ];
 

@@ -45,6 +45,7 @@ const COLUMNS = [
   { key: 'DAMAGE RECOVERY',      label: 'Damage\nRecovery',        width: 90,  calc: true  },
   { key: 'CASH_BANK_OTHERS',     label: 'Cash/Bank\nTF/Others',    width: 100, calc: true  },
   { key: 'OTHER DEDUCTION',      label: 'Other\nDeduction',        width: 90,  calc: true  },
+  { key: 'OTHER REASON',         label: 'Other\nReason',           width: 120, editable: true, bg: '#fef3c7' },
   { key: 'GPS TRIP CHARGE',      label: 'GPS Trip\nCharge',        width: 80,  calc: true  },
   { key: 'GPS DEVICE',           label: 'GPS\nDevice',             width: 80,  calc: true  },
   // ⑬ Net Amount  (calculated)
@@ -52,7 +53,7 @@ const COLUMNS = [
   // ⑭–⑲ Incentives from Cement Register
   { key: '8.5% NVCL',           label: '8.5% NVCL\nIncentive',   width: 90,  calc: true, bg: '#e0f2fe' },
   { key: 'DEDICATED INCENTIVE',  label: 'Dedicated\nIncentive',    width: 90,  calc: true, bg: '#e0f2fe' },
-  { key: 'RAFTER',               label: 'Rafter',                  width: 80,  calc: true, bg: '#e0f2fe' },
+  { key: 'RAFTER',               label: 'Others',                  width: 80,  calc: true, bg: '#e0f2fe' },
   { key: 'EXTRA U/L',            label: 'Extra U/L',               width: 80,  calc: true, bg: '#e0f2fe' },
   { key: 'TOLL UP',              label: 'Toll UP',                 width: 80,  calc: true, bg: '#fef08a' },
   { key: 'TOLL DOWN',            label: 'Toll Down',               width: 80,  calc: true, bg: '#fef08a' },
@@ -60,16 +61,12 @@ const COLUMNS = [
   { key: 'TDS ON INCENTIVE',     label: 'TDS on\nIncentive/UL',   width: 90,  calc: true, bg: '#bbf7d0' },
   // ㉑ Total Freight (calculated)
   { key: 'TOTAL FREIGHT',        label: 'Total Freight',           width: 100, calc: true, highlight: '#f3e8ff' },
-  // ㉒–㉔ Manual entries
+  // Manual entries
   { key: 'GST FCM',              label: 'GST FCM',                 width: 90,  editable: true, bg: '#fee2e2' },
   { key: 'WITHHOLD AMOUNT',      label: 'Withhold\nAmount',        width: 90,  editable: true, bg: '#fee2e2' },
+  { key: 'WITHHOLD REASON',      label: 'Withhold\nReason',        width: 120, editable: true, bg: '#fee2e2' },
   { key: 'PREV MONTH DUE',       label: 'Prev Month\nDue',         width: 100, editable: true, bg: '#fee2e2' },
-  // ㉕ Gross Payable (calculated)
-  { key: 'GROSS PAYABLE',        label: 'Gross Payable',           width: 110, calc: true, highlight: '#e0e7ff' },
-  // ㉖–㉗ Manual Credit entries
-  { key: 'CREDIT DA',            label: 'Credit (DA)',             width: 90,  editable: true, bg: '#ffedd5' },
-  { key: 'CREDIT DAC',           label: 'Credit (DAC)',            width: 90,  editable: true, bg: '#ffedd5' },
-  // ㉘ Net Payable (calculated)
+  // Net Payable (calculated)
   { key: 'NET PAYABLE',          label: 'Net Payable\n(after deduct)', width: 120, calc: true, highlight: '#e0e7ff' },
   // ㉙ Manual
   { key: 'RECOVERED TO DAC',     label: 'Recovered\nto DAC',       width: 100, editable: true, bg: '#fce7f3' },
@@ -251,9 +248,9 @@ export default function PartyPaymentDetails({ onBack }) {
           ...ag,
           'GST FCM':          num(saved.gstFcm),
           'WITHHOLD AMOUNT':  num(saved.withholdAmount),
+          'WITHHOLD REASON':  saved.withholdReason || '',
+          'OTHER REASON':     saved.otherReason || '',
           'PREV MONTH DUE':   num(saved.prevMonthDue),
-          'CREDIT DA':        num(saved.creditDa),
-          'CREDIT DAC':       num(saved.creditDac),
           'RECOVERED TO DAC': num(saved.recoveredToDac),
           'CREDIT REFUND':    num(saved.creditRefund),
           'PAID TO PARTY':    num(saved.paidToParty),
@@ -309,16 +306,13 @@ export default function PartyPaymentDetails({ onBack }) {
         num(r['TOLL DOWN']);
       r['TOTAL FREIGHT'] = round2(r['NET AMOUNT'] + incentiveSum - r['TDS ON INCENTIVE']);
 
-      // ㉕ Gross Payable = (Total Freight + GST FCM + Prev Month Due) − Withhold Amount
-      r['GROSS PAYABLE'] = round2(
+      // ㉘ Net Payable = Total Freight + GST FCM + Prev Month Due − Withhold Amount
+      r['NET PAYABLE'] = round2(
         r['TOTAL FREIGHT'] +
         num(r['GST FCM'])        +
         num(r['PREV MONTH DUE']) -
         num(r['WITHHOLD AMOUNT'])
       );
-
-      // ㉘ Net Payable = Gross Payable − (Credit DA + Credit DAC)
-      r['NET PAYABLE'] = round2(r['GROSS PAYABLE'] - (num(r['CREDIT DA']) + num(r['CREDIT DAC'])));
 
       // ㉛ Balance Due = Net Payable − Paid to Party
       r['BALANCE DUE'] = round2(r['NET PAYABLE'] - num(r['PAID TO PARTY']));
@@ -353,9 +347,9 @@ export default function PartyPaymentDetails({ onBack }) {
           vehicleNo:      cr['VEHICLE NO'],
           gstFcm:         num(cr['GST FCM']),
           withholdAmount: num(cr['WITHHOLD AMOUNT']),
+          withholdReason: cr['WITHHOLD REASON'] || '',
+          otherReason:    cr['OTHER REASON']    || '',
           prevMonthDue:   num(cr['PREV MONTH DUE']),
-          creditDa:       num(cr['CREDIT DA']),
-          creditDac:      num(cr['CREDIT DAC']),
           recoveredToDac: num(cr['RECOVERED TO DAC']),
           creditRefund:   num(cr['CREDIT REFUND']),
           paidToParty:    num(cr['PAID TO PARTY']),

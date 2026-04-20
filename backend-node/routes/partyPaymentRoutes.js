@@ -129,9 +129,9 @@ router.post('/bulk', async (req, res) => {
           $set: {
             gstFcm: record.gstFcm !== undefined ? Number(record.gstFcm) : 0,
             withholdAmount: record.withholdAmount !== undefined ? Number(record.withholdAmount) : 0,
+            withholdReason: record.withholdReason || '',
+            otherReason: record.otherReason || '',
             prevMonthDue: record.prevMonthDue !== undefined ? Number(record.prevMonthDue) : 0,
-            creditDa: record.creditDa !== undefined ? Number(record.creditDa) : 0,
-            creditDac: record.creditDac !== undefined ? Number(record.creditDac) : 0,
             recoveredToDac: record.recoveredToDac !== undefined ? Number(record.recoveredToDac) : 0,
             creditRefund: record.creditRefund !== undefined ? Number(record.creditRefund) : 0,
             paidToParty: record.paidToParty !== undefined ? Number(record.paidToParty) : 0,
