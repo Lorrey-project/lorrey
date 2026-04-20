@@ -35,7 +35,7 @@ import TruckContactManager from './TruckContactManager';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails }) => {
     const { user, logout } = useAuth();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -789,6 +789,54 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     }}
                                 >
                                     Open Party Sheet
+                                </Button>
+                            </CardContent>
+                        </Card>
+
+                        {/* ── Account Details Block ─────────────────────────── */}
+                        <Card sx={{
+                            height: '100%',
+                            borderRadius: '20px',
+                            background: 'linear-gradient(135deg, #0f766e 0%, #115e59 100%)',
+                            color: '#fff',
+                            boxShadow: '0 16px 40px rgba(15,118,110,0.3)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            overflow: 'hidden',
+                            position: 'relative',
+                        }}>
+                            <Box sx={{
+                                position: 'absolute', top: -20, right: -20,
+                                width: 100, height: 100, borderRadius: '50%',
+                                bgcolor: 'rgba(255,255,255,0.06)',
+                            }} />
+                            <CardContent sx={{ p: 2.5 }}>
+                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
+                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
+                                        <AccountBalanceWalletIcon sx={{ fontSize: 20 }} />
+                                    </Box>
+                                    <Box>
+                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
+                                            ACCOUNT DETAILS
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                                            Transaction & Balances
+                                        </Typography>
+                                    </Box>
+                                </Box>
+                                <Button
+                                    fullWidth variant="contained"
+                                    startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
+                                    onClick={onOpenAccountDetails}
+                                    sx={{
+                                        borderRadius: '12px', py: 1.1, fontWeight: 800,
+                                        bgcolor: 'rgba(255,255,255,0.2)', color: '#fff',
+                                        boxShadow: 'none',
+                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+                                        transition: 'all 0.2s', justifyContent: 'flex-start',
+                                        border: '1px solid rgba(255,255,255,0.2)',
+                                    }}
+                                >
+                                    Open Details Sheet
                                 </Button>
                             </CardContent>
                         </Card>

@@ -49,6 +49,7 @@ app.use("/main-cashbook", require("./routes/mainCashbookRoutes"));
 app.use("/pump-payment", require("./routes/pumpPaymentRoutes"));
 app.use("/party-payment", require("./routes/partyPaymentRoutes"));
 app.use("/fy-details", require("./routes/financialYearRoutes"));
+app.use("/account-details", require("./routes/accountDetailRoutes"));
 
 console.log("AWS REGION:", process.env.AWS_REGION);
 

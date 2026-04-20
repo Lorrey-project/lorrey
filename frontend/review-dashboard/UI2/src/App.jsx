@@ -21,6 +21,7 @@ import PumpPortal from './portals/pump/PumpPortal';
 import PumpPaymentDetails from './pages/PumpPaymentDetails';
 import PartyPaymentDetails from './pages/PartyPaymentDetails';
 import FinancialYearDetails from './pages/FinancialYearDetails';
+import AccountDetails from './pages/AccountDetails';
 
 const theme = createTheme({
   palette: {
@@ -214,6 +215,10 @@ function AppContent() {
     return <FinancialYearDetails onBack={() => setCurrentView('dashboard')} />;
   }
 
+  if (currentView === 'accountDetails') {
+    return <AccountDetails onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'fuelRateSettings') {
     return <FuelRateSettings onBack={() => setCurrentView('dashboard')} />;
   }
@@ -273,6 +278,7 @@ function AppContent() {
         onOpenPartyPayment={() => setCurrentView('partyPayment')}
         onOpenFYDetails={() => setCurrentView('fyDetails')}
         onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}
+        onOpenAccountDetails={() => setCurrentView('accountDetails')}
       />
     );
   }

@@ -487,6 +487,31 @@ export default function CementRegister({ onBack }) {
         )}
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => alert("Incentive Calculation Sheet route pending!")}
+            sx={{
+              fontWeight: 700, 
+              borderRadius: '24px', 
+              px: 2.5, 
+              py: 0.5,
+              fontSize: '13px',
+              textTransform: 'none',
+              border: '2px solid #0891b2', 
+              color: '#0891b2',
+              whiteSpace: 'nowrap',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              '&:hover': { 
+                bgcolor: '#0891b2', 
+                color: '#fff',
+                border: '2px solid #0891b2',
+                boxShadow: '0 4px 8px rgba(8, 145, 178, 0.2)'
+              }
+            }}
+          >
+            Incentive Calculation Sheet
+          </Button>
           {isBillingMode ? (
             <Box sx={{ 
               display: 'flex', alignItems: 'center', gap: 2, 
