@@ -226,6 +226,8 @@ export default function CementRegister({ onBack }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [isBillingMode, setIsBillingMode] = useState(false);
+  const [bulkBillInput, setBulkBillInput] = useState({ billNo: '', billDate: '' });
 
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -302,11 +304,18 @@ export default function CementRegister({ onBack }) {
 
   // ── Merged rows with calcs ─────────────────────────────────────────────────
   const computedRows = useMemo(() => {
-    return entries.map(row => {
+    let rows = entries.map(row => {
       const merged = { ...row, ...(localData[row._id] || {}) };
       return applyCalcs(merged);
     });
-  }, [entries, localData]);
+
+    if (isBillingMode) {
+      // Show ONLY entries that are STAMPED but NOT yet BILLED
+      rows = rows.filter(r => r['CHALLAN STATUS'] === 'STAMP' && !r['BILL NO']);
+    }
+
+    return rows;
+  }, [entries, localData, isBillingMode]);
 
   // ── Cell edit (local draft) ────────────────────────────────────────────────
   const handleCellEdit = useCallback((rowId, field, value) => {
@@ -370,6 +379,35 @@ export default function CementRegister({ onBack }) {
 
   // ── CSV Export ─────────────────────────────────────────────────────────────
   const handleExport = () => exportToCsv('cement_register.xls', computedRows);
+  
+  // ── Apply Bulk Bill to selected rows (draft only) ─────────────────────────
+  const handleBulkBillApply = () => {
+    const { billNo, billDate } = bulkBillInput;
+    if (!billNo) {
+      setSnack({ severity: 'error', msg: 'Please enter a Bill Number' });
+      return;
+    }
+    const ids = [...selectedIds];
+    if (ids.length === 0) {
+      setSnack({ severity: 'warning', msg: 'No rows selected for billing' });
+      return;
+    }
+
+    setLocalData(prev => {
+      const next = { ...prev };
+      ids.forEach(id => {
+        next[id] = { 
+          ...(next[id] || {}), 
+          'BILL NO': billNo, 
+          'BILL DATE': billDate 
+        };
+      });
+      return next;
+    });
+    setIsBillingMode(false);
+    setSelectedIds(new Set()); 
+    setSnack({ severity: 'success', msg: `Drafted Bill No: ${billNo} for ${ids.length} rows. Remember to click SAVE!` });
+  };
 
 
 
@@ -449,20 +487,46 @@ export default function CementRegister({ onBack }) {
         )}
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
-          {selectedIds.size > 0 && (
-            <Button
-              size="small" variant="contained"
-              startIcon={deleting ? <CircularProgress size={13} color="inherit" /> : <DeleteIcon />}
-              onClick={() => setConfirmDel(true)}
-              disabled={deleting}
-              sx={{
-                fontWeight: 800, borderRadius: 2, px: 2, fontSize: '12px',
-                background: 'linear-gradient(135deg,#dc2626,#b91c1c)',
-                boxShadow: '0 4px 12px rgba(220,38,38,0.35)',
-                '&:hover': { background: 'linear-gradient(135deg,#b91c1c,#991b1b)' },
+          {isBillingMode ? (
+            <Box sx={{ 
+              display: 'flex', alignItems: 'center', gap: 2, 
+              bgcolor: '#f0f9ff', px: 2, py: 0.5, borderRadius: 2, border: '1px solid #bae6fd' 
+            }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#0369a1' }}>BILLING MODE:</Typography>
+              <input 
+                type="text" placeholder="Bill No" 
+                value={bulkBillInput.billNo}
+                onChange={e => setBulkBillInput(prev => ({ ...prev, billNo: e.target.value }))}
+                style={{ width: 220, padding: '6px 12px', borderRadius: 6, border: '1px solid #94a3b8', fontSize: 13, outline: 'none' }}
+              />
+              <input 
+                type="date"
+                value={bulkBillInput.billDate}
+                onChange={e => setBulkBillInput(prev => ({ ...prev, billDate: e.target.value }))}
+                style={{ width: 160, padding: '6px 12px', borderRadius: 6, border: '1px solid #94a3b8', fontSize: 13, outline: 'none' }}
+              />
+              <Button size="small" variant="contained" color="primary" onClick={handleBulkBillApply}
+                disabled={selectedIds.size === 0}
+                sx={{ fontWeight: 800, fontSize: 10, px: 2, bgcolor: '#0284c7' }}>
+                Apply to {selectedIds.size}
+              </Button>
+              <Button size="small" sx={{ fontWeight: 700, fontSize: 10, color: '#64748b' }} 
+                onClick={() => setIsBillingMode(false)}>Exit</Button>
+            </Box>
+          ) : (
+            <Button size="small" variant="contained"
+              startIcon={<SyncIcon />}
+              onClick={() => {
+                setIsBillingMode(true);
+                setSelectedIds(new Set());
               }}
-            >
-              Delete ({selectedIds.size})
+              sx={{
+                fontWeight: 800, borderRadius: 2, px: 2, fontSize: '11px',
+                background: 'linear-gradient(135deg,#0ea5e9,#0284c7)',
+                boxShadow: '0 4px 12px rgba(14,165,233,0.3)',
+                '&:hover': { background: 'linear-gradient(135deg,#0284c7,#0369a1)' },
+              }}>
+              Bill Together
             </Button>
           )}
 
