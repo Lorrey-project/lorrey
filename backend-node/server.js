@@ -4,8 +4,12 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const mongoose = require("mongoose");
+const http = require("http");
+const { init: initSocket } = require("./socket");
+const { startWatcher } = require("./utils/scannerWatcher");
 
 const invoiceRoutes = require("./routes/invoiceRoutes");
+const voucherRoutes = require("./routes/voucherRoutes");
 const authRoutes = require("./routes/authRoutes");
 const upload = require("./middleware/upload");
 const auth = require("./middleware/authMiddleware");
@@ -13,11 +17,22 @@ const softcopyUpload = require("./middleware/softcopyUpload");
 const gcnUpload = require("./middleware/gcnUpload");
 
 const app = express();
+const server = http.createServer(app);
+initSocket(server);
+startWatcher();
 
 app.use(cors());
 app.use(express.json());
 
 app.use("/auth", authRoutes);
+app.use("/voucher", voucherRoutes);
+app.use("/truck-contacts", require("./routes/truckContactRoutes"));
+app.use("/cement-register", require("./routes/cementRegisterRoutes"));
+app.use("/gst-portal", require("./routes/gstPortalRoutes"));
+app.use("/main-cashbook", require("./routes/mainCashbookRoutes"));
+app.use("/pump-payment", require("./routes/pumpPaymentRoutes"));
+app.use("/party-payment", require("./routes/partyPaymentRoutes"));
+app.use("/fy-details", require("./routes/financialYearRoutes"));
 
 console.log("AWS REGION:", process.env.AWS_REGION);
 
@@ -78,6 +93,6 @@ mongoose.connect(process.env.MONGO_URI)
 
 app.use("/invoice", auth, invoiceRoutes);
 
-app.listen(3000, () => {
+server.listen(3000, () => {
   console.log("Server is running on port 3000");
 });

@@ -1,0 +1,102 @@
+Project Requirements and Dependencies
+
+This project consists of three main services: an AI Worker (Python), a Node.js Backend, and a Frontend UI (React/Vite). Below are the requirements and dependencies for each service.
+
+
+======================================================================
+1. AI Worker (Python)
+Location: ai-worker/requirements.txt
+======================================================================
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.12.1
+boto3==1.42.61
+botocore==1.42.61
+certifi==2026.2.25
+charset-normalizer==3.4.4
+click==8.3.1
+distro==1.9.0
+dotenv==0.9.9
+fastapi==0.135.1
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.11
+jiter==0.13.0
+jmespath==1.1.0
+openai==2.24.0
+packaging==26.0
+pillow==12.1.1
+pydantic==2.12.5
+pydantic_core==2.41.5
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+requests==2.32.5
+s3transfer==0.16.0
+six==1.17.0
+sniffio==1.3.1
+starlette==0.52.1
+tqdm==4.67.3
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+urllib3==2.6.3
+uvicorn==0.41.0
+
+
+======================================================================
+2. Backend (Node.js)
+Location: backend-node/package.json
+======================================================================
+Dependencies:
+- @aws-sdk/client-s3 (v3.1002.0)
+- aws-sdk (v2.1693.0)
+- axios (v1.13.6)
+- bcryptjs (v3.0.3)
+- cors (v2.8.6)
+- dotenv (v17.3.1)
+- dotevn (v0.0.1-security)
+- express (v5.2.1)
+- express-validator (v7.3.2)
+- jsonwebtoken (v9.0.3)
+- mongoose (v9.2.4)
+- multer (v2.1.1)
+- multer-s3 (v3.0.1)
+- socket.io (v4.8.3)
+
+Dev Dependencies:
+- jest (v30.3.0)
+- mongodb-memory-server (v11.0.1)
+- nodemon (v3.1.14)
+- supertest (v7.2.2)
+
+
+======================================================================
+3. Frontend UI (React + Vite)
+Location: frontend/review-dashboard/UI2/package.json
+======================================================================
+Dependencies:
+- @emotion/react (v11.14.0)
+- @emotion/styled (v11.14.1)
+- @mui/icons-material (v7.3.9)
+- @mui/material (v7.3.9)
+- axios (v1.13.6)
+- html2pdf.js (v0.14.0)
+- number-to-words (v1.2.4)
+- qrcode.react (v4.2.0)
+- react (v19.2.0)
+- react-dom (v19.2.0)
+- react-router-dom (v7.14.0)
+- socket.io-client (v4.8.3)
+- xlsx (v0.18.5)
+
+Dev Dependencies:
+- @eslint/js (v9.39.1)
+- @types/react (v19.2.7)
+- @types/react-dom (v19.2.3)
+- @vitejs/plugin-react (v5.1.1)
+- eslint (v9.39.1)
+- eslint-plugin-react-hooks (v7.0.1)
+- eslint-plugin-react-refresh (v0.4.24)
+- globals (v16.5.0)
+- vite (v5.2.0)
+

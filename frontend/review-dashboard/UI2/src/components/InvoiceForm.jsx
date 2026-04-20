@@ -9,6 +9,15 @@ import {
   Divider,
   Alert,
   CircularProgress,
+  Card,
+  CardHeader,
+  CardContent,
+  TextField,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  IconButton
 } from "@mui/material";
 import SaveIcon from "@mui/icons-material/Save";
 import RestoreIcon from "@mui/icons-material/Restore";
@@ -16,24 +25,29 @@ import UploadFileIcon from "@mui/icons-material/UploadFile";
 import PrintIcon from "@mui/icons-material/Print";
 import DownloadIcon from "@mui/icons-material/Download";
 import EditIcon from "@mui/icons-material/Edit";
+import DocumentScannerIcon from "@mui/icons-material/DocumentScanner";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
+import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 import axios from "axios";
 import html2pdf from "html2pdf.js";
+import { io } from "socket.io-client";
 import { API_URL } from "../config";
+
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
+const socket = io(SOCKET_URL, { autoConnect: true });
 
 import InvoiceDetails from "./InvoiceDetails";
 import SellerDetails from "./SellerDetails";
 import BuyerDetails from "./BuyerDetails";
-import ConsigneeDetails from "./ConsigneeDetails";
 import SupplyDetails from "./SupplyDetails";
 import ItemsTable from "./ItemsTable";
-import TaxDetails from "./TaxDetails";
-import AmountSummary from "./AmountSummary";
 import EwbDetails from "./EwbDetails";
 import PremiumLoadingOverlay from "./PremiumLoadingOverlay";
 import TaxInvoice from "./TaxInvoice";
 import GCNDocument from "./GCNDocument";
 import LorryHireSlipReview from "./LorryHireSlipReview";
 import FuelSlipReview from "./FuelSlipReview";
+import CameraCaptureDialog from "./CameraCaptureDialog";
 
 export default function InvoiceForm({ onBack }) {
   const { logout } = useAuth();
@@ -46,6 +60,67 @@ export default function InvoiceForm({ onBack }) {
   const [showGCN, setShowGCN] = useState(false);
   const [showLorrySlip, setShowLorrySlip] = useState(false);
   const [showFuelSlip, setShowFuelSlip] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isScanTriggered, setIsScanTriggered] = useState(false);
+
+  const handleScannerCapture = (file) => {
+      setIsScannerOpen(false);
+      handleFileUpload({ target: { files: [file] } });
+  };
+
+  const handlePhysicalScan = async () => {
+      setIsScanTriggered(true);
+      setIsProcessing(true);
+      setProcessingMode("upload");
+      setStatus({ type: "info", message: "🖨️ Commanding your HP scanner... Place the document on the scanner and wait." });
+      try {
+          const token = localStorage.getItem("token");
+          await axios.post(`${API_URL}/invoice/scan-now`, {}, {
+              headers: { Authorization: `Bearer ${token}` }
+          });
+          // Result comes back via socket.io (scanner_document_processed)
+      } catch (error) {
+          setIsProcessing(false);
+          const errMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+          if (error.response?.status === 401) {
+              setStatus({ type: "error", message: "⚠️ Session expired. Please log out and log back in, then try scanning again." });
+          } else {
+              setStatus({ type: "error", message: `Scanner error: ${errMsg}. Run: brew install sane-backends` });
+          }
+      } finally {
+          setIsScanTriggered(false);
+      }
+  };
+
+  // Auto-calculate Unloading Charges (30 * MT) only if destination state is West Bengal.
+  // If destination state is anything else, fix unloading charges to 0.
+  useEffect(() => {
+     const destState = formData?.supply_details?.destination_state?.toLowerCase() || '';
+     if (destState === 'west bengal') {
+         const qtyStr = formData?.items?.[0]?.quantity;
+         if (qtyStr) {
+             const qty = parseFloat(qtyStr);
+             if (!isNaN(qty)) {
+                 const calc = (qty * 30).toFixed(2);
+                 if (formData.nt_details?.unloading_charges !== calc) {
+                     setFormData(prev => ({
+                         ...prev,
+                         nt_details: { ...prev?.nt_details, unloading_charges: calc }
+                     }));
+                 }
+             }
+         }
+     } else if (destState && destState !== 'west bengal') {
+         // Non-WB destination: fix unloading charges to 0
+         if (formData.nt_details?.unloading_charges !== '0') {
+             setFormData(prev => ({
+                 ...prev,
+                 nt_details: { ...prev?.nt_details, unloading_charges: '0' }
+             }));
+         }
+     }
+  }, [formData?.supply_details?.destination_state, formData?.items]);
 
   // Refs for unified print/download
   const taxInvoiceRef = useRef(null);
@@ -91,6 +166,13 @@ export default function InvoiceForm({ onBack }) {
     }
   };
 
+  const ADDON_OPTIONS = [
+    { label: "GPS Device",            amount: 1500 },
+    { label: "RFID Tag",               amount: 100  },
+    { label: "RFID Tag Reassurance",   amount: 100  },
+    { label: "Fastag",                 amount: 200  },
+  ];
+
   const getEmptySchema = () => ({
     invoice_details: {},
     seller_details: {},
@@ -101,21 +183,103 @@ export default function InvoiceForm({ onBack }) {
     tax_details: {},
     amount_summary: {},
     ewb_details: {},
+    addon_charges: [],
   });
+
+  const handleAddAddon = () => {
+    const usedTypes = (formData.addon_charges || []).map(c => c.type);
+    const nextOpt = ADDON_OPTIONS.find(o => !usedTypes.includes(o.label));
+    if (!nextOpt) return; // all 4 already added
+    setFormData(prev => ({
+      ...prev,
+      addon_charges: [...(prev.addon_charges || []), { type: nextOpt.label, amount: nextOpt.amount }]
+    }));
+  };
+
+  const handleAddonChange = (index, selectedLabel) => {
+    const opt = ADDON_OPTIONS.find(o => o.label === selectedLabel);
+    setFormData(prev => {
+      const updated = [...(prev.addon_charges || [])];
+      updated[index] = { type: opt.label, amount: opt.amount };
+      return { ...prev, addon_charges: updated };
+    });
+  };
+
+  const handleRemoveAddon = (index) => {
+    setFormData(prev => {
+      const updated = [...(prev.addon_charges || [])];
+      updated.splice(index, 1);
+      return { ...prev, addon_charges: updated };
+    });
+  };
 
   useEffect(() => {
     setFormData(getEmptySchema());
   }, []);
 
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    if (!isDragActive) setIsDragActive(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragActive(false);
+  };
+
+  useEffect(() => {
+      const onStatus = (data) => {
+          setProcessingMode("upload");
+          setIsProcessing(true);
+          setStatus({ type: "info", message: data.message });
+      };
+
+      const onError = (data) => {
+          setIsProcessing(false);
+          setStatus({ type: "error", message: data.error });
+      };
+
+      const onProcessed = (data) => {
+          setFormData({
+              _id: data.invoice_id,
+              ...getEmptySchema(),
+              ...data.ai_data.invoice_data,
+          });
+          setErrors({});
+          setStatus({
+              type: "success",
+              message: "Scanning complete! AI Extraction finished, please review the fields below.",
+          });
+          setIsProcessing(false);
+      };
+
+      socket.on("scanner_status", onStatus);
+      socket.on("scanner_error", onError);
+      socket.on("scanner_document_processed", onProcessed);
+
+      return () => {
+          socket.off("scanner_status", onStatus);
+          socket.off("scanner_error", onError);
+          socket.off("scanner_document_processed", onProcessed);
+      };
+  }, []);
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileUpload({ target: { files: e.dataTransfer.files } });
+    }
+  };
+
   const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
+    const file = event.target.files?.[0];
     if (!file) return;
 
-    const validTypes = ["image/jpeg", "image/png", "application/pdf"];
-    if (!validTypes.includes(file.type)) {
+    if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
       setStatus({
         type: "error",
-        message: "Please upload a PDF, PNG, or JPG document.",
+        message: "Please upload a valid image or PDF document.",
       });
       setTimeout(() => setStatus(null), 4000);
       return;
@@ -239,7 +403,18 @@ export default function InvoiceForm({ onBack }) {
         }, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Crucial: fetch the officially generated sequential GCN NO (e.g., DAC/26-27/1)
+        try {
+          const updated = await axios.get(`${API_URL}/invoice/lorry-data/${formData._id}`, { headers: { Authorization: `Bearer ${token}` } });
+          if (updated.data?.gcn_data?.gcn_no) {
+            setFormData(prev => ({ ...prev, gcn_data: { ...prev.gcn_data, gcn_no: updated.data.gcn_data.gcn_no } }));
+          }
+        } catch (e) {
+          console.error("Failed to fetch assigned GCN No", e);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
         setStatus({
           type: "success",
           message: "Final invoice data saved to database successfully!",
@@ -312,7 +487,7 @@ export default function InvoiceForm({ onBack }) {
             <Button variant="outlined" size="small" onClick={() => setShowGCN(false)}>
               ← Back to Invoice
             </Button>
-            <Button variant="outlined" size="small" color="error" onClick={onBack}>
+            <Button variant="outlined" size="small" color="error" onClick={() => window.location.href = '/'}>
               Back to Dashboard
             </Button>
             <Button
@@ -388,7 +563,7 @@ export default function InvoiceForm({ onBack }) {
           className="no-print"
         >
           <Box display="flex" gap={2}>
-            <Button variant="outlined" size="small" onClick={onBack}>
+            <Button variant="outlined" size="small" onClick={() => window.location.href = '/'}>
               Back to Dashboard
             </Button>
             <Button
@@ -439,17 +614,43 @@ export default function InvoiceForm({ onBack }) {
   }
 
   return (
+    <>
+    <CameraCaptureDialog 
+        open={isScannerOpen} 
+        onClose={() => setIsScannerOpen(false)} 
+        onCapture={handleScannerCapture} 
+    />
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Paper
         elevation={0}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         sx={{
           p: { xs: 3, md: 6 },
           borderRadius: 2,
-          border: "1px solid #e0e0e0",
-          backgroundColor: "#ffffff",
+          border: isDragActive ? "2px dashed #1a73e8" : "1px solid #e0e0e0",
+          backgroundColor: isDragActive ? "rgba(26,115,232,0.04)" : "#ffffff",
           position: "relative",
+          transition: "all 0.2s ease",
         }}
       >
+        {isDragActive && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0, left: 0, right: 0, bottom: 0,
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(255,255,255,0.8)',
+              borderRadius: 2,
+            }}
+          >
+            <Typography variant="h4" color="primary" fontWeight="bold">Drop document here</Typography>
+          </Box>
+        )}
         <PremiumLoadingOverlay isProcessing={isProcessing} mode={processingMode} />
 
         <Box
@@ -462,7 +663,7 @@ export default function InvoiceForm({ onBack }) {
           <Box display="flex" alignItems="center" gap={2}>
             <Button
               variant="outlined"
-              onClick={onBack}
+              onClick={() => window.location.href = '/'}
               disabled={isProcessing}
               sx={{ minWidth: "auto", px: 2, borderRadius: '8px' }}
             >
@@ -497,6 +698,16 @@ export default function InvoiceForm({ onBack }) {
             </Button>
             <Button
               variant="contained"
+              color="secondary"
+              startIcon={isScanTriggered ? <CircularProgress size={16} color="inherit" /> : <DocumentScannerIcon />}
+              onClick={handlePhysicalScan}
+              sx={{ borderRadius: '8px', px: 3, background: 'linear-gradient(45deg, #7b1fa2, #9c27b0)', boxShadow: '0 4px 12px rgba(123,31,162,0.3)', '&:hover': { background: 'linear-gradient(45deg, #6a1b9a, #8e24aa)' } }}
+              disabled={isProcessing || isScanTriggered}
+            >
+              {isScanTriggered ? 'Scanning...' : 'Scan from Printer'}
+            </Button>
+            <Button
+              variant="contained"
               component="label"
               startIcon={<UploadFileIcon />}
               sx={{ borderRadius: '8px', px: 3 }}
@@ -506,7 +717,7 @@ export default function InvoiceForm({ onBack }) {
               <input
                 type="file"
                 hidden
-                accept="image/png, image/jpeg, application/pdf"
+                accept="image/*, application/pdf"
                 onChange={handleFileUpload}
               />
             </Button>
@@ -551,17 +762,114 @@ export default function InvoiceForm({ onBack }) {
           <BuyerDetails data={formData.buyer_details} errors={errors.buyer_details} onChange={handleChange} />
         </Box>
 
-        <ConsigneeDetails data={formData.consignee_details} errors={errors.consignee_details} onChange={handleChange} />
         <SupplyDetails data={formData.supply_details} errors={errors.supply_details} onChange={handleChange} />
-        <ItemsTable items={formData.items} errors={errors.items} onChange={handleChange} />
+        <ItemsTable items={formData.items} amountSummary={formData.amount_summary} errors={errors.items} onChange={handleChange} />
 
-        <Box display="flex" flexDirection="column" gap={0}>
-          <TaxDetails data={formData.tax_details} errors={errors.tax_details} onChange={handleChange} />
-          <AmountSummary data={formData.amount_summary} errors={errors.amount_summary} onChange={handleChange} />
-        </Box>
+        { (formData.invoice_details?.invoice_type === 'NT' || formData.items?.some(i => (i.description_of_product || '').toUpperCase().includes('UNLOADING'))) && (() => {
+            const isWestBengal = formData?.supply_details?.destination_state?.toLowerCase() === 'west bengal';
+            return (
+                <Card sx={{ mb: 3, border: '2px dashed #f59e0b', bgcolor: '#fffbeb' }}>
+                    <CardHeader title="NT Billing Section" sx={{ bgcolor: '#fde68a' }} titleTypographyProps={{ fontWeight: 800, color: '#b45309' }} />
+                    <CardContent>
+                        <Typography variant="body2" color="text.secondary" mb={2}>Extra details for NT (New Transport/Unloading) or NVR billing.</Typography>
+                        <Box display="flex" flexDirection="column" gap={3}>
+                            <TextField
+                                fullWidth
+                                label="Unloading Charges"
+                                name="unloading_charges"
+                                value={formData.nt_details?.unloading_charges || ''}
+                                onChange={(e) => isWestBengal ? handleChange('nt_details', 'unloading_charges', e.target.value) : undefined}
+                                variant="outlined"
+                                disabled={!isWestBengal}
+                                helperText={
+                                    isWestBengal
+                                        ? "Auto-calculated (30 × MT) for West Bengal routes."
+                                        : "Fixed at ₹0 — Unloading charges only apply for West Bengal destinations."
+                                }
+                                sx={{
+                                    '& .MuiInputBase-input.Mui-disabled': {
+                                        WebkitTextFillColor: '#555',
+                                        fontWeight: 600,
+                                    }
+                                }}
+                            />
+                        </Box>
+                    </CardContent>
+                </Card>
+            );
+        })()}
+
+        {/* ── Add on Charges ── */}
+        <Card sx={{ mb: 3, border: '2px solid #e3f2fd', bgcolor: '#f8fbff' }}>
+          <CardHeader
+            title="Add on Charges"
+            sx={{ bgcolor: '#e3f2fd' }}
+            titleTypographyProps={{ fontWeight: 800, color: '#1565c0' }}
+            action={
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddCircleOutlineIcon />}
+                onClick={handleAddAddon}
+                disabled={(formData.addon_charges || []).length >= ADDON_OPTIONS.length}
+                sx={{ mr: 1, borderRadius: '8px', background: 'linear-gradient(45deg,#1565c0,#1976d2)', boxShadow: '0 3px 8px rgba(25,118,210,0.3)', '&:hover': { background: 'linear-gradient(45deg,#0d47a1,#1565c0)' }, '&.Mui-disabled': { background: '#ccc' } }}
+              >
+                Add Charge
+              </Button>
+            }
+          />
+          <CardContent>
+            {(!formData.addon_charges || formData.addon_charges.length === 0) ? (
+              <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                No add-on charges added. Click "Add Charge" to add one.
+              </Typography>
+            ) : (
+              <Box display="flex" flexDirection="column" gap={2}>
+                {formData.addon_charges.map((charge, idx) => (
+                  <Box key={idx} display="flex" alignItems="center" gap={2}>
+                    <FormControl sx={{ minWidth: 280 }} size="small">
+                      <InputLabel>Charge Type</InputLabel>
+                      <Select
+                        value={charge.type}
+                        label="Charge Type"
+                        onChange={(e) => handleAddonChange(idx, e.target.value)}
+                      >
+                        {ADDON_OPTIONS.map(opt => {
+                          const alreadyUsed = (formData.addon_charges || []).some((c, i) => i !== idx && c.type === opt.label);
+                          return (
+                            <MenuItem key={opt.label} value={opt.label} disabled={alreadyUsed}>
+                              {opt.label} — ₹{opt.amount.toLocaleString()} per Truck
+                            </MenuItem>
+                          );
+                        })}
+                      </Select>
+                    </FormControl>
+                    <TextField
+                      size="small"
+                      label="Amount (₹)"
+                      value={`₹${charge.amount.toLocaleString()}`}
+                      inputProps={{ readOnly: true }}
+                      sx={{ width: 140, '& .MuiInputBase-input': { fontWeight: 700, color: '#1565c0' } }}
+                    />
+                    <IconButton onClick={() => handleRemoveAddon(idx)} color="error" size="small" title="Remove">
+                      <RemoveCircleOutlineIcon />
+                    </IconButton>
+                  </Box>
+                ))}
+                <Box sx={{ mt: 1, pt: 1.5, borderTop: '1px dashed #90caf9', display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" fontWeight={700} color="text.secondary">Total Add-on:</Typography>
+                  <Typography variant="body1" fontWeight={900} color="primary.main">
+                    ₹{(formData.addon_charges.reduce((s, c) => s + (c.amount || 0), 0)).toLocaleString()}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+          </CardContent>
+        </Card>
 
         <EwbDetails data={formData.ewb_details} errors={errors.ewb_details} onChange={handleChange} />
       </Paper>
     </Container>
+    </>
   );
 }

@@ -22,11 +22,10 @@ import html2pdf from 'html2pdf.js';
 import LorryHireSlipDocument from './LorryHireSlipDocument';
 import { API_URL } from '../config';
 
-const DIESEL_RATE = 90;
 const STEPS = ['Review Details', 'Generate Slip'];
 
 /* ─── Helpers ───────────────────────────────────────────────────────────── */
-const buildGcnDataFromInvoice = (data) => {
+export const buildGcnDataFromInvoice = (data) => {
     const inv = data?.human_verified_data || data?.ai_data?.invoice_data || (data?.invoice_details ? data : {});
     const details = inv?.invoice_details || {};
     const seller = inv?.seller_details || {};
@@ -50,7 +49,7 @@ const buildGcnDataFromInvoice = (data) => {
     const fyStart = month >= 4 ? yr : yr - 1;
     const fyShort = `${String(fyStart).slice(-2)}-${String(fyStart + 1).slice(-2)}`;
     const ref = details.reference_number || '';
-    const gcnNo = supply.lorrey_receipt_number || `DAC/${fyShort}${ref ? `-${ref}` : ''}`;
+    const gcnNo = supply.lorrey_receipt_number || (inv?.gcn_data?.gcn_no && inv.gcn_data.gcn_no !== '' ? inv.gcn_data.gcn_no : `DAC/${fyShort}/?`);
 
     return {
         company_name: 'DIPALI ASSOCIATES & CO.',
@@ -78,7 +77,7 @@ const buildGcnDataFromInvoice = (data) => {
         material: firstItem.description_of_product || firstItem.material_code || '',
         bags: String(supply.bags || firstItem.bags || ''),
         qty_mt: String(firstItem.quantity || ''),
-        material_value: String(firstItem.taxable_value || amount.net_payable || ''),
+        material_value: String(amount.net_payable || firstItem.taxable_value || ''),
     };
 };
 
@@ -136,9 +135,15 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
     // Editable advance fields
     const [loadingAdv, setLoadingAdv] = useState('');
     const [dieselLtrs, setDieselLtrs] = useState('');
+    const [dieselRate, setDieselRate] = useState('0');
+
+    // Required fuel (auto-calculated, read-only)
+    const [fuelRequirement, setFuelRequirement] = useState(null);  // { required_fuel_litres, distance_km, mileage_kmpl, vehicle_type, wheels }
+    const [fuelLoading, setFuelLoading] = useState(false);
+    const [fuelError, setFuelError] = useState('');
 
     // Derived
-    const dieselAdv = (parseFloat(dieselLtrs) || 0) * DIESEL_RATE;
+    const dieselAdv = (parseFloat(dieselLtrs) || 0) * (parseFloat(dieselRate) || 0);
     const totalAdv = (parseFloat(loadingAdv) || 0) + dieselAdv;
 
     // Random slip numbers, fixed on mount
@@ -167,6 +172,9 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                     setSavedUrl(inv.lorry_hire_slip_data.lorry_hire_slip_url);
                     setLoadingAdv(String(inv.lorry_hire_slip_data.loading_advance ?? ''));
                     setDieselLtrs(String(inv.lorry_hire_slip_data.diesel_litres ?? ''));
+                    if (inv.lorry_hire_slip_data.diesel_rate != null) {
+                        setDieselRate(inv.lorry_hire_slip_data.diesel_rate);
+                    }
                 }
 
                 const derived = buildGcnDataFromInvoice(inv);
@@ -185,7 +193,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                 }
 
                 const savedGcn = inv?.gcn_data || {};
-                setGcnData({
+                const finalGcnData = {
                     ...derived,
                     ...savedGcn,
                     agent_name: dbContact.owner || savedGcn.agent_name || derived.agent_name || '',
@@ -202,7 +210,37 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                     permit: dbContact.permit || savedGcn.permit || '',
                     puc: dbContact.puc || savedGcn.puc || '',
                     np_validity: dbContact.np_validity || savedGcn.np_validity || '',
-                });
+                };
+                setGcnData(finalGcnData);
+
+                // ── Fetch required fuel (read-only) ──────────────────────────
+                const finalTruckNo = finalGcnData.truck_no;
+                const finalDestination = finalGcnData.destination;
+                if (finalTruckNo && finalDestination) {
+                    setFuelLoading(true);
+                    try {
+                        const fuelRes = await axios.get(
+                            `${API_URL}/invoice/fuel-requirement/${encodeURIComponent(finalTruckNo)}/${encodeURIComponent(finalDestination)}`,
+                            { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        if (fuelRes.data.found && fuelRes.data.required_fuel_litres != null) {
+                            setFuelRequirement(fuelRes.data);
+                            // Pre-fill Diesel field with the estimate only if not already loaded from a saved slip
+                            if (!inv?.lorry_hire_slip_data?.lorry_hire_slip_url) {
+                                setDieselLtrs(String(fuelRes.data.required_fuel_litres));
+                            }
+                        } else {
+                            setFuelError(fuelRes.data.error || 'Could not calculate required fuel');
+                        }
+                    } catch (fuelErr) {
+                        setFuelError('Fuel calculation failed: ' + fuelErr.message);
+                    } finally {
+                        setFuelLoading(false);
+                    }
+                } else {
+                    setFuelError(!finalTruckNo ? 'Truck number not found' : 'Destination not found');
+                }
+
             } catch (err) {
                 setSnack({ type: 'error', message: 'Failed to load data: ' + err.message });
             } finally {
@@ -228,9 +266,10 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                 fuel_slip_no: fuelSlipNo,
                 loading_advance: parseFloat(loadingAdv) || 0,
                 diesel_litres: parseFloat(dieselLtrs) || 0,
-                diesel_rate: DIESEL_RATE,
+                diesel_rate: parseFloat(dieselRate) || 0,
                 diesel_advance: parseFloat(dieselAdv.toFixed(2)),
                 total_advance: parseFloat(totalAdv.toFixed(2)),
+                estimated_required_fuel: fuelRequirement?.required_fuel_litres ?? null,
             };
 
             const formData = new FormData();
@@ -294,7 +333,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
         return (
             <Box sx={{ bgcolor: '#f4f7f9', minHeight: '100vh', pb: 6 }}>
                 <Box sx={{ bgcolor: '#fff', borderBottom: '1px solid #e8eaed', px: 3, py: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f0f6ff', '&:hover': { bgcolor: '#d0e4ff' }, flexShrink: 0 }}>
+                    <IconButton onClick={() => window.location.href = '/'} size="small" sx={{ bgcolor: '#f0f6ff', '&:hover': { bgcolor: '#d0e4ff' }, flexShrink: 0 }}>
                         <ArrowBackIcon fontSize="small" />
                     </IconButton>
                     <Box flex={1} sx={{ minWidth: 0 }}>
@@ -320,7 +359,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                         variant="contained"
                         size="small"
                         startIcon={<DescriptionIcon />}
-                        onClick={onBack}
+                        onClick={() => window.location.href = '/'}
                         sx={{ ml: { xs: 0, sm: 2 }, borderRadius: 2, px: 2, bgcolor: '#333', '&:hover': { bgcolor: '#000' }, whiteSpace: 'nowrap' }}
                     >
                         Dashboard
@@ -360,6 +399,8 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                 <InfoRow label="Truck No." value={gcnData?.truck_no} mono />
                                 <InfoRow label="Truck Owner" value={gcnData?.agent_name} />
                                 <InfoRow label="Driver Name" value={gcnData?.driver_name} />
+                                <InfoRow label="Driver Number" value={gcnData?.owner_agent_contact || gcnData?.driver_number} />
+                                <InfoRow label="License No" value={gcnData?.driver_license_no} />
                             </SectionCard>
                             <SectionCard icon={<InventoryIcon />} title="Material Details" color="#00695c">
                                 <InfoRow label="Material" value={gcnData?.material} />
@@ -378,11 +419,65 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                 mb: { xs: 4, md: 0 }
                             }} elevation={0}>
                                 <Typography variant="h6" fontWeight="900" mb={3}>Trip Advance</Typography>
+
+                                {/* ── Required Fuel (Read-only, auto-calculated) ── */}
+                                <Box sx={{
+                                    mb: 2.5,
+                                    borderRadius: 3,
+                                    border: fuelError ? '1.5px solid #ef9a9a' : '1.5px solid #b2dfdb',
+                                    bgcolor: fuelError ? '#fff8f8' : '#f0fdf4',
+                                    px: 2.5,
+                                    py: 1.8,
+                                    position: 'relative',
+                                    overflow: 'hidden'
+                                }}>
+                                    {/* subtle gradient accent */}
+                                    <Box sx={{
+                                        position: 'absolute', top: 0, left: 0, bottom: 0, width: 4,
+                                        bgcolor: fuelError ? '#e53935' : '#00897b',
+                                        borderRadius: '3px 0 0 3px'
+                                    }} />
+                                    <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                                        <LocalGasStationIcon sx={{ fontSize: 16, color: fuelError ? '#e53935' : '#00897b' }} />
+                                        <Typography variant="caption" fontWeight="700" sx={{ color: fuelError ? '#e53935' : '#00897b', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                                            Required Fuel
+                                        </Typography>
+                                    </Box>
+                                    {fuelLoading ? (
+                                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
+                                            <CircularProgress size={16} sx={{ color: '#00897b' }} />
+                                            <Typography variant="body2" color="text.secondary">Calculating…</Typography>
+                                        </Box>
+                                    ) : fuelError ? (
+                                        <Typography variant="body2" sx={{ color: '#c62828', fontWeight: 500, mt: 0.5 }}>
+                                            {fuelError}
+                                        </Typography>
+                                    ) : fuelRequirement ? (
+                                        <>
+                                            <Typography variant="h5" fontWeight="900" sx={{ color: '#00695c', lineHeight: 1.1 }}>
+                                                {fuelRequirement.required_fuel_litres} L
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                                ({fuelRequirement.distance_km} km × 2) ÷ {fuelRequirement.mileage_kmpl} km/L ({fuelRequirement.vehicle_type})
+                                            </Typography>
+                                        </>
+                                    ) : (
+                                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>—</Typography>
+                                    )}
+                                </Box>
+
                                 <TextField label="Loading Advance (Rs.)" type="number" fullWidth value={loadingAdv} onChange={e => setLoadingAdv(e.target.value)} sx={{ mb: 2 }} InputProps={{ startAdornment: <Typography sx={{ mr: 1, color: '#777', fontWeight: 700 }}>₹</Typography> }} />
-                                <TextField label="Diesel (Litres)" type="number" fullWidth value={dieselLtrs} onChange={e => setDieselLtrs(e.target.value)} sx={{ mb: 2 }} InputProps={{ endAdornment: <LocalGasStationIcon sx={{ color: '#f57c00' }} /> }} />
-                                <Box sx={{ bgcolor: '#f8f9fa', borderRadius: 2, px: 3, py: 2.5, border: '1px solid #e0e0e0', mb: 3 }}>
-                                    <Typography variant="subtitle1" fontWeight="500" color="text.secondary">Total Advance</Typography>
-                                    <Typography variant="h5" fontWeight="900" color="primary">₹{totalAdv.toFixed(2)}</Typography>
+                                
+                                <Box display="flex" gap={2} sx={{ mb: 2 }}>
+                                    <TextField
+                                        label="Fuel Amount (Litres) — adjust if needed"
+                                        type="number"
+                                        fullWidth
+                                        value={dieselLtrs}
+                                        onChange={e => setDieselLtrs(e.target.value)}
+                                        helperText={fuelRequirement ? `Estimate: ${fuelRequirement.required_fuel_litres} L` : ''}
+                                        InputProps={{ endAdornment: <LocalGasStationIcon sx={{ color: '#f57c00' }} /> }}
+                                    />
                                 </Box>
                                 <Button variant="contained" fullWidth size="large" endIcon={<ArrowForwardIcon />} onClick={() => setStep(1)} sx={{ borderRadius: 2, fontWeight: 800, py: 1.6, background: 'linear-gradient(45deg, #f57c00, #ff9800)', boxShadow: '0 6px 16px rgba(245,124,0,0.35)' }}>
                                     Generate Lorry Hire Slip
@@ -472,7 +567,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                 Fuel Slip
                             </Button>
                         )}
-                        <Button variant="contained" size="small" startIcon={<DescriptionIcon />} onClick={onBack} sx={{ borderRadius: 2, px: 2, bgcolor: '#333', '&:hover': { bgcolor: '#000' }, flex: { xs: 1, sm: 'none' } }}>
+                        <Button variant="contained" size="small" startIcon={<DescriptionIcon />} onClick={() => window.location.href = '/'} sx={{ borderRadius: 2, px: 2, bgcolor: '#333', '&:hover': { bgcolor: '#000' }, flex: { xs: 1, sm: 'none' } }}>
                             Dashboard
                         </Button>
                     </Box>
@@ -493,7 +588,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                         fuelSlipNo={fuelSlipNo}
                         loadingAdv={parseFloat(loadingAdv) || 0}
                         dieselLtrs={parseFloat(dieselLtrs) || 0}
-                        dieselRate={DIESEL_RATE}
+                        dieselRate={parseFloat(dieselRate) || 0}
                         dieselAdv={dieselAdv.toFixed(2)}
                         totalAdv={totalAdv.toFixed(2)}
                         invoiceData={invoiceData}

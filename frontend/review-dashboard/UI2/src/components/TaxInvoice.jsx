@@ -127,11 +127,13 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                         <tbody>
                             <tr>
                                 <td style={{ ...cellBase, width: '46%', borderRight: '1px solid #000' }} rowSpan={2}>
-                                    <div style={{ fontSize: F.xl, fontWeight: '900', lineHeight: '1.2', marginBottom: '3px' }}>{seller.seller_name}</div>
-                                    <div style={{ fontSize: F.sm }}>{seller.seller_address}</div>
-                                    <div style={{ fontSize: F.sm }}>GST Number : <strong>{seller.seller_gstin}</strong></div>
-                                    <div style={{ fontSize: F.sm }}>Email: {seller.seller_email}</div>
-                                    <div style={{ fontSize: F.sm }}>Contact: {seller.seller_contact}</div>
+                                    <div style={{ fontSize: F.xl, fontWeight: '900', lineHeight: '1.2', marginBottom: '3px' }}>{supply.transporter_name || "DIPALI ASSOCIATES & CO."}</div>
+                                    <div style={{ fontSize: F.md, fontWeight: '700', marginBottom: '4px' }}>Fleet Owner & Transport Service Provider</div>
+                                    <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Office:</strong> No.144, Plot No-3, Nayak Villa, Netaji Subhas Pally, Durgapur - 713201</div>
+                                    <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Site Office:</strong> 1st Floor, Panja Hotel, Darjeeling More, Panagarh</div>
+                                    <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Mobile:</strong> 7810935738 / 8116221063 / 9474485192</div>
+                                    <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Email:</strong> dipaliassociates.durgapur@gmail.com</div>
+                                    <div style={{ fontSize: F.sm }}><strong>GST No.:</strong> {supply.transporter_gstin || "19AATFD1733C1ZH"}</div>
                                 </td>
                                 <td style={{ ...cellBase, width: '27%', borderRight: '1px solid #000' }}>
                                     <span style={lbl}>Invoice No</span>
@@ -161,16 +163,18 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                             <tr>
                                 <td style={{ ...cellBase, width: '50%', borderRight: '1px solid #000' }}>
                                     <span style={lbl}>Customer :</span>
-                                    <div style={bold}>{buyer.buyer_name}</div>
-                                    <div style={{ fontSize: F.sm, marginTop: '2px' }}>{buyer.buyer_address}</div>
-                                    <div style={{ fontSize: F.sm, marginTop: '3px' }}>GSTIN: <strong>{buyer.buyer_gstin}</strong></div>
-                                    <div style={{ fontSize: F.sm }}>PAN: <strong>{buyer.buyer_pan}</strong></div>
+                                    <div style={bold}>{seller.seller_name}</div>
+                                    <div style={{ fontSize: F.sm, marginTop: '2px' }}>{seller.seller_address}</div>
+                                    {seller.seller_pincode && <div style={{ fontSize: F.sm }}>PIN: <strong>{seller.seller_pincode}</strong></div>}
+                                    <div style={{ fontSize: F.sm, marginTop: '3px' }}>GSTIN: <strong>{seller.seller_gstin}</strong></div>
+                                    <div style={{ fontSize: F.sm }}>PAN: <strong>{seller.seller_pan}</strong></div>
                                 </td>
                                 <td style={{ ...cellBase, width: '50%' }}>
                                     <span style={lbl}>Consignee :</span>
-                                    <div style={bold}>{consignee.consignee_name}</div>
-                                    <div style={{ fontSize: F.sm, marginTop: '2px' }}>{consignee.consignee_address}</div>
-                                    {consignee.consignee_pincode && <div style={{ fontSize: F.sm, marginTop: '3px' }}>PIN: <strong>{consignee.consignee_pincode}</strong></div>}
+                                    <div style={bold}>{buyer.buyer_name}</div>
+                                    <div style={{ fontSize: F.sm, marginTop: '2px' }}>{buyer.buyer_address}</div>
+                                    {buyer.buyer_pincode && <div style={{ fontSize: F.sm }}>PIN: <strong>{buyer.buyer_pincode}</strong></div>}
+                                    {buyer.buyer_gstin && <div style={{ fontSize: F.sm, marginTop: '3px' }}>GSTIN: <strong>{buyer.buyer_gstin}</strong></div>}
                                 </td>
                             </tr>
                         </tbody>
@@ -220,10 +224,7 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                                     {supply.delivery_number && <><span style={lbl}>Delivery Number</span><strong>{supply.delivery_number}</strong></>}
                                 </td>
                                 <td style={{ ...cellBase }} colSpan={2}>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                        <div><span style={lbl}>State</span><strong>WEST BENGAL</strong></div>
-                                        <div><span style={lbl}>Place of Supply</span><strong>WEST BENGAL</strong></div>
-                                    </div>
+                                    <div><span style={lbl}>State</span><strong style={{ textTransform: 'uppercase' }}>{supply.destination_state || "WEST BENGAL"}</strong></div>
                                 </td>
                             </tr>
                         </tbody>
@@ -234,10 +235,10 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                         <thead>
                             <tr style={{ backgroundColor: '#f2f2f2' }}>
                                 <th style={{ ...cellBase, width: '12%', textAlign: 'center' }}>HSN</th>
-                                <th style={{ ...cellBase, width: '40%', textAlign: 'center' }}>Description</th>
-                                <th style={{ ...cellBase, width: '15%', textAlign: 'center' }}>Qty</th>
-                                <th style={{ ...cellBase, width: '15%', textAlign: 'right' }}>Rate</th>
-                                <th style={{ ...cellBase, width: '18%', textAlign: 'right' }}>Amount</th>
+                                <th style={{ ...cellBase, width: '33%', textAlign: 'center' }}>Description</th>
+                                <th style={{ ...cellBase, width: '12%', textAlign: 'center' }}>Qty (MT)</th>
+                                <th style={{ ...cellBase, width: '13%', textAlign: 'center' }}>Bags</th>
+                                <th style={{ ...cellBase, width: '31%', textAlign: 'right' }}>Amount</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -249,11 +250,12 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                                         <div style={{ fontSize: F.sm }}>{item.description_of_product}</div>
                                     </td>
                                     <td style={{ ...cellBase, textAlign: 'center' }}>
-                                        <strong>{item.quantity} MT</strong>
-                                        {item.bags && <div>{item.bags} BAGS</div>}
+                                        <strong>{item.quantity}</strong>
                                     </td>
-                                    <td style={{ ...cellBase, textAlign: 'right' }}>{item.rate}</td>
-                                    <td style={{ ...cellBase, textAlign: 'right' }}>{item.taxable_value}</td>
+                                    <td style={{ ...cellBase, textAlign: 'center' }}>
+                                        <strong>{item.bags || '-'}</strong>
+                                    </td>
+                                    <td style={{ ...cellBase, textAlign: 'right' }}>{item.net_payable || item.taxable_value}</td>
                                 </tr>
                             ))}
                             {/* Fillers */}
@@ -261,18 +263,11 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                                 <td style={cellBase} colSpan={5}></td>
                             </tr>
                             {/* Totals */}
-                            {[
-                                { l: 'Sub Total', v: amount.net_value },
-                                { l: `SGST (${tax.sgst_rate}%)`, v: tax.sgst_amount },
-                                { l: `CGST (${tax.cgst_rate}%)`, v: tax.cgst_amount },
-                                { l: 'Total Payable', v: amount.net_payable, b: true }
-                            ].map((row, i) => (
-                                <tr key={i}>
-                                    <td style={{ ...cellBase, border: 'none' }} colSpan={2}></td>
-                                    <td style={{ ...cellBase, textAlign: 'right', fontWeight: row.b ? '900' : '700' }} colSpan={2}>{row.l}</td>
-                                    <td style={{ ...cellBase, textAlign: 'right', fontWeight: row.b ? '900' : '400' }}>{row.v}</td>
-                                </tr>
-                            ))}
+                            <tr>
+                                <td style={{ ...cellBase, border: 'none' }} colSpan={2}></td>
+                                <td style={{ ...cellBase, textAlign: 'right', fontWeight: '900' }} colSpan={2}>Total Payable</td>
+                                <td style={{ ...cellBase, textAlign: 'right', fontWeight: '900' }}>{amount.net_payable}</td>
+                            </tr>
                         </tbody>
                     </table>
 
@@ -303,7 +298,7 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                             )}
                         </div>
                         <div style={{ width: '38%', textAlign: 'right' }}>
-                            <div style={{ fontSize: F.md, fontWeight: '700' }}>For {seller.seller_name}</div>
+                            <div style={{ fontSize: F.md, fontWeight: '700' }}>For {supply.transporter_name || "DIPALI ASSOCIATES & CO."}</div>
                             <div style={{ height: '40px' }}></div>
                             <div style={{ fontSize: F.sm }}><strong>Authorized Signatory</strong></div>
                         </div>

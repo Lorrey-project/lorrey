@@ -4,9 +4,20 @@ import InvoiceForm from './components/InvoiceForm';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import Signup from './components/Signup';
+import PumpLogin from './components/PumpLogin';
 import Dashboard from './components/Dashboard';
+import PumpDashboard from './components/PumpDashboard';
 import LorryHireSlipReview from './components/LorryHireSlipReview';
 import FuelSlipReview from './components/FuelSlipReview';
+import VoucherEntry from './components/VoucherEntry';
+import CementRegister from './pages/CementRegister';
+import VoucherRegister from './pages/VoucherRegister';
+import GSTPortalRegister from './pages/GSTPortalRegister';
+import MainCashbook from './pages/MainCashbook';
+import PumpPaymentDetails from './pages/PumpPaymentDetails';
+import PartyPaymentDetails from './pages/PartyPaymentDetails';
+import FinancialYearDetails from './pages/FinancialYearDetails';
+import FuelRateSettings from './pages/FuelRateSettings';
 
 const theme = createTheme({
   palette: {
@@ -69,6 +80,8 @@ function AppContent() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [lorrySlipInvoiceId, setLorrySlipInvoiceId] = useState(null);
   const [fuelSlipInvoiceId, setFuelSlipInvoiceId] = useState(null);
+  const [voucherInvoiceId, setVoucherInvoiceId] = useState(null);
+  const [voucherInvoiceData, setVoucherInvoiceData] = useState(null);
 
   if (loading) {
     return (
@@ -79,6 +92,36 @@ function AppContent() {
   }
 
   if (!user) {
+    const portal = import.meta.env.VITE_PORTAL; // undefined | 'site' | 'sas1' | 'sas2'
+
+    // Port 5175 — SAS-1 pump only
+    if (portal === 'sas1') {
+      return showSignup ? (
+        <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-1" />
+      ) : (
+        <PumpLogin onToggle={() => setShowSignup(true)} lockedPump="SAS-1" />
+      );
+    }
+
+    // Port 5176 — SAS-2 pump only
+    if (portal === 'sas2') {
+      return showSignup ? (
+        <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-2" />
+      ) : (
+        <PumpLogin onToggle={() => setShowSignup(true)} lockedPump="SAS-2" />
+      );
+    }
+
+    // Port 5174 — Site admin only (OFFICE role)
+    if (portal === 'site') {
+      return showSignup ? (
+        <Signup onToggle={() => setShowSignup(false)} lockedPortal="OFFICE" />
+      ) : (
+        <Login onToggle={() => setShowSignup(true)} lockedPortal="OFFICE" />
+      );
+    }
+
+    // Port 5173 — Full office portal (all roles: HEAD_OFFICE, OFFICE, PETROL PUMP)
     return showSignup ? (
       <Signup onToggle={() => setShowSignup(false)} />
     ) : (
@@ -105,17 +148,97 @@ function AppContent() {
       <FuelSlipReview
         invoiceId={fuelSlipInvoiceId}
         onBack={() => { setCurrentView('dashboard'); setFuelSlipInvoiceId(null); }}
+        onOpenVoucher={(id) => {
+          setVoucherInvoiceId(id);
+          setFuelSlipInvoiceId(null);
+          setCurrentView('voucher');
+        }}
       />
     );
   }
 
-  return currentView === 'dashboard' ? (
-    <Dashboard
-      onUploadNew={() => setCurrentView('upload')}
-      onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); setCurrentView('lorryHireSlip'); }}
-      onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); setCurrentView('fuelSlip'); }}
-    />
-  ) : (
+  if (currentView === 'voucher') {
+    return (
+      <VoucherEntry
+        invoiceId={voucherInvoiceId}
+        invoiceData={voucherInvoiceData}
+        onBack={() => {
+          if (voucherInvoiceId) {
+            setFuelSlipInvoiceId(voucherInvoiceId);
+            setCurrentView('fuelSlip');
+          } else {
+            setCurrentView('dashboard');
+          }
+          setVoucherInvoiceId(null);
+          setVoucherInvoiceData(null);
+        }}
+        onDashboard={() => {
+          setCurrentView('dashboard');
+          setVoucherInvoiceId(null);
+          setVoucherInvoiceData(null);
+        }}
+      />
+    );
+  }
+
+  if (currentView === 'cementRegister') {
+    return <CementRegister onBack={() => setCurrentView('dashboard')} />;
+  }
+
+  if (currentView === 'voucherRegister') {
+    return <VoucherRegister onBack={() => setCurrentView('dashboard')} />;
+  }
+
+  if (currentView === 'gstPortalRegister') {
+    return <GSTPortalRegister onBack={() => setCurrentView('dashboard')} />;
+  }
+
+  if (currentView === 'mainCashbook') {
+    return <MainCashbook onBack={() => setCurrentView('dashboard')} />;
+  }
+
+  if (currentView === 'pumpPayment') {
+    return <PumpPaymentDetails onBack={() => setCurrentView('dashboard')} />;
+  }
+
+  if (currentView === 'partyPayment') {
+    return <PartyPaymentDetails onBack={() => setCurrentView('dashboard')} />;
+  }
+
+  if (currentView === 'fyDetails') {
+    return <FinancialYearDetails onBack={() => setCurrentView('dashboard')} />;
+  }
+
+  if (currentView === 'fuelRateSettings') {
+    return <FuelRateSettings onBack={() => setCurrentView('dashboard')} />;
+  }
+
+  if (currentView === 'dashboard') {
+    if (user.role === 'PETROL PUMP') {
+      return (
+        <PumpDashboard 
+          onOpenPumpPayment={() => setCurrentView('pumpPayment')}
+        />
+      );
+    }
+    return (
+      <Dashboard
+        onUploadNew={() => setCurrentView('upload')}
+        onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); setCurrentView('lorryHireSlip'); }}
+        onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); setCurrentView('fuelSlip'); }}
+        onOpenCementRegister={() => setCurrentView('cementRegister')}
+        onOpenVoucherRegister={() => setCurrentView('voucherRegister')}
+        onOpenGSTPortalRegister={() => setCurrentView('gstPortalRegister')}
+        onOpenMainCashbook={() => setCurrentView('mainCashbook')}
+        onOpenPumpPayment={() => setCurrentView('pumpPayment')}
+        onOpenPartyPayment={() => setCurrentView('partyPayment')}
+        onOpenFYDetails={() => setCurrentView('fyDetails')}
+        onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}
+      />
+    );
+  }
+
+  return (
     <InvoiceForm onBack={() => setCurrentView('dashboard')} />
   );
 }

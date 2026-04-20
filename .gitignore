@@ -5,3 +5,8 @@ __pycache__/
 .env.*
 *.log
 uploads/
+.DS_Store
+Invoices/
+Lorrey_Scans/
+frontend/voucher/
+token.txt

@@ -14,15 +14,21 @@ def clean_number(num):
     return num.replace(",", "")
 
 
-def clear_hallucinated_fields(invoice_json, ocr_text):
+def clear_hallucinated_fields(invoice_json, ocr_text=""):
     """
     Hard guard: wipe fields that the AI should never invent.
-    challan_number is only valid if the word 'challan' appears
-    explicitly in the raw OCR text.
+    Previously relied on OCR text to check for 'challan'.
+    Now that GPT vision is used directly, the extraction prompt
+    already guards against challan hallucination. This function
+    is kept for backward compatibility and future rule additions.
     """
-    ocr_lower = ocr_text.lower()
-    if "challan" not in ocr_lower:
-        invoice_json["supply_details"]["challan_number"] = ""
+    # If ocr_text was provided (legacy path), use it for challan check
+    if ocr_text:
+        ocr_lower = ocr_text.lower()
+        if "challan" not in ocr_lower:
+            supply = invoice_json.get("supply_details", {})
+            supply["challan_number"] = ""
+    # No-op for vision path — GPT prompt handles this
     return invoice_json
 
 

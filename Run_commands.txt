@@ -1,0 +1,45 @@
+Lorrey Project - Services Run Commands
+
+=====================================================
+1. Frontend Services
+Location: frontend/review-dashboard/UI2
+=====================================================
+First, open a terminal and go to the frontend directory:
+cd frontend/review-dashboard/UI2
+
+Then run the command for the panel you want to start:
+- Office Panel (Port 5173):
+  npm run dev:office
+
+- Site Panel (Port 5174):
+  npm run dev:site
+
+- Pump SAS1 Panel (Port 5175):
+  npm run dev:sas1
+
+- Pump SAS2 Panel (Port 5176):
+  npm run dev:sas2
+
+=====================================================
+2. Backend Service
+Location: backend-node
+=====================================================
+First, open a new terminal and go to the backend directory:
+cd backend-node
+
+Then start the application loop:
+npm run dev
+
+(Note: If `npm run dev` fails with a nodemon permission error, you can run `npm start` instead which uses `node server.js` directly)
+
+
+=====================================================
+3. AI-Worker Service
+Location: ai-worker
+=====================================================
+First, open a new terminal and go to the ai-worker directory:
+cd ai-worker
+
+Then activate the environment and start the FASTAPI server:
+source venv/bin/activate
+uvicorn pipeline:app --reload

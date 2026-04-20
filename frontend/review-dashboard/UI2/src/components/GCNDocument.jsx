@@ -60,7 +60,10 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
     }, [supply.vehicle_number]);
 
     const computeGCNNo = () => {
+        if (data?.gcn_data?.gcn_no) return data.gcn_data.gcn_no;
+        if (data?.lorrey_receipt_number) return data.lorrey_receipt_number;
         if (supply.lorrey_receipt_number) return supply.lorrey_receipt_number;
+
         const rawDate = inv.invoice_date || '';
         let fyDate = new Date();
         if (rawDate) {
@@ -76,8 +79,8 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
         const year = fyDate.getFullYear();
         const fyStart = month >= 4 ? year : year - 1;
         const fyShort = `${String(fyStart).slice(-2)}-${String(fyStart + 1).slice(-2)}`;
-        const refNo = inv.reference_number || '';
-        return `DAC/${fyShort}${refNo ? `-${refNo}` : ''}`;
+        
+        return `DAC/${fyShort}/TBD`; // Prevent generating fake serial numbers
     };
 
     const gcnData = {
@@ -108,7 +111,7 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
         material: firstItem.description_of_product || firstItem.material_code || '',
         bags: supply.bags || firstItem.bags || '',
         qty_mt: firstItem.quantity || '',
-        material_value: firstItem.taxable_value || amount.net_payable || '',
+        material_value: amount.net_payable || firstItem.taxable_value || '',
     };
 
     const qrPayload = JSON.stringify({

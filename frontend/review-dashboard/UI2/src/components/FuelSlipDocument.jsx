@@ -127,9 +127,9 @@ const FuelSlipDocument = forwardRef(({
                     <tr>
                         <td className="fuel-td fuel-value">Diesel</td>
                         <td className="fuel-td fuel-value">{fuelData.qty || ''}</td>
-                        <td className="fuel-td fuel-value">{fuelData.rate || ''}</td>
+                        <td className="fuel-td fuel-value">{Number(fuelData.rate) === 0 ? '--' : fuelData.rate}</td>
                         <td className="fuel-td fuel-value" style={{ textAlign: 'left' }}>
-                            {fuelData.amount > 0 ? fuelData.amount.toFixed(2) : '0.00'}
+                            {Number(fuelData.amount) === 0 ? '--' : Number(fuelData.amount).toFixed(2)}
                         </td>
                     </tr>
 

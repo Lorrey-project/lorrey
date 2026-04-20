@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
     Box, Button, TextField, Typography, Paper, Alert, Link, InputAdornment, IconButton,
+    ToggleButtonGroup, ToggleButton
 } from '@mui/material';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
@@ -10,22 +11,35 @@ import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import { useAuth } from '../context/AuthContext';
 import AnimatedBackground from './AnimatedBackground';
 
-const Signup = ({ onToggle }) => {
+const PORTAL_LABELS = {
+    HEAD_OFFICE: { title: 'office', badge: 'OFFICE ADMIN' },
+    OFFICE: { title: 'site', badge: 'SITE ADMIN' },
+    'PETROL PUMP': { title: 'petrol pump', badge: 'PUMP ADMIN' },
+};
+
+const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
     const { signup } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [showPass, setShowPass] = useState(false);
+    // If lockedPump is set, portal must be PETROL PUMP
+    const [portal, setPortal] = useState(lockedPump ? 'PETROL PUMP' : (lockedPortal || 'OFFICE'));
+    const [pumpName, setPumpName] = useState(lockedPump || 'SAS-1');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const portalInfo = PORTAL_LABELS[portal] || PORTAL_LABELS.OFFICE;
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         if (password !== confirmPassword) return setError('Passwords do not match');
+        if (portal === 'PETROL PUMP' && !['SAS-1', 'SAS-2'].includes(pumpName)) {
+            return setError('Please select a pump (SAS-1 or SAS-2)');
+        }
         setLoading(true);
         try {
-            await signup(email, password);
+            await signup(email, password, portal, portal === 'PETROL PUMP' ? pumpName : null);
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to create account. Please try again.');
         } finally {
@@ -73,8 +87,94 @@ const Signup = ({ onToggle }) => {
                         background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent)'
                     }
                 }}>
+                    {/* Portal toggle — only when not locked */}
+                    {!lockedPortal && !lockedPump && (
+                        <Box display="flex" justifyContent="center" mb={portal === 'PETROL PUMP' ? 2 : 4}>
+                             <ToggleButtonGroup
+                                 value={portal}
+                                 exclusive
+                                 onChange={(e, val) => val && setPortal(val)}
+                                 fullWidth
+                                 sx={{ 
+                                     bgcolor: 'rgba(255,255,255,0.05)', 
+                                     p: 0.5, borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)',
+                                     '& .MuiToggleButton-root': {
+                                         color: 'rgba(255,255,255,0.5)',
+                                         borderRadius: '12px !important',
+                                         border: 'none',
+                                         fontWeight: 800,
+                                         py: 1.5,
+                                         '&.Mui-selected': {
+                                             bgcolor: 'rgba(66, 133, 244, 0.4)',
+                                             color: '#fff',
+                                             boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                                         }
+                                     }
+                                 }}
+                             >
+                                 <ToggleButton value="HEAD_OFFICE">OFFICE ADMIN</ToggleButton>
+                                 <ToggleButton value="OFFICE">SITE ADMIN</ToggleButton>
+                                 <ToggleButton value="PETROL PUMP">PUMP ADMIN</ToggleButton>
+                             </ToggleButtonGroup>
+                        </Box>
+                    )}
+
+                    {/* Locked-portal or locked-pump badge */}
+                    {(lockedPortal || lockedPump) && (
+                        <Box display="flex" justifyContent="center" mb={3}>
+                            <Box sx={{
+                                px: 3, py: 1.2, borderRadius: '14px',
+                                bgcolor: 'rgba(66,133,244,0.2)', border: '1px solid rgba(66,133,244,0.35)',
+                                display: 'inline-flex', alignItems: 'center', gap: 1,
+                            }}>
+                                <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#4285f4', boxShadow: '0 0 8px #4285f4' }} />
+                                <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: 13, letterSpacing: 1 }}>
+                                    {lockedPump ? `⛽ ${lockedPump} PUMP ADMIN` : portalInfo.badge}
+                                </Typography>
+                            </Box>
+                        </Box>
+                    )}
+
+                    {/* Pump sub-selector — only visible when Pump Admin is chosen AND not locked to a specific pump */}
+                    {portal === 'PETROL PUMP' && !lockedPump && (
+                        <Box mb={4}>
+                            <Typography variant="caption" fontWeight={800}
+                                sx={{ color: 'rgba(255,255,255,0.5)', letterSpacing: 1, display: 'block', mb: 1, textTransform: 'uppercase' }}>
+                                Select Your Pump
+                            </Typography>
+                            <Box display="flex" gap={1.5}>
+                                {['SAS-1', 'SAS-2'].map(p => (
+                                    <Button
+                                        key={p}
+                                        fullWidth
+                                        variant={pumpName === p ? 'contained' : 'outlined'}
+                                        onClick={() => setPumpName(p)}
+                                        sx={{
+                                            borderRadius: '14px', py: 1.8, fontWeight: 900, fontSize: 15,
+                                            ...(pumpName === p ? {
+                                                background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
+                                                color: '#fff',
+                                                boxShadow: '0 6px 20px rgba(25,118,210,0.4)',
+                                                border: 'none',
+                                            } : {
+                                                borderColor: 'rgba(255,255,255,0.25)',
+                                                color: 'rgba(255,255,255,0.6)',
+                                                bgcolor: 'rgba(255,255,255,0.04)',
+                                                '&:hover': { borderColor: '#fff', color: '#fff', bgcolor: 'rgba(255,255,255,0.1)' },
+                                            }),
+                                        }}
+                                    >
+                                        ⛽ {p}
+                                    </Button>
+                                ))}
+                            </Box>
+                        </Box>
+                    )}
+
                     <Typography variant="h5" fontWeight="900" sx={{ color: '#fff', mb: 1, letterSpacing: '-0.5px' }}>Register Now</Typography>
-                    <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 4, fontWeight: 500 }}>Join the premium slip network</Typography>
+                    <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 4, fontWeight: 500 }}>
+                        Join the secure {portalInfo.title} network
+                    </Typography>
 
                     {error && <Alert severity="error" sx={{ mb: 3, borderRadius: '16px', bgcolor: 'rgba(211, 47, 47, 0.15)', color: '#ff8a80', border: '1px solid rgba(211, 47, 47, 0.2)' }}>{error}</Alert>}
 

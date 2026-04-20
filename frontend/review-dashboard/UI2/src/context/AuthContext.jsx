@@ -13,15 +13,21 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         const token = localStorage.getItem('token');
         const storedUser = localStorage.getItem('user');
-        if (token && storedUser) {
-            setUser(JSON.parse(storedUser));
-            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        if (token && storedUser && storedUser !== 'undefined') {
+            try {
+                setUser(JSON.parse(storedUser));
+                axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            } catch (e) {
+                console.error("Failed to parse stored user", e);
+                localStorage.removeItem('user');
+                localStorage.removeItem('token');
+            }
         }
         setLoading(false);
     }, []);
 
-    const signup = async (email, password) => {
-        const response = await axios.post(`${API_URL}/auth/signup`, { email, password });
+    const signup = async (email, password, role, pumpName = null) => {
+        const response = await axios.post(`${API_URL}/auth/signup`, { email, password, role, pumpName });
         const { token, user: newUser } = response.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(newUser));
@@ -30,9 +36,17 @@ export const AuthProvider = ({ children }) => {
         return newUser;
     };
 
-    const login = async (email, password) => {
-        const response = await axios.post(`${API_URL}/auth/login`, { email, password });
+    const login = async (email, password, role) => {
+        const response = await axios.post(`${API_URL}/auth/login`, { email, password, role });
         const { token, user: loggedInUser } = response.data;
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(loggedInUser));
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        setUser(loggedInUser);
+        return loggedInUser;
+    };
+
+    const loginWithToken = (token, loggedInUser) => {
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(loggedInUser));
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -48,7 +62,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     return (
-        <AuthContext.Provider value={{ user, signup, login, logout, loading }}>
+        <AuthContext.Provider value={{ user, signup, login, loginWithToken, logout, loading }}>
             {children}
         </AuthContext.Provider>
     );

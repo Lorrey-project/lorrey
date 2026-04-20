@@ -20,7 +20,7 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import FuelSlipDocument from './FuelSlipDocument';
 
-const FuelSlipReview = ({ invoiceId, onBack }) => {
+const FuelSlipReview = ({ invoiceId, onBack, onOpenVoucher }) => {
     const entrySlipRef = useRef();
     const reviewSlipRef = useRef();
 
@@ -55,14 +55,21 @@ const FuelSlipReview = ({ invoiceId, onBack }) => {
 
             // Prefill with existing lorry slip details
             const lsd = inv.lorry_hire_slip_data || {};
-            setFuelData({
-                stationName: lsd.station_name || '',
-                stationAddress: lsd.station_address || '',
+            const autoData = {
+                stationName: 'SAS',
+                stationAddress: 'Panagarh',
                 lorrySlipNo: lsd.lorry_hire_slip_no || '',
                 qty: lsd.diesel_litres || '',
-                rate: lsd.diesel_rate || 90,
+                rate: lsd.diesel_rate || 0,
                 amount: lsd.diesel_advance || 0
-            });
+            };
+            setFuelData(autoData);
+            // Auto trigger generation next tick
+            setTimeout(() => {
+                if (entrySlipRef.current && !savingRef.current) {
+                    handleSaveAndGenerate(autoData);
+                }
+            }, 500);
         } catch (error) {
             console.error('Error fetching invoice for fuel slip:', error);
             setSnack({ type: 'error', message: 'Failed to load invoice data' });
@@ -98,13 +105,13 @@ const FuelSlipReview = ({ invoiceId, onBack }) => {
         amount: Number(fuelData.amount).toFixed(2)
     });
 
-    const handleSaveAndGenerate = async () => {
-        if (!fuelData.stationName) {
-            setSnack({ type: 'error', message: 'Station Name is required' });
-            return;
-        }
+    const savingRef = useRef(false);
 
+    const handleSaveAndGenerate = async (explicitData = null) => {
+        if (savingRef.current) return;
+        savingRef.current = true;
         setSaving(true);
+        const dataToSave = explicitData || fuelData;
         try {
             // 1. Generate PDF
             const opt = {
@@ -121,11 +128,11 @@ const FuelSlipReview = ({ invoiceId, onBack }) => {
             const formData = new FormData();
             formData.append('invoice_id', invoiceId);
             formData.append('slip_data', JSON.stringify({
-                station_name: fuelData.stationName,
-                station_address: fuelData.stationAddress,
-                diesel_litres: fuelData.qty,
-                diesel_rate: fuelData.rate,
-                diesel_advance: fuelData.amount
+                station_name: dataToSave.stationName,
+                station_address: dataToSave.stationAddress,
+                diesel_litres: dataToSave.qty,
+                diesel_rate: dataToSave.rate,
+                diesel_advance: dataToSave.amount
             }));
             formData.append('softcopy', blob, `fuel_slip_${invoiceId}.pdf`);
 
@@ -144,6 +151,7 @@ const FuelSlipReview = ({ invoiceId, onBack }) => {
             setSnack({ type: 'error', message: 'Failed to upload/save Fuel Slip: ' + msg });
         } finally {
             setSaving(false);
+            savingRef.current = false;
         }
     };
 
@@ -236,9 +244,19 @@ const FuelSlipReview = ({ invoiceId, onBack }) => {
                             >
                                 Download PDF
                             </Button>
+                            {onOpenVoucher && (
+                                <Button
+                                    variant="contained"
+                                    startIcon={<SaveIcon />}
+                                    onClick={() => onOpenVoucher(invoiceId)}
+                                    sx={{ borderRadius: '12px', fontWeight: 700, background: 'linear-gradient(45deg, #e65100, #ff7043)', boxShadow: '0 6px 20px rgba(230,81,0,0.35)' }}
+                                >
+                                    Voucher Entry
+                                </Button>
+                            )}
                         </>
                     )}
-                    <Button variant="contained" startIcon={<DashboardIcon />} onClick={onBack} sx={{ borderRadius: '12px', fontWeight: 700, bgcolor: '#333' }}>Dashboard</Button>
+                    <Button variant="contained" startIcon={<DashboardIcon />} onClick={() => window.location.href = '/'} sx={{ borderRadius: '12px', fontWeight: 700, bgcolor: '#333' }}>Dashboard</Button>
                 </Box>
             </Box>
 
@@ -246,115 +264,21 @@ const FuelSlipReview = ({ invoiceId, onBack }) => {
                 <Fade in={activeStep === 'entry'} unmountOnExit>
                     <Grid container justifyContent="center" className="no-print">
                         <Grid item xs={12} md={6}>
-                            <Card sx={{
-                                borderRadius: '32px',
-                                background: 'rgba(255, 255, 255, 0.8)',
-                                backdropFilter: 'blur(20px)',
-                                border: '1px solid rgba(255,255,255,0.4)',
-                                boxShadow: '0 20px 60px rgba(0,0,0,0.08)',
-                                p: 2
-                            }}>
-                                <CardContent sx={{ p: 4 }}>
-                                    <Box mb={4}>
-                                        <Typography variant="subtitle1" fontWeight="800" color="#1a237e" mb={3} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                            <LocalGasStationIcon fontSize="small" /> Station Information
-                                        </Typography>
-                                        <Grid container spacing={3}>
-                                            <Grid item xs={12}>
-                                                <TextField
-                                                    fullWidth
-                                                    label="Petrol Pump Name"
-                                                    name="stationName"
-                                                    value={fuelData.stationName}
-                                                    onChange={handleInputChange}
-                                                    variant="outlined"
-                                                    required
-                                                    autoFocus
-                                                    InputProps={{
-                                                        sx: { borderRadius: '16px', bgcolor: '#fff' },
-                                                        startAdornment: <InputAdornment position="start"><LocalGasStationIcon color="action" /></InputAdornment>,
-                                                    }}
-                                                />
-                                            </Grid>
-                                            <Grid item xs={12}>
-                                                <TextField
-                                                    fullWidth
-                                                    label="Address"
-                                                    name="stationAddress"
-                                                    value={fuelData.stationAddress}
-                                                    onChange={handleInputChange}
-                                                    variant="outlined"
-                                                    multiline
-                                                    rows={3}
-                                                    InputProps={{
-                                                        sx: { borderRadius: '16px', bgcolor: '#fff' },
-                                                        startAdornment: <InputAdornment position="start"><LocationOnIcon color="action" /></InputAdornment>,
-                                                    }}
-                                                />
-                                            </Grid>
-                                        </Grid>
-                                    </Box>
-
-                                    <Divider sx={{ my: 4, borderStyle: 'dashed' }} />
-
-                                    <Box mb={4}>
-                                        <Typography variant="subtitle2" color="text.secondary" fontWeight="900" mb={2} sx={{ textTransform: 'uppercase', letterSpacing: '1px' }}>
-                                            Fetched Details
-                                        </Typography>
-                                        <Grid container spacing={2}>
-                                            <Grid item xs={6}>
-                                                <TextField fullWidth label="Lorry Hire No." value={fuelData.lorrySlipNo} disabled variant="filled"
-                                                    InputProps={{ sx: { borderRadius: '12px' }, startAdornment: <InputAdornment position="start"><ConfirmationNumberIcon fontSize="inherit" /></InputAdornment> }}
-                                                />
-                                            </Grid>
-                                            <Grid item xs={6}>
-                                                <TextField fullWidth label="Vehicle" value={invoiceData?.human_verified_data?.supply_details?.vehicle_number || ''} disabled variant="filled"
-                                                    InputProps={{ sx: { borderRadius: '12px' }, startAdornment: <InputAdornment position="start"><LocalGasStationIcon fontSize="inherit" /></InputAdornment> }}
-                                                />
-                                            </Grid>
-                                            <Grid item xs={6}>
-                                                <TextField fullWidth label="Quantity (Ltrs)" value={fuelData.qty} disabled variant="filled"
-                                                    InputProps={{ sx: { borderRadius: '12px' }, startAdornment: <InputAdornment position="start"><SpeedIcon fontSize="inherit" /></InputAdornment> }}
-                                                />
-                                            </Grid>
-                                            <Grid item xs={6}>
-                                                <TextField fullWidth label="Rate" value={fuelData.rate} disabled variant="filled"
-                                                    InputProps={{ sx: { borderRadius: '12px' }, startAdornment: <InputAdornment position="start"><CurrencyRupeeIcon fontSize="inherit" /></InputAdornment> }}
-                                                />
-                                            </Grid>
-                                        </Grid>
-                                    </Box>
-
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        size="large"
-                                        onClick={handleSaveAndGenerate}
-                                        sx={{
-                                            py: 2,
-                                            borderRadius: '18px',
-                                            fontWeight: 900,
-                                            background: 'linear-gradient(45deg, #ff4081, #f50057)',
-                                            boxShadow: '0 10px 30px rgba(245,0,87,0.3)',
-                                            '&:hover': { background: 'linear-gradient(45deg, #f50057, #c51162)', transform: 'translateY(-2px)' }
-                                        }}
-                                    >
-                                        Save & Generate Fuel Slip
-                                    </Button>
-
-                                    <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
-                                        <FuelSlipDocument
-                                            ref={entrySlipRef}
-                                            data={invoiceData}
-                                            fuelData={fuelData}
-                                            hsdSlipNo={hsdSlipNo}
-                                            slipDate={slipDate}
-                                            amountWords={amountWords}
-                                            qrPayload={qrPayload}
-                                        />
-                                    </Box>
-                                </CardContent>
-                            </Card>
+                            <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" py={10}>
+                                <CircularProgress size={50} sx={{ mb: 3 }} />
+                                <Typography variant="h5" color="text.secondary" fontWeight="700">Auto-generating Fuel Slip...</Typography>
+                            </Box>
+                            <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
+                                <FuelSlipDocument
+                                    ref={entrySlipRef}
+                                    data={invoiceData}
+                                    fuelData={fuelData}
+                                    hsdSlipNo={hsdSlipNo}
+                                    slipDate={slipDate}
+                                    amountWords={amountWords}
+                                    qrPayload={qrPayload}
+                                />
+                            </Box>
                         </Grid>
                     </Grid>
                 </Fade>

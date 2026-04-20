@@ -36,6 +36,7 @@ target_schema = {
     "delivery_number": "",
     "order_reference_number": "",
     "destination": "",
+    "destination_state": "",
     "destination_code": "",
     "mode_of_transport": "",
     "vehicle_number": "",

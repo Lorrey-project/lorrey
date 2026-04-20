@@ -320,11 +320,11 @@ const LorryHireSlipDocument = forwardRef(({
                     </tr>
                     <tr>
                         <td style={lbl}>Diesel Rate (Rs./Ltr)</td>
-                        <td style={{ ...td, ...r }}>{dieselRate}</td>
+                        <td style={{ ...td, ...r }}>{Number(dieselRate) === 0 ? '--' : dieselRate}</td>
                     </tr>
                     <tr>
                         <td style={lbl}>Total Diesel Advance (Rs.)</td>
-                        <td style={{ ...td, ...r }}>{v(dieselAdv)}</td>
+                        <td style={{ ...td, ...r }}>{Number(dieselAdv) === 0 ? '--' : v(dieselAdv)}</td>
                     </tr>
                     <tr>
                         <td style={lbl}>Fuel Slip Number</td>

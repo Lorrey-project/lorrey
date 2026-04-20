@@ -22,6 +22,7 @@ const invoiceSchema = new mongoose.Schema({
         diesel_rate: { type: Number, default: 90 },
         diesel_advance: Number,
         total_advance: Number,
+        estimated_required_fuel: Number,   // (distance × 2) / mileage_kmpl — auto-calculated, read-only reference
         lorry_hire_slip_url: String,
         station_name: String,
         station_address: String,

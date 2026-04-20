@@ -13,6 +13,31 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    role: {
+        type: String,
+        enum: ['OFFICE', 'PETROL PUMP', 'HEAD_OFFICE'],
+        default: 'OFFICE'
+    },
+    pumpName: {
+        type: String,
+        enum: ['SAS-1', 'SAS-2', null],
+        default: null
+    },
+    fuelRate: {
+        type: Number,
+        default: 90   // HSD diesel rate (₹/litre) — can be updated per-pump
+    },
+    // WebAuthn Passkey Database
+    passkeys: [{
+        credentialID: String,
+        credentialPublicKey: Buffer,
+        counter: Number,
+        transports: [String]
+    }],
+    currentChallenge: {
+        type: String,
+        default: null
+    }
 }, { timestamps: true });
 
 // Hash password before saving
