@@ -70,7 +70,7 @@ exports.login = async (req, res) => {
 
         // ── Block pending / rejected accounts ────────────────────────────────────
         // (Existing users with no status field are treated as 'active' for backward compat)
-        if (user.status === 'pending') {
+        if (user.role !== 'HEAD_OFFICE' && user.status === 'pending') {
             return res.status(403).json({ message: "Your account is pending approval by the Head Office admin. Please wait for authorization." });
         }
         if (user.status === 'rejected') {
@@ -237,7 +237,7 @@ exports.verifyAuthResponse = async (req, res) => {
 
         // ── Block pending / rejected accounts ────────────────────────────────────
         // (Existing users with no status field are treated as 'active' for backward compat)
-        if (user.status === 'pending') {
+        if (user.role !== 'HEAD_OFFICE' && user.status === 'pending') {
             return res.status(403).json({ error: "Your account is pending approval by the Head Office admin." });
         }
         if (user.status === 'rejected') {
