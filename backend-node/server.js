@@ -5,8 +5,6 @@ const cors = require("cors");
 const axios = require("axios");
 const mongoose = require("mongoose");
 const http = require("http");
-const https = require("https");
-const fs = require("fs");
 const { init: initSocket } = require("./socket");
 const { startWatcher } = require("./utils/scannerWatcher");
 
@@ -20,24 +18,29 @@ const gcnUpload = require("./middleware/gcnUpload");
 
 const app = express();
 
-let server;
-const sslOptions = {
-  key: fs.existsSync("./key.pem") ? fs.readFileSync("./key.pem") : null,
-  cert: fs.existsSync("./cert.pem") ? fs.readFileSync("./cert.pem") : null
-};
-
-if (sslOptions.key && sslOptions.cert) {
-  server = https.createServer(sslOptions, app);
-  console.log("SSL Encryption Enabled (HTTPS)");
-} else {
-  server = http.createServer(app);
-  console.log("No SSL certificates found, running on HTTP");
-}
+// Plain HTTP server — no SSL
+const server = http.createServer(app);
+console.log("Running on HTTP (no SSL)");
 
 initSocket(server);
 startWatcher();
 
-app.use(cors());
+// Allow all frontend dev ports (5173–5176) on localhost and local network
+const allowedOrigins = [
+  /^http:\/\/localhost:(5173|5174|5175|5176)$/,
+  /^http:\/\/192\.168\.\d+\.\d+:(5173|5174|5175|5176)$/,
+  /^http:\/\/10\.\d+\.\d+\.\d+:(5173|5174|5175|5176)$/,
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (curl, Postman, mobile apps)
+    if (!origin) return callback(null, true);
+    const allowed = allowedOrigins.some((pattern) => pattern.test(origin));
+    callback(allowed ? null : new Error(`CORS blocked: ${origin}`), allowed);
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 app.use("/auth", authRoutes);
@@ -50,6 +53,48 @@ app.use("/pump-payment", require("./routes/pumpPaymentRoutes"));
 app.use("/party-payment", require("./routes/partyPaymentRoutes"));
 app.use("/fy-details", require("./routes/financialYearRoutes"));
 app.use("/account-details", require("./routes/accountDetailRoutes"));
+
+const activePortals = {
+  office: 0,
+  site: 0,
+  sas1: 0,
+  sas2: 0
+};
+
+function getPortalId(user) {
+  if (user.role === 'HEAD_OFFICE') return 'office';
+  if (user.role === 'OFFICE') return 'site';
+  if (user.role === 'PETROL PUMP' && user.pumpName === 'SAS-1') return 'sas1';
+  if (user.role === 'PETROL PUMP' && user.pumpName === 'SAS-2') return 'sas2';
+  return null;
+}
+
+app.post("/system/heartbeat", auth, (req, res) => {
+  const portalId = getPortalId(req.user);
+  if (portalId) activePortals[portalId] = Date.now();
+  res.json({ success: true });
+});
+
+app.post("/system/portal-logout", auth, (req, res) => {
+  const portalId = getPortalId(req.user);
+  if (portalId) activePortals[portalId] = 0; // Immediately zero out — goes Offline right away
+  res.json({ success: true });
+});
+
+app.get("/system/portal-status", (req, res) => {
+  const now = Date.now();
+  const timeoutMs = 2 * 60 * 1000; // 2 minutes threshold to count as offline
+  
+  res.json({ 
+    success: true, 
+    statuses: [
+      { id: 'office', name: 'Head', active: (now - activePortals.office) < timeoutMs },
+      { id: 'site', name: 'Site', active: (now - activePortals.site) < timeoutMs },
+      { id: 'sas1', name: 'SAS-1', active: (now - activePortals.sas1) < timeoutMs },
+      { id: 'sas2', name: 'SAS-2', active: (now - activePortals.sas2) < timeoutMs }
+    ]
+  });
+});
 
 console.log("AWS REGION:", process.env.AWS_REGION);
 

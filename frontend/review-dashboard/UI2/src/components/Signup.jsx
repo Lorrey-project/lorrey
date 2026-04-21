@@ -11,6 +11,9 @@ import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import BusinessIcon from '@mui/icons-material/Business';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
+import HourglassTopIcon from '@mui/icons-material/HourglassTop';
 import { useAuth } from '../context/AuthContext';
 
 // Single brand blue — no colour changes
@@ -51,16 +54,20 @@ const PUMPS = ['SAS-1', 'SAS-2'];
 
 const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
     const { signup } = useAuth();
-    const [email,           setEmail]           = useState('');
-    const [password,        setPassword]        = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [showPass,        setShowPass]        = useState(false);
-    const [portal,          setPortal]          = useState(lockedPump ? 'PETROL PUMP' : (lockedPortal || 'HEAD_OFFICE'));
-    const [pumpName,        setPumpName]        = useState(lockedPump || 'SAS-1');
-    const [error,           setError]           = useState('');
-    const [loading,         setLoading]         = useState(false);
+    const [name,             setName]             = useState('');
+    const [email,            setEmail]            = useState('');
+    const [password,         setPassword]         = useState('');
+    const [confirmPassword,  setConfirmPassword]  = useState('');
+    const [showPass,         setShowPass]         = useState(false);
+    const [registrationSecret, setRegistrationSecret] = useState('');
+    const [portal,           setPortal]           = useState(lockedPump ? 'PETROL PUMP' : (lockedPortal || 'HEAD_OFFICE'));
+    const [pumpName,         setPumpName]         = useState(lockedPump || 'SAS-1');
+    const [error,            setError]            = useState('');
+    const [loading,          setLoading]          = useState(false);
+    const [pendingSuccess,   setPendingSuccess]   = useState(false);
 
     const isPump = portal === 'PETROL PUMP';
+    const isHeadOffice = portal === 'HEAD_OFFICE';
     const locked = !!(lockedPortal || lockedPump);
 
     const handleSubmit = async (e) => {
@@ -68,9 +75,14 @@ const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
         setError('');
         if (password !== confirmPassword) return setError('Passwords do not match.');
         if (isPump && !PUMPS.includes(pumpName)) return setError('Please select a valid pump (SAS-1 or SAS-2).');
+        if (isHeadOffice && !registrationSecret) return setError('Registration secret is required for Head Office accounts.');
         setLoading(true);
         try {
-            await signup(email, password, portal, isPump ? pumpName : null);
+            const result = await signup(email, password, portal, isPump ? pumpName : null, name, isHeadOffice ? registrationSecret : undefined);
+            // If pending (non-HEAD_OFFICE), show success holding screen
+            if (result?.pending) {
+                setPendingSuccess(true);
+            }
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to create account. Please try again.');
         } finally {
@@ -85,6 +97,35 @@ const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
             fontFamily: `'Inter', 'SF Pro Display', system-ui, sans-serif`,
             overflow: 'hidden',
         }}>
+            {/* ── PENDING APPROVAL SCREEN ────────────────────────────── */}
+            {pendingSuccess && (
+                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', px: 3, textAlign: 'center' }}>
+                    <Box sx={{ width: 72, height: 72, borderRadius: '22px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 3, boxShadow: '0 16px 40px rgba(245,158,11,0.3)' }}>
+                        <HourglassTopIcon sx={{ color: '#fff', fontSize: 36 }} />
+                    </Box>
+                    <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: 22, letterSpacing: '-0.5px', mb: 1 }}>Pending Approval</Typography>
+                    <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, lineHeight: 1.7, maxWidth: 300, mb: 4 }}>
+                        Your registration request has been sent to the <strong style={{ color: 'rgba(255,255,255,0.8)' }}>Head Office admin</strong>.
+                        You will be able to log in once your account is approved.
+                    </Typography>
+                    <Box sx={{ bgcolor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '14px', px: 3, py: 2, maxWidth: 320, width: '100%', mb: 3 }}>
+                        <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, mb: 0.5 }}>Registered As</Typography>
+                        <Typography sx={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>{email}</Typography>
+                        <Typography sx={{ color: '#f59e0b', fontWeight: 600, fontSize: 12, mt: 0.3 }}>
+                            {portal === 'PETROL PUMP' ? `${pumpName} Pump Admin` : 'Site Admin'}
+                        </Typography>
+                    </Box>
+                    {onToggle && (
+                        <Typography sx={{ color: 'rgba(255,255,255,0.25)', fontSize: 12 }}>
+                            Back to{' '}
+                            <Box component="span" onClick={onToggle} sx={{ color: BLUE, fontWeight: 800, cursor: 'pointer', '&:hover': { opacity: 0.8 } }}>Sign In</Box>
+                        </Typography>
+                    )}
+                </Box>
+            )}
+
+            {/* ── NORMAL SIGNUP FORM ─────────────────────────────────── */}
+            {!pendingSuccess && <>
             {/* ── HERO ───────────────────────────────────────── */}
             <Box sx={{
                 flex: 1, display: 'flex', flexDirection: 'column',
@@ -227,6 +268,12 @@ const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
                 {/* Form */}
                 <form onSubmit={handleSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <TextField
+                        label="Full Name" type="text" fullWidth required size="small"
+                        value={name} onChange={e => setName(e.target.value)}
+                        autoComplete="off" sx={inputSx}
+                        InputProps={{ startAdornment: <InputAdornment position="start"><PersonOutlineIcon sx={{ color: 'rgba(255,255,255,0.25)', fontSize: 17, mr: 0.5 }} /></InputAdornment> }}
+                    />
+                    <TextField
                         label="Email" type="email" fullWidth required size="small"
                         value={email} onChange={e => setEmail(e.target.value)}
                         autoComplete="new-password" sx={inputSx}
@@ -256,6 +303,34 @@ const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
                         InputProps={{ startAdornment: <InputAdornment position="start"><LockIcon sx={{ color: 'rgba(255,255,255,0.25)', fontSize: 17, mr: 0.5 }} /></InputAdornment> }}
                     />
 
+                    {/* Registration Secret — only for HEAD_OFFICE */}
+                    {isHeadOffice && (
+                        <TextField
+                            label="Registration Secret *" type="password" fullWidth required size="small"
+                            value={registrationSecret} onChange={e => setRegistrationSecret(e.target.value)}
+                            autoComplete="new-password" sx={{
+                                ...inputSx,
+                                '& .MuiOutlinedInput-root': {
+                                    ...inputSx['& .MuiOutlinedInput-root'],
+                                    '& fieldset': { borderColor: 'rgba(245,158,11,0.3)' },
+                                    '&.Mui-focused fieldset': { borderColor: '#f59e0b', borderWidth: '1.5px' },
+                                },
+                                '& .MuiInputLabel-root': { ...inputSx['& .MuiInputLabel-root'], '&.Mui-focused': { color: '#f59e0b' } },
+                            }}
+                            helperText={<span style={{ color: 'rgba(245,158,11,0.7)', fontSize: 11 }}>Required for Head Office registration. Contact your system administrator.</span>}
+                            InputProps={{ startAdornment: <InputAdornment position="start"><VpnKeyIcon sx={{ color: 'rgba(245,158,11,0.5)', fontSize: 17, mr: 0.5 }} /></InputAdornment> }}
+                        />
+                    )}
+
+                    {/* Pending info notice for non-HEAD_OFFICE */}
+                    {!isHeadOffice && (
+                        <Box sx={{ bgcolor: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: '12px', px: 2, py: 1.2 }}>
+                            <Typography sx={{ color: 'rgba(245,158,11,0.85)', fontSize: 11, fontWeight: 600 }}>
+                                ⏳ Your account will require Head Office approval before you can log in.
+                            </Typography>
+                        </Box>
+                    )}
+
                     <Button
                         type="submit" variant="contained" fullWidth disabled={loading}
                         endIcon={loading ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <PersonAddIcon sx={{ fontSize: 17 }} />}
@@ -277,12 +352,11 @@ const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
                     <Typography sx={{ textAlign: 'center', mt: 2.5, color: 'rgba(255,255,255,0.25)', fontSize: 12 }}>
                         Already have an account?{' '}
                         <Box component="span" onClick={onToggle}
-                            sx={{ color: BLUE, fontWeight: 800, cursor: 'pointer', '&:hover': { opacity: 0.8 } }}>
-                            Sign In
-                        </Box>
+                            sx={{ color: BLUE, fontWeight: 800, cursor: 'pointer', '&:hover': { opacity: 0.8 } }}>Sign In</Box>
                     </Typography>
                 )}
             </Box>
+            </>}
         </Box>
     );
 };

@@ -165,8 +165,8 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
     const tbl = { width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' };
     const tdBase = {
         border: '1px solid #000',
-        padding: '4px',
-        fontSize: '9pt',
+        padding: '2px 4px',
+        fontSize: '8pt',
         verticalAlign: 'top',
         fontFamily: 'Helvetica, Arial, sans-serif',
         color: '#000',
@@ -175,7 +175,7 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
     const grayBg = { ...tdBase, background: '#e0e0e0', fontWeight: 'bold' };
     const headerBar = {
         background: '#000', color: '#fff', textAlign: 'center',
-        fontWeight: '900', fontSize: '12pt', padding: '5px 0',
+        fontWeight: '900', fontSize: '10pt', padding: '3px 0',
         fontFamily: 'Helvetica, Arial, sans-serif',
     };
 
@@ -207,147 +207,190 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
                 @page { size: A4; margin: 0; }
                 @media print {
                     .no-print { display: none !important; }
-                    body { background: #fff !important; margin: 0 !important; }
-                    html, body { width: 210mm; }
-                    #gcn-plate { width: 210mm !important; min-height: 297mm !important; border: none !important; box-shadow: none !important; margin: 0 !important; padding: 10mm !important; }
+                    body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+                    html, body { width: 210mm; height: 100%; }
+                    .a4-page { width: 210mm !important; height: 280mm !important; max-height: 280mm !important; border: none !important; margin: 0 !important; padding: 2mm 10mm !important; box-sizing: border-box !important; page-break-after: always; overflow: hidden !important; transform: scale(0.92); transform-origin: top center; }
+                }
+                .a4-page {
+                    width: 210mm;
+                    height: 285mm;
+                    background: #fff;
+                    font-family: Helvetica, Arial, sans-serif;
+                    box-sizing: border-box;
+                    margin: 0 auto;
+                    border: 1px solid #ddd;
+                    padding: 2mm 10mm;
+                    display: flex;
+                    flex-direction: column;
+                    overflow: hidden;
                 }
             `}} />
 
             <Box sx={{ overflowX: 'auto', width: '100%' }}>
-                <div id="gcn-plate" ref={gcnRef} style={{
-                    width: '210mm',
-                    minHeight: '297mm',
-                    background: '#fff',
-                    fontFamily: 'Helvetica, Arial, sans-serif',
-                    boxSizing: 'border-box',
-                    margin: '0 auto',
-                    border: '1px solid #eee',
-                    padding: '10mm'
-                }}>
-                    <div style={headerBar}>GOODS CONSIGNMENT NOTE (GCN)</div>
-                    <table style={{ ...tbl, borderBottom: '2px solid #000' }}>
-                        <tbody>
-                            <tr>
-                                <td style={{ ...tdBase, width: '40%', borderRight: '2px solid #000' }}>
-                                    <div style={{ fontSize: '14pt', fontWeight: '900' }}>DIPALI ASSOCIATES &amp; CO.</div>
-                                    <div style={{ fontSize: '8pt', fontWeight: 'bold' }}>Fleet Owner &amp; Transport Service Provider</div>
-                                    <div style={{ fontSize: '8pt', lineHeight: '1.4' }}>
-                                        <b>Office:</b> {gcnData.company_office_address}<br />
-                                        <b>Site Office:</b> {gcnData.company_site_office_address}<br />
-                                        <b>Mobile:</b> {gcnData.company_phone_number}<br />
-                                        <b>Email:</b> {gcnData.company_email}<br />
-                                        <b>GST No.:</b> {gcnData.company_gst}
-                                    </div>
-                                </td>
-                                <td style={{ ...tdBase, width: '40%', borderRight: '2px solid #000', padding: 0 }}>
-                                    <table style={{ ...tbl, border: 'none' }}>
-                                        <tbody>
-                                            {[
-                                                ['GCN No.', gcnData.gcn_no],
-                                                ['Date', gcnData.gcn_date],
-                                                ['From', gcnData.consignor_name],
-                                                ['Destination', gcnData.destination],
-                                                ['Pin', gcnData.consignee_pincode],
-                                            ].map(([label, val]) => (
-                                                <tr key={label}>
-                                                    <td style={labelCell}>{label}</td>
-                                                    <td style={tdBase}>{val}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </td>
-                                <td style={{ ...tdBase, width: '20%', textAlign: 'center', verticalAlign: 'middle' }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '4px' }}>
-                                        <AssignmentIcon style={{ fontSize: '14px', color: '#555' }} />
-                                        <QRCodeCanvas value={qrPayload} size={68} level="M" />
-                                        <div style={{ fontSize: '6pt', color: '#555' }}>GCN QR</div>
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <table style={{ ...tbl, borderBottom: '2px solid #000' }}>
-                        <tbody>
-                            <tr><td style={grayBg} width="50%">Consignor</td><td style={grayBg} width="50%">Consignee</td></tr>
-                            <tr>
-                                <td style={{ ...tdBase, height: '60px' }}>
-                                    <b>{gcnData.consignor_name}</b><br />{gcnData.consignor_address}<br /><b>GSTIN:</b> {gcnData.seller_gstin}
-                                </td>
-                                <td style={{ ...tdBase, height: '60px' }}>
-                                    <b>{gcnData.consignee_name}</b><br />{gcnData.consignee_address}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <table style={{ ...tbl, borderBottom: '2px solid #000' }}>
-                        <tbody>
-                            <tr>
-                                <td style={grayBg}>Truck No.</td><td style={tdBase}>{gcnData.truck_no}</td>
-                                <td style={grayBg}>Truck Owner</td><td style={tdBase}>{truckOwner || gcnData.agent_name}</td>
-                                <td style={grayBg}>Truck Contact</td><td style={tdBase}>{truckContact}</td>
-                            </tr>
-                            <tr>
-                                <td style={grayBg}>Invoice No.</td><td style={tdBase}>{gcnData.invoice_no}</td>
-                                <td style={grayBg}>Eway Bill No.</td><td style={tdBase} colSpan={3}>{gcnData.e_way_bill_number}</td>
-                            </tr>
-                            <tr>
-                                <td style={grayBg}>Shipment No.</td><td style={tdBase}>{gcnData.shipment_no}</td>
-                                <td style={grayBg}>EWB Creation</td><td style={tdBase} colSpan={3}>
-                                    {gcnData.e_way_bill_creation_date} {gcnData.e_way_bill_creation_time}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td style={grayBg}>Challan No.</td><td style={tdBase}>{gcnData.challan_number}</td>
-                                <td style={grayBg}>EWB Validity</td><td style={tdBase} colSpan={3}>
-                                    {gcnData.e_way_bill_validUpto_date} {gcnData.e_way_bill_validUpto_time && `at ${gcnData.e_way_bill_validUpto_time}`}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <table style={{ ...tbl, borderBottom: '2px solid #000' }}>
-                        <tbody>
-                            <tr>
-                                <td style={{ ...grayBg, textAlign: 'center' }}>Material</td>
-                                <td style={{ ...grayBg, textAlign: 'center' }}>Bags (Nos)</td>
-                                <td style={{ ...grayBg, textAlign: 'center' }}>Quantity (MT)</td>
-                                <td style={{ ...grayBg, textAlign: 'center' }}>Material Value (Rs.)</td>
-                            </tr>
-                            <tr>
-                                <td style={{ ...tdBase, textAlign: 'center' }}>{gcnData.material}</td>
-                                <td style={{ ...tdBase, textAlign: 'center' }}>{gcnData.bags}</td>
-                                <td style={{ ...tdBase, textAlign: 'center' }}>{gcnData.qty_mt}</td>
-                                <td style={{ ...tdBase, textAlign: 'center' }}>{gcnData.material_value}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <table style={tbl}>
-                        <tbody>
-                            <tr>
-                                <td style={grayBg} width="40%">Received Material In Good Condition</td>
-                                <td style={grayBg} width="30%">For Dipali Associates &amp; Co.</td>
-                                <td style={grayBg} width="30%">Truck Owner / Driver Sign</td>
-                            </tr>
-                            <tr>
-                                <td style={{ ...tdBase, height: '60px', textAlign: 'center', verticalAlign: 'bottom', paddingBottom: '6px' }}>Consignee Sign with Stamp</td>
-                                <td style={{ ...tdBase, height: '60px', textAlign: 'center', verticalAlign: 'bottom', paddingBottom: '6px' }}>Authorised Signatory</td>
-                                <td style={{ ...tdBase, height: '60px' }}></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <div style={{ padding: '6px 8px' }}>
-                        <div style={{ display: 'inline-block', border: '2px solid #000', padding: '2px 12px', fontWeight: '900', fontSize: '10pt', marginBottom: '8px' }}>TERMS &amp; CONDITION</div>
-                        <ul style={{ margin: '0', paddingLeft: '18px', fontSize: '8pt', lineHeight: '1.6' }}>
-                            <li style={{ marginBottom: '6px' }}>This Goods Consignment Note (GCN) to be treated as a valid legal document as well as an independent agreement between Transporter and Truck Owner / Carrier / Agent for each single trip.</li>
-                            <li style={{ marginBottom: '6px' }}>Upon issuance of this GCN lien on the Goods / Materials deemed to transfer from transporter to Truck owner / Carrier / Agency.</li>
-                            <li style={{ marginBottom: '6px' }}>Responsibility of the material until its safe delivery to the respective consignee from the loading point shall be the Truck Owner / Carrier / Agency. In case of any loss / damage to the material, charges of such damage material at actual to be borne by the Truck Owner / Carrier / Agency. Transporter under no circumstances shall be held responsible.</li>
-                            <li>Transporter shall only be liable to make freight only upon receipt of stamped &amp; signed GCN copy.</li>
-                        </ul>
+                <div id="gcn-wrapper" ref={gcnRef} style={{ margin: '0 auto', width: '210mm' }}>
+                    
+                    {/* PAGE 1: Two GCN Copies */}
+                    <div className="a4-page">
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                            <GCNFormBlock />
+                        </div>
+                        <div style={{ borderTop: '1px dashed #ccc', margin: '2mm 0', position: 'relative' }}>
+                            <div style={{ position: 'absolute', top: '-6px', right: '10px', background: '#fff', padding: '0 8px', fontSize: '8pt', color: '#999' }}>✂ cut here</div>
+                        </div>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                            <GCNFormBlock />
+                        </div>
                     </div>
+
+                    {/* PAGE 2: Two T&C Copies */}
+                    <div className="a4-page">
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                            <TCBlock />
+                        </div>
+                        <div style={{ borderTop: '1px dashed #ccc', margin: '2mm 0', position: 'relative' }}>
+                            <div style={{ position: 'absolute', top: '-6px', right: '10px', background: '#fff', padding: '0 8px', fontSize: '8pt', color: '#999' }}>✂ cut here</div>
+                        </div>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                            <TCBlock />
+                        </div>
+                    </div>
+
                 </div>
             </Box>
         </Box>
     );
+
+    function GCNFormBlock() {
+        return (
+            <div style={{ border: '1px solid #eee' }}>
+                <div style={headerBar}>GOODS CONSIGNMENT NOTE (GCN)</div>
+                <table style={{ ...tbl, borderBottom: '2px solid #000' }}>
+                    <tbody>
+                        <tr>
+                            <td style={{ ...tdBase, width: '40%', borderRight: '2px solid #000' }}>
+                                <div style={{ fontSize: '14pt', fontWeight: '900' }}>DIPALI ASSOCIATES &amp; CO.</div>
+                                <div style={{ fontSize: '8pt', fontWeight: 'bold' }}>Fleet Owner &amp; Transport Service Provider</div>
+                                <div style={{ fontSize: '7pt', lineHeight: '1.4' }}>
+                                    <b>Office:</b> {gcnData.company_office_address}<br />
+                                    <b>Site:</b> {gcnData.company_site_office_address}<br />
+                                    <b>Mobile:</b> {gcnData.company_phone_number}<br />
+                                    <b>Email:</b> {gcnData.company_email}<br />
+                                    <b>GST No.:</b> {gcnData.company_gst}
+                                </div>
+                            </td>
+                            <td style={{ ...tdBase, width: '40%', borderRight: '2px solid #000', padding: 0 }}>
+                                <table style={{ ...tbl, border: 'none' }}>
+                                    <tbody>
+                                        {[
+                                            ['GCN No.', gcnData.gcn_no],
+                                            ['Date', gcnData.gcn_date],
+                                            ['From', gcnData.consignor_name],
+                                            ['Destination', gcnData.destination],
+                                            ['Pin', gcnData.consignee_pincode],
+                                        ].map(([label, val]) => (
+                                            <tr key={label}>
+                                                <td style={labelCell}>{label}</td>
+                                                <td style={tdBase}>{val}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </td>
+                            <td style={{ ...tdBase, width: '20%', textAlign: 'center', verticalAlign: 'middle' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '4px' }}>
+                                    <AssignmentIcon style={{ fontSize: '14px', color: '#555' }} />
+                                    <QRCodeCanvas value={qrPayload} size={50} level="M" />
+                                    <div style={{ fontSize: '6pt', color: '#555' }}>GCN QR</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <table style={{ ...tbl, borderBottom: '2px solid #000' }}>
+                    <tbody>
+                        <tr><td style={grayBg} width="50%">Consignor</td><td style={grayBg} width="50%">Consignee</td></tr>
+                        <tr>
+                            <td style={{ ...tdBase, height: '60px' }}>
+                                <b>{gcnData.consignor_name}</b><br />{gcnData.consignor_address}<br /><b>GSTIN:</b> {gcnData.seller_gstin}
+                            </td>
+                            <td style={{ ...tdBase, height: '60px' }}>
+                                <b>{gcnData.consignee_name}</b><br />{gcnData.consignee_address}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <table style={{ ...tbl, borderBottom: '2px solid #000' }}>
+                    <tbody>
+                        <tr>
+                            <td style={grayBg}>Truck No.</td><td style={tdBase}>{gcnData.truck_no}</td>
+                            <td style={grayBg}>Truck Owner</td><td style={tdBase}>{truckOwner || gcnData.agent_name}</td>
+                            <td style={grayBg}>Truck Contact</td><td style={tdBase}>{truckContact}</td>
+                        </tr>
+                        <tr>
+                            <td style={grayBg}>Invoice No.</td><td style={tdBase}>{gcnData.invoice_no}</td>
+                            <td style={grayBg}>Eway Bill No.</td><td style={tdBase} colSpan={3}>{gcnData.e_way_bill_number}</td>
+                        </tr>
+                        <tr>
+                            <td style={grayBg}>Shipment No.</td><td style={tdBase}>{gcnData.shipment_no}</td>
+                            <td style={grayBg}>EWB Creation</td><td style={tdBase} colSpan={3}>
+                                {gcnData.e_way_bill_creation_date} {gcnData.e_way_bill_creation_time}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style={grayBg}>Challan No.</td><td style={tdBase}>{gcnData.challan_number}</td>
+                            <td style={grayBg}>EWB Validity</td><td style={tdBase} colSpan={3}>
+                                {gcnData.e_way_bill_validUpto_date} {gcnData.e_way_bill_validUpto_time && `at ${gcnData.e_way_bill_validUpto_time}`}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <table style={{ ...tbl, borderBottom: '2px solid #000' }}>
+                    <tbody>
+                        <tr>
+                            <td style={{ ...grayBg, textAlign: 'center' }}>Material</td>
+                            <td style={{ ...grayBg, textAlign: 'center' }}>Bags (Nos)</td>
+                            <td style={{ ...grayBg, textAlign: 'center' }}>Quantity (MT)</td>
+                            <td style={{ ...grayBg, textAlign: 'center' }}>Material Value (Rs.)</td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...tdBase, textAlign: 'center' }}>{gcnData.material}</td>
+                            <td style={{ ...tdBase, textAlign: 'center' }}>{gcnData.bags}</td>
+                            <td style={{ ...tdBase, textAlign: 'center' }}>{gcnData.qty_mt}</td>
+                            <td style={{ ...tdBase, textAlign: 'center' }}>{gcnData.material_value}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <table style={tbl}>
+                    <tbody>
+                        <tr>
+                            <td style={grayBg} width="40%">Received Material In Good Condition</td>
+                            <td style={grayBg} width="30%">For Dipali Associates &amp; Co.</td>
+                            <td style={grayBg} width="30%">Truck Owner / Driver Sign</td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...tdBase, height: '60px', textAlign: 'center', verticalAlign: 'bottom', paddingBottom: '6px' }}>Consignee Sign with Stamp</td>
+                            <td style={{ ...tdBase, height: '60px', textAlign: 'center', verticalAlign: 'bottom', paddingBottom: '6px' }}>Authorised Signatory</td>
+                            <td style={{ ...tdBase, height: '60px' }}></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        );
+    }
+
+    function TCBlock() {
+        return (
+            <div style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '4px' }}>
+                <div style={{ display: 'inline-block', border: '2px solid #000', padding: '4px 16px', fontWeight: '900', fontSize: '11pt', marginBottom: '12px' }}>TERMS &amp; CONDITION</div>
+                <ul style={{ margin: '0', paddingLeft: '22px', fontSize: '9pt', lineHeight: '1.8' }}>
+                    <li style={{ marginBottom: '8px' }}>This Goods Consignment Note (GCN) to be treated as a valid legal document as well as an independent agreement between Transporter and Truck Owner / Carrier / Agent for each single trip.</li>
+                    <li style={{ marginBottom: '8px' }}>Upon issuance of this GCN lien on the Goods / Materials deemed to transfer from transporter to Truck owner / Carrier / Agency.</li>
+                    <li style={{ marginBottom: '8px' }}>Responsibility of the material until its safe delivery to the respective consignee from the loading point shall be the Truck Owner / Carrier / Agency. In case of any loss / damage to the material, charges of such damage material at actual to be borne by the Truck Owner / Carrier / Agency. Transporter under no circumstances shall be held responsible.</li>
+                    <li>Transporter shall only be liable to make freight only upon receipt of stamped &amp; signed GCN copy.</li>
+                </ul>
+            </div>
+        );
+    }
 });
 
 export default GCNDocument;

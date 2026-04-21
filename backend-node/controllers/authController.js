@@ -9,10 +9,20 @@ const {
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
 
+const HEAD_OFFICE_SECRET = process.env.HEAD_OFFICE_REGISTRATION_SECRET || 'supersecret';
+
 exports.signup = async (req, res) => {
     try {
-        let { email, password, role = 'OFFICE', pumpName = null } = req.body;
+        let { email, password, role = 'OFFICE', pumpName = null, name = '', registrationSecret } = req.body;
         if (email) email = email.trim().toLowerCase();
+        if (name) name = name.trim();
+
+        // ── Layer 1: Secure HEAD_OFFICE registration ──────────────────────────────
+        if (role === 'HEAD_OFFICE') {
+            if (!registrationSecret || registrationSecret !== HEAD_OFFICE_SECRET) {
+                return res.status(403).json({ message: "Invalid registration secret. HEAD_OFFICE accounts require admin authorization." });
+            }
+        }
 
         // Check if user exists
         const existingUser = await User.findOne({ email });
@@ -25,12 +35,23 @@ exports.signup = async (req, res) => {
             return res.status(400).json({ message: "Pump Admin must be assigned to SAS-1 or SAS-2" });
         }
 
-        const user = new User({ email, password, role, pumpName: role === 'PETROL PUMP' ? pumpName : null });
+        // HEAD_OFFICE → active immediately. All others → pending (require approval)
+        const accountStatus = role === 'HEAD_OFFICE' ? 'active' : 'pending';
+
+        const user = new User({ email, password, role, name, pumpName: role === 'PETROL PUMP' ? pumpName : null, status: accountStatus });
         await user.save();
 
-        const token = jwt.sign({ userId: user._id, role: user.role, pumpName: user.pumpName }, JWT_SECRET, { expiresIn: "1h" });
+        // HEAD_OFFICE: log them in immediately
+        if (role === 'HEAD_OFFICE') {
+            const token = jwt.sign({ userId: user._id, role: user.role, pumpName: user.pumpName }, JWT_SECRET, { expiresIn: "1h" });
+            return res.status(201).json({ token, user: { id: user._id, email: user.email, role: user.role, name: user.name, pumpName: user.pumpName } });
+        }
 
-        res.status(201).json({ token, user: { id: user._id, email: user.email, role: user.role, pumpName: user.pumpName } });
+        // Non-HEAD_OFFICE: account is pending — do NOT issue a token
+        return res.status(202).json({
+            pending: true,
+            message: "Registration successful! Your account is pending approval by the Head Office admin. You will be able to log in once approved."
+        });
     } catch (error) {
         console.error("Signup Error:", error);
         res.status(500).json({ message: "Server error during signup", error: error.message });
@@ -47,6 +68,15 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: "Invalid credentials" });
         }
 
+        // ── Block pending / rejected accounts ────────────────────────────────────
+        // (Existing users with no status field are treated as 'active' for backward compat)
+        if (user.status === 'pending') {
+            return res.status(403).json({ message: "Your account is pending approval by the Head Office admin. Please wait for authorization." });
+        }
+        if (user.status === 'rejected') {
+            return res.status(403).json({ message: "Your account registration has been rejected. Please contact the Head Office admin." });
+        }
+
         // Role verification firewall
         if (role && user.role !== role) {
             return res.status(403).json({ message: `Unauthorized access: Cannot login to ${role} workspace.` });
@@ -59,7 +89,7 @@ exports.login = async (req, res) => {
 
         const token = jwt.sign({ userId: user._id, role: user.role, pumpName: user.pumpName || null }, JWT_SECRET, { expiresIn: "1h" });
 
-        res.json({ token, user: { id: user._id, email: user.email, role: user.role, pumpName: user.pumpName || null } });
+        res.json({ token, user: { id: user._id, email: user.email, role: user.role, name: user.name || '', pumpName: user.pumpName || null } });
     } catch (error) {
         res.status(500).json({ message: "Server error during login", error: error.message });
     }
@@ -204,6 +234,15 @@ exports.verifyAuthResponse = async (req, res) => {
         const { email, body, role } = req.body;
         const user = await User.findOne({email});
         if(!user) return res.status(404).json({error: "User not found"});
+
+        // ── Block pending / rejected accounts ────────────────────────────────────
+        // (Existing users with no status field are treated as 'active' for backward compat)
+        if (user.status === 'pending') {
+            return res.status(403).json({ error: "Your account is pending approval by the Head Office admin." });
+        }
+        if (user.status === 'rejected') {
+            return res.status(403).json({ error: "Your account registration has been rejected." });
+        }
 
         // Role verification firewall (same as login)
         if (role && user.role !== role) {

@@ -5,7 +5,8 @@ const SitePortal = ({
     onUploadNew, 
     onOpenLorrySlip, 
     onOpenFuelSlip, 
-    onOpenRegisters 
+    onOpenRegisters,
+    onOpenVouchers
 }) => {
     return (
         <MobileDashboard 
@@ -13,6 +14,7 @@ const SitePortal = ({
             onOpenLorrySlip={onOpenLorrySlip}
             onOpenFuelSlip={onOpenFuelSlip}
             onOpenRegisters={onOpenRegisters}
+            onOpenVouchers={onOpenVouchers}
             // onOpenFuelRateSettings is null for Site Admin
         />
     );

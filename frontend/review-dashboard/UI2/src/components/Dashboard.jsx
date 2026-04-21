@@ -3,7 +3,7 @@ import {
     Container, Typography, Button, Box, Chip, IconButton, CircularProgress,
     Grid, Card, CardContent, Divider, Collapse, Dialog, DialogTitle,
     DialogContent, DialogContentText, DialogActions, Checkbox, Tooltip, TablePagination,
-    Snackbar, Alert
+    Snackbar, Alert, Badge
 } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -18,6 +18,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
+import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import PersonIcon from '@mui/icons-material/Person';
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import AssignmentIcon from '@mui/icons-material/Assignment';
@@ -35,7 +36,7 @@ import TruckContactManager from './TruckContactManager';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals }) => {
     const { user, logout } = useAuth();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -55,9 +56,12 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
     const [fuelRates, setFuelRates] = useState({ 'SAS-1': 90, 'SAS-2': 90 });
     const [fuelRateEdits, setFuelRateEdits] = useState({ 'SAS-1': '90', 'SAS-2': '90' });
     const [fuelRateSaving, setFuelRateSaving] = useState({ 'SAS-1': false, 'SAS-2': false });
-    const [fuelRateModalOpen, setFuelRateModalOpen] = useState(false);
-    const [fuelRateModalPump, setFuelRateModalPump] = useState('SAS-1');
+    const [fuelRateModalOpen, setFuelRateModalOpen]   = useState(false);
+    const [fuelRateModalPump, setFuelRateModalPump]   = useState('SAS-1');
     const [fuelRateModalValue, setFuelRateModalValue] = useState('');
+    const [pendingCount, setPendingCount]             = useState(0);
+
+    const [portalStatuses, setPortalStatuses] = useState([]);
 
     // Pagination states
     const [page, setPage] = useState(0);
@@ -68,7 +72,40 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
         setPage(0);
     };
 
-    useEffect(() => { fetchInvoices(); fetchVouchers(); fetchFuelRates(); }, []);
+    useEffect(() => { 
+        fetchInvoices(); 
+        fetchVouchers(); 
+        fetchFuelRates(); 
+        
+        // Portal status poller for Head Office
+        if (user?.role === 'HEAD_OFFICE') {
+            fetchPortalStatuses();
+            fetchPendingCount();
+            const intervalId = setInterval(() => { fetchPortalStatuses(); fetchPendingCount(); }, 30000);
+            return () => clearInterval(intervalId);
+        }
+    }, [user?.role]);
+
+    const fetchPendingCount = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`${API_URL}/auth/admin/pending-registrations`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.success) setPendingCount(res.data.users.length);
+        } catch (e) { /* silently ignore */ }
+    };
+
+    const fetchPortalStatuses = async () => {
+        try {
+            const res = await axios.get(`${API_URL}/system/portal-status`);
+            if (res.data.success) {
+                setPortalStatuses(res.data.statuses);
+            }
+        } catch (e) {
+            console.error('Failed to fetch portal statuses:', e);
+        }
+    };
 
     const fetchFuelRates = async () => {
         try {
@@ -253,9 +290,30 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             sx={{ letterSpacing: '-1.5px', fontSize: { xs: '2rem', sm: '2.4rem', md: '2.8rem' }, textAlign: { xs: 'center', md: 'left' } }}>
                             DIPALI ASSOCIATES &amp; CO
                         </Typography>
-                        <Typography variant="subtitle1" color="text.secondary" fontWeight="500" sx={{ textAlign: { xs: 'center', md: 'left' }, opacity: 0.8 }}>
-                            Premium Slip &amp; Invoice Management Portal [Role: {user?.role === 'OFFICE' ? 'Site-office' : (user?.role === 'HEAD_OFFICE' ? 'Head-office' : user?.role) || 'NONE'}]
-                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 0.5, justifyContent: { xs: 'center', md: 'flex-start' } }}>
+                            <Typography variant="subtitle1" color="text.secondary" fontWeight="500" sx={{ opacity: 0.8 }}>
+                                Premium Slip &amp; Invoice Management Portal [Role: {user?.role === 'OFFICE' ? 'Site-office' : (user?.role === 'HEAD_OFFICE' ? 'Head-office' : user?.role) || 'NONE'}]
+                            </Typography>
+                            {user?.role === 'HEAD_OFFICE' && portalStatuses.length > 0 && (
+                                <Box sx={{ display: 'flex', gap: 1, borderLeft: { xs: 'none', md: '2px solid #e2e8f0' }, pl: { xs: 0, md: 1.5 } }}>
+                                    {portalStatuses.map(ps => (
+                                        <Tooltip key={ps.id} title={`${ps.name} is ${ps.active ? 'Online' : 'Offline'}`}>
+                                            <Chip 
+                                                size="small" 
+                                                label={ps.name.split(' ')[0]} 
+                                                sx={{ 
+                                                    height: 20, fontSize: '0.65rem', fontWeight: 800,
+                                                    bgcolor: ps.active ? '#dcfce7' : '#fee2e2',
+                                                    color: ps.active ? '#166534' : '#991b1b',
+                                                    border: `1px solid ${ps.active ? '#bbf7d0' : '#fecaca'}`,
+                                                    '& .MuiChip-label': { px: 1 }
+                                                }}
+                                            />
+                                        </Tooltip>
+                                    ))}
+                                </Box>
+                            )}
+                        </Box>
                     </Box>
                     <Box display="flex" gap={2}
                         sx={{ width: { xs: '100%', md: 'auto' }, justifyContent: { xs: 'center', md: 'flex-end' } }}>
@@ -263,6 +321,27 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             sx={{ borderRadius: '12px', px: { xs: 2.5, sm: 3 }, fontWeight: 700, flex: { xs: 1, md: 'none' } }}>
                             Register Biometrics
                         </Button>
+
+                        {/* ── Pending Approvals Bell (HEAD_OFFICE only) ── */}
+                        {user?.role === 'HEAD_OFFICE' && (
+                            <Tooltip title={pendingCount > 0 ? `${pendingCount} pending registration request${pendingCount !== 1 ? 's' : ''}` : 'No pending registrations'}>
+                                <Badge badgeContent={pendingCount} color="error" max={99}
+                                    sx={{ '& .MuiBadge-badge': { fontWeight: 900, fontSize: 10 } }}>
+                                    <IconButton
+                                        onClick={() => document.getElementById('account-approvals-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                                        sx={{
+                                            bgcolor: pendingCount > 0 ? '#ede9fe' : '#f1f5f9',
+                                            border: pendingCount > 0 ? '2px solid #7c3aed' : '2px solid #e2e8f0',
+                                            borderRadius: '12px',
+                                            transition: 'all 0.2s',
+                                            '&:hover': { bgcolor: '#ede9fe', borderColor: '#7c3aed' }
+                                        }}>
+                                        <PersonAddAlt1Icon sx={{ color: pendingCount > 0 ? '#7c3aed' : '#94a3b8', fontSize: 22 }} />
+                                    </IconButton>
+                                </Badge>
+                            </Tooltip>
+                        )}
+
                         <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={logout}
                             sx={{ borderRadius: '12px', px: { xs: 2.5, sm: 3 }, fontWeight: 700, flex: { xs: 1, md: 'none' } }}>
                             Logout
@@ -513,7 +592,68 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             </CardContent>
                         </Card>
                         )}
-                        {/* ── Cement Register Block ────────────────────────────────── */}
+
+                        {/* ── Account Approvals Summary Block (HEAD_OFFICE only) ───────── */}
+                        {user?.role === 'HEAD_OFFICE' && (
+                        <Card id="account-approvals-anchor" sx={{
+                            height: '100%',
+                            borderRadius: '20px',
+                            background: 'linear-gradient(135deg, #1e0a3c 0%, #3b0764 50%, #6d28d9 100%)',
+                            color: '#fff',
+                            boxShadow: '0 16px 40px rgba(109,40,217,0.25)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            overflow: 'hidden',
+                            position: 'relative',
+                            cursor: 'pointer',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            '&:hover': { transform: 'scale(1.02)', boxShadow: '0 24px 48px rgba(109,40,217,0.35)' }
+                        }} onClick={onOpenAccountApprovals}>
+                            <Box sx={{ position: 'absolute', top: -30, right: -30, width: 130, height: 130, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.05)' }} />
+                            <Box sx={{ position: 'absolute', bottom: -20, left: -20, width: 90, height: 90, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.04)' }} />
+                            <CardContent sx={{ p: { xs: 3, md: 4 }, display: 'flex', flexDirection: 'column', flexGrow: 1, justifyContent: 'space-between', height: '100%' }}>
+                                <Box>
+                                    <Box display="flex" alignItems="center" gap={2} mb={3}>
+                                        <Box sx={{ p: 1.2, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '12px' }}>
+                                            <PersonAddAlt1Icon sx={{ fontSize: 24 }} />
+                                        </Box>
+                                        <Typography variant="h6" fontWeight={900} sx={{ letterSpacing: '0.3px' }}>Account Approvals</Typography>
+                                    </Box>
+                                    <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', mb: 3 }} />
+
+                                    {/* Big count display */}
+                                    <Box sx={{ textAlign: 'center', py: 3 }}>
+                                        <Typography sx={{
+                                            fontSize: '4.5rem', fontWeight: 900, lineHeight: 1,
+                                            color: pendingCount > 0 ? '#fbbf24' : 'rgba(255,255,255,0.5)',
+                                            letterSpacing: '-3px',
+                                        }}>
+                                            {pendingCount}
+                                        </Typography>
+                                        <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: 600, mt: 1 }}>
+                                            {pendingCount === 1 ? 'account waiting for approval' : 'accounts waiting for approval'}
+                                        </Typography>
+                                    </Box>
+                                </Box>
+
+                                <Button
+                                    variant="contained" fullWidth
+                                    onClick={(e) => { e.stopPropagation(); onOpenAccountApprovals?.(); }}
+                                    sx={{
+                                        mt: 2, py: 1.5, borderRadius: '14px',
+                                        bgcolor: pendingCount > 0 ? '#fbbf24' : 'rgba(255,255,255,0.15)',
+                                        color: pendingCount > 0 ? '#1e0a3c' : '#fff',
+                                        fontWeight: 900, fontSize: 14,
+                                        boxShadow: pendingCount > 0 ? '0 4px 20px rgba(251,191,36,0.4)' : 'none',
+                                        '&:hover': { bgcolor: pendingCount > 0 ? '#f59e0b' : 'rgba(255,255,255,0.25)' },
+                                        textTransform: 'none',
+                                    }}>
+                                    {pendingCount > 0 ? `Review ${pendingCount} Request${pendingCount !== 1 ? 's' : ''}` : 'Manage Approvals'}
+                                </Button>
+                            </CardContent>
+                        </Card>
+                        )}
+
+                        {/* ── Cement Register Block ───────────────────────── */}
                         <Card sx={{
                             height: '100%',
                             borderRadius: '20px',

@@ -65,65 +65,71 @@ export default function InvoiceForm({ onBack }) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isScanTriggered, setIsScanTriggered] = useState(false);
-
+  const [zoom, setZoom] = useState(window.innerWidth < 600 ? 0.40 : 1.0);
+  const ZOOM_STEP = 0.15;
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 3.0;
+  const zoomIn = () => setZoom(z => +(Math.min(z + ZOOM_STEP, ZOOM_MAX).toFixed(2)));
+  const zoomOut = () => setZoom(z => +(Math.max(z - ZOOM_STEP, ZOOM_MIN).toFixed(2)));
+  const zoomReset = () => setZoom(window.innerWidth < 600 ? 0.40 : 1.0);
   const handleScannerCapture = (file) => {
-      setIsScannerOpen(false);
-      handleFileUpload({ target: { files: [file] } });
+    setIsScannerOpen(false);
+    handleFileUpload({ target: { files: [file] } });
   };
 
   const handlePhysicalScan = async () => {
-      setIsScanTriggered(true);
-      setIsProcessing(true);
-      setProcessingMode("upload");
-      setStatus({ type: "info", message: "🖨️ Commanding your HP scanner... Place the document on the scanner and wait." });
-      try {
-          const token = localStorage.getItem("token");
-          await axios.post(`${API_URL}/invoice/scan-now`, {}, {
-              headers: { Authorization: `Bearer ${token}` }
-          });
-          // Result comes back via socket.io (scanner_document_processed)
-      } catch (error) {
-          setIsProcessing(false);
-          const errMsg = error.response?.data?.error || error.response?.data?.message || error.message;
-          if (error.response?.status === 401) {
-              setStatus({ type: "error", message: "⚠️ Session expired. Please log out and log back in, then try scanning again." });
-          } else {
-              setStatus({ type: "error", message: `Scanner error: ${errMsg}. Run: brew install sane-backends` });
-          }
-      } finally {
-          setIsScanTriggered(false);
+    setIsScanTriggered(true);
+    setIsProcessing(true);
+    setProcessingMode("upload");
+    setStatus({ type: "info", message: "🖨️ Commanding your HP scanner... Place the document on the scanner and wait." });
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API_URL}/invoice/scan-now`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      // Result comes back via socket.io (scanner_document_processed)
+    } catch (error) {
+      setIsProcessing(false);
+      const errMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+      if (error.response?.status === 401) {
+        setStatus({ type: "error", message: "⚠️ Session expired. Please log out and log back in, then try scanning again." });
+      } else {
+        setStatus({ type: "error", message: `Scanner error: ${errMsg}. Run: brew install sane-backends` });
       }
+    } finally {
+      setIsScanTriggered(false);
+    }
   };
 
   // Auto-calculate Unloading Charges (30 * MT) only if destination state is West Bengal.
   // If destination state is anything else, fix unloading charges to 0.
   useEffect(() => {
-     const destState = formData?.supply_details?.destination_state?.toLowerCase() || '';
-     if (destState === 'west bengal') {
-         const qtyStr = formData?.items?.[0]?.quantity;
-         if (qtyStr) {
-             const qty = parseFloat(qtyStr);
-             if (!isNaN(qty)) {
-                 const calc = (qty * 30).toFixed(2);
-                 if (formData.nt_details?.unloading_charges !== calc) {
-                     setFormData(prev => ({
-                         ...prev,
-                         nt_details: { ...prev?.nt_details, unloading_charges: calc }
-                     }));
-                 }
-             }
-         }
-     } else if (destState && destState !== 'west bengal') {
-         // Non-WB destination: fix unloading charges to 0
-         if (formData.nt_details?.unloading_charges !== '0') {
-             setFormData(prev => ({
-                 ...prev,
-                 nt_details: { ...prev?.nt_details, unloading_charges: '0' }
-             }));
-         }
-     }
+    const destState = formData?.supply_details?.destination_state?.toLowerCase() || '';
+    if (destState === 'west bengal') {
+      const qtyStr = formData?.items?.[0]?.quantity;
+      if (qtyStr) {
+        const qty = parseFloat(qtyStr);
+        if (!isNaN(qty)) {
+          const calc = (qty * 30).toFixed(2);
+          if (formData.nt_details?.unloading_charges !== calc) {
+            setFormData(prev => ({
+              ...prev,
+              nt_details: { ...prev?.nt_details, unloading_charges: calc }
+            }));
+          }
+        }
+      }
+    } else if (destState && destState !== 'west bengal') {
+      // Non-WB destination: fix unloading charges to 0
+      if (formData.nt_details?.unloading_charges !== '0') {
+        setFormData(prev => ({
+          ...prev,
+          nt_details: { ...prev?.nt_details, unloading_charges: '0' }
+        }));
+      }
+    }
   }, [formData?.supply_details?.destination_state, formData?.items]);
-  
+
   // Auto-calculate Amount in Words when Net Payable changes
   useEffect(() => {
     const netPayableStr = formData?.amount_summary?.net_payable;
@@ -186,10 +192,10 @@ export default function InvoiceForm({ onBack }) {
   };
 
   const ADDON_OPTIONS = [
-    { label: "GPS Device",            amount: 1500 },
-    { label: "RFID Tag",               amount: 100  },
-    { label: "RFID Tag Reassurance",   amount: 100  },
-    { label: "Fastag",                 amount: 200  },
+    { label: "GPS Device", amount: 1500 },
+    { label: "RFID Tag", amount: 100 },
+    { label: "RFID Tag Reassurance", amount: 100 },
+    { label: "Fastag", amount: 200 },
   ];
 
   const getEmptySchema = () => ({
@@ -247,40 +253,40 @@ export default function InvoiceForm({ onBack }) {
   };
 
   useEffect(() => {
-      const onStatus = (data) => {
-          setProcessingMode("upload");
-          setIsProcessing(true);
-          setStatus({ type: "info", message: data.message });
-      };
+    const onStatus = (data) => {
+      setProcessingMode("upload");
+      setIsProcessing(true);
+      setStatus({ type: "info", message: data.message });
+    };
 
-      const onError = (data) => {
-          setIsProcessing(false);
-          setStatus({ type: "error", message: data.error });
-      };
+    const onError = (data) => {
+      setIsProcessing(false);
+      setStatus({ type: "error", message: data.error });
+    };
 
-      const onProcessed = (data) => {
-          setFormData({
-              _id: data.invoice_id,
-              ...getEmptySchema(),
-              ...data.ai_data.invoice_data,
-          });
-          setErrors({});
-          setStatus({
-              type: "success",
-              message: "Scanning complete! AI Extraction finished, please review the fields below.",
-          });
-          setIsProcessing(false);
-      };
+    const onProcessed = (data) => {
+      setFormData({
+        _id: data.invoice_id,
+        ...getEmptySchema(),
+        ...data.ai_data.invoice_data,
+      });
+      setErrors({});
+      setStatus({
+        type: "success",
+        message: "Scanning complete! AI Extraction finished, please review the fields below.",
+      });
+      setIsProcessing(false);
+    };
 
-      socket.on("scanner_status", onStatus);
-      socket.on("scanner_error", onError);
-      socket.on("scanner_document_processed", onProcessed);
+    socket.on("scanner_status", onStatus);
+    socket.on("scanner_error", onError);
+    socket.on("scanner_document_processed", onProcessed);
 
-      return () => {
-          socket.off("scanner_status", onStatus);
-          socket.off("scanner_error", onError);
-          socket.off("scanner_document_processed", onProcessed);
-      };
+    return () => {
+      socket.off("scanner_status", onStatus);
+      socket.off("scanner_error", onError);
+      socket.off("scanner_document_processed", onProcessed);
+    };
   }, []);
 
   const handleDrop = (e) => {
@@ -502,60 +508,46 @@ export default function InvoiceForm({ onBack }) {
           }}
           className="no-print"
         >
-          <Box display="flex" gap={1} sx={{ flexWrap: 'wrap', width: { xs: '100%', md: 'auto' } }}>
-            <Button variant="outlined" size="small" onClick={() => setShowGCN(false)} sx={{ flex: { xs: 1, md: 'none' } }}>
-              ← Invoice
-            </Button>
-            <Button variant="outlined" size="small" color="error" onClick={() => window.location.href = '/'} sx={{ flex: { xs: 1, md: 'none' } }}>
-              Home
-            </Button>
-            <Button
-              variant="contained"
-              size="small"
-              onClick={() => setShowLorrySlip(true)}
-              sx={{
-                flex: { xs: '1 1 100%', md: 'none' },
-                borderRadius: '8px', fontWeight: 700,
-                background: 'linear-gradient(45deg, #f57c00, #ff9800)',
-                boxShadow: '0 4px 12px rgba(245,124,0,0.35)',
-                '&:hover': { background: 'linear-gradient(45deg, #e65100, #f57c00)' },
-              }}
-            >
-              🚚 Lorry Hire Slip
-            </Button>
-          </Box>
-          <Box display="flex" gap={1} sx={{ mt: { xs: 1, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<EditIcon />}
-              onClick={() => setShowGCN(false)}
-              sx={{ borderRadius: 2, flex: 1, px: 2, borderColor: 'primary.main', color: 'primary.main' }}
-            >
-              Edit
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<PrintIcon />}
-              onClick={handlePrint}
-              sx={{ borderRadius: 2, flex: 1 }}
-            >
-              Print
-            </Button>
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<DownloadIcon />}
-              onClick={handleDownload}
-              sx={{ borderRadius: 2, flex: 1 }}
-            >
-              PDF
-            </Button>
+          <Box display="flex" flexWrap="wrap" gap={1.5} justifyContent="space-between" alignItems="center" sx={{ width: '100%' }}>
+
+            {/* Nav Group */}
+            <Box display="flex" gap={1} sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 1, md: 1 } }}>
+              <Button variant="outlined" size="small" onClick={() => setShowGCN(false)} sx={{ flex: { xs: 1, md: 'none' } }}>
+                ← Invoice
+              </Button>
+              <Button variant="outlined" size="small" onClick={() => window.location.href = '/'} sx={{ flex: { xs: 1, md: 'none' } }}>
+                🏠 Home
+              </Button>
+              <Button
+                variant="contained" size="small" onClick={() => setShowLorrySlip(true)}
+                sx={{ flex: { xs: 1, md: 'none' }, borderRadius: '8px', fontWeight: 700, background: 'linear-gradient(45deg, #f57c00, #ff9800)', boxShadow: '0 4px 12px rgba(245,124,0,0.3)', '&:hover': { background: '#e65100' } }}
+              >
+                🚚 Lorry Slip
+              </Button>
+            </Box>
+
+            {/* Zoom Tool */}
+            <Box display="flex" justifyContent="center" sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 3, md: 2 } }}>
+              <Box display="flex" alignItems="center" sx={{ bgcolor: '#f8f9fa', border: '1px solid #e2e8f0', borderRadius: '8px', px: 0.5, py: 0.25 }}>
+                <IconButton size="small" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} sx={{ p: 0.5, width: 28, height: 28 }}><span style={{ fontSize: '1.2rem', lineHeight: 1 }}>−</span></IconButton>
+                <Box onClick={zoomReset} sx={{ fontWeight: 600, fontSize: '0.85rem', width: 46, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}>{Math.round(zoom * 100)}%</Box>
+                <IconButton size="small" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} sx={{ p: 0.5, width: 28, height: 28 }}><span style={{ fontSize: '1.2rem', lineHeight: 1 }}>+</span></IconButton>
+              </Box>
+            </Box>
+
+            {/* Actions Group */}
+            <Box display="flex" gap={1} sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 2, md: 3 } }}>
+              <Button variant="outlined" size="small" startIcon={<EditIcon />} onClick={() => setShowGCN(false)} sx={{ flex: 1, borderRadius: 2 }}>Edit</Button>
+              <Button variant="outlined" size="small" startIcon={<PrintIcon />} onClick={handlePrint} sx={{ flex: 1, borderRadius: 2 }}>Print</Button>
+              <Button variant="contained" size="small" startIcon={<DownloadIcon />} onClick={handleDownload} sx={{ flex: 1, borderRadius: 2 }}>PDF</Button>
+            </Box>
+
           </Box>
         </Box>
-        <Box sx={{ width: '100%', overflowX: 'auto', backgroundColor: '#f0f0f0', p: { xs: 2, sm: 4, md: 10 }, pt: { xs: 12, sm: 14 } }}>
-          <GCNDocument ref={gcnRef} data={formData} />
+        <Box sx={{ width: '100%', height: '100svh', overflow: 'auto', backgroundColor: '#f0f0f0', p: { xs: 2, sm: 4, md: 10 }, pt: { xs: 16, sm: 14 }, textAlign: 'center', '@media print': { height: 'auto !important', overflow: 'visible !important', display: 'block !important', position: 'static !important', p: 0, pt: 0, backgroundColor: 'transparent' } }}>
+          <Box sx={{ display: 'inline-block', textAlign: 'left', zoom: zoom, transition: 'zoom 0.2s cubic-bezier(0.4,0,0.2,1)', '@media print': { zoom: '1 !important', display: 'block !important' } }}>
+            <GCNDocument ref={gcnRef} data={formData} />
+          </Box>
         </Box>
       </Box>
     );
@@ -582,52 +574,43 @@ export default function InvoiceForm({ onBack }) {
           }}
           className="no-print"
         >
-          <Box display="flex" gap={1} sx={{ flexWrap: 'wrap', width: { xs: '100%', md: 'auto' } }}>
-            <Button variant="outlined" size="small" onClick={() => window.location.href = '/'} sx={{ flex: { xs: 1, md: 'none' } }}>
-              Home
-            </Button>
-            <Button
-              variant="contained"
-              size="small"
-              color="success"
-              onClick={() => setShowGCN(true)}
-              sx={{ flex: { xs: 1, md: 'none' }, borderRadius: '8px', fontWeight: 700 }}
-            >
-              📋 GCN Copy
-            </Button>
-          </Box>
-          <Box display="flex" gap={1} sx={{ mt: { xs: 1, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<EditIcon />}
-              onClick={() => setShowInvoice(false)}
-              sx={{ borderRadius: 2, flex: 1, px: 2, borderColor: 'primary.main', color: 'primary.main' }}
-            >
-              Edit
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<PrintIcon />}
-              onClick={handlePrint}
-              sx={{ borderRadius: 2, flex: 1 }}
-            >
-              Print
-            </Button>
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<DownloadIcon />}
-              onClick={handleDownload}
-              sx={{ borderRadius: 2, flex: 1 }}
-            >
-              PDF
-            </Button>
+          <Box display="flex" flexWrap="wrap" gap={1.5} justifyContent="space-between" alignItems="center" sx={{ width: '100%' }}>
+
+            {/* Nav Group */}
+            <Box display="flex" gap={1} sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 1, md: 1 } }}>
+              <Button variant="outlined" size="small" onClick={() => window.location.href = '/'} sx={{ flex: { xs: 1, md: 'none' } }}>
+                🏠 Home
+              </Button>
+              <Button
+                variant="contained" size="small" onClick={() => setShowGCN(true)}
+                sx={{ flex: { xs: 1, md: 'none' }, borderRadius: '8px', fontWeight: 700, background: 'linear-gradient(135deg, #10b981, #059669)', boxShadow: '0 2px 8px rgba(16,185,129,0.25)', '&:hover': { background: '#047857' } }}
+              >
+                📋 GCN Copy
+              </Button>
+            </Box>
+
+            {/* Zoom Tool */}
+            <Box display="flex" justifyContent="center" sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 3, md: 2 } }}>
+              <Box display="flex" alignItems="center" sx={{ bgcolor: '#f8f9fa', border: '1px solid #e2e8f0', borderRadius: '8px', px: 0.5, py: 0.25 }}>
+                <IconButton size="small" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} sx={{ p: 0.5, width: 28, height: 28 }}><span style={{ fontSize: '1.2rem', lineHeight: 1 }}>−</span></IconButton>
+                <Box onClick={zoomReset} sx={{ fontWeight: 600, fontSize: '0.85rem', width: 46, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}>{Math.round(zoom * 100)}%</Box>
+                <IconButton size="small" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} sx={{ p: 0.5, width: 28, height: 28 }}><span style={{ fontSize: '1.2rem', lineHeight: 1 }}>+</span></IconButton>
+              </Box>
+            </Box>
+
+            {/* Actions Group */}
+            <Box display="flex" gap={1} sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 2, md: 3 } }}>
+              <Button variant="outlined" size="small" startIcon={<EditIcon />} onClick={() => setShowInvoice(false)} sx={{ flex: 1, borderRadius: 2 }}>Edit</Button>
+              <Button variant="outlined" size="small" startIcon={<PrintIcon />} onClick={handlePrint} sx={{ flex: 1, borderRadius: 2 }}>Print</Button>
+              <Button variant="contained" size="small" startIcon={<DownloadIcon />} onClick={handleDownload} sx={{ flex: 1, borderRadius: 2 }}>PDF</Button>
+            </Box>
+
           </Box>
         </Box>
-        <Box sx={{ width: '100%', overflowX: 'auto', backgroundColor: '#f0f0f0', p: { xs: 2, sm: 4, md: 10 }, pt: { xs: 12, sm: 14 } }}>
-          <TaxInvoice ref={taxInvoiceRef} data={formData} />
+        <Box sx={{ width: '100%', height: '100svh', overflow: 'auto', backgroundColor: '#f0f0f0', p: { xs: 2, sm: 4, md: 10 }, pt: { xs: 16, sm: 14 }, textAlign: 'center', '@media print': { height: 'auto !important', overflow: 'visible !important', display: 'block !important', position: 'static !important', p: 0, pt: 0, backgroundColor: 'transparent' } }}>
+          <Box sx={{ display: 'inline-block', textAlign: 'left', zoom: zoom, transition: 'zoom 0.2s cubic-bezier(0.4,0,0.2,1)', '@media print': { zoom: '1 !important', display: 'block !important' } }}>
+            <TaxInvoice ref={taxInvoiceRef} data={formData} />
+          </Box>
         </Box>
       </Box>
     );
@@ -635,275 +618,275 @@ export default function InvoiceForm({ onBack }) {
 
   return (
     <>
-    <CameraCaptureDialog 
-        open={isScannerOpen} 
-        onClose={() => setIsScannerOpen(false)} 
-        onCapture={handleScannerCapture} 
-    />
-    <Container maxWidth="xl" sx={{ mt: 4, pb: 14 }}>
-      <Paper
-        elevation={0}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        sx={{
-          p: { xs: 2.5, md: 6 },
-          borderRadius: 2,
-          border: isDragActive ? "2px dashed #1a73e8" : "1px solid #e0e0e0",
-          backgroundColor: isDragActive ? "rgba(26,115,232,0.04)" : "#ffffff",
-          position: "relative",
-          transition: "all 0.2s ease",
-          boxShadow: { xs: 'none', md: '0 4px 12px rgba(0,0,0,0.05)' }
-        }}
-      >
-        {isDragActive && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: 0, left: 0, right: 0, bottom: 0,
-              zIndex: 10,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: 'rgba(255,255,255,0.8)',
-              borderRadius: 2,
-            }}
-          >
-            <Typography variant="h4" color="primary" fontWeight="bold">Drop document here</Typography>
-          </Box>
-        )}
-        <PremiumLoadingOverlay isProcessing={isProcessing} mode={processingMode} />
-
-        <Box sx={{ mb: 4 }}>
-          {/* Header & Back Button */}
-          <Box display="flex" alignItems="flex-start" gap={1.5} mb={2.5}>
-            <IconButton
-              onClick={() => window.location.href = '/'}
-              disabled={isProcessing}
-              sx={{ bgcolor: '#f1f5f9', color: '#334155', borderRadius: '12px', mt: 0.5, boxShadow: '0 2px 5px rgba(0,0,0,0.05)', '&:hover': { bgcolor: '#e2e8f0' } }}
+      <CameraCaptureDialog
+        open={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onCapture={handleScannerCapture}
+      />
+      <Container maxWidth="xl" sx={{ mt: 4, pb: 14 }}>
+        <Paper
+          elevation={0}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          sx={{
+            p: { xs: 2.5, md: 6 },
+            borderRadius: 2,
+            border: isDragActive ? "2px dashed #1a73e8" : "1px solid #e0e0e0",
+            backgroundColor: isDragActive ? "rgba(26,115,232,0.04)" : "#ffffff",
+            position: "relative",
+            transition: "all 0.2s ease",
+            boxShadow: { xs: 'none', md: '0 4px 12px rgba(0,0,0,0.05)' }
+          }}
+        >
+          {isDragActive && (
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0, left: 0, right: 0, bottom: 0,
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(255,255,255,0.8)',
+                borderRadius: 2,
+              }}
             >
-              <ArrowBackIcon />
-            </IconButton>
-            <Box>
-              <Typography
-                variant="h4"
-                fontWeight="900"
-                color="primary"
-                sx={{
-                  letterSpacing: '-1px',
-                  fontSize: { xs: '1.5rem', md: '2.5rem' },
-                  lineHeight: 1.15
-                }}
+              <Typography variant="h4" color="primary" fontWeight="bold">Drop document here</Typography>
+            </Box>
+          )}
+          <PremiumLoadingOverlay isProcessing={isProcessing} mode={processingMode} />
+
+          <Box sx={{ mb: 4 }}>
+            {/* Header & Back Button */}
+            <Box display="flex" alignItems="flex-start" gap={1.5} mb={2.5}>
+              <IconButton
+                onClick={() => window.location.href = '/'}
+                disabled={isProcessing}
+                sx={{ bgcolor: '#f1f5f9', color: '#334155', borderRadius: '12px', mt: 0.5, boxShadow: '0 2px 5px rgba(0,0,0,0.05)', '&:hover': { bgcolor: '#e2e8f0' } }}
               >
-                DIPALI ASSOCIATES & CO
-              </Typography>
-              <Typography variant="body2" color="text.secondary" fontWeight="500" sx={{ mt: 0.5, fontSize: { xs: '0.85rem', md: '1.1rem' } }}>
-                Upload PDF or Image. AI will automatically extract data for review.
-              </Typography>
+                <ArrowBackIcon />
+              </IconButton>
+              <Box>
+                <Typography
+                  variant="h4"
+                  fontWeight="900"
+                  color="primary"
+                  sx={{
+                    letterSpacing: '-1px',
+                    fontSize: { xs: '1.5rem', md: '2.5rem' },
+                    lineHeight: 1.15
+                  }}
+                >
+                  DIPALI ASSOCIATES & CO
+                </Typography>
+                <Typography variant="body2" color="text.secondary" fontWeight="500" sx={{ mt: 0.5, fontSize: { xs: '0.85rem', md: '1.1rem' } }}>
+                  Upload PDF or Image. AI will automatically extract data for review.
+                </Typography>
+              </Box>
+            </Box>
+
+            {/* Action Buttons (Scan & Upload) */}
+            <Box display="flex" gap={1.5} sx={{ flexDirection: { xs: 'row', sm: 'row' }, width: '100%' }}>
+              <Button
+                fullWidth
+                variant="contained"
+                color="secondary"
+                startIcon={isScanTriggered ? <CircularProgress size={16} color="inherit" /> : <DocumentScannerIcon />}
+                onClick={handlePhysicalScan}
+                sx={{
+                  borderRadius: '12px', py: { xs: 1.2, md: 1.5 }, fontWeight: 800, fontSize: { xs: '0.9rem', md: '1rem' },
+                  background: 'linear-gradient(45deg, #7b1fa2, #9c27b0)',
+                  boxShadow: '0 4px 12px rgba(123,31,162,0.3)',
+                  whiteSpace: 'nowrap'
+                }}
+                disabled={isProcessing || isScanTriggered}
+              >
+                {isScanTriggered ? 'Scanning...' : 'Scan'}
+              </Button>
+              <Button
+                fullWidth
+                variant="contained"
+                component="label"
+                startIcon={<UploadFileIcon />}
+                sx={{
+                  borderRadius: '12px', py: { xs: 1.2, md: 1.5 }, fontWeight: 800, fontSize: { xs: '0.9rem', md: '1rem' },
+                  bgcolor: '#0052cc', '&:hover': { bgcolor: '#0043a8' },
+                  boxShadow: '0 4px 12px rgba(0,82,204,0.3)',
+                  whiteSpace: 'nowrap'
+                }}
+                disabled={isProcessing}
+              >
+                Upload
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*, application/pdf"
+                  onChange={handleFileUpload}
+                />
+              </Button>
             </Box>
           </Box>
 
-          {/* Action Buttons (Scan & Upload) */}
-          <Box display="flex" gap={1.5} sx={{ flexDirection: { xs: 'row', sm: 'row' }, width: '100%' }}>
-            <Button
-              fullWidth
-              variant="contained"
-              color="secondary"
-              startIcon={isScanTriggered ? <CircularProgress size={16} color="inherit" /> : <DocumentScannerIcon />}
-              onClick={handlePhysicalScan}
-              sx={{ 
-                borderRadius: '12px', py: { xs: 1.2, md: 1.5 }, fontWeight: 800, fontSize: { xs: '0.9rem', md: '1rem' },
-                background: 'linear-gradient(45deg, #7b1fa2, #9c27b0)', 
-                boxShadow: '0 4px 12px rgba(123,31,162,0.3)',
-                whiteSpace: 'nowrap'
-              }}
-              disabled={isProcessing || isScanTriggered}
-            >
-              {isScanTriggered ? 'Scanning...' : 'Scan'}
-            </Button>
-            <Button
-              fullWidth
-              variant="contained"
-              component="label"
-              startIcon={<UploadFileIcon />}
-              sx={{ 
-                borderRadius: '12px', py: { xs: 1.2, md: 1.5 }, fontWeight: 800, fontSize: { xs: '0.9rem', md: '1rem' }, 
-                bgcolor: '#0052cc', '&:hover': { bgcolor: '#0043a8' },
-                boxShadow: '0 4px 12px rgba(0,82,204,0.3)',
-                whiteSpace: 'nowrap'
-              }}
-              disabled={isProcessing}
-            >
-              Upload
-              <input
-                type="file"
-                hidden
-                accept="image/*, application/pdf"
-                onChange={handleFileUpload}
-              />
-            </Button>
+
+
+          {status && (
+            <Alert severity={status.type} sx={{ mb: 3 }}>
+              {status.message}
+            </Alert>
+          )}
+
+          <Divider sx={{ mb: 4 }} />
+
+          <InvoiceDetails data={formData.invoice_details} errors={errors.invoice_details} onChange={handleChange} />
+
+          <Box display="flex" flexDirection="column" gap={0}>
+            <SellerDetails data={formData.seller_details} errors={errors.seller_details} onChange={handleChange} />
+            <BuyerDetails data={formData.buyer_details} errors={errors.buyer_details} onChange={handleChange} />
           </Box>
-        </Box>
 
+          <SupplyDetails data={formData.supply_details} errors={errors.supply_details} onChange={handleChange} />
+          <ItemsTable items={formData.items} amountSummary={formData.amount_summary} errors={errors.items} onChange={handleChange} />
 
-
-        {status && (
-          <Alert severity={status.type} sx={{ mb: 3 }}>
-            {status.message}
-          </Alert>
-        )}
-
-        <Divider sx={{ mb: 4 }} />
-
-        <InvoiceDetails data={formData.invoice_details} errors={errors.invoice_details} onChange={handleChange} />
-
-        <Box display="flex" flexDirection="column" gap={0}>
-          <SellerDetails data={formData.seller_details} errors={errors.seller_details} onChange={handleChange} />
-          <BuyerDetails data={formData.buyer_details} errors={errors.buyer_details} onChange={handleChange} />
-        </Box>
-
-        <SupplyDetails data={formData.supply_details} errors={errors.supply_details} onChange={handleChange} />
-        <ItemsTable items={formData.items} amountSummary={formData.amount_summary} errors={errors.items} onChange={handleChange} />
-
-        { (formData.invoice_details?.invoice_type === 'NT' || formData.items?.some(i => (i.description_of_product || '').toUpperCase().includes('UNLOADING'))) && (() => {
+          {(formData.invoice_details?.invoice_type === 'NT' || formData.items?.some(i => (i.description_of_product || '').toUpperCase().includes('UNLOADING'))) && (() => {
             const isWestBengal = formData?.supply_details?.destination_state?.toLowerCase() === 'west bengal';
             return (
-                <Card sx={{ mb: 3, border: '2px dashed #f59e0b', bgcolor: '#fffbeb' }}>
-                    <CardHeader title="NT Billing Section" sx={{ bgcolor: '#fde68a' }} titleTypographyProps={{ fontWeight: 800, color: '#b45309' }} />
-                    <CardContent>
-                        <Typography variant="body2" color="text.secondary" mb={2}>Extra details for NT (New Transport/Unloading) or NVR billing.</Typography>
-                        <Box display="flex" flexDirection="column" gap={3}>
-                            <TextField
-                                fullWidth
-                                label="Unloading Charges"
-                                name="unloading_charges"
-                                value={formData.nt_details?.unloading_charges || ''}
-                                onChange={(e) => isWestBengal ? handleChange('nt_details', 'unloading_charges', e.target.value) : undefined}
-                                variant="outlined"
-                                disabled={!isWestBengal}
-                                helperText={
-                                    isWestBengal
-                                        ? "Auto-calculated (30 × MT) for West Bengal routes."
-                                        : "Fixed at ₹0 — Unloading charges only apply for West Bengal destinations."
-                                }
-                                sx={{
-                                    '& .MuiInputBase-input.Mui-disabled': {
-                                        WebkitTextFillColor: '#555',
-                                        fontWeight: 600,
-                                    }
-                                }}
-                            />
-                        </Box>
-                    </CardContent>
-                </Card>
-            );
-        })()}
-
-        {/* ── Add on Charges ── */}
-        <Card sx={{ mb: 3, border: '2px solid #e3f2fd', bgcolor: '#f8fbff' }}>
-          <CardHeader
-            title="Add on Charges"
-            sx={{ bgcolor: '#e3f2fd' }}
-            titleTypographyProps={{ fontWeight: 800, color: '#1565c0' }}
-            action={
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<AddCircleOutlineIcon />}
-                onClick={handleAddAddon}
-                disabled={(formData.addon_charges || []).length >= ADDON_OPTIONS.length}
-                sx={{ mr: 1, borderRadius: '8px', background: 'linear-gradient(45deg,#1565c0,#1976d2)', boxShadow: '0 3px 8px rgba(25,118,210,0.3)', '&:hover': { background: 'linear-gradient(45deg,#0d47a1,#1565c0)' }, '&.Mui-disabled': { background: '#ccc' } }}
-              >
-                Add Charge
-              </Button>
-            }
-          />
-          <CardContent>
-            {(!formData.addon_charges || formData.addon_charges.length === 0) ? (
-              <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                No add-on charges added. Click "Add Charge" to add one.
-              </Typography>
-            ) : (
-              <Box display="flex" flexDirection="column" gap={2}>
-                {formData.addon_charges.map((charge, idx) => (
-                  <Box key={idx} display="flex" alignItems="center" gap={2}>
-                    <FormControl sx={{ minWidth: 280 }} size="small">
-                      <InputLabel>Charge Type</InputLabel>
-                      <Select
-                        value={charge.type}
-                        label="Charge Type"
-                        onChange={(e) => handleAddonChange(idx, e.target.value)}
-                      >
-                        {ADDON_OPTIONS.map(opt => {
-                          const alreadyUsed = (formData.addon_charges || []).some((c, i) => i !== idx && c.type === opt.label);
-                          return (
-                            <MenuItem key={opt.label} value={opt.label} disabled={alreadyUsed}>
-                              {opt.label} — ₹{opt.amount.toLocaleString()} per Truck
-                            </MenuItem>
-                          );
-                        })}
-                      </Select>
-                    </FormControl>
+              <Card sx={{ mb: 3, border: '2px dashed #f59e0b', bgcolor: '#fffbeb' }}>
+                <CardHeader title="NT Billing Section" sx={{ bgcolor: '#fde68a' }} titleTypographyProps={{ fontWeight: 800, color: '#b45309' }} />
+                <CardContent>
+                  <Typography variant="body2" color="text.secondary" mb={2}>Extra details for NT (New Transport/Unloading) or NVR billing.</Typography>
+                  <Box display="flex" flexDirection="column" gap={3}>
                     <TextField
-                      size="small"
-                      label="Amount (₹)"
-                      value={`₹${charge.amount.toLocaleString()}`}
-                      inputProps={{ readOnly: true }}
-                      sx={{ width: 140, '& .MuiInputBase-input': { fontWeight: 700, color: '#1565c0' } }}
+                      fullWidth
+                      label="Unloading Charges"
+                      name="unloading_charges"
+                      value={formData.nt_details?.unloading_charges || ''}
+                      onChange={(e) => isWestBengal ? handleChange('nt_details', 'unloading_charges', e.target.value) : undefined}
+                      variant="outlined"
+                      disabled={!isWestBengal}
+                      helperText={
+                        isWestBengal
+                          ? "Auto-calculated (30 × MT) for West Bengal routes."
+                          : "Fixed at ₹0 — Unloading charges only apply for West Bengal destinations."
+                      }
+                      sx={{
+                        '& .MuiInputBase-input.Mui-disabled': {
+                          WebkitTextFillColor: '#555',
+                          fontWeight: 600,
+                        }
+                      }}
                     />
-                    <IconButton onClick={() => handleRemoveAddon(idx)} color="error" size="small" title="Remove">
-                      <RemoveCircleOutlineIcon />
-                    </IconButton>
                   </Box>
-                ))}
-                <Box sx={{ mt: 1, pt: 1.5, borderTop: '1px dashed #90caf9', display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="body2" fontWeight={700} color="text.secondary">Total Add-on:</Typography>
-                  <Typography variant="body1" fontWeight={900} color="primary.main">
-                    ₹{(formData.addon_charges.reduce((s, c) => s + (c.amount || 0), 0)).toLocaleString()}
-                  </Typography>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* ── Add on Charges ── */}
+          <Card sx={{ mb: 3, border: '2px solid #e3f2fd', bgcolor: '#f8fbff' }}>
+            <CardHeader
+              title="Add on Charges"
+              sx={{ bgcolor: '#e3f2fd' }}
+              titleTypographyProps={{ fontWeight: 800, color: '#1565c0' }}
+              action={
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<AddCircleOutlineIcon />}
+                  onClick={handleAddAddon}
+                  disabled={(formData.addon_charges || []).length >= ADDON_OPTIONS.length}
+                  sx={{ mr: 1, borderRadius: '8px', background: 'linear-gradient(45deg,#1565c0,#1976d2)', boxShadow: '0 3px 8px rgba(25,118,210,0.3)', '&:hover': { background: 'linear-gradient(45deg,#0d47a1,#1565c0)' }, '&.Mui-disabled': { background: '#ccc' } }}
+                >
+                  Add Charge
+                </Button>
+              }
+            />
+            <CardContent>
+              {(!formData.addon_charges || formData.addon_charges.length === 0) ? (
+                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                  No add-on charges added. Click "Add Charge" to add one.
+                </Typography>
+              ) : (
+                <Box display="flex" flexDirection="column" gap={2}>
+                  {formData.addon_charges.map((charge, idx) => (
+                    <Box key={idx} display="flex" alignItems="center" gap={2}>
+                      <FormControl sx={{ minWidth: 280 }} size="small">
+                        <InputLabel>Charge Type</InputLabel>
+                        <Select
+                          value={charge.type}
+                          label="Charge Type"
+                          onChange={(e) => handleAddonChange(idx, e.target.value)}
+                        >
+                          {ADDON_OPTIONS.map(opt => {
+                            const alreadyUsed = (formData.addon_charges || []).some((c, i) => i !== idx && c.type === opt.label);
+                            return (
+                              <MenuItem key={opt.label} value={opt.label} disabled={alreadyUsed}>
+                                {opt.label} — ₹{opt.amount.toLocaleString()} per Truck
+                              </MenuItem>
+                            );
+                          })}
+                        </Select>
+                      </FormControl>
+                      <TextField
+                        size="small"
+                        label="Amount (₹)"
+                        value={`₹${charge.amount.toLocaleString()}`}
+                        inputProps={{ readOnly: true }}
+                        sx={{ width: 140, '& .MuiInputBase-input': { fontWeight: 700, color: '#1565c0' } }}
+                      />
+                      <IconButton onClick={() => handleRemoveAddon(idx)} color="error" size="small" title="Remove">
+                        <RemoveCircleOutlineIcon />
+                      </IconButton>
+                    </Box>
+                  ))}
+                  <Box sx={{ mt: 1, pt: 1.5, borderTop: '1px dashed #90caf9', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" fontWeight={700} color="text.secondary">Total Add-on:</Typography>
+                    <Typography variant="body1" fontWeight={900} color="primary.main">
+                      ₹{(formData.addon_charges.reduce((s, c) => s + (c.amount || 0), 0)).toLocaleString()}
+                    </Typography>
+                  </Box>
                 </Box>
-              </Box>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
 
-        <EwbDetails data={formData.ewb_details} errors={errors.ewb_details} onChange={handleChange} />
-      </Paper>
-    </Container>
-
-    {/* ── Fixed Bottom Actions Bar ── */}
-    <Paper elevation={16} sx={{ 
-      position: 'fixed', bottom: 0, left: 0, right: 0, 
-      zIndex: 1200, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(10px)',
-      borderTop: '1px solid rgba(0,0,0,0.08)', p: 2, pb: { xs: 3, sm: 2 }
-    }}>
-      <Container maxWidth="xl" disableGutters>
-        <Box display="flex" gap={2} justifyContent="center">
-          <Button
-            fullWidth
-            variant="outlined"
-            color="secondary"
-            startIcon={<RestoreIcon />}
-            onClick={handleReset}
-            sx={{ borderRadius: '12px', fontWeight: 800, py: 1.5, maxWidth: '300px', backgroundColor: '#fff' }}
-            disabled={isProcessing}
-          >
-            Reset
-          </Button>
-          <Button
-            fullWidth
-            variant="contained"
-            color="primary"
-            startIcon={<SaveIcon />}
-            onClick={handleSave}
-            sx={{ borderRadius: '12px', fontWeight: 900, py: 1.5, maxWidth: '300px', background: 'linear-gradient(45deg, #1a73e8, #1557b0)', boxShadow: '0 4px 15px rgba(26,115,232,0.4)', '&:hover': { background: '#1557b0' } }}
-            disabled={isProcessing}
-          >
-            Save All Data
-          </Button>
-        </Box>
+          <EwbDetails data={formData.ewb_details} errors={errors.ewb_details} onChange={handleChange} />
+        </Paper>
       </Container>
-    </Paper>
+
+      {/* ── Fixed Bottom Actions Bar ── */}
+      <Paper elevation={16} sx={{
+        position: 'fixed', bottom: 0, left: 0, right: 0,
+        zIndex: 1200, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(10px)',
+        borderTop: '1px solid rgba(0,0,0,0.08)', p: 2, pb: { xs: 3, sm: 2 }
+      }}>
+        <Container maxWidth="xl" disableGutters>
+          <Box display="flex" gap={2} justifyContent="center">
+            <Button
+              fullWidth
+              variant="outlined"
+              color="secondary"
+              startIcon={<RestoreIcon />}
+              onClick={handleReset}
+              sx={{ borderRadius: '12px', fontWeight: 800, py: 1.5, maxWidth: '300px', backgroundColor: '#fff' }}
+              disabled={isProcessing}
+            >
+              Reset
+            </Button>
+            <Button
+              fullWidth
+              variant="contained"
+              color="primary"
+              startIcon={<SaveIcon />}
+              onClick={handleSave}
+              sx={{ borderRadius: '12px', fontWeight: 900, py: 1.5, maxWidth: '300px', background: 'linear-gradient(45deg, #1a73e8, #1557b0)', boxShadow: '0 4px 15px rgba(26,115,232,0.4)', '&:hover': { background: '#1557b0' } }}
+              disabled={isProcessing}
+            >
+              Save All Data
+            </Button>
+          </Box>
+        </Container>
+      </Paper>
     </>
   );
 }

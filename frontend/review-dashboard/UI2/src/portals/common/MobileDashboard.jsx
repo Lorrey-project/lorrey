@@ -22,15 +22,23 @@ import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import StorageIcon from '@mui/icons-material/Storage';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import VoucherDialog from '../../components/VoucherDialog';
+import TruckContactManager from '../../components/TruckContactManager';
+import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 
 const MobileDashboard = ({
     onUploadNew,
     onOpenLorrySlip,
     onOpenFuelSlip,
     onOpenFuelRateSettings,
+    onOpenVouchers,
+    onOpenContacts,
     onOpenRegisters,
     onOpenBillingSheet,
-    onRegisterBiometrics
+    onRegisterBiometrics,
+    onOpenAccountApprovals,
 }) => {
     const { user, logout, registerPasskey } = useAuth();
     const [invoices, setInvoices] = useState([]);
@@ -41,11 +49,13 @@ const MobileDashboard = ({
     const [isRegistering, setIsRegistering] = useState(false);
     const [navValue, setNavValue] = useState(0);
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [truckManagerOpen, setTruckManagerOpen] = useState(false);
+    const [voucherDialogOpen, setVoucherDialogOpen] = useState(false);
     const [filterMonth, setFilterMonth] = useState('');
     const [filterYear, setFilterYear] = useState('');
     const [page, setPage] = useState(0);
     const [selectedInvoices, setSelectedInvoices] = useState(new Set());
-
+    const [portalStatuses, setPortalStatuses] = useState([]);
 
     const [pumpVerifications, setPumpVerifications] = useState([]);
     const [pumpStats, setPumpStats] = useState({ totalLitresToday: 0, verifiedTodayCount: 0, pendingCount: 0 });
@@ -54,12 +64,44 @@ const MobileDashboard = ({
     const [verificationCodes, setVerificationCodes] = useState({});
     const [billingLoading, setBillingLoading] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
+    const [pendingApprovals, setPendingApprovals] = useState(0);
 
     // Live Clock Effect
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
+
+    // Portal Status polling (HEAD_OFFICE only)
+    useEffect(() => {
+        if (user?.role !== 'HEAD_OFFICE') return;
+        const fetchPortalStatuses = async () => {
+            try {
+                const res = await axios.get(`${API_URL}/system/portal-status`);
+                if (res.data.success) setPortalStatuses(res.data.statuses);
+            } catch (e) { console.error('Portal status fetch failed', e); }
+        };
+        fetchPortalStatuses();
+        const intervalId = setInterval(fetchPortalStatuses, 60000);
+        return () => clearInterval(intervalId);
+    }, [user?.role]);
+
+    // Pending Approvals fetch (HEAD_OFFICE only)
+    useEffect(() => {
+        if (user?.role !== 'HEAD_OFFICE') return;
+        const fetchPending = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                const res = await axios.get(`${API_URL}/auth/admin/pending-registrations`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (res.data.success) setPendingApprovals(res.data.users.length);
+            } catch (e) { /* silent */ }
+        };
+        fetchPending();
+        const id = setInterval(fetchPending, 60000);
+        return () => clearInterval(id);
+    }, [user?.role]);
 
     // Port-based Auto Detection
     const autoPump = window.location.port === '5175' ? 'SAS-1' : window.location.port === '5176' ? 'SAS-2' : null;
@@ -216,7 +258,19 @@ const MobileDashboard = ({
         try {
             const p = dateStr.replace(/[\.\/]/g, '-').split('-');
             if (p.length !== 3) return true;
-            const d = new Date(parseInt(p[2].length === 2 ? '20' + p[2] : p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+            
+            let d;
+            const p0 = parseInt(p[0]);
+            const p1 = parseInt(p[1]);
+            const p2 = parseInt(p[2]);
+
+            if (p0 > 1000) { // YYYY-MM-DD
+                d = new Date(p0, p1 - 1, p2);
+            } else { // DD-MM-YYYY or DD-MM-YY
+                const y = p2 < 50 ? 2000 + p2 : p2 > 1000 ? p2 : 1900 + p2;
+                d = new Date(y, p1 - 1, p0);
+            }
+            
             const diffDays = (new Date() - d) / (1000 * 60 * 60 * 24);
             return diffDays <= 1.5;
         } catch (e) { return true; }
@@ -229,15 +283,42 @@ const MobileDashboard = ({
     const filteredInvoices = invoices.filter(inv => {
         if (!filterMonth && !filterYear) return true;
 
-        let dateStr = inv.human_verified_data?.invoice_details?.invoice_date;
-        if (!dateStr) return false;
+        // Try to get a date string from various possible paths
+        let dateStr = inv.human_verified_data?.invoice_details?.invoice_date || 
+                      inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
+                      inv.ai_data?.invoice_details?.invoice_date;
 
-        const parts = dateStr.replace(/[\.\/]/g, '-').split('-');
-        if (parts.length !== 3) return false;
+        let m, y;
 
-        const m = parseInt(parts[1]);
-        const yStr = parts[2];
-        const y = parseInt(yStr.length === 2 ? '20' + yStr : yStr);
+        if (dateStr) {
+            const parts = dateStr.replace(/[\.\/]/g, '-').split('-');
+            if (parts.length === 3) {
+                // Determine which part is the year (usually 4 digits)
+                const p0 = parseInt(parts[0]);
+                const p1 = parseInt(parts[1]);
+                const p2 = parseInt(parts[2]);
+
+                if (p0 > 1000) { // YYYY-MM-DD
+                    y = p0;
+                    m = p1;
+                } else if (p2 > 1000) { // DD-MM-YYYY
+                    y = p2;
+                    m = p1;
+                } else { // Assume DD-MM-YY and attempt to fix year
+                    y = p2 < 50 ? 2000 + p2 : 1900 + p2;
+                    m = p1;
+                }
+            }
+        }
+
+        // If still no m/y, fallback to created_at
+        if ((!m || !y) && inv.created_at) {
+            const d = new Date(inv.created_at);
+            m = d.getMonth() + 1;
+            y = d.getFullYear();
+        }
+
+        if (!m || !y) return false;
 
         if (filterMonth && m !== parseInt(filterMonth)) return false;
         if (filterYear && y !== parseInt(filterYear)) return false;
@@ -295,15 +376,39 @@ const MobileDashboard = ({
             )}
 
             <Container maxWidth="sm" sx={{ mt: 1, px: { xs: 2, sm: 3 } }}>
-                {/* ── Greeting (Hidden for Pump as requested) ───────────── */}
+                {/* ── Greeting with inline Portal Status (HEAD_OFFICE) ──── */}
                 {!isPump && (
-                    <Box mb={4} sx={{ px: 0.5 }}>
-                        <Typography variant="h5" fontWeight="900" sx={{ color: '#0f172a' }}>
-                            Hello, {user?.name?.split(' ')[0] || (isSite ? 'Site Admin' : 'Admin')}
-                        </Typography>
-                        <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500 }}>
-                            {isOffice ? 'Office Operations' : 'Site Field Operations'}
-                        </Typography>
+                    <Box mb={4} sx={{ px: 0.5, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Box>
+                            <Typography variant="h5" fontWeight="900" sx={{ color: '#0f172a' }}>
+                                Hello, {user?.name?.split(' ')[0] || (isSite ? 'Site Admin' : 'Admin')}
+                            </Typography>
+                            <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500 }}>
+                                {isOffice ? 'Office Operations' : 'Site Field Operations'}
+                            </Typography>
+                        </Box>
+
+                        {/* Compact portal dots — right side, HEAD_OFFICE only */}
+                        {user?.role === 'HEAD_OFFICE' && portalStatuses.length > 0 && (
+                            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.75, mt: 0.5 }}>
+                                {portalStatuses.map(ps => (
+                                    <Box key={ps.id} sx={{
+                                        display: 'flex', alignItems: 'center', gap: 0.6,
+                                        bgcolor: ps.active ? '#f0fdf4' : '#fff5f5',
+                                        border: `1px solid ${ps.active ? '#bbf7d0' : '#fecaca'}`,
+                                        borderRadius: '20px', px: 1, py: 0.4,
+                                    }}>
+                                        <Box sx={{
+                                            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                                            bgcolor: ps.active ? '#22c55e' : '#ef4444',
+                                        }} />
+                                        <Typography sx={{ fontSize: '0.6rem', fontWeight: 800, color: ps.active ? '#166534' : '#991b1b', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                                            {ps.name}
+                                        </Typography>
+                                    </Box>
+                                ))}
+                            </Box>
+                        )}
                     </Box>
                 )}
 
@@ -341,17 +446,35 @@ const MobileDashboard = ({
                             </Card>
                         )}
 
-                        <Card onClick={onOpenRegisters} sx={{
-                            flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
-                            display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
-                            boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-                            '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
-                        }}>
-                            <Box sx={{ p: 1, bgcolor: '#dcfce7', borderRadius: 3, mb: 1 }}>
-                                <StorageIcon sx={{ color: '#16a34a', fontSize: 20 }} />
-                            </Box>
-                            <Typography variant="caption" fontWeight="800" sx={{ color: '#1e293b', fontSize: '10px', textAlign: 'center', lineHeight: 1.1 }}>Registers</Typography>
-                        </Card>
+                        {/* Contacts Card */}
+                        {isOffice && (
+                            <Card onClick={() => setTruckManagerOpen(true)} sx={{
+                                flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
+                                display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
+                                boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
+                                '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
+                            }}>
+                                <Box sx={{ p: 1, bgcolor: '#dbeafe', borderRadius: 3, mb: 1 }}>
+                                    <LocalShippingIcon sx={{ color: '#1d4ed8', fontSize: 20 }} />
+                                </Box>
+                                <Typography variant="caption" fontWeight="800" sx={{ color: '#1e293b', fontSize: '10px', textAlign: 'center', lineHeight: 1.1 }}>Contacts</Typography>
+                            </Card>
+                        )}
+
+                        {/* Vouchers Card */}
+                        {(isOffice || isSite) && onOpenVouchers && (
+                            <Card onClick={() => setVoucherDialogOpen(true)} sx={{
+                                flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
+                                display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
+                                boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
+                                '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
+                            }}>
+                                <Box sx={{ p: 1, bgcolor: '#ede9fe', borderRadius: 3, mb: 1 }}>
+                                    <ReceiptLongIcon sx={{ color: '#7c3aed', fontSize: 20 }} />
+                                </Box>
+                                <Typography variant="caption" fontWeight="800" sx={{ color: '#1e293b', fontSize: '10px', textAlign: 'center', lineHeight: 1.1 }}>Vouchers</Typography>
+                            </Card>
+                        )}
 
                         <Card onClick={fetchInvoices} sx={{
                             flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
@@ -376,21 +499,84 @@ const MobileDashboard = ({
                     }}>
                         <Box display="flex" justifyContent="space-between" alignItems="center">
                             <Box>
-                                <Typography variant="h3" fontWeight="900" sx={{ letterSpacing: '-1px' }}>{invoices.length}</Typography>
-                                <Typography variant="body2" sx={{ opacity: 0.8, fontWeight: 500 }}>Total Invoices</Typography>
+                                <Typography variant="h3" fontWeight="900" sx={{ letterSpacing: '-1px' }}>
+                                    {(filterMonth || filterYear) ? filteredInvoices.length : invoices.length}
+                                </Typography>
+                                <Typography variant="body2" sx={{ opacity: 0.8, fontWeight: 500 }}>
+                                    {(filterMonth || filterYear) ? 'Results found' : 'Total Invoices'}
+                                </Typography>
                             </Box>
                             <Box sx={{ textAlign: 'right' }}>
                                 <Box display="flex" gap={1} mb={1} sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
                                     <Chip label="Approved" size="small" sx={{ height: 18, bgcolor: 'rgba(255,255,255,0.2)', color: '#fff', fontSize: '9px', fontWeight: 900 }} />
-                                    <Typography variant="body2" fontWeight="800">{invoices.filter(i => i.status === 'approved').length}</Typography>
+                                    <Typography variant="body2" fontWeight="800">
+                                        {filteredInvoices.filter(i => i.status === 'approved').length}
+                                    </Typography>
                                 </Box>
                                 <Box display="flex" gap={1} sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
                                     <Chip label="Pending" size="small" sx={{ height: 18, bgcolor: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '9px', fontWeight: 900 }} />
-                                    <Typography variant="body2" fontWeight="800">{invoices.filter(i => i.status === 'pending').length}</Typography>
+                                    <Typography variant="body2" fontWeight="800">
+                                        {filteredInvoices.filter(i => i.status === 'pending').length}
+                                    </Typography>
                                 </Box>
                             </Box>
                         </Box>
                     </Paper>
+                )}
+
+                {/* ── Account Approvals Mobile Banner (HEAD_OFFICE only) ─── */}
+                {user?.role === 'HEAD_OFFICE' && onOpenAccountApprovals && (
+                    <Box
+                        onClick={onOpenAccountApprovals}
+                        sx={{
+                            mb: 3, borderRadius: 5, overflow: 'hidden', cursor: 'pointer',
+                            background: 'linear-gradient(135deg, #1e0a3c 0%, #3b0764 55%, #6d28d9 100%)',
+                            boxShadow: pendingApprovals > 0 ? '0 10px 30px rgba(109,40,217,0.35)' : '0 4px 15px rgba(109,40,217,0.15)',
+                            border: pendingApprovals > 0 ? '1.5px solid rgba(251,191,36,0.4)' : '1.5px solid rgba(109,40,217,0.2)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            p: 2.5, gap: 2,
+                            transition: 'all 0.2s',
+                            '&:active': { transform: 'scale(0.98)' },
+                            position: 'relative',
+                        }}
+                    >
+                        {/* Decorative blobs */}
+                        <Box sx={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.05)', pointerEvents: 'none' }} />
+
+                        <Box display="flex" alignItems="center" gap={2}>
+                            <Box sx={{
+                                width: 46, height: 46, borderRadius: '14px',
+                                bgcolor: pendingApprovals > 0 ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.12)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                            }}>
+                                <PersonAddAlt1Icon sx={{ color: pendingApprovals > 0 ? '#fbbf24' : 'rgba(255,255,255,0.7)', fontSize: 24 }} />
+                            </Box>
+                            <Box>
+                                <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: 14, letterSpacing: '-0.3px', lineHeight: 1 }}>
+                                    Account Approvals
+                                </Typography>
+                                <Typography sx={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 600, mt: 0.4 }}>
+                                    {pendingApprovals > 0
+                                        ? `${pendingApprovals} request${pendingApprovals !== 1 ? 's' : ''} waiting for review`
+                                        : 'No pending registrations'}
+                                </Typography>
+                            </Box>
+                        </Box>
+
+                        {/* Right count badge */}
+                        <Box sx={{
+                            minWidth: 42, height: 42, borderRadius: '12px',
+                            bgcolor: pendingApprovals > 0 ? '#fbbf24' : 'rgba(255,255,255,0.1)',
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                        }}>
+                            <Typography sx={{ color: pendingApprovals > 0 ? '#1e0a3c' : 'rgba(255,255,255,0.5)', fontWeight: 900, fontSize: 18, lineHeight: 1 }}>
+                                {pendingApprovals}
+                            </Typography>
+                            <Typography sx={{ color: pendingApprovals > 0 ? '#3b0764' : 'rgba(255,255,255,0.35)', fontWeight: 700, fontSize: 8, letterSpacing: 0.5 }}>
+                                PENDING
+                            </Typography>
+                        </Box>
+                    </Box>
                 )}
 
                 {/* ── Actionable Blocks Launcher ────────────────── */}
@@ -553,6 +739,14 @@ const MobileDashboard = ({
                                         </Button>
                                         <Button
                                             size="small" variant="contained" disableElevation
+                                            onClick={() => window.open(inv.gcn_url, '_blank')}
+                                            disabled={!inv.gcn_url}
+                                            sx={{ flex: '1 1 auto', bgcolor: '#fce7f3', color: '#be185d', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#fbcfe8' } }}
+                                        >
+                                            GCN
+                                        </Button>
+                                        <Button
+                                            size="small" variant="contained" disableElevation
                                             onClick={() => onOpenLorrySlip(inv._id)}
                                             sx={{ flex: '1 1 auto', bgcolor: '#e0e7ff', color: '#4f46e5', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#c7d2fe' } }}
                                         >
@@ -564,14 +758,6 @@ const MobileDashboard = ({
                                             sx={{ flex: '1 1 auto', bgcolor: '#ecfccb', color: '#4d7c0f', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#d9f99d' } }}
                                         >
                                             FUEL
-                                        </Button>
-                                        <Button
-                                            size="small" variant="contained" disableElevation
-                                            onClick={() => window.open(inv.gcn_url, '_blank')}
-                                            disabled={!inv.gcn_url}
-                                            sx={{ flex: '1 1 auto', bgcolor: '#fce7f3', color: '#be185d', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#fbcfe8' } }}
-                                        >
-                                            GCN
                                         </Button>
                                     </Box>
                                 </Box>
@@ -595,10 +781,18 @@ const MobileDashboard = ({
                             <ListItemText primary="Dashboard" primaryTypographyProps={{ fontWeight: 800, color: '#0052cc' }} />
                         </ListItem>
                         {!isPump && <>
-                            <ListItem button onClick={() => { setDrawerOpen(false); onOpenRegisters(); }} sx={{ borderRadius: 2 }}>
-                                <ListItemIcon><StorageIcon sx={{ color: '#64748b' }} /></ListItemIcon>
-                                <ListItemText primary="Registers" primaryTypographyProps={{ fontWeight: 600 }} />
-                            </ListItem>
+                            {isOffice && (
+                                <ListItem button onClick={() => { setDrawerOpen(false); setTruckManagerOpen(true); }} sx={{ borderRadius: 2 }}>
+                                    <ListItemIcon><LocalShippingIcon sx={{ color: '#64748b' }} /></ListItemIcon>
+                                    <ListItemText primary="Contacts" primaryTypographyProps={{ fontWeight: 600 }} />
+                                </ListItem>
+                            )}
+                            {(isOffice || isSite) && onOpenVouchers && (
+                                <ListItem button onClick={() => { setDrawerOpen(false); setVoucherDialogOpen(true); }} sx={{ borderRadius: 2 }}>
+                                    <ListItemIcon><ReceiptLongIcon sx={{ color: '#64748b' }} /></ListItemIcon>
+                                    <ListItemText primary="Vouchers" primaryTypographyProps={{ fontWeight: 600 }} />
+                                </ListItem>
+                            )}
                             {isOffice && (
                                 <ListItem button onClick={() => { setDrawerOpen(false); onOpenFuelRateSettings(); }} sx={{ borderRadius: 2 }}>
                                     <ListItemIcon><LocalGasStationIcon sx={{ color: '#64748b' }} /></ListItemIcon>
@@ -710,6 +904,10 @@ const MobileDashboard = ({
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            {/* ── Modals ──────────────────────── */}
+            <TruckContactManager open={truckManagerOpen} onClose={() => setTruckManagerOpen(false)} />
+            <VoucherDialog open={voucherDialogOpen} onClose={() => setVoucherDialogOpen(false)} initialTab={0} />
         </Box>
     );
 };

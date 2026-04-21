@@ -6,7 +6,9 @@ const OfficePortal = ({
     onOpenLorrySlip, 
     onOpenFuelSlip, 
     onOpenFuelRateSettings,
-    onOpenRegisters 
+    onOpenVouchers,
+    onOpenContacts,
+    onOpenAccountApprovals,
 }) => {
     return (
         <MobileDashboard 
@@ -14,7 +16,9 @@ const OfficePortal = ({
             onOpenLorrySlip={onOpenLorrySlip}
             onOpenFuelSlip={onOpenFuelSlip}
             onOpenFuelRateSettings={onOpenFuelRateSettings}
-            onOpenRegisters={onOpenRegisters}
+            onOpenVouchers={onOpenVouchers}
+            onOpenContacts={onOpenContacts}
+            onOpenAccountApprovals={onOpenAccountApprovals}
         />
     );
 };

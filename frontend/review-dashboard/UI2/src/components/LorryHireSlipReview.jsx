@@ -87,20 +87,23 @@ const InfoRow = ({ label, value, mono }) => (
         <Box sx={{
             display: 'flex',
             justifyContent: 'space-between',
-            alignItems: 'baseline',
-            py: 1,
-            borderBottom: '1px solid #f0f0f0',
-            gap: 2
+            alignItems: 'center',
+            py: 0.8,
+            borderBottom: '1px solid #f1f5f9',
+            transition: 'background-color 0.2s',
+            '&:hover': { bgcolor: '#f8fafc' },
+            px: 0.5,
         }}>
-            <Typography variant="body2" sx={{ color: '#666', flexShrink: 0, fontWeight: 400 }}>
+            <Typography variant="body2" sx={{ color: '#64748b', flexShrink: 0, fontWeight: 500, fontSize: '0.85rem' }}>
                 {label}
             </Typography>
             <Typography variant="body2" sx={{
                 fontWeight: 700,
                 textAlign: 'right',
                 wordBreak: 'break-word',
-                fontFamily: mono ? 'monospace' : 'inherit',
-                color: '#1a1a1a'
+                fontSize: '0.9rem',
+                fontFamily: mono ? '"Roboto Mono", monospace' : 'inherit',
+                color: '#1e293b',
             }}>
                 {value}
             </Typography>
@@ -108,18 +111,48 @@ const InfoRow = ({ label, value, mono }) => (
     ) : null
 );
 
-const SectionCard = ({ icon, title, color = '#1a73e8', children }) => (
-    <Box sx={{ mb: 4 }}>
-        <Box display="flex" alignItems="center" gap={1.2} mb={1.5}>
-            {React.cloneElement(icon, { sx: { fontSize: 18, color } })}
-            <Typography variant="subtitle2" fontWeight="900" sx={{ color, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+const SectionCard = ({ icon, title, color = '#3b82f6', children }) => (
+    <Card sx={{ 
+        height: '100%',
+        overflow: 'visible', 
+        borderRadius: 3, 
+        border: '1px solid #e2e8f0',
+        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.02)',
+        transition: 'transform 0.2s, box-shadow 0.2s',
+        '&:hover': {
+            transform: 'translateY(-1px)',
+            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.04)'
+        }
+    }}>
+        <Box sx={{ 
+            bgcolor: '#ffffff',
+            px: 2, 
+            py: 1.5,
+            borderBottom: '1px solid #f1f5f9',
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 1.5,
+            borderTopLeftRadius: 12,
+            borderTopRightRadius: 12
+        }}>
+            <Box sx={{ 
+                bgcolor: color, 
+                p: 0.8, 
+                borderRadius: 2, 
+                display: 'flex', 
+                color: '#fff',
+                boxShadow: `0 4px 12px ${color}40`
+            }}>
+                {React.cloneElement(icon, { sx: { fontSize: 18 } })}
+            </Box>
+            <Typography variant="subtitle2" fontWeight="800" sx={{ color: color, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
                 {title}
             </Typography>
         </Box>
-        <Paper elevation={0} sx={{ p: 0.5, bgcolor: 'transparent' }}>
+        <CardContent sx={{ px: 3, py: 2, '&:last-child': { pb: 2 } }}>
             {children}
-        </Paper>
-    </Box>
+        </CardContent>
+    </Card>
 );
 
 /* ─── Main Component ──────────────────────────────────────────────────────── */
@@ -131,6 +164,15 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
     const [saving, setSaving] = useState(false);
     const [savedUrl, setSavedUrl] = useState(null);
     const [snack, setSnack] = useState(null);
+
+    // Zoom state for document preview
+    const [zoom, setZoom] = useState(0.85);
+    const ZOOM_STEP = 0.1;
+    const ZOOM_MAX = 2.0;
+    const ZOOM_MIN = 0.3;
+    const zoomIn = () => setZoom(prev => Math.min(prev + ZOOM_STEP, ZOOM_MAX));
+    const zoomOut = () => setZoom(prev => Math.max(prev - ZOOM_STEP, ZOOM_MIN));
+    const zoomReset = () => setZoom(0.85);
 
     // Editable advance fields
     const [loadingAdv, setLoadingAdv] = useState('');
@@ -331,258 +373,255 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
 
     if (step === 0) {
         return (
-            <Box sx={{ bgcolor: '#f4f7f9', minHeight: '100vh', pb: 6 }}>
-                <Box sx={{ bgcolor: '#fff', borderBottom: '1px solid #e8eaed', px: 3, py: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <IconButton onClick={() => window.location.href = '/'} size="small" sx={{ bgcolor: '#f0f6ff', '&:hover': { bgcolor: '#d0e4ff' }, flexShrink: 0 }}>
+            <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', pb: 8, fontFamily: '"Inter", sans-serif' }}>
+                 {/* Glassy Header */}
+                <Box sx={{ 
+                    position: 'sticky', top: 0, zIndex: 50,
+                    bgcolor: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)',
+                    borderBottom: '1px solid rgba(226,232,240,0.8)', px: { xs: 2, md: 4 }, py: 2, 
+                    display: 'flex', alignItems: 'center', gap: { xs: 1.5, md: 3 } 
+                }}>
+                    <IconButton onClick={() => window.location.href = '/'} size="small" sx={{ bgcolor: '#f1f5f9', color: '#475569', '&:hover': { bgcolor: '#e2e8f0', color: '#0f172a' }, flexShrink: 0, boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
                         <ArrowBackIcon fontSize="small" />
                     </IconButton>
                     <Box flex={1} sx={{ minWidth: 0 }}>
-                        <Typography variant="h6" fontWeight="900" color="primary" sx={{
-                            lineHeight: 1.1,
-                            fontSize: { xs: '1rem', sm: '1.25rem' },
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap'
+                        <Typography variant="h6" fontWeight="900" sx={{
+                            color: '#0f172a', lineHeight: 1.2, fontSize: { xs: '1.1rem', sm: '1.4rem' },
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                         }}>
-                            Lorry Hire Slip — Review
+                            Lorry Hire Slip Setup
                         </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
-                            Review details and enter advance
+                        <Typography variant="caption" sx={{ color: '#64748b', display: { xs: 'none', sm: 'block' }, fontWeight: 500 }}>
+                            Review details and finalize advance payment configuration
                         </Typography>
                     </Box>
-                    <Stepper activeStep={step} alternativeLabel sx={{ minWidth: 200, display: { xs: 'none', md: 'flex' } }}>
+                    <Stepper activeStep={step} alternativeLabel sx={{ minWidth: 250, display: { xs: 'none', md: 'flex' }, '& .MuiStepLabel-label': { fontWeight: 600 } }}>
                         {STEPS.map(label => (
                             <Step key={label}><StepLabel>{label}</StepLabel></Step>
                         ))}
                     </Stepper>
                     <Button
-                        variant="contained"
+                        variant="outlined"
                         size="small"
-                        startIcon={<DescriptionIcon />}
                         onClick={() => window.location.href = '/'}
-                        sx={{ ml: { xs: 0, sm: 2 }, borderRadius: 2, px: 2, bgcolor: '#333', '&:hover': { bgcolor: '#000' }, whiteSpace: 'nowrap' }}
+                        sx={{ ml: 'auto', borderRadius: 2, px: { xs: 2, sm: 2.5 }, py: { xs: 0.5, sm: 0.8 }, color: '#334155', borderColor: '#cbd5e1', fontWeight: 700, '&:hover': { bgcolor: '#f1f5f9' }, whiteSpace: 'nowrap', display: 'flex' }}
                     >
-                        Dashboard
+                        Home
                     </Button>
                 </Box>
 
-                <Container maxWidth="lg" sx={{ pt: 4, px: { xs: 2.5, md: 6 } }}>
-                    <Grid container spacing={5}>
-                        <Grid item xs={12} md={7}>
-                            <SectionCard icon={<BusinessIcon />} title="Transport Company" color="#1a73e8">
-                                <InfoRow label="Company" value={gcnData?.company_name} />
-                                <InfoRow label="Site Office" value={gcnData?.company_site_office_address} />
-                                <InfoRow label="Mobile" value={gcnData?.company_phone_number} />
-                                <InfoRow label="Email" value={gcnData?.company_email} />
-                                <InfoRow label="GST No." value={gcnData?.company_gst} mono />
-                            </SectionCard>
-                            <SectionCard icon={<ReceiptIcon />} title="Slip Reference" color="#7b1fa2">
-                                <InfoRow label="GCN No." value={gcnData?.gcn_no} mono />
-                                <InfoRow label="Date" value={gcnData?.gcn_date} />
-                                <InfoRow label="Invoice No." value={gcnData?.invoice_no} mono />
-                            </SectionCard>
-                            <Grid container spacing={2}>
-                                <Grid item xs={12} sm={6}>
-                                    <SectionCard icon={<PersonIcon />} title="Consignor (From)" color="#0b8043">
-                                        <InfoRow label="Name" value={gcnData?.consignor_name} />
-                                        <InfoRow label="Destination" value={gcnData?.destination} />
-                                    </SectionCard>
-                                </Grid>
-                                <Grid item xs={12} sm={6}>
-                                    <SectionCard icon={<PersonIcon />} title="Consignee (To)" color="#c62828">
-                                        <InfoRow label="Name" value={gcnData?.consignee_name} />
-                                        <InfoRow label="Pincode" value={gcnData?.consignee_pincode} mono />
-                                    </SectionCard>
-                                </Grid>
-                            </Grid>
-                            <SectionCard icon={<LocalShippingIcon />} title="Vehicle Details" color="#e65100">
-                                <InfoRow label="Truck No." value={gcnData?.truck_no} mono />
-                                <InfoRow label="Truck Owner" value={gcnData?.agent_name} />
-                                <InfoRow label="Driver Name" value={gcnData?.driver_name} />
-                                <InfoRow label="Driver Number" value={gcnData?.owner_agent_contact || gcnData?.driver_number} />
-                                <InfoRow label="License No" value={gcnData?.driver_license_no} />
-                            </SectionCard>
-                            <SectionCard icon={<InventoryIcon />} title="Material Details" color="#00695c">
-                                <InfoRow label="Material" value={gcnData?.material} />
-                                <InfoRow label="Bags (Nos)" value={gcnData?.bags} />
-                                <InfoRow label="Quantity (MT)" value={gcnData?.qty_mt} />
-                            </SectionCard>
+                <Container maxWidth="xl" sx={{ pt: { xs: 3, md: 5 }, px: { xs: 2, md: 4 } }}>
+                    <Grid container spacing={{ xs: 3, md: 5 }} justifyContent="center">
+                        <Grid item xs={12} lg={5} xl={4}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, height: '100%' }}>
+                                <Box>
+                                    <Typography variant="h6" fontWeight="800" color="#1e293b" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        <span style={{ width: 4, height: 20, backgroundColor: '#3b82f6', borderRadius: 2 }}></span>
+                                        Slip Configuration
+                                    </Typography>
+                                    <Typography variant="body2" color="#64748b" mt={1}>Review core identifiers and vehicle allocations.</Typography>
+                                </Box>
+                                
+                                <SectionCard icon={<ReceiptIcon />} title="Slip Reference" color="#8b5cf6">
+                                    <InfoRow label="GCN No." value={gcnData?.gcn_no} mono />
+                                    <InfoRow label="Date" value={gcnData?.gcn_date} />
+                                    <InfoRow label="Invoice No." value={gcnData?.invoice_no} mono />
+                                </SectionCard>
+
+                                <SectionCard icon={<LocalShippingIcon />} title="Vehicle Details" color="#f59e0b">
+                                    <InfoRow label="Truck No." value={gcnData?.truck_no} mono />
+                                    <InfoRow label="Truck Owner" value={gcnData?.agent_name} />
+                                    <InfoRow label="Driver Name" value={gcnData?.driver_name} />
+                                    <InfoRow label="Driver Number" value={gcnData?.owner_agent_contact || gcnData?.driver_number} />
+                                    <InfoRow label="License No" value={gcnData?.driver_license_no} />
+                                </SectionCard>
+                            </Box>
                         </Grid>
-                        <Grid item xs={12} md={5}>
+                        
+                        <Grid item xs={12} lg={5} xl={4}>
                             <Paper sx={{
                                 p: { xs: 3, md: 4 },
-                                borderRadius: 4,
-                                position: { xs: 'static', md: 'sticky' },
-                                top: 24,
+                                borderRadius: 5,
+                                position: { xs: 'static', lg: 'sticky' },
+                                top: 100,
                                 bgcolor: '#fff',
-                                border: '1px solid #e0e0e0',
-                                mb: { xs: 4, md: 0 }
+                                boxShadow: '0 12px 40px rgba(0,0,0,0.06)',
+                                border: '1px solid rgba(226,232,240,0.8)',
                             }} elevation={0}>
-                                <Typography variant="h6" fontWeight="900" mb={3}>Trip Advance</Typography>
+                                <Typography variant="h5" fontWeight="900" color="#0f172a" mb={1}>Trip Advance</Typography>
+                                <Typography variant="body2" color="#64748b" mb={4}>Review the AI estimated fuel allowance and input the specific loading advance amounts.</Typography>
 
                                 {/* ── Required Fuel (Read-only, auto-calculated) ── */}
                                 <Box sx={{
-                                    mb: 2.5,
-                                    borderRadius: 3,
-                                    border: fuelError ? '1.5px solid #ef9a9a' : '1.5px solid #b2dfdb',
-                                    bgcolor: fuelError ? '#fff8f8' : '#f0fdf4',
-                                    px: 2.5,
-                                    py: 1.8,
+                                    mb: 4,
+                                    borderRadius: 4,
+                                    border: fuelError ? '1px solid #fecaca' : '1px solid #10b981',
+                                    bgcolor: fuelError ? '#fef2f2' : '#ecfdf5',
+                                    p: 3,
                                     position: 'relative',
-                                    overflow: 'hidden'
+                                    overflow: 'hidden',
+                                    boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.01)'
                                 }}>
-                                    {/* subtle gradient accent */}
                                     <Box sx={{
-                                        position: 'absolute', top: 0, left: 0, bottom: 0, width: 4,
-                                        bgcolor: fuelError ? '#e53935' : '#00897b',
-                                        borderRadius: '3px 0 0 3px'
+                                        position: 'absolute', top: 0, left: 0, width: 6, height: '100%',
+                                        bgcolor: fuelError ? '#ef4444' : '#10b981',
                                     }} />
-                                    <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                                        <LocalGasStationIcon sx={{ fontSize: 16, color: fuelError ? '#e53935' : '#00897b' }} />
-                                        <Typography variant="caption" fontWeight="700" sx={{ color: fuelError ? '#e53935' : '#00897b', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
-                                            Required Fuel
+                                    <Box display="flex" alignItems="center" gap={1.5} mb={1}>
+                                        <Box sx={{ p: 1, bgcolor: fuelError ? '#fee2e2' : '#d1fae5', borderRadius: 2, display: 'flex' }}>
+                                            <LocalGasStationIcon sx={{ fontSize: 20, color: fuelError ? '#ef4444' : '#059669' }} />
+                                        </Box>
+                                        <Typography variant="subtitle2" fontWeight="800" sx={{ color: fuelError ? '#ef4444' : '#065f46', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                                            AI Fuel Estimate
                                         </Typography>
                                     </Box>
                                     {fuelLoading ? (
-                                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                                            <CircularProgress size={16} sx={{ color: '#00897b' }} />
-                                            <Typography variant="body2" color="text.secondary">Calculating…</Typography>
+                                        <Box display="flex" alignItems="center" gap={1.5} mt={1.5} ml={6}>
+                                            <CircularProgress size={16} sx={{ color: '#059669' }} />
+                                            <Typography variant="body2" fontWeight="600" color="#065f46">Calculating route...</Typography>
                                         </Box>
                                     ) : fuelError ? (
-                                        <Typography variant="body2" sx={{ color: '#c62828', fontWeight: 500, mt: 0.5 }}>
+                                        <Typography variant="body2" sx={{ color: '#b91c1c', fontWeight: 600, mt: 1, ml: 6 }}>
                                             {fuelError}
                                         </Typography>
                                     ) : fuelRequirement ? (
-                                        <>
-                                            <Typography variant="h5" fontWeight="900" sx={{ color: '#00695c', lineHeight: 1.1 }}>
-                                                {fuelRequirement.required_fuel_litres} L
+                                        <Box ml={6}>
+                                            <Typography variant="h3" fontWeight="900" sx={{ color: '#047857', lineHeight: 1.1, letterSpacing: '-1px' }}>
+                                                {fuelRequirement.required_fuel_litres} <Typography component="span" variant="h5" fontWeight="700" color="#059669">Liters</Typography>
                                             </Typography>
-                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                                                ({fuelRequirement.distance_km} km × 2) ÷ {fuelRequirement.mileage_kmpl} km/L ({fuelRequirement.vehicle_type})
+                                            <Typography variant="caption" fontWeight="600" sx={{ display: 'block', mt: 1, color: '#065f46', opacity: 0.8 }}>
+                                                Route: {fuelRequirement.distance_km} km × 2 trips
                                             </Typography>
-                                        </>
+                                            <Typography variant="caption" fontWeight="600" sx={{ display: 'block', color: '#065f46', opacity: 0.8 }}>
+                                                Vehicle: {fuelRequirement.vehicle_type} ({fuelRequirement.mileage_kmpl} km/L)
+                                            </Typography>
+                                        </Box>
                                     ) : (
-                                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>—</Typography>
+                                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1, ml: 6 }}>—</Typography>
                                     )}
                                 </Box>
 
-                                <TextField label="Loading Advance (Rs.)" type="number" fullWidth value={loadingAdv} onChange={e => setLoadingAdv(e.target.value)} sx={{ mb: 2 }} InputProps={{ startAdornment: <Typography sx={{ mr: 1, color: '#777', fontWeight: 700 }}>₹</Typography> }} />
-                                
-                                <Box display="flex" gap={2} sx={{ mb: 2 }}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 4 }}>
+                                    <TextField 
+                                        label="Loading Advance Amount" 
+                                        type="number" 
+                                        fullWidth 
+                                        value={loadingAdv} 
+                                        onChange={e => setLoadingAdv(e.target.value)} 
+                                        variant="outlined"
+                                        InputLabelProps={{ sx: { fontWeight: 600, color: '#475569' } }}
+                                        InputProps={{ 
+                                            startAdornment: <Typography sx={{ mr: 1, color: '#0f172a', fontSize: '1.1rem', fontWeight: 800 }}>₹</Typography>,
+                                            sx: { borderRadius: 3, bgcolor: '#f8fafc', fontWeight: 700, fontSize: '1.1rem' } 
+                                        }} 
+                                    />
+                                    
                                     <TextField
-                                        label="Fuel Amount (Litres) — adjust if needed"
+                                        label="Fuel Advance (Litres)"
                                         type="number"
                                         fullWidth
                                         value={dieselLtrs}
                                         onChange={e => setDieselLtrs(e.target.value)}
-                                        helperText={fuelRequirement ? `Estimate: ${fuelRequirement.required_fuel_litres} L` : ''}
-                                        InputProps={{ endAdornment: <LocalGasStationIcon sx={{ color: '#f57c00' }} /> }}
+                                        variant="outlined"
+                                        helperText={fuelRequirement ? `* AI suggested constraint is ${fuelRequirement.required_fuel_litres} Litres` : ''}
+                                        FormHelperTextProps={{ sx: { fontWeight: 600, color: '#64748b' } }}
+                                        InputLabelProps={{ sx: { fontWeight: 600, color: '#475569' } }}
+                                        InputProps={{ 
+                                            endAdornment: <LocalGasStationIcon sx={{ color: '#3b82f6' }} />,
+                                            sx: { borderRadius: 3, bgcolor: '#f8fafc', fontWeight: 700, fontSize: '1.1rem' }
+                                        }}
                                     />
                                 </Box>
-                                <Button variant="contained" fullWidth size="large" endIcon={<ArrowForwardIcon />} onClick={() => setStep(1)} sx={{ borderRadius: 2, fontWeight: 800, py: 1.6, background: 'linear-gradient(45deg, #f57c00, #ff9800)', boxShadow: '0 6px 16px rgba(245,124,0,0.35)' }}>
-                                    Generate Lorry Hire Slip
+
+                                <Button 
+                                    variant="contained" 
+                                    fullWidth 
+                                    size="large" 
+                                    endIcon={<ArrowForwardIcon />} 
+                                    onClick={() => setStep(1)} 
+                                    sx={{ 
+                                        borderRadius: 3, 
+                                        fontWeight: 800, 
+                                        py: 1.8, 
+                                        fontSize: '1.05rem',
+                                        background: 'linear-gradient(135deg, #020617 0%, #1e293b 100%)', 
+                                        boxShadow: '0 10px 25px rgba(15,23,42,0.3)',
+                                        transition: 'all 0.2s',
+                                        '&:hover': { 
+                                            background: 'linear-gradient(135deg, #0f172a 0%, #334155 100%)',
+                                            transform: 'translateY(-2px)',
+                                            boxShadow: '0 15px 30px rgba(15,23,42,0.4)',
+                                        } 
+                                    }}
+                                >
+                                    Generate Lorry Slip
                                 </Button>
                             </Paper>
                         </Grid>
                     </Grid>
                 </Container>
                 <Snackbar open={!!snack} autoHideDuration={5000} onClose={() => setSnack(null)} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
-                    <Alert severity={snack?.type || 'info'} onClose={() => setSnack(null)} variant="filled">
+                    <Alert severity={snack?.type || 'info'} onClose={() => setSnack(null)} variant="filled" sx={{ borderRadius: 3, fontWeight: 600 }}>
                         {snack?.message}
                     </Alert>
                 </Snackbar>
             </Box>
         );
     }
-
     return (
-        <Box sx={{ bgcolor: '#f0f0f0', minHeight: '100vh' }}>
-            <Box
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-                sx={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    zIndex: 1100,
-                    backgroundColor: '#fff',
-                    borderBottom: '1px solid #ddd',
-                    px: { xs: 1.5, sm: 3 },
-                    py: 1.5,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-                    flexDirection: { xs: 'column', md: 'row' },
-                    gap: { xs: 1.5, md: 0 }
-                }}
-                className="no-print"
-            >
-                <Box display="flex" gap={1.5} alignItems="center" sx={{ width: { xs: '100%', md: 'auto' } }}>
-                    <IconButton onClick={() => setStep(0)} size="small" sx={{ bgcolor: '#f0f6ff', '&:hover': { bgcolor: '#d0e4ff' } }}>
-                        <ArrowBackIcon fontSize="small" />
-                    </IconButton>
-                    <Box sx={{ flex: 1 }}>
-                        <Typography variant="subtitle1" fontWeight="900" color="primary" sx={{ lineHeight: 1.2, fontSize: { xs: '0.9rem', sm: '1.25rem' } }}>
-                            Lorry Hire Slip — Final
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '10px' }}>
-                            #{slipNo} · Fuel #{fuelSlipNo}
-                        </Typography>
-                    </Box>
-                    <Stepper activeStep={step} alternativeLabel sx={{ minWidth: 200, display: { xs: 'none', lg: 'flex' }, ml: 2 }}>
-                        {STEPS.map(label => (
-                            <Step key={label}><StepLabel>{label}</StepLabel></Step>
-                        ))}
-                    </Stepper>
-                </Box>
+      <Box position="relative">
+        <Box
+          display="flex"
+          justifyContent="space-between"
+          alignItems="center"
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 1100,
+            backgroundColor: '#fff',
+            borderBottom: '1px solid #ddd',
+            px: 3,
+            py: 1.5,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+          }}
+          className="no-print"
+        >
+          <Box display="flex" flexWrap="wrap" gap={1.5} justifyContent="space-between" alignItems="center" sx={{ width: '100%' }}>
 
-                <Box display="flex" sx={{
-                    flexDirection: 'row',
-                    gap: 1,
-                    width: { xs: '100%', md: 'auto' },
-                    justifyContent: 'space-between'
-                }}>
-                    <Box display="flex" gap={1} sx={{ flex: 1 }}>
-                        <Button variant="outlined" size="small" startIcon={<PrintIcon />} onClick={() => window.print()} sx={{ borderRadius: 2, flex: 1, fontSize: '11px' }}>
-                            Print
-                        </Button>
-                        <Button variant="contained" size="small" startIcon={<DownloadIcon />} onClick={handleDownload} sx={{ borderRadius: 2, flex: 1, fontSize: '11px', background: 'linear-gradient(45deg, #1a73e8, #4285f4)' }}>
-                            PDF
-                        </Button>
-                    </Box>
-                    <Box display="flex" gap={1} sx={{ flex: 1 }}>
-                        {savedUrl && onOpenFuelSlip && (
-                            <Button
-                                variant="contained"
-                                size="small"
-                                color="secondary"
-                                startIcon={<LocalGasStationIcon />}
-                                onClick={() => onOpenFuelSlip(invoiceId)}
-                                sx={{
-                                    borderRadius: 2,
-                                    fontWeight: 700,
-                                    flex: 1,
-                                    fontSize: '11px',
-                                    background: '#7c3aed',
-                                    boxShadow: '0 4px 12px rgba(124, 58, 237, 0.3)',
-                                    '&:hover': { background: '#6d28d9' }
-                                }}
-                            >
-                                Fuel Slip
-                            </Button>
-                        )}
-                        <Button variant="outlined" size="small" onClick={() => window.location.href = '/'} sx={{ borderRadius: '12px', fontWeight: 700, color: '#64748b', borderColor: '#e2e8f0', flex: { xs: 'none', sm: 'none' }, minWidth: '40px' }}>Home</Button>
-                    </Box>
-                </Box>
+            {/* Nav Group */}
+            <Box display="flex" gap={1} sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 1, md: 1 } }}>
+              <Button variant="outlined" size="small" onClick={() => setStep(0)} sx={{ flex: { xs: 1, md: 'none' } }}>
+                ← Setup
+              </Button>
+              <Button variant="outlined" size="small" onClick={() => window.location.href = '/'} sx={{ flex: { xs: 1, md: 'none' } }}>
+                🏠 Home
+              </Button>
             </Box>
 
-            <Box sx={{ overflowX: 'auto', py: 5, px: { xs: 1, sm: 2, md: 10 }, display: 'flex', justifyContent: 'center', pt: { xs: 20, sm: 14, md: 12 } }}>
-                <Box sx={{
-                    transform: { xs: 'scale(0.35)', sm: 'scale(0.65)', md: 'scale(0.85)', lg: 'scale(1)' },
-                    transformOrigin: 'top center',
-                    boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
-                    mb: { xs: -100, sm: -40, md: -10 } // Compensate for scaling whitespace
-                }}>
+            {/* Zoom Tool */}
+            <Box display="flex" justifyContent="center" sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 3, md: 2 } }}>
+              <Box display="flex" alignItems="center" sx={{ bgcolor: '#f8f9fa', border: '1px solid #e2e8f0', borderRadius: '8px', px: 0.5, py: 0.25 }}>
+                <IconButton size="small" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} sx={{ p: 0.5, width: 28, height: 28 }}><span style={{ fontSize: '1.2rem', lineHeight: 1 }}>−</span></IconButton>
+                <Box onClick={zoomReset} sx={{ fontWeight: 600, fontSize: '0.85rem', width: 46, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}>{Math.round(zoom * 100)}%</Box>
+                <IconButton size="small" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} sx={{ p: 0.5, width: 28, height: 28 }}><span style={{ fontSize: '1.2rem', lineHeight: 1 }}>+</span></IconButton>
+              </Box>
+            </Box>
+
+            {/* Actions Group */}
+            <Box display="flex" gap={1} sx={{ flex: { xs: '1 1 100%', md: '0 1 auto' }, order: { xs: 2, md: 3 } }}>
+              <Button variant="outlined" size="small" startIcon={<PrintIcon />} onClick={() => window.print()} sx={{ flex: 1, borderRadius: 2 }}>Print Document</Button>
+              <Button variant="contained" size="small" startIcon={<DownloadIcon />} onClick={handleDownload} sx={{ flex: 1, borderRadius: 2 }}>Save PDF</Button>
+              {savedUrl && onOpenFuelSlip && (
+                  <Button variant="contained" color="secondary" size="small" startIcon={<LocalGasStationIcon />} onClick={() => onOpenFuelSlip(invoiceId)} sx={{ flex: 1, borderRadius: 2 }}>Get Fuel Slip</Button>
+              )}
+            </Box>
+
+          </Box>
+        </Box>
+
+        <Box sx={{ width: '100%', height: '100svh', overflow: 'auto', backgroundColor: '#f0f0f0', p: { xs: 2, sm: 4, md: 10 }, pt: { xs: 16, sm: 14 }, textAlign: 'center', '@media print': { height: 'auto !important', overflow: 'visible !important', display: 'block !important', position: 'static !important', p: 0, pt: 0, backgroundColor: 'transparent' } }}>
+          <Box sx={{ display: 'inline-block', textAlign: 'left', zoom: zoom, transition: 'zoom 0.2s cubic-bezier(0.4,0,0.2,1)', boxShadow: '0 20px 60px rgba(0,0,0,0.1)', '@media print': { zoom: '1 !important', display: 'block !important', boxShadow: 'none' } }}>
                     <LorryHireSlipDocument
                         ref={docRef}
                         gcnData={gcnData}
@@ -595,18 +634,18 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                         totalAdv={totalAdv.toFixed(2)}
                         invoiceData={invoiceData}
                     />
-                </Box>
-            </Box>
-
-            <style dangerouslySetInnerHTML={{
-                __html: `
-                    @media print {
-                        .no-print { display: none !important; }
-                        body { background: #fff !important; margin: 0 !important; }
-                    }
-                `
-            }} />
+          </Box>
         </Box>
+
+        <style dangerouslySetInnerHTML={{
+            __html: `
+                @media print {
+                    .no-print { display: none !important; }
+                    body { background: #fff !important; margin: 0 !important; }
+                }
+            `
+        }} />
+      </Box>
     );
 };
 

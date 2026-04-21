@@ -28,9 +28,28 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
     }, []);
 
-    const signup = async (email, password, role, pumpName = null) => {
-        const response = await axios.post(`${API_URL}/auth/signup`, { email, password, role, pumpName });
-        const { token, user: newUser } = response.data;
+    useEffect(() => {
+        if (!user) return;
+        
+        const sendHeartbeat = () => {
+            axios.post(`${API_URL}/system/heartbeat`).catch(err => console.error("Heartbeat failed:", err));
+        };
+        
+        sendHeartbeat(); // Initial ping on login/load
+        const intervalId = setInterval(sendHeartbeat, 60000); // 1-minute interval
+        
+        return () => clearInterval(intervalId);
+    }, [user]);
+
+    const signup = async (email, password, role, pumpName = null, name = '', registrationSecret = undefined) => {
+        const response = await axios.post(`${API_URL}/auth/signup`, { email, password, role, pumpName, name, registrationSecret });
+        const { token, user: newUser, pending, message } = response.data;
+
+        // pending = true means the account is awaiting HO approval — do NOT log in
+        if (pending) {
+            return { pending: true, message };
+        }
+
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(newUser));
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -101,7 +120,13 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const logout = () => {
+    const logout = async () => {
+        // Signal the backend immediately so the portal shows "Offline" at once
+        try {
+            await axios.post(`${API_URL}/system/portal-logout`);
+        } catch (e) {
+            // Silently ignore — logout should still proceed if this fails
+        }
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         delete axios.defaults.headers.common['Authorization'];

@@ -22,6 +22,7 @@ import PumpPaymentDetails from './pages/PumpPaymentDetails';
 import PartyPaymentDetails from './pages/PartyPaymentDetails';
 import FinancialYearDetails from './pages/FinancialYearDetails';
 import AccountDetails from './pages/AccountDetails';
+import AccountApprovalsPage from './pages/AccountApprovalsPage';
 
 const theme = createTheme({
   palette: {
@@ -219,6 +220,10 @@ function AppContent() {
     return <AccountDetails onBack={() => setCurrentView('dashboard')} />;
   }
 
+  if (currentView === 'accountApprovals') {
+    return <AccountApprovalsPage onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'fuelRateSettings') {
     return <FuelRateSettings onBack={() => setCurrentView('dashboard')} />;
   }
@@ -242,6 +247,7 @@ function AppContent() {
             onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); setCurrentView('lorryHireSlip'); }}
             onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); setCurrentView('fuelSlip'); }}
             onOpenRegisters={() => setCurrentView('cementRegister')}
+            onOpenVouchers={() => setCurrentView('voucherRegister')}
           />
         );
       }
@@ -251,7 +257,9 @@ function AppContent() {
           onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); setCurrentView('lorryHireSlip'); }}
           onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); setCurrentView('fuelSlip'); }}
           onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}
-          onOpenRegisters={() => setCurrentView('cementRegister')}
+          onOpenVouchers={() => setCurrentView('voucherRegister')}
+          onOpenContacts="truckManager"
+          onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
         />
       );
     }
@@ -279,6 +287,7 @@ function AppContent() {
         onOpenFYDetails={() => setCurrentView('fyDetails')}
         onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}
         onOpenAccountDetails={() => setCurrentView('accountDetails')}
+        onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
       />
     );
   }

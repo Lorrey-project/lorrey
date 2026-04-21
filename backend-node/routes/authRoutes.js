@@ -43,4 +43,48 @@ router.put("/pump-config", authMiddleware, async (req, res) => {
   }
 });
 
+// ── Admin: Account Approval Routes (HEAD_OFFICE only) ───────────────────────
+
+// GET /auth/admin/pending-registrations
+router.get('/admin/pending-registrations', authMiddleware, async (req, res) => {
+  if (req.user.role !== 'HEAD_OFFICE') return res.status(403).json({ message: 'Forbidden' });
+  try {
+    const pending = await User.find({ status: 'pending' })
+      .select('email role pumpName name createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ success: true, users: pending });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /auth/admin/approve/:id
+router.put('/admin/approve/:id', authMiddleware, async (req, res) => {
+  if (req.user.role !== 'HEAD_OFFICE') return res.status(403).json({ message: 'Forbidden' });
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { status: 'active' },
+      { new: true }
+    ).select('email role pumpName name status');
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /auth/admin/reject/:id
+router.delete('/admin/reject/:id', authMiddleware, async (req, res) => {
+  if (req.user.role !== 'HEAD_OFFICE') return res.status(403).json({ message: 'Forbidden' });
+  try {
+    const user = await User.findByIdAndDelete(req.params.id);
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+    res.json({ success: true, message: 'Registration request rejected and deleted.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
