@@ -35,7 +35,7 @@ router.put("/pump-config", authMiddleware, async (req, res) => {
     const updated = await User.findByIdAndUpdate(
       req.user.id,
       { fuelRate: parseFloat(fuelRate) },
-      { new: true }
+      { returnDocument: 'after' }
     ).select("email role pumpName fuelRate");
     res.json({ success: true, user: updated });
   } catch (err) {
@@ -66,7 +66,7 @@ router.put('/admin/approve/:id', authMiddleware, async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { status: 'active' },
-      { new: true }
+      { returnDocument: 'after' }
     ).select('email role pumpName name status');
     if (!user) return res.status(404).json({ success: false, error: 'User not found' });
     res.json({ success: true, user });
