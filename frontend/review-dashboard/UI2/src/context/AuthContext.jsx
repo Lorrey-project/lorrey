@@ -24,6 +24,20 @@ export const AuthProvider = ({ children }) => {
             }
         }
         setLoading(false);
+
+        // Global interceptor for session expiry
+        const interceptor = axios.interceptors.response.use(
+            (response) => response,
+            (error) => {
+                if (error.response?.status === 401) {
+                    console.warn("Session expired or unauthorized. Logging out...");
+                    logout();
+                }
+                return Promise.reject(error);
+            }
+        );
+
+        return () => axios.interceptors.response.eject(interceptor);
     }, []);
 
     const signup = async (email, password, role, pumpName = null) => {

@@ -24,6 +24,14 @@ startWatcher();
 app.use(cors());
 app.use(express.json());
 
+app.use((req, res, next) => {
+  const fs = require('fs');
+  const path = require('path');
+  const logPath = path.join(__dirname, 'request_log.txt');
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${req.method} ${req.url}\n`);
+  next();
+});
+
 app.use("/auth", authRoutes);
 app.use("/voucher", voucherRoutes);
 app.use("/truck-contacts", require("./routes/truckContactRoutes"));
@@ -34,6 +42,7 @@ app.use("/pump-payment", require("./routes/pumpPaymentRoutes"));
 app.use("/party-payment", require("./routes/partyPaymentRoutes"));
 app.use("/fy-details", require("./routes/financialYearRoutes"));
 app.use("/account-details", require("./routes/accountDetailRoutes"));
+
 
 console.log("AWS REGION:", process.env.AWS_REGION);
 

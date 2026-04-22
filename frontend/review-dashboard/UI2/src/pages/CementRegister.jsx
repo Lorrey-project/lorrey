@@ -16,6 +16,7 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
 const socket = io(SOCKET_URL, { autoConnect: true });
@@ -138,10 +139,7 @@ export const COLUMNS = [
   { key: 'EXTRA UNLOADING', label: 'EXTRA UNLOADING', width: 140, type: 'manual', group: 'net' },
   { key: 'DEDICATED', label: 'DEDICATED', width: 120, type: 'dropdown', options: ['Project', 'Actual', ''], group: 'net', hint: '9.5% billing (ATO) or 8.5% party rate (non-ATO)' },
   { key: '10W EXTRA 8.5%', label: '10W EXTRA 8.5%', width: 130, type: 'auto', group: 'net', hint: 'Non-STO only' },
-  {
-    key: 'INCENTIVE TDS', label: 'INCENTIVE TDS', width: 120, type: 'calc', group: 'net',
-    formula: r => fmt2((num(r['EXTRA UNLOADING']) + num(r.DEDICATED) + num(r['10W EXTRA 8.5%'])) * 0.01)
-  },
+
   {
     key: 'GROSS AMOUNT', label: 'GROSS\nAMOUNT', width: 100, type: 'calc', group: 'net',
     formula: r => fmt2(
@@ -151,7 +149,6 @@ export const COLUMNS = [
       + num(r['EXTRA UNLOADING'])
       + num(r.DEDICATED)
       + num(r['10W EXTRA 8.5%'])
-      - num(r['INCENTIVE TDS'])
     )
   },
 
@@ -228,6 +225,7 @@ export default function CementRegister({ onBack }) {
   const [syncing, setSyncing] = useState(false);
   const [isBillingMode, setIsBillingMode] = useState(false);
   const [bulkBillInput, setBulkBillInput] = useState({ billNo: '', billDate: '' });
+
 
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -487,31 +485,6 @@ export default function CementRegister({ onBack }) {
         )}
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => alert("Incentive Calculation Sheet route pending!")}
-            sx={{
-              fontWeight: 700, 
-              borderRadius: '24px', 
-              px: 2.5, 
-              py: 0.5,
-              fontSize: '13px',
-              textTransform: 'none',
-              border: '2px solid #0891b2', 
-              color: '#0891b2',
-              whiteSpace: 'nowrap',
-              fontFamily: 'Inter, system-ui, sans-serif',
-              '&:hover': { 
-                bgcolor: '#0891b2', 
-                color: '#fff',
-                border: '2px solid #0891b2',
-                boxShadow: '0 4px 8px rgba(8, 145, 178, 0.2)'
-              }
-            }}
-          >
-            Incentive Calculation Sheet
-          </Button>
           {isBillingMode ? (
             <Box sx={{ 
               display: 'flex', alignItems: 'center', gap: 2, 
@@ -554,6 +527,8 @@ export default function CementRegister({ onBack }) {
               Bill Together
             </Button>
           )}
+
+
 
           <Tooltip title="Discard & reload">
             <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: '#f1f5f9' }}>
@@ -763,6 +738,8 @@ export default function CementRegister({ onBack }) {
           {liveMsg}
         </Alert>
       </Snackbar>
+
+
     </Box>
   );
 }

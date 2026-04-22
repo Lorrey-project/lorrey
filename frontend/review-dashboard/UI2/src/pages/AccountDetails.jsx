@@ -1,71 +1,89 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
-  Snackbar, Alert, Chip, Tooltip
+  Snackbar, Alert, Chip, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
-import UploadIcon from '@mui/icons-material/Upload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
-const socket = io(SOCKET_URL, { autoConnect: true });
 
+// Columns configuration
 export const COLUMNS = [
-  { key: 'Transaction Date', label: 'TRANSACTION\nDATE', width: 140, type: 'manual', isDate: true },
-  { key: 'Ledger Name', label: 'LEDGER\nNAME', width: 180, type: 'manual' },
-  { key: 'Names', label: 'NAMES', width: 160, type: 'manual' },
-  { key: 'Particulars', label: 'PARTICULARS', width: 220, type: 'manual' },
-  { key: 'Remarks', label: 'REMARKS', width: 200, type: 'manual' },
-  { key: 'Reference No', label: 'REFERENCE\nNO', width: 140, type: 'manual' },
-  { key: 'Cheque No', label: 'CHEQUE\nNO', width: 140, type: 'manual' },
-  { key: 'Withdraw', label: 'WITHDRAW', width: 130, type: 'manual' },
-  { key: 'Deposit', label: 'DEPOSIT', width: 130, type: 'manual' },
-  { key: 'Closing Balance', label: 'CLOSING\nBALANCE', width: 140, type: 'manual' },
+  { key: 'Transaction Date', label: 'TRANSACTION\nDATE', width: 140, isDate: true },
+  { key: 'Ledger Name',      label: 'LEDGER\nNAME',        width: 180 },
+  { key: 'Names',            label: 'NAMES',               width: 160 },
+  { key: 'Particulars',      label: 'PARTICULARS',         width: 220 },
+  { key: 'Remarks',          label: 'REMARKS',            width: 200 },
+  { key: 'Reference No',     label: 'REFERENCE\nNO',       width: 140 },
+  { key: 'Cheque No',        label: 'CHEQUE\nNO',          width: 140 },
+  { key: 'Withdraw',         label: 'WITHDRAW',            width: 130 },
+  { key: 'Deposit',          label: 'DEPOSIT',             width: 130 },
+  { key: 'Closing Balance',  label: 'CLOSING\nBALANCE',    width: 140 },
 ];
+
+const AUTO_COLS = new Set(['Transaction Date', 'Remarks', 'Reference No', 'Cheque No', 'Withdraw', 'Deposit', 'Closing Balance']);
+const MANUAL_COLS = new Set(['Ledger Name', 'Names', 'Particulars']);
 
 export default function AccountDetails({ onBack }) {
   const [entries, setEntries] = useState([]);
-  const [localData, setLocalData] = useState({}); // { rowId: { field: val } }
+  const [localData, setLocalData] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [snack, setSnack] = useState(null);
-
-  const dirtyCount = Object.keys(localData).length;
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [bankUploadPreview, setBankUploadPreview] = useState(null);
 
+  const dirtyCount = Object.keys(localData).length;
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
 
   const toggleSelect = (id) => setSelectedIds(prev => {
-    const s = new Set(prev);
-    s.has(id) ? s.delete(id) : s.add(id);
-    return s;
+    const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s;
   });
   const toggleSelectAll = () => {
     if (allSelected || someSelected) setSelectedIds(new Set());
     else setSelectedIds(new Set(entries.map(r => r._id)));
   };
 
+  // Initialize socket inside component or use a stable reference
+  useEffect(() => {
+    let socket;
+    try {
+      socket = io(SOCKET_URL, { autoConnect: true });
+      socket.on('accountDetailsUpdate', () => fetchData(true));
+    } catch (err) {
+      console.warn('Socket error in AccountDetails:', err.message);
+    }
+    return () => { if (socket) socket.disconnect(); };
+  }, []);
+
   const fetchData = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const res = await axios.get(`${API_URL}/account-details`);
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/account-details`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       if (res.data.success) {
         setEntries(res.data.entries);
         setLocalData({});
       }
     } catch (e) {
-      console.error('Fetch failed:', e);
+      console.error('Fetch AccountDetails failed:', e);
+      setSnack({ severity: 'error', msg: 'Failed to fetch data' });
     } finally {
       setLoading(false);
     }
@@ -73,27 +91,18 @@ export default function AccountDetails({ onBack }) {
 
   useEffect(() => {
     fetchData();
-    socket.on('accountDetailsUpdate', (msg) => {
-      fetchData(true);
-    });
-    return () => socket.off('accountDetailsUpdate');
   }, [fetchData]);
 
-  const computedRows = useMemo(() => {
-    return entries.map(row => {
-      return { ...row, ...(localData[row._id] || {}) };
-    });
-  }, [entries, localData]);
+  const computedRows = useMemo(() =>
+    entries.map(row => ({ ...row, ...(localData[row._id] || {}) })),
+    [entries, localData]);
 
   const handleCellEdit = useCallback((rowId, field, value) => {
-    setLocalData(prev => ({
-      ...prev,
-      [rowId]: { ...(prev[rowId] || {}), [field]: value }
-    }));
+    setLocalData(prev => ({ ...prev, [rowId]: { ...(prev[rowId] || {}), [field]: value } }));
   }, []);
 
   const handleAddRow = () => {
-    const newId = 'new_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const newId = 'new_' + Date.now();
     setEntries(prev => [{ _id: newId, isNewRow: true }, ...prev]);
     setLocalData(prev => ({ ...prev, [newId]: { isNewRow: true } }));
   };
@@ -103,21 +112,13 @@ export default function AccountDetails({ onBack }) {
     try {
       const token = localStorage.getItem('token');
       const ids = [...selectedIds].filter(id => !id.startsWith('new_'));
-      const newIds = [...selectedIds].filter(id => id.startsWith('new_'));
-      
       if (ids.length > 0) {
         await axios.delete(`${API_URL}/account-details/bulk-delete`, {
           headers: { Authorization: `Bearer ${token}` },
           data: { ids },
         });
       }
-      
       setEntries(prev => prev.filter(r => !selectedIds.has(r._id)));
-      setLocalData(prev => {
-        const n = { ...prev };
-        selectedIds.forEach(id => delete n[id]);
-        return n;
-      });
       setSelectedIds(new Set());
       setConfirmDel(false);
       setSnack({ severity: 'success', msg: `${selectedIds.size} row(s) deleted.` });
@@ -133,47 +134,45 @@ export default function AccountDetails({ onBack }) {
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
-      const updates = Object.entries(localData).map(([id, changes]) => ({ 
-        id: id.startsWith('new_') ? null : id, 
+      const updates = Object.entries(localData).map(([id, changes]) => ({
+        id: id.startsWith('new_') ? null : id,
         isNewRow: id.startsWith('new_'),
-        changes 
+        changes
       }));
-      await axios.put(
-        `${API_URL}/account-details/bulk-update`,
-        { updates },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setSnack({ severity: 'success', msg: `Saved successfully!` });
-      fetchData(); // reload to get real IDs for new rows
+      await axios.put(`${API_URL}/account-details/bulk-update`, { updates }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSnack({ severity: 'success', msg: 'Saved successfully!' });
+      fetchData();
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Save failed: ' + (err.response?.data?.error || err.message) });
+    } finally {
       setSaving(false);
     }
   };
 
   const handleExport = () => exportToCsv('account_details.xls', computedRows);
 
-  const handleImport = async (e) => {
+  const handleBankStatementUpload = async (e) => {
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
-    const text = await file.text();
-    const [headerLine, ...lines] = text.split('\n').filter(Boolean);
-    const headers = headerLine.split(',').map(h => h.replace(/^"|"$/g, '').trim());
-    const rows = lines.map(line => {
-      const vals = line.split(',').map(v => v.replace(/^"|"$/g, '').trim());
-      const obj = {};
-      headers.forEach((h, i) => { obj[h] = vals[i] || ''; });
-      return obj;
-    });
+    setUploading(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${API_URL}/account-details/bulk`, { entries: rows }, {
-        headers: { Authorization: `Bearer ${token}` }
+      const formData = new FormData();
+      formData.append('statement', file);
+      const res = await axios.post(`${API_URL}/account-details/upload-statement`, formData, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' }
       });
-      fetchData();
-      setSnack({ severity: 'success', msg: `${rows.length} rows imported!` });
+      if (res.data.success) {
+        setBankUploadPreview({ count: res.data.count, filename: file.name });
+        fetchData();
+      }
     } catch (err) {
-      setSnack({ severity: 'error', msg: 'Import failed: ' + err.message });
+      setSnack({ severity: 'error', msg: 'Upload failed: ' + (err.response?.data?.error || err.message) });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -188,7 +187,6 @@ export default function AccountDetails({ onBack }) {
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
-      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
       <Box sx={{
         px: 2.5, py: 1.2,
         display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
@@ -202,8 +200,9 @@ export default function AccountDetails({ onBack }) {
           Account Details
         </Typography>
 
-        <Box sx={{ display: 'flex', gap: 1, ml: 1 }}>
-          <Chip size="small" label="✏️ Manual Entry Grid" sx={{ bgcolor: '#fff7ed', fontSize: '10px', fontWeight: 600, height: 20 }} />
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <Chip size="small" label="🏦 Auto from Bank" sx={{ bgcolor: '#f0fdf4', color: '#15803d', fontSize: '10px', fontWeight: 700, height: 20 }} />
+          <Chip size="small" label="✏️ 3 Manual Fields" sx={{ bgcolor: '#fff7ed', color: '#c2410c', fontSize: '10px', fontWeight: 600, height: 20 }} />
         </Box>
 
         {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" color="warning" sx={{ fontWeight: 700 }} />}
@@ -216,6 +215,19 @@ export default function AccountDetails({ onBack }) {
         )}
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Button
+            size="small" component="label" variant="contained"
+            startIcon={uploading ? <CircularProgress size={13} color="inherit" /> : <AccountBalanceIcon />}
+            disabled={uploading}
+            sx={{
+              fontWeight: 800, borderRadius: 2, px: 2, fontSize: '12px',
+              background: 'linear-gradient(135deg, #0891b2, #0e7490)',
+              '&:hover': { background: 'linear-gradient(135deg, #0e7490, #155e75)' }
+            }}>
+            {uploading ? 'Parsing...' : 'Upload Bank Statement'}
+            <input type="file" accept=".xlsx,.xls,.csv" hidden onChange={handleBankStatementUpload} />
+          </Button>
+
           <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={handleAddRow}
             sx={{ fontWeight: 800, borderRadius: 2, px: 2, fontSize: '12px', bgcolor: '#0f766e', '&:hover': { bgcolor: '#115e59' } }}>
             Add Row
@@ -227,11 +239,6 @@ export default function AccountDetails({ onBack }) {
           </Tooltip>
           <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>XLS</Button>
-          <Button size="small" component="label" variant="outlined" startIcon={<UploadIcon />}
-            sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>
-            Import
-            <input type="file" accept=".csv" hidden onChange={handleImport} />
-          </Button>
           <Button
             size="small" variant="contained"
             startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
@@ -247,113 +254,97 @@ export default function AccountDetails({ onBack }) {
         </Box>
       </Box>
 
-      {/* ── Group header row ─────────────────────────────────────────────── */}
-      <Box sx={{ overflow: 'auto', flex: 1 }}>
-        <table style={{
-          borderCollapse: 'collapse', minWidth: '100%',
-          tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '12px'
-        }}>
-          <colgroup>
-            <col style={{ width: 40, minWidth: 40 }} />
-            {COLUMNS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
-          </colgroup>
+      <Box sx={{ px: 2.5, py: 0.8, bgcolor: '#f0f9ff', borderBottom: '1px solid #bae6fd', display: 'flex', gap: 2, alignItems: 'center', flexShrink: 0 }}>
+        <Typography variant="caption" fontWeight={700} color="#0369a1">Column Key:</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: '#dcfce7', border: '1px solid #16a34a' }} />
+          <Typography variant="caption" color="#15803d" fontWeight={600}>Auto (from bank statement)</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: '#fff7ed', border: '1px solid #f97316' }} />
+          <Typography variant="caption" color="#c2410c" fontWeight={600}>Manual (Ledger Name, Names, Particulars)</Typography>
+        </Box>
+      </Box>
 
+      <Box sx={{ overflow: 'auto', flex: 1 }}>
+        <table style={{ borderCollapse: 'collapse', minWidth: '100%', tableLayout: 'fixed', fontFamily: 'Inter, sans-serif', fontSize: '12px' }}>
+          <colgroup>
+            <col style={{ width: 40 }} />
+            {COLUMNS.map(c => <col key={c.key} style={{ width: c.width }} />)}
+          </colgroup>
           <thead>
             <tr>
-              <th style={{
-                position: 'sticky', top: 0, zIndex: 3, width: 40, minWidth: 40,
-                background: 'linear-gradient(135deg,#1e293b,#0f172a)',
-                textAlign: 'center', padding: '7px 4px',
-                borderRight: '1px solid rgba(255,255,255,0.12)',
-              }}>
-                <input
-                  type="checkbox" checked={allSelected}
-                  ref={el => { if (el) el.indeterminate = someSelected; }}
-                  onChange={toggleSelectAll} style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#0f766e' }}
-                />
+              <th style={{ position: 'sticky', top: 0, zIndex: 3, background: '#1e293b', borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ cursor: 'pointer' }} />
               </th>
-              {COLUMNS.map((col) => (
-                <th key={col.key} style={{
-                  position: 'sticky', top: 0, zIndex: 2,
-                  background: 'linear-gradient(135deg,#0f766e,#115e59)', color: '#ccfbf1',
-                  padding: '10px 5px', textAlign: 'center', fontSize: '10px', fontWeight: 700,
-                  letterSpacing: '0.3px', whiteSpace: 'pre-line', lineHeight: 1.3,
-                  borderRight: '1px solid rgba(255,255,255,0.12)',
-                }}>
-                  {col.label}
-                </th>
-              ))}
+              {COLUMNS.map((col) => {
+                const isAuto = AUTO_COLS.has(col.key);
+                const isManual = MANUAL_COLS.has(col.key);
+                return (
+                  <th key={col.key} style={{
+                    position: 'sticky', top: 0, zIndex: 2,
+                    background: isAuto ? '#059669' : isManual ? '#ea580c' : '#0f766e',
+                    color: '#fff', padding: '10px 5px', textAlign: 'center', fontSize: '10px', fontWeight: 700,
+                    whiteSpace: 'pre-line', borderRight: '1px solid rgba(255,255,255,0.1)',
+                  }}>
+                    {col.label}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
-
           <tbody>
-            {computedRows.length === 0 && (
-              <tr>
-                <td colSpan={COLUMNS.length + 1} style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
-                  No entries found. Click "Add Row" or "Import".
+            {computedRows.map((row, ri) => (
+              <tr key={row._id} style={{ background: selectedIds.has(row._id) ? '#f0f9ff' : ri % 2 === 0 ? '#fff' : '#f8fafc' }}>
+                <td style={{ textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                  <input type="checkbox" checked={selectedIds.has(row._id)} onChange={() => toggleSelect(row._id)} />
                 </td>
+                {COLUMNS.map((col) => {
+                  const val = localData[row._id]?.[col.key] ?? (row[col.key] || '');
+                  const isAuto = AUTO_COLS.has(col.key);
+                  const isFromBank = row._source === 'bank_statement';
+                  return (
+                    <td key={col.key} style={{ border: '1px solid #e2e8f0', padding: 0 }}>
+                      <input
+                        type={col.isDate ? 'date' : 'text'}
+                        value={val}
+                        readOnly={isAuto && isFromBank && !localData[row._id]?.[col.key]}
+                        onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
+                        style={{
+                          width: '100%', height: '100%', border: 'none', padding: '6px 8px',
+                          background: 'transparent', outline: 'none', fontSize: '12px'
+                        }}
+                      />
+                    </td>
+                  );
+                })}
               </tr>
-            )}
-            {computedRows.map((row, ri) => {
-              const hasDraft = !!localData[row._id];
-              const isSelected = selectedIds.has(row._id);
-              return (
-                <tr key={row._id} style={{
-                  background: isSelected ? 'rgba(15,118,110,0.08)' : hasDraft ? '#fffbeb' : ri % 2 === 0 ? '#fff' : '#f8fafc',
-                }}>
-                  <td style={{ width: 40, textAlign: 'center', border: '1px solid #e2e8f0', padding: '4px' }}>
-                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(row._id)} style={{ cursor: 'pointer', accentColor: '#0f766e' }} />
-                  </td>
-                  {COLUMNS.map((col) => {
-                    const rawVal = row[col.key];
-                    const localVal = localData[row._id]?.[col.key];
-                    const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
-                    const isDirty = localVal !== undefined;
-
-                    return (
-                      <td key={col.key} style={{
-                        padding: 0, border: '1px solid #e2e8f0',
-                        borderRight: isDirty ? '2px solid #f59e0b' : '1px solid #e2e8f0',
-                      }}>
-                        <input
-                          type={col.isDate ? 'date' : 'text'}
-                          value={displayVal}
-                          onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
-                          style={{
-                            width: '100%', height: '100%', border: 'none', padding: '6px 8px',
-                            background: 'transparent', outline: 'none', fontSize: '12px', color: '#1e293b',
-                            fontFamily: 'inherit'
-                          }}
-                        />
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
+            ))}
           </tbody>
         </table>
       </Box>
 
-      {/* Confirm delete dialog */}
       {confirmDel && (
-        <Box sx={{
-          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.55)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }} onClick={() => setConfirmDel(false)}>
-          <Box sx={{ bgcolor: '#fff', borderRadius: 3, p: 4, maxWidth: 420, width: '90%' }} onClick={e => e.stopPropagation()}>
-            <Typography variant="h6" fontWeight={800} color="error.main" mb={2}>Delete {selectedIds.size} Row(s)?</Typography>
-            <Box display="flex" gap={1.5} justifyContent="flex-end">
-              <Button onClick={() => setConfirmDel(false)}>Cancel</Button>
-              <Button variant="contained" color="error" onClick={handleBulkDelete} disabled={deleting}>
-                {deleting ? 'Deleting...' : 'Yes, Delete'}
-              </Button>
-            </Box>
-          </Box>
-        </Box>
+        <Dialog open={confirmDel} onClose={() => setConfirmDel(false)}>
+          <DialogTitle sx={{ fontWeight: 800, color: 'error.main' }}>Delete {selectedIds.size} row(s)?</DialogTitle>
+          <DialogActions>
+            <Button onClick={() => setConfirmDel(false)}>Cancel</Button>
+            <Button variant="contained" color="error" onClick={handleBulkDelete}>Delete</Button>
+          </DialogActions>
+        </Dialog>
       )}
 
-      {/* Snackbar */}
+      <Dialog open={!!bankUploadPreview} onClose={() => setBankUploadPreview(null)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, color: '#15803d' }}>🏦 Bank Statement Imported!</DialogTitle>
+        <DialogContent>
+          <Typography variant="h3" fontWeight={900} color="#15803d" textAlign="center">{bankUploadPreview?.count}</Typography>
+          <Typography variant="body1" textAlign="center">transactions from <strong>{bankUploadPreview?.filename}</strong></Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBankUploadPreview(null)} variant="contained" sx={{ bgcolor: '#15803d' }}>Got it</Button>
+        </DialogActions>
+      </Dialog>
+
       <Snackbar open={!!snack} autoHideDuration={4000} onClose={() => setSnack(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         {snack && <Alert severity={snack.severity} variant="filled">{snack.msg}</Alert>}
       </Snackbar>

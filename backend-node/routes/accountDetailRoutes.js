@@ -1,7 +1,24 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const AccountDetail = require('../models/AccountDetail');
-const { getIo } = require('../socket');
+const { getIO } = require('../socket');
+const { parseBankStatement } = require('../utils/parseBankStatement');
+
+// In-memory multer for bank statement uploads (max 10MB)
+const statementUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.xlsx', '.xls', '.csv'];
+    const ext = '.' + file.originalname.split('.').pop().toLowerCase();
+    if (allowed.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only Excel (.xlsx/.xls) and CSV files are supported'));
+    }
+  }
+});
 
 // Map frontend labels strictly to DB fields
 const keyMap = {
@@ -19,7 +36,7 @@ const keyMap = {
 const reverseMap = Object.fromEntries(Object.entries(keyMap).map(([k, v]) => [v, k]));
 
 function docToFrontend(doc) {
-  const obj = { _id: doc._id.toString() };
+  const obj = { _id: doc._id.toString(), _source: doc._source || 'manual' };
   for (const [k, v] of Object.entries(reverseMap)) {
     obj[v] = doc[k] || '';
   }
@@ -29,9 +46,10 @@ function docToFrontend(doc) {
 // GET all
 router.get('/', async (req, res) => {
   try {
-    const docs = await AccountDetail.find().sort({ createdAt: -1 });
+    const docs = await AccountDetail.find().sort({ transactionDate: -1, createdAt: -1 });
     res.json({ success: true, entries: docs.map(docToFrontend) });
   } catch (error) {
+    console.error('Fetch Account Details Error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -42,14 +60,12 @@ router.put('/bulk-update', async (req, res) => {
     const { updates } = req.body;
     for (const item of updates) {
       if (item.isNewRow) {
-        // Create new
         const newDoc = {};
         for (const [lbl, val] of Object.entries(item.changes)) {
           if (keyMap[lbl]) newDoc[keyMap[lbl]] = val;
         }
         await AccountDetail.create(newDoc);
       } else if (item.id) {
-        // Update existing
         const updateDoc = {};
         for (const [lbl, val] of Object.entries(item.changes)) {
           if (keyMap[lbl]) updateDoc[keyMap[lbl]] = val;
@@ -58,12 +74,16 @@ router.put('/bulk-update', async (req, res) => {
       }
     }
     
-    // Notify clients
-    const io = getIo();
-    if (io) io.emit('accountDetailsUpdate', { action: 'bulk-update' });
+    try {
+      const io = getIO();
+      if (io) io.emit('accountDetailsUpdate', { action: 'bulk-update' });
+    } catch (socketErr) {
+      console.warn('Socket notify failed:', socketErr.message);
+    }
 
     res.json({ success: true });
   } catch (error) {
+    console.error('Bulk Update Error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -74,39 +94,48 @@ router.delete('/bulk-delete', async (req, res) => {
     const { ids } = req.body;
     if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids array required' });
     await AccountDetail.deleteMany({ _id: { $in: ids } });
-
-    // Notify clients
-    const io = getIo();
-    if (io) io.emit('accountDetailsUpdate', { action: 'bulk-delete' });
+    
+    try {
+      const io = getIO();
+      if (io) io.emit('accountDetailsUpdate', { action: 'bulk-delete' });
+    } catch (socketErr) {
+      console.warn('Socket notify failed:', socketErr.message);
+    }
 
     res.json({ success: true });
   } catch (error) {
+    console.error('Bulk Delete Error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// BULK IMPORT
-router.post('/bulk', async (req, res) => {
+// UPLOAD & PARSE BANK STATEMENT
+router.post('/upload-statement', statementUpload.single('statement'), async (req, res) => {
   try {
-    const { entries } = req.body;
-    if (!Array.isArray(entries)) return res.status(400).json({ error: 'entries array required' });
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
+    
+    const { transactions, colMap } = parseBankStatement(req.file.buffer, req.file.originalname);
+    req.file.debugColMap = colMap;
+    
+    if (transactions.length === 0) {
+      const debugInfo = req.file.debugColMap ? ` (MAPPED: ${JSON.stringify(req.file.debugColMap)})` : '';
+      console.warn(`[StatementUpload] No transactions found in file: ${req.file.originalname}`);
+      return res.status(400).json({ success: false, error: `No transactions found. Please check headers. ${debugInfo}` });
+    }
 
-    const insertDocs = entries.map(row => {
-      const d = {};
-      for (const [lbl, val] of Object.entries(row)) {
-        if (keyMap[lbl]) d[keyMap[lbl]] = val;
-      }
-      return d;
-    });
+    console.log(`[StatementUpload] Found ${transactions.length} transactions for file: ${req.file.originalname}`);
+    await AccountDetail.insertMany(transactions);
+    
+    try {
+      const io = getIO();
+      if (io) io.emit('accountDetailsUpdate', { action: 'bank-statement-upload' });
+    } catch (socketErr) {
+      console.warn('Socket notify failed:', socketErr.message);
+    }
 
-    await AccountDetail.insertMany(insertDocs);
-
-    // Notify clients
-    const io = getIo();
-    if (io) io.emit('accountDetailsUpdate', { action: 'bulk-import' });
-
-    res.json({ success: true, count: insertDocs.length });
+    res.json({ success: true, count: transactions.length });
   } catch (error) {
+    console.error('Upload Statement Error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
