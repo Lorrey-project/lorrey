@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box, Typography, Button, Chip, CircularProgress, Alert,
-    Card, CardContent, Divider, Avatar, Tooltip, Container, IconButton
+    Card, CardContent, Divider, Avatar, Tooltip, Container, IconButton,
+    Tabs, Tab
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
@@ -13,6 +14,8 @@ import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -28,31 +31,35 @@ const fmtDate = (d) => new Date(d).toLocaleString('en-IN', {
 });
 
 const AccountApprovalsPage = ({ onBack }) => {
+    const [tabIndex, setTabIndex] = useState(0);
     const [requests, setRequests] = useState([]);
+    const [activeUsers, setActiveUsers] = useState([]);
     const [loading, setLoading]   = useState(true);
     const [actionId, setActionId] = useState(null);
     const [snack, setSnack]       = useState(null);
 
-    const fetchPending = useCallback(async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
             const token = localStorage.getItem('token');
-            const res = await axios.get(`${API_URL}/auth/admin/pending-registrations`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (res.data.success) setRequests(res.data.users);
+            const [pendingRes, activeRes] = await Promise.all([
+                axios.get(`${API_URL}/auth/admin/pending-registrations`, { headers: { Authorization: `Bearer ${token}` } }),
+                axios.get(`${API_URL}/auth/admin/active-users`, { headers: { Authorization: `Bearer ${token}` } })
+            ]);
+            if (pendingRes.data.success) setRequests(pendingRes.data.users);
+            if (activeRes.data.success) setActiveUsers(activeRes.data.users);
         } catch (e) {
-            setSnack({ type: 'error', message: 'Failed to load pending requests.' });
+            setSnack({ type: 'error', message: 'Failed to load user data.' });
         } finally {
             setLoading(false);
         }
     }, []);
 
     useEffect(() => {
-        fetchPending();
-        const interval = setInterval(fetchPending, 60000);
+        fetchData();
+        const interval = setInterval(fetchData, 60000);
         return () => clearInterval(interval);
-    }, [fetchPending]);
+    }, [fetchData]);
 
     const handleApprove = async (id) => {
         setActionId(id);
@@ -71,7 +78,7 @@ const AccountApprovalsPage = ({ onBack }) => {
     };
 
     const handleReject = async (id) => {
-        if (!window.confirm('Reject and permanently delete this registration request?')) return;
+        if (!window.confirm('Are you sure you want to completely remove this user account? This cannot be undone.')) return;
         setActionId(id);
         try {
             const token = localStorage.getItem('token');
@@ -79,7 +86,8 @@ const AccountApprovalsPage = ({ onBack }) => {
                 headers: { Authorization: `Bearer ${token}` }
             });
             setRequests(prev => prev.filter(u => u._id !== id));
-            setSnack({ type: 'info', message: 'Registration request rejected and removed.' });
+            setActiveUsers(prev => prev.filter(u => u._id !== id));
+            setSnack({ type: 'info', message: 'User account successfully removed.' });
         } catch (e) {
             setSnack({ type: 'error', message: '❌ Failed to reject. Please try again.' });
         } finally {
@@ -123,11 +131,19 @@ const AccountApprovalsPage = ({ onBack }) => {
                         </Typography>
                     </Box>
                     <Tooltip title="Refresh">
-                        <IconButton onClick={fetchPending} sx={{ color: 'rgba(255,255,255,0.8)', bgcolor: 'rgba(255,255,255,0.1)', borderRadius: '10px', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}>
+                        <IconButton onClick={fetchData} sx={{ color: 'rgba(255,255,255,0.8)', bgcolor: 'rgba(255,255,255,0.1)', borderRadius: '10px', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}>
                             <RefreshIcon sx={{ fontSize: 18 }} />
                         </IconButton>
                     </Tooltip>
                 </Box>
+            </Box>
+
+            {/* ── Tabs ───────────────────────────────────────── */}
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', px: { xs: 1, md: 4 } }}>
+                <Tabs value={tabIndex} onChange={(e, v) => setTabIndex(v)} centered variant="fullWidth" TabIndicatorProps={{ sx: { height: 3, borderRadius: '3px 3px 0 0', bgcolor: '#7c3aed' } }}>
+                    <Tab label={`Pending (${requests.length})`} sx={{ fontWeight: 800, textTransform: 'none', fontSize: 15, py: 2, '&.Mui-selected': { color: '#7c3aed' } }} />
+                    <Tab label={`Active Accounts (${activeUsers.length})`} sx={{ fontWeight: 800, textTransform: 'none', fontSize: 15, py: 2, '&.Mui-selected': { color: '#7c3aed' } }} />
+                </Tabs>
             </Box>
 
             <Container maxWidth="md" sx={{ py: 4 }}>
@@ -149,21 +165,21 @@ const AccountApprovalsPage = ({ onBack }) => {
                 )}
 
                 {/* Empty state */}
-                {!loading && requests.length === 0 && (
+                {!loading && (tabIndex === 0 ? requests.length === 0 : activeUsers.length === 0) && (
                     <Box sx={{ textAlign: 'center', py: 12, px: 4 }}>
                         <Box sx={{
                             width: 80, height: 80, borderRadius: '24px',
-                            background: 'linear-gradient(135deg, #dcfce7, #bbf7d0)',
+                            background: tabIndex === 0 ? 'linear-gradient(135deg, #dcfce7, #bbf7d0)' : 'linear-gradient(135deg, #f1f5f9, #e2e8f0)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            mx: 'auto', mb: 3, boxShadow: '0 12px 30px rgba(34,197,94,0.2)'
+                            mx: 'auto', mb: 3, boxShadow: tabIndex === 0 ? '0 12px 30px rgba(34,197,94,0.2)' : 'none'
                         }}>
-                            <CheckCircleIcon sx={{ fontSize: 40, color: '#16a34a' }} />
+                            {tabIndex === 0 ? <CheckCircleIcon sx={{ fontSize: 40, color: '#16a34a' }} /> : <VerifiedUserIcon sx={{ fontSize: 40, color: '#64748b' }} />}
                         </Box>
                         <Typography variant="h6" fontWeight={900} color="#0f172a" mb={0.5}>
-                            All clear!
+                            {tabIndex === 0 ? 'All clear!' : 'No active accounts'}
                         </Typography>
                         <Typography color="text.secondary" fontWeight={500}>
-                            No pending registration requests at the moment.
+                            {tabIndex === 0 ? 'No pending registration requests at the moment.' : 'No other users are currently marked as active.'}
                         </Typography>
                         <Button onClick={onBack} variant="outlined" sx={{ mt: 4, borderRadius: '12px', px: 4, fontWeight: 700 }}>
                             Back to Dashboard
@@ -171,8 +187,8 @@ const AccountApprovalsPage = ({ onBack }) => {
                     </Box>
                 )}
 
-                {/* Request cards */}
-                {!loading && requests.map((req, idx) => {
+                {/* Request / Active cards */}
+                {!loading && (tabIndex === 0 ? requests : activeUsers).map((req, idx) => {
                     const roleInfo = ROLE_MAP[req.role] || ROLE_MAP['OFFICE'];
                     const isActioning = actionId === req._id;
 
@@ -184,8 +200,8 @@ const AccountApprovalsPage = ({ onBack }) => {
                             transition: 'all 0.2s',
                             '&:hover': { boxShadow: '0 8px 32px rgba(0,0,0,0.07)', borderColor: '#c4b5fd' }
                         }}>
-                            {/* Purple top accent bar */}
-                            <Box sx={{ height: 4, background: 'linear-gradient(90deg, #7c3aed, #a78bfa)', borderRadius: '20px 20px 0 0' }} />
+                            {/* Color top accent bar based on tab */}
+                            <Box sx={{ height: 4, background: tabIndex === 0 ? 'linear-gradient(90deg, #7c3aed, #a78bfa)' : 'linear-gradient(90deg, #0ea5e9, #38bdf8)', borderRadius: '20px 20px 0 0' }} />
 
                             <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
                                 {/* Header row */}
@@ -206,9 +222,11 @@ const AccountApprovalsPage = ({ onBack }) => {
                                             </Typography>
                                         </Box>
                                     </Box>
-                                    <Box display="flex" alignItems="center" gap={0.5} sx={{ bgcolor: '#fff8e1', borderRadius: '10px', px: 1.5, py: 0.7 }}>
-                                        <HourglassTopIcon sx={{ fontSize: 14, color: '#d97706' }} />
-                                        <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#d97706' }}>PENDING</Typography>
+                                    <Box display="flex" alignItems="center" gap={0.5} sx={{ bgcolor: tabIndex === 0 ? '#fff8e1' : '#f0fdf4', borderRadius: '10px', px: 1.5, py: 0.7 }}>
+                                        {tabIndex === 0 ? <HourglassTopIcon sx={{ fontSize: 14, color: '#d97706' }} /> : <VerifiedUserIcon sx={{ fontSize: 14, color: '#16a34a' }} />}
+                                        <Typography sx={{ fontSize: 11, fontWeight: 800, color: tabIndex === 0 ? '#d97706' : '#16a34a' }}>
+                                            {tabIndex === 0 ? 'PENDING' : 'ACTIVE'}
+                                        </Typography>
                                     </Box>
                                 </Box>
 
@@ -231,34 +249,46 @@ const AccountApprovalsPage = ({ onBack }) => {
 
                                 {/* Actions */}
                                 <Box display="flex" gap={2}>
-                                    <Button
-                                        variant="contained" fullWidth
-                                        disabled={isActioning}
-                                        startIcon={isActioning ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <CheckCircleIcon />}
-                                        onClick={() => handleApprove(req._id)}
-                                        sx={{
-                                            py: 1.5, borderRadius: '12px', fontWeight: 800, fontSize: 14,
-                                            bgcolor: '#16a34a', '&:hover': { bgcolor: '#15803d' },
-                                            boxShadow: '0 4px 14px rgba(22,163,74,0.3)',
-                                            textTransform: 'none',
-                                        }}
-                                    >
-                                        Approve Account
-                                    </Button>
-                                    <Button
-                                        variant="outlined" fullWidth
-                                        disabled={isActioning}
-                                        startIcon={<CancelIcon />}
-                                        onClick={() => handleReject(req._id)}
-                                        sx={{
-                                            py: 1.5, borderRadius: '12px', fontWeight: 800, fontSize: 14,
-                                            borderColor: '#ef4444', color: '#ef4444', borderWidth: 1.5,
-                                            '&:hover': { bgcolor: '#fef2f2', borderColor: '#dc2626', borderWidth: 1.5 },
-                                            textTransform: 'none',
-                                        }}
-                                    >
-                                        Reject
-                                    </Button>
+                                    {tabIndex === 0 ? (
+                                        <>
+                                            <Button
+                                                variant="contained" fullWidth disabled={isActioning}
+                                                startIcon={isActioning ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <CheckCircleIcon />}
+                                                onClick={() => handleApprove(req._id)}
+                                                sx={{
+                                                    py: 1.5, borderRadius: '12px', fontWeight: 800, fontSize: 14,
+                                                    bgcolor: '#16a34a', '&:hover': { bgcolor: '#15803d' },
+                                                    boxShadow: '0 4px 14px rgba(22,163,74,0.3)', textTransform: 'none',
+                                                }}
+                                            >
+                                                Approve
+                                            </Button>
+                                            <Button
+                                                variant="outlined" fullWidth disabled={isActioning}
+                                                startIcon={<CancelIcon />} onClick={() => handleReject(req._id)}
+                                                sx={{
+                                                    py: 1.5, borderRadius: '12px', fontWeight: 800, fontSize: 14,
+                                                    borderColor: '#ef4444', color: '#ef4444', borderWidth: 1.5,
+                                                    '&:hover': { bgcolor: '#fef2f2', borderColor: '#dc2626', borderWidth: 1.5 }, textTransform: 'none',
+                                                }}
+                                            >
+                                                Reject
+                                            </Button>
+                                        </>
+                                    ) : (
+                                        <Button
+                                            variant="outlined" fullWidth disabled={isActioning}
+                                            startIcon={isActioning ? <CircularProgress size={15} sx={{ color: '#ef4444' }} /> : <DeleteForeverIcon />}
+                                            onClick={() => handleReject(req._id)}
+                                            sx={{
+                                                py: 1.5, borderRadius: '12px', fontWeight: 800, fontSize: 14,
+                                                borderColor: '#ef4444', color: '#ef4444', borderWidth: 1.5,
+                                                '&:hover': { bgcolor: '#fef2f2', borderColor: '#dc2626', borderWidth: 1.5 }, textTransform: 'none',
+                                            }}
+                                        >
+                                            Revoke Access & Delete Account
+                                        </Button>
+                                    )}
                                 </Box>
                             </CardContent>
                         </Card>

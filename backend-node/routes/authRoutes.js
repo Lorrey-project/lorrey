@@ -59,6 +59,21 @@ router.get('/admin/pending-registrations', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /auth/admin/active-users
+router.get('/admin/active-users', authMiddleware, async (req, res) => {
+  if (req.user.role !== 'HEAD_OFFICE') return res.status(403).json({ message: 'Forbidden' });
+  try {
+    // Return all active users, excluding the current head office admin themselves
+    const active = await User.find({ status: 'active', _id: { $ne: req.user.id } })
+      .select('email role pumpName name createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ success: true, users: active });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // PUT /auth/admin/approve/:id
 router.put('/admin/approve/:id', authMiddleware, async (req, res) => {
   if (req.user.role !== 'HEAD_OFFICE') return res.status(403).json({ message: 'Forbidden' });
@@ -75,13 +90,14 @@ router.put('/admin/approve/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /auth/admin/reject/:id
+// DELETE /auth/admin/reject/:id (Backward compatibility for UI)
+// Or use for revoking active users:
 router.delete('/admin/reject/:id', authMiddleware, async (req, res) => {
   if (req.user.role !== 'HEAD_OFFICE') return res.status(403).json({ message: 'Forbidden' });
   try {
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ success: false, error: 'User not found' });
-    res.json({ success: true, message: 'Registration request rejected and deleted.' });
+    res.json({ success: true, message: 'User account removed.' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
