@@ -11,3 +11,4 @@ Lorrey_Scans/
 frontend/voucher/
 token.txt
 *.pem
+backend-node/request_log.txt
