@@ -27,11 +27,16 @@ export const AuthProvider = ({ children }) => {
         }
         setLoading(false);
 
-        // Global interceptor for session expiry
+        // Global interceptor for session expiry — but only for non-system calls
         const interceptor = axios.interceptors.response.use(
             (response) => response,
             (error) => {
-                if (error.response?.status === 401) {
+                const url = error.config?.url || '';
+                const is401 = error.response?.status === 401;
+                // Don't auto-logout for heartbeat/portal-logout calls — they may
+                // transiently fail without meaning the session is truly expired
+                const isSystemCall = url.includes('/system/');
+                if (is401 && !isSystemCall) {
                     console.warn("Session expired or unauthorized. Logging out...");
                     logout();
                 }
@@ -46,7 +51,11 @@ export const AuthProvider = ({ children }) => {
         if (!user) return;
         
         const sendHeartbeat = () => {
-            axios.post(`${API_URL}/system/heartbeat`).catch(err => console.error("Heartbeat failed:", err));
+            const token = localStorage.getItem('token');
+            if (!token) return; // No token — skip silently, don't spam 401s
+            axios.post(`${API_URL}/system/heartbeat`, {}, {
+                headers: { Authorization: `Bearer ${token}` }
+            }).catch(() => {}); // Silently swallow — heartbeat failures are non-critical
         };
         
         sendHeartbeat(); // Initial ping on login/load

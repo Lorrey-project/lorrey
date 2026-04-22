@@ -7,19 +7,29 @@ const PartyPayment = require('../models/PartyPayment');
 function parseDate(val) {
   if (!val) return null;
   if (val instanceof Date) return isNaN(val) ? null : val;
-  const iso = new Date(val);
-  if (!isNaN(iso.getTime())) {
-    const str = String(val);
-    const parts = str.split(/[-\/]/);
-    if (parts.length === 3 && parts[2].length === 4) {
-      const d = parseInt(parts[0]), m = parseInt(parts[1]), y = parseInt(parts[2]);
-      if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
-        return new Date(y, m - 1, d);
-      }
+  const str = String(val).trim();
+
+  // Handle DD-MM-YYYY (e.g. "13-04-2026") — the format stored in the DB
+  const ddmmyyyy = str.match(/^(\d{1,2})[\-\/](\d{1,2})[\-\/](\d{4})$/);
+  if (ddmmyyyy) {
+    const d = parseInt(ddmmyyyy[1]), m = parseInt(ddmmyyyy[2]), y = parseInt(ddmmyyyy[3]);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d);
     }
-    return iso;
   }
-  return null;
+
+  // Handle YYYY-MM-DD ISO format
+  const yyyymmdd = str.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})/);
+  if (yyyymmdd) {
+    const y = parseInt(yyyymmdd[1]), m = parseInt(yyyymmdd[2]), d = parseInt(yyyymmdd[3]);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d);
+    }
+  }
+
+  // Final fallback
+  const iso = new Date(val);
+  return isNaN(iso.getTime()) ? null : iso;
 }
 function getDateParts(val) {
   const d = parseDate(val);

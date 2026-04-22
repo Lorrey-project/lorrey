@@ -14,21 +14,21 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
+const API_URL = import.meta.env.VITE_API_URL || '/api';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || '/';
 
 // Columns configuration
 export const COLUMNS = [
   { key: 'Transaction Date', label: 'TRANSACTION\nDATE', width: 140, isDate: true },
-  { key: 'Ledger Name',      label: 'LEDGER\nNAME',        width: 180 },
-  { key: 'Names',            label: 'NAMES',               width: 160 },
-  { key: 'Particulars',      label: 'PARTICULARS',         width: 220 },
-  { key: 'Remarks',          label: 'REMARKS',            width: 200 },
-  { key: 'Reference No',     label: 'REFERENCE\nNO',       width: 140 },
-  { key: 'Cheque No',        label: 'CHEQUE\nNO',          width: 140 },
-  { key: 'Withdraw',         label: 'WITHDRAW',            width: 130 },
-  { key: 'Deposit',          label: 'DEPOSIT',             width: 130 },
-  { key: 'Closing Balance',  label: 'CLOSING\nBALANCE',    width: 140 },
+  { key: 'Ledger Name', label: 'LEDGER\nNAME', width: 180 },
+  { key: 'Names', label: 'NAMES', width: 160 },
+  { key: 'Particulars', label: 'PARTICULARS', width: 220 },
+  { key: 'Remarks', label: 'REMARKS', width: 200 },
+  { key: 'Reference No', label: 'REFERENCE\nNO', width: 140 },
+  { key: 'Cheque No', label: 'CHEQUE\nNO', width: 140 },
+  { key: 'Withdraw', label: 'WITHDRAW', width: 130 },
+  { key: 'Deposit', label: 'DEPOSIT', width: 130 },
+  { key: 'Closing Balance', label: 'CLOSING\nBALANCE', width: 140 },
 ];
 
 const AUTO_COLS = new Set(['Transaction Date', 'Remarks', 'Reference No', 'Cheque No', 'Withdraw', 'Deposit', 'Closing Balance']);
