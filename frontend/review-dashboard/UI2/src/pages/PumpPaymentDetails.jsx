@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Select, MenuItem, FormControl,
-  InputLabel, TextField, Divider
+  InputLabel, TextField, Divider, Card, CardContent, useMediaQuery, Grid, Paper
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -16,8 +16,8 @@ import { exportToCsv } from '../utils/exportCsv';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const socket = io(API_URL);
+const API_URL = import.meta.env.VITE_API_URL || '/api';
+const socket = io('/');
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
@@ -88,11 +88,17 @@ const COLUMNS = [
 
 export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
   const { user } = useAuth();
+  const isMobile = useMediaQuery('(max-width:960px)');
   const isPumpAdmin = user?.role === 'PETROL PUMP';
   const isOfficeAdmin = user?.role === 'OFFICE' || user?.role === 'HEAD_OFFICE';
+  
+  // Port-based Auto Detection
+  const autoPump = window.location.port === '5175' ? 'SAS-1' : window.location.port === '5176' ? 'SAS-2' : null;
+  const effectiveLockedPump = autoPump || lockedPump;
+
   const now = new Date();
   const currentDay = now.getDate();
-  const [selPump, setSelPump] = useState(lockedPump || '');
+  const [selPump, setSelPump] = useState(effectiveLockedPump || '');
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
   const [selYear, setSelYear] = useState(now.getFullYear());
   const [selPeriod, setSelPeriod] = useState(currentDay <= 10 ? 1 : currentDay <= 20 ? 2 : 3);
@@ -120,7 +126,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
   // Map of specific fuel prices for all pumps
   const [fuelRatesMap, setFuelRatesMap] = useState({});
   // partitioning for pump admin
-  const [pumpTab, setPumpTab] = useState('today'); // 'today' or 'expired'
+  const [pumpTab, setPumpTab] = useState('today'); // 'today', 'expired' or 'all'
 
   const yearOptions = [];
   for (let y = now.getFullYear() - 2; y <= now.getFullYear() + 1; y++) yearOptions.push(y);
@@ -154,9 +160,16 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       .then(r => {
         if (r.data.success) {
           setPumps(r.data.pumps);
-          // If locked to a specific pump, always use that; otherwise default to first
-          if (lockedPump) {
+          
+          // Port-based Auto Detection
+          const autoPump = window.location.port === '5175' ? 'SAS-1' : window.location.port === '5176' ? 'SAS-2' : null;
+          
+          if (autoPump && r.data.pumps.includes(autoPump)) {
+            setSelPump(autoPump);
+          } else if (lockedPump) {
             setSelPump(lockedPump);
+          } else if (autoPump) {
+            setSelPump(autoPump);
           } else if (r.data.pumps.length > 0) {
             setSelPump(r.data.pumps[0]);
           }
@@ -484,16 +497,25 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
   const { todayRows, expiredRows } = useMemo(() => {
     if (!isPumpAdmin) return { todayRows: [], expiredRows: [] };
     const today = new Date();
-    const todayStr = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    const f = (d) => `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+    const f2 = (d) => `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getFullYear()).slice(2)}`;
+    
+    const todayS1 = f(today);
+    const todayS2 = f2(today);
+    const yestS1 = f(yesterday);
+    const yestS2 = f2(yesterday);
     
     return {
-      todayRows: computedRows.filter(r => r['LOADING DATE'] === todayStr),
-      expiredRows: computedRows.filter(r => r['LOADING DATE'] !== todayStr)
+      todayRows: computedRows.filter(r => r['LOADING DATE'] === todayS1 || r['LOADING DATE'] === todayS2),
+      expiredRows: computedRows.filter(r => r['LOADING DATE'] === yestS1 || r['LOADING DATE'] === yestS2)
     };
   }, [computedRows, isPumpAdmin]);
 
   const activeRows = isPumpAdmin 
-    ? (pumpTab === 'today' ? todayRows : expiredRows)
+    ? (pumpTab === 'today' ? todayRows : pumpTab === 'expired' ? expiredRows : computedRows)
     : computedRows;
 
   const totals = useMemo(() => ({
@@ -627,7 +649,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     </Box>
   );
 
-  if (!loadingPumps && !lockedPump && pumps.length === 0) return (
+  if (!loadingPumps && !effectiveLockedPump && pumps.length === 0) return (
     <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
       <Typography color="text.secondary" fontWeight={600} fontSize={18} sx={{ mb: 1 }}>No pumps found in cement register.</Typography>
       <Typography color="text.secondary" variant="body2" sx={{ mb: 2 }}>Please ensure there are entries in the cement register with assigned pump names.</Typography>
@@ -663,11 +685,11 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
           </Typography>
 
           {/* Pump */}
-          {lockedPump ? (
-            /* Pump Admin: locked to their assigned pump – shown as a badge */
+          {effectiveLockedPump ? (
+            /* Locked to assigned pump – shown as a status badge */
             <Box display="flex" alignItems="center" gap={1}
               sx={{ px: 1.5, py: 0.6, bgcolor: '#e0f7fa', borderRadius: '8px', border: '1px solid #0891b2' }}>
-              <Typography sx={{ fontSize: 12, fontWeight: 900, color: '#0c4a6e' }}>⛽ {lockedPump}</Typography>
+              <Typography sx={{ fontSize: 12, fontWeight: 900, color: '#0c4a6e' }}>⛽ {effectiveLockedPump}</Typography>
             </Box>
           ) : (
             <FormControl size="small" sx={{ minWidth: 140 }}>
@@ -751,6 +773,19 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       {isPumpAdmin && (
         <Box sx={{ px: 2, py: 1.5, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: 2 }}>
           <Button
+            onClick={() => setPumpTab('all')}
+            variant={pumpTab === 'all' ? 'contained' : 'outlined'}
+            sx={{
+              borderRadius: '20px', px: 3, fontWeight: 800, fontSize: 13,
+              bgcolor: pumpTab === 'all' ? '#64748b' : 'transparent',
+              color: pumpTab === 'all' ? '#fff' : '#64748b',
+              borderColor: '#64748b',
+              '&:hover': { bgcolor: pumpTab === 'all' ? '#475569' : '#f8fafc' }
+            }}
+          >
+            All ({computedRows.length})
+          </Button>
+          <Button
             onClick={() => setPumpTab('today')}
             variant={pumpTab === 'today' ? 'contained' : 'outlined'}
             sx={{
@@ -821,12 +856,89 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         </Box>
       )}
 
-      {/* ── Table ── */}
-      <Box sx={{ overflow: 'auto', flex: 1, p: 0 }}>
+      {/* ── Table/Cards ── */}
+      <Box sx={{ overflow: 'auto', flex: 1, p: 0, bgcolor: isMobile ? '#f8fafc' : 'inherit' }}>
         {loading ? (
           <Box display="flex" alignItems="center" justifyContent="center" height="60%" gap={2}>
             <CircularProgress sx={{ color: '#0891b2' }} />
-            <Typography color="text.secondary">Loading from cement register...</Typography>
+            <Typography color="text.secondary">Loading...</Typography>
+          </Box>
+        ) : isMobile ? (
+          <Box sx={{ p: 1.5, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {activeRows.length === 0 && (
+              <Box sx={{ textAlign: 'center', py: 5, color: '#64748b' }}>
+                <Typography variant="body2">No entries found for this period.</Typography>
+              </Box>
+            )}
+            {activeRows.map((row, i) => {
+              const ri = row.originalIndex;
+              return (
+                <Card key={i} sx={{ 
+                  borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                  overflow: 'visible', position: 'relative'
+                }}>
+                  <CardContent sx={{ p: 2 }}>
+                    <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1.5}>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, display: 'block' }}>{row['LOADING DATE']}</Typography>
+                        <Box display="flex" alignItems="center" gap={3}>
+                          <Box>
+                            <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 700, display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Vehicle No</Typography>
+                            <Typography variant="subtitle1" fontWeight={900} color="#0c4a6e">{row['VEHICLE NUMBER']}</Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 700, display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Fuel (Ltrs)</Typography>
+                            <Typography variant="subtitle1" fontWeight={900} color="#059669">{row['HSD (LTR)']} L</Typography>
+                          </Box>
+                        </Box>
+                      </Box>
+                      {row['VERIFICATION STATUS'] === 'Verified' ? (
+                        <Chip label="VERIFIED" size="small" color="success" sx={{ fontWeight: 900, fontSize: 10 }} />
+                      ) : (
+                        <Chip label="UNVERIFIED" size="small" color="error" sx={{ fontWeight: 900, fontSize: 10 }} />
+                      )}
+                    </Box>
+
+                    {/* Compact Grid with no Slip No */}
+                    <Box sx={{ mb: 1 }} />
+
+                    {isPumpAdmin && row['VERIFICATION STATUS'] !== 'Verified' && (
+                      <Box sx={{ mt: 1, pt: 1.5, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 1 }}>
+                        <TextField 
+                          size="small" 
+                          placeholder="Code"
+                          type="number"
+                          value={verificationCodes[ri] || ''}
+                          onChange={e => setVerificationCodes(prev => ({ ...prev, [ri]: e.target.value }))}
+                          sx={{ flex: 1, '& .MuiInputBase-input': { p: 1, fontSize: 13, fontWeight: 700 } }}
+                        />
+                        <Button 
+                          variant="contained" color="success" size="small"
+                          onClick={() => handleVerifyCode(ri, row)}
+                          sx={{ fontWeight: 800, px: 2, borderRadius: 2 }}
+                        >
+                          VERIFY
+                        </Button>
+                      </Box>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+            
+            {/* Mobile Footer Total (Office Admin Only) */}
+            {activeRows.length > 0 && isOfficeAdmin && (
+              <Paper sx={{ p: 2, borderRadius: 3, bgcolor: '#0c4a6e', color: '#fff', mt: 2 }}>
+                <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Typography variant="subtitle2" fontWeight={800}>PERIOD TOTAL</Typography>
+                  <Typography variant="h5" fontWeight={900}>₹{totals['HSD AMOUNT'].toLocaleString('en-IN')}</Typography>
+                </Box>
+                <Box display="flex" justifyContent="space-between" mt={1}>
+                   <Typography variant="caption" sx={{ opacity: 0.8 }}>Total Quantity</Typography>
+                   <Typography variant="caption" fontWeight={800}>{totals['HSD (LTR)']} Ltrs</Typography>
+                </Box>
+              </Paper>
+            )}
           </Box>
         ) : (
           <table style={{

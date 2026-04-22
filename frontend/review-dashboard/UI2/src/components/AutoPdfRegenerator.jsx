@@ -81,6 +81,13 @@ export default function AutoPdfRegenerator({ invoiceId, onComplete }) {
                     const fuelForm = new FormData();
                     fuelForm.append('softcopy', fuelBlob, `fuel_slip_${invoiceId}.pdf`);
                     fuelForm.append('invoice_id', invoiceId);
+                    fuelForm.append('slip_data', JSON.stringify({
+                        station_name: autoFuelData.stationName,
+                        station_address: autoFuelData.stationAddress,
+                        diesel_litres: autoFuelData.qty,
+                        diesel_rate: autoFuelData.rate,
+                        diesel_advance: autoFuelData.amount
+                    }));
                     await axios.post(`${API_URL}/invoice/fuel-slip-softcopy`, fuelForm, { 
                         headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` } 
                     });

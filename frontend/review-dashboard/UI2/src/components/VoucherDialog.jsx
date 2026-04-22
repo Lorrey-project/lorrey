@@ -4,6 +4,7 @@ import {
   Button, Grid, IconButton, CircularProgress, Chip, Autocomplete,
   Snackbar, Alert, Backdrop, Fade, List, ListItem, ListItemText,
   ListItemButton, Divider, Tabs, Tab, Badge, InputAdornment,
+  useTheme, useMediaQuery
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
@@ -129,6 +130,9 @@ function TabPanel({ value, index, children }) {
 
 // ── Main VoucherDialog ────────────────────────────────────────────────────────
 const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  
   const slipRef = useRef();
   const [tab, setTab] = useState(initialTab);          // 0=New, 1=Previous, 2=Download
   const [contacts, setContacts] = useState({ names: [], vehicles: [], ownerMap: {} });
@@ -342,12 +346,13 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
         onClose={!slipStep ? onClose : undefined}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
         PaperProps={{
           sx: {
-            borderRadius: '24px',
+            borderRadius: isMobile ? 0 : '24px',
             overflow: 'hidden',
             background: '#ffffff',
-            maxHeight: '92vh',
+            maxHeight: isMobile ? '100dvh' : '92vh',
           }
         }}
       >
@@ -381,8 +386,8 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
             <IconButton onClick={onClose} sx={{ color: '#fff' }}><CloseIcon /></IconButton>
           </Box>
 
-          {/* ── Tabs (hidden when showing slip preview) ── */}
-          {!slipStep && (
+          {/* ── Tabs (hidden when showing slip preview or on mobile) ── */}
+          {!slipStep && !isMobile && (
             <Box sx={{ bgcolor: '#faf5ff', borderBottom: '1px solid #ede7f6' }}>
               <Tabs
                 value={tab}

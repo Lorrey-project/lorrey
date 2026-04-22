@@ -1,45 +1,88 @@
 import React, { useState } from 'react';
 import {
-    Box, Button, TextField, Typography, Paper, Alert, Link, InputAdornment, IconButton,
-    ToggleButtonGroup, ToggleButton
+    Box, Button, TextField, Typography, Alert, InputAdornment, IconButton,
+    CircularProgress, Chip
 } from '@mui/material';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
+import BusinessIcon from '@mui/icons-material/Business';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
+import HourglassTopIcon from '@mui/icons-material/HourglassTop';
 import { useAuth } from '../context/AuthContext';
-import AnimatedBackground from './AnimatedBackground';
 
-const PORTAL_LABELS = {
-    HEAD_OFFICE: { title: 'office', badge: 'OFFICE ADMIN' },
-    OFFICE: { title: 'site', badge: 'SITE ADMIN' },
-    'PETROL PUMP': { title: 'petrol pump', badge: 'PUMP ADMIN' },
+// Single brand blue — no colour changes
+const BLUE = '#4285f4';
+const BLUE_GLOW = 'rgba(66,133,244,0.4)';
+
+const inputSx = {
+    '& .MuiOutlinedInput-root': {
+        bgcolor: 'rgba(255,255,255,0.07)',
+        borderRadius: '14px',
+        color: '#fff',
+        fontSize: 15,
+        '& fieldset': { borderColor: 'rgba(255,255,255,0.1)' },
+        '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.25)' },
+        '&.Mui-focused fieldset': { borderColor: BLUE, borderWidth: '1.5px' },
+        '& input': {
+            py: '13px',
+            '&:-webkit-autofill': {
+                WebkitBoxShadow: '0 0 0 1000px #1c1c1e inset !important',
+                WebkitTextFillColor: '#fff !important',
+            },
+        },
+    },
+    '& .MuiInputLabel-root': {
+        color: 'rgba(255,255,255,0.35)',
+        fontSize: 14,
+        '&.Mui-focused': { color: BLUE },
+    },
 };
+
+const PORTALS = [
+    { id: 'HEAD_OFFICE', label: 'Office', icon: <BusinessIcon sx={{ fontSize: 15 }} /> },
+    { id: 'OFFICE',      label: 'Site',   icon: <LocationOnIcon sx={{ fontSize: 15 }} /> },
+    { id: 'PETROL PUMP', label: 'Pump',   icon: <LocalGasStationIcon sx={{ fontSize: 15 }} /> },
+];
+
+const PUMPS = ['SAS-1', 'SAS-2'];
 
 const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
     const { signup } = useAuth();
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [showPass, setShowPass] = useState(false);
-    // If lockedPump is set, portal must be PETROL PUMP
-    const [portal, setPortal] = useState(lockedPump ? 'PETROL PUMP' : (lockedPortal || 'OFFICE'));
-    const [pumpName, setPumpName] = useState(lockedPump || 'SAS-1');
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(false);
-    const portalInfo = PORTAL_LABELS[portal] || PORTAL_LABELS.OFFICE;
+    const [name,             setName]             = useState('');
+    const [email,            setEmail]            = useState('');
+    const [password,         setPassword]         = useState('');
+    const [confirmPassword,  setConfirmPassword]  = useState('');
+    const [showPass,         setShowPass]         = useState(false);
+    const [registrationSecret, setRegistrationSecret] = useState('');
+    const [portal,           setPortal]           = useState(lockedPump ? 'PETROL PUMP' : (lockedPortal || 'HEAD_OFFICE'));
+    const [pumpName,         setPumpName]         = useState(lockedPump || 'SAS-1');
+    const [error,            setError]            = useState('');
+    const [loading,          setLoading]          = useState(false);
+    const [pendingSuccess,   setPendingSuccess]   = useState(false);
+
+    const isPump = portal === 'PETROL PUMP';
+    const isHeadOffice = portal === 'HEAD_OFFICE';
+    const locked = !!(lockedPortal || lockedPump);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
-        if (password !== confirmPassword) return setError('Passwords do not match');
-        if (portal === 'PETROL PUMP' && !['SAS-1', 'SAS-2'].includes(pumpName)) {
-            return setError('Please select a pump (SAS-1 or SAS-2)');
-        }
+        if (password !== confirmPassword) return setError('Passwords do not match.');
+        if (isPump && !PUMPS.includes(pumpName)) return setError('Please select a valid pump (SAS-1 or SAS-2).');
+        if (isHeadOffice && !registrationSecret) return setError('Registration secret is required for Head Office accounts.');
         setLoading(true);
         try {
-            await signup(email, password, portal, portal === 'PETROL PUMP' ? pumpName : null);
+            const result = await signup(email, password, portal, isPump ? pumpName : null, name, isHeadOffice ? registrationSecret : undefined);
+            // If pending (non-HEAD_OFFICE), show success holding screen
+            if (result?.pending) {
+                setPendingSuccess(true);
+            }
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to create account. Please try again.');
         } finally {
@@ -47,329 +90,274 @@ const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
         }
     };
 
-
     return (
-        <AnimatedBackground>
-            <Box sx={{ width: '100%', maxWidth: '440px', px: 2 }}>
-                {/* Logo / Brand */}
-                <Box textAlign="center" mb={5}>
-                    <Box sx={{
-                        width: 64, height: 64, borderRadius: '20px',
-                        background: 'linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%)',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        mb: 2.5,
-                        boxShadow: '0 12px 30px rgba(26,115,232,0.3), inset 0 0 15px rgba(255,255,255,0.2)',
-                        border: '1px solid rgba(255,255,255,0.1)'
-                    }}>
-                        <Typography sx={{ color: '#fff', fontWeight: '900', fontSize: '28px', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>D</Typography>
+        <Box sx={{
+            minHeight: '100dvh', bgcolor: '#0a0a0a',
+            display: 'flex', flexDirection: 'column',
+            fontFamily: `'Inter', 'SF Pro Display', system-ui, sans-serif`,
+            overflow: 'hidden',
+        }}>
+            {/* ── PENDING APPROVAL SCREEN ────────────────────────────── */}
+            {pendingSuccess && (
+                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', px: 3, textAlign: 'center' }}>
+                    <Box sx={{ width: 72, height: 72, borderRadius: '22px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 3, boxShadow: '0 16px 40px rgba(245,158,11,0.3)' }}>
+                        <HourglassTopIcon sx={{ color: '#fff', fontSize: 36 }} />
                     </Box>
-                    <Typography variant="h4" fontWeight="900" sx={{ color: '#fff', letterSpacing: '-1px', textShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-                        DIPALI ASSOCIATES & CO
+                    <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: 22, letterSpacing: '-0.5px', mb: 1 }}>Pending Approval</Typography>
+                    <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, lineHeight: 1.7, maxWidth: 300, mb: 4 }}>
+                        Your registration request has been sent to the <strong style={{ color: 'rgba(255,255,255,0.8)' }}>Head Office admin</strong>.
+                        You will be able to log in once your account is approved.
                     </Typography>
-                    <Typography variant="body1" sx={{ color: 'rgba(255,255,255,0.6)', mt: 1, fontWeight: 500 }}>
-                        Create your secure slip management account
-                    </Typography>
-                </Box>
-                {/* Card */}
-                <Paper elevation={0} sx={{
-                    p: { xs: 4, sm: 5 },
-                    borderRadius: '32px',
-                    backgroundColor: 'rgba(255,255,255,0.04)',
-                    backdropFilter: 'blur(30px) saturate(180%)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    boxShadow: '0 24px 80px rgba(0,0,0,0.4), inset 0 0 40px rgba(255,255,255,0.02)',
-                    overflow: 'hidden',
-                    position: 'relative',
-                    '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0, left: 0, right: 0, height: '2px',
-                        background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent)'
-                    }
-                }}>
-                    {/* Portal toggle — only when not locked */}
-                    {!lockedPortal && !lockedPump && (
-                        <Box display="flex" justifyContent="center" mb={portal === 'PETROL PUMP' ? 2 : 4}>
-                             <ToggleButtonGroup
-                                 value={portal}
-                                 exclusive
-                                 onChange={(e, val) => val && setPortal(val)}
-                                 fullWidth
-                                 sx={{ 
-                                     bgcolor: 'rgba(255,255,255,0.05)', 
-                                     p: 0.5, borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)',
-                                     '& .MuiToggleButton-root': {
-                                         color: 'rgba(255,255,255,0.5)',
-                                         borderRadius: '12px !important',
-                                         border: 'none',
-                                         fontWeight: 800,
-                                         py: 1.5,
-                                         '&.Mui-selected': {
-                                             bgcolor: 'rgba(66, 133, 244, 0.4)',
-                                             color: '#fff',
-                                             boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
-                                         }
-                                     }
-                                 }}
-                             >
-                                 <ToggleButton value="HEAD_OFFICE">OFFICE ADMIN</ToggleButton>
-                                 <ToggleButton value="OFFICE">SITE ADMIN</ToggleButton>
-                                 <ToggleButton value="PETROL PUMP">PUMP ADMIN</ToggleButton>
-                             </ToggleButtonGroup>
-                        </Box>
-                    )}
-
-                    {/* Locked-portal or locked-pump badge */}
-                    {(lockedPortal || lockedPump) && (
-                        <Box display="flex" justifyContent="center" mb={3}>
-                            <Box sx={{
-                                px: 3, py: 1.2, borderRadius: '14px',
-                                bgcolor: 'rgba(66,133,244,0.2)', border: '1px solid rgba(66,133,244,0.35)',
-                                display: 'inline-flex', alignItems: 'center', gap: 1,
-                            }}>
-                                <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#4285f4', boxShadow: '0 0 8px #4285f4' }} />
-                                <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: 13, letterSpacing: 1 }}>
-                                    {lockedPump ? `⛽ ${lockedPump} PUMP ADMIN` : portalInfo.badge}
-                                </Typography>
-                            </Box>
-                        </Box>
-                    )}
-
-                    {/* Pump sub-selector — only visible when Pump Admin is chosen AND not locked to a specific pump */}
-                    {portal === 'PETROL PUMP' && !lockedPump && (
-                        <Box mb={4}>
-                            <Typography variant="caption" fontWeight={800}
-                                sx={{ color: 'rgba(255,255,255,0.5)', letterSpacing: 1, display: 'block', mb: 1, textTransform: 'uppercase' }}>
-                                Select Your Pump
-                            </Typography>
-                            <Box display="flex" gap={1.5}>
-                                {['SAS-1', 'SAS-2'].map(p => (
-                                    <Button
-                                        key={p}
-                                        fullWidth
-                                        variant={pumpName === p ? 'contained' : 'outlined'}
-                                        onClick={() => setPumpName(p)}
-                                        sx={{
-                                            borderRadius: '14px', py: 1.8, fontWeight: 900, fontSize: 15,
-                                            ...(pumpName === p ? {
-                                                background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
-                                                color: '#fff',
-                                                boxShadow: '0 6px 20px rgba(25,118,210,0.4)',
-                                                border: 'none',
-                                            } : {
-                                                borderColor: 'rgba(255,255,255,0.25)',
-                                                color: 'rgba(255,255,255,0.6)',
-                                                bgcolor: 'rgba(255,255,255,0.04)',
-                                                '&:hover': { borderColor: '#fff', color: '#fff', bgcolor: 'rgba(255,255,255,0.1)' },
-                                            }),
-                                        }}
-                                    >
-                                        ⛽ {p}
-                                    </Button>
-                                ))}
-                            </Box>
-                        </Box>
-                    )}
-
-                    <Typography variant="h5" fontWeight="900" sx={{ color: '#fff', mb: 1, letterSpacing: '-0.5px' }}>Register Now</Typography>
-                    <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 4, fontWeight: 500 }}>
-                        Join the secure {portalInfo.title} network
-                    </Typography>
-
-                    {error && <Alert severity="error" sx={{ mb: 3, borderRadius: '16px', bgcolor: 'rgba(211, 47, 47, 0.15)', color: '#ff8a80', border: '1px solid rgba(211, 47, 47, 0.2)' }}>{error}</Alert>}
-
-                    <form onSubmit={handleSubmit} autoComplete="off">
-                        <TextField
-                            label="Email Address"
-                            variant="outlined"
-                            fullWidth
-                            autoComplete="new-password"
-                            sx={{
-                                mb: 2.5,
-                                '& .MuiOutlinedInput-root': {
-                                    backgroundColor: 'rgba(255,255,255,0.02)',
-                                    borderRadius: '18px',
-                                    color: '#fff',
-                                    transition: 'all 0.3s ease',
-                                    '& input': {
-                                        '&:-webkit-autofill': {
-                                            WebkitBoxShadow: '0 0 0 1000px rgba(13, 27, 78, 0.2) inset !important',
-                                            WebkitTextFillColor: '#fff !important',
-                                            transition: 'background-color 5000s ease-in-out 0s',
-                                            borderRadius: 'inherit',
-                                        },
-                                    },
-                                    '& fieldset': {
-                                        borderColor: 'rgba(255,255,255,0.1)',
-                                        borderWidth: '1px',
-                                    },
-                                    '&:hover fieldset': {
-                                        borderColor: 'rgba(255,255,255,0.2)',
-                                    },
-                                    '&.Mui-focused fieldset': {
-                                        borderColor: '#4285f4',
-                                        borderWidth: '2px',
-                                        boxShadow: '0 0 20px rgba(66,133,244,0.15)',
-                                    },
-                                },
-                                '& .MuiInputLabel-root': {
-                                    color: 'rgba(255,255,255,0.4)',
-                                    fontWeight: 500,
-                                    '&.Mui-focused': { color: '#4285f4' }
-                                }
-                            }}
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            required type="email"
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <EmailIcon sx={{ color: '#4285f4', mr: 1, fontSize: 20 }} />
-                                    </InputAdornment>
-                                ),
-                            }}
-                        />
-                        <TextField
-                            label="Password"
-                            variant="outlined"
-                            fullWidth
-                            autoComplete="new-password"
-                            sx={{
-                                mb: 2.5,
-                                '& .MuiOutlinedInput-root': {
-                                    backgroundColor: 'rgba(255,255,255,0.02)',
-                                    borderRadius: '18px',
-                                    color: '#fff',
-                                    transition: 'all 0.3s ease',
-                                    '& input': {
-                                        '&:-webkit-autofill': {
-                                            WebkitBoxShadow: '0 0 0 1000px rgba(13, 27, 78, 0.2) inset !important',
-                                            WebkitTextFillColor: '#fff !important',
-                                            transition: 'background-color 5000s ease-in-out 0s',
-                                            borderRadius: 'inherit',
-                                        },
-                                    },
-                                    '& fieldset': {
-                                        borderColor: 'rgba(255,255,255,0.1)',
-                                        borderWidth: '1px',
-                                    },
-                                    '&:hover fieldset': {
-                                        borderColor: 'rgba(255,255,255,0.2)',
-                                    },
-                                    '&.Mui-focused fieldset': {
-                                        borderColor: '#4285f4',
-                                        borderWidth: '2px',
-                                        boxShadow: '0 0 20px rgba(66,133,244,0.15)',
-                                    },
-                                },
-                                '& .MuiInputLabel-root': {
-                                    color: 'rgba(255,255,255,0.4)',
-                                    fontWeight: 500,
-                                    '&.Mui-focused': { color: '#4285f4' }
-                                }
-                            }}
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required type={showPass ? 'text' : 'password'}
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <LockIcon sx={{ color: '#4285f4', mr: 1, fontSize: 20 }} />
-                                    </InputAdornment>
-                                ),
-                                endAdornment: (
-                                    <InputAdornment position="end">
-                                        <IconButton onClick={() => setShowPass(!showPass)} edge="end" sx={{ color: 'rgba(255,255,255,0.3)', mr: 0.5 }}>
-                                            {showPass ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                                        </IconButton>
-                                    </InputAdornment>
-                                ),
-                            }}
-                        />
-                        <TextField
-                            label="Confirm Password"
-                            variant="outlined"
-                            fullWidth
-                            autoComplete="new-password"
-                            sx={{
-                                mb: 4,
-                                '& .MuiOutlinedInput-root': {
-                                    backgroundColor: 'rgba(255,255,255,0.02)',
-                                    borderRadius: '18px',
-                                    color: '#fff',
-                                    transition: 'all 0.3s ease',
-                                    '& input': {
-                                        '&:-webkit-autofill': {
-                                            WebkitBoxShadow: '0 0 0 1000px rgba(13, 27, 78, 0.2) inset !important',
-                                            WebkitTextFillColor: '#fff !important',
-                                            transition: 'background-color 5000s ease-in-out 0s',
-                                            borderRadius: 'inherit',
-                                        },
-                                    },
-                                    '& fieldset': {
-                                        borderColor: 'rgba(255,255,255,0.1)',
-                                        borderWidth: '1px',
-                                    },
-                                    '&:hover fieldset': {
-                                        borderColor: 'rgba(255,255,255,0.2)',
-                                    },
-                                    '&.Mui-focused fieldset': {
-                                        borderColor: '#4285f4',
-                                        borderWidth: '2px',
-                                        boxShadow: '0 0 20px rgba(66,133,244,0.15)',
-                                    },
-                                },
-                                '& .MuiInputLabel-root': {
-                                    color: 'rgba(255,255,255,0.4)',
-                                    fontWeight: 500,
-                                    '&.Mui-focused': { color: '#4285f4' }
-                                }
-                            }}
-                            value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                            required type={showPass ? 'text' : 'password'}
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <LockIcon sx={{ color: '#4285f4', mr: 1, fontSize: 20 }} />
-                                    </InputAdornment>
-                                ),
-                            }}
-                        />
-                        <Button
-                            type="submit"
-                            variant="contained"
-                            fullWidth
-                            size="large"
-                            disabled={loading}
-                            startIcon={<PersonAddIcon />}
-                            sx={{
-                                py: 2, borderRadius: '16px', fontWeight: '900', fontSize: '16px',
-                                background: 'linear-gradient(45deg, #1a73e8 30%, #4285f4 90%)',
-                                boxShadow: '0 12px 30px rgba(26,115,232,0.4)',
-                                transition: 'all 0.3s ease',
-                                '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 15px 35px rgba(26,115,232,0.5)' }
-                            }}
-                        >
-                            {loading ? 'Creating Account...' : 'Get Started Now'}
-                        </Button>
-                    </form>
-
-                    <Box textAlign="center" mt={4}>
-                        <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}>
-                            Already a member?{' '}
-                            <Link component="button" onClick={onToggle} sx={{ color: '#4285f4', fontWeight: '800', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>
-                                Sign In
-                            </Link>
+                    <Box sx={{ bgcolor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '14px', px: 3, py: 2, maxWidth: 320, width: '100%', mb: 3 }}>
+                        <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, mb: 0.5 }}>Registered As</Typography>
+                        <Typography sx={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>{email}</Typography>
+                        <Typography sx={{ color: '#f59e0b', fontWeight: 600, fontSize: 12, mt: 0.3 }}>
+                            {portal === 'PETROL PUMP' ? `${pumpName} Pump Admin` : 'Site Admin'}
                         </Typography>
                     </Box>
-                </Paper>
+                    {onToggle && (
+                        <Typography sx={{ color: 'rgba(255,255,255,0.25)', fontSize: 12 }}>
+                            Back to{' '}
+                            <Box component="span" onClick={onToggle} sx={{ color: BLUE, fontWeight: 800, cursor: 'pointer', '&:hover': { opacity: 0.8 } }}>Sign In</Box>
+                        </Typography>
+                    )}
+                </Box>
+            )}
 
-                <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', mt: 4, color: 'rgba(255,255,255,0.3)', fontWeight: 500, letterSpacing: '0.5px' }}>
-                    © 2026 DIPALI ASSOCIATES & CO. ALL RIGHTS RESERVED.
+            {/* ── NORMAL SIGNUP FORM ─────────────────────────────────── */}
+            {!pendingSuccess && <>
+            {/* ── HERO ───────────────────────────────────────── */}
+            <Box sx={{
+                flex: 1, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                px: 3, pt: 6, pb: 2, position: 'relative',
+            }}>
+                {/* Static blue glow */}
+                <Box sx={{
+                    position: 'absolute', width: 240, height: 240, borderRadius: '50%',
+                    background: `radial-gradient(circle, ${BLUE_GLOW} 0%, transparent 70%)`,
+                    top: '5%', left: '50%', transform: 'translateX(-50%)',
+                    pointerEvents: 'none',
+                }} />
+
+                {/* Logo: DAC */}
+                <Box sx={{
+                    width: 56, height: 56, borderRadius: '18px',
+                    background: `linear-gradient(135deg, #1a56db 0%, ${BLUE} 100%)`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    mb: 2.5, boxShadow: `0 12px 32px ${BLUE_GLOW}`,
+                }}>
+                    <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: 16, letterSpacing: 0.5 }}>DAC</Typography>
+                </Box>
+
+                <Typography sx={{
+                    color: '#fff', fontWeight: 800, fontSize: { xs: 18, sm: 22 },
+                    letterSpacing: '-0.5px', textAlign: 'center',
+                }}>
+                    DIPALI ASSOCIATES & CO.
+                </Typography>
+                <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, mt: 0.5, letterSpacing: 1 }}>
+                    CREATE YOUR ACCOUNT
                 </Typography>
             </Box>
-        </AnimatedBackground >
+
+            {/* ── BOTTOM CARD ─────────────────────────────────── */}
+            <Box sx={{
+                bgcolor: '#1c1c1e',
+                borderRadius: { xs: '28px 28px 0 0', sm: '28px' },
+                p: { xs: '28px 20px 36px', sm: '32px 28px' },
+                mx: { sm: 'auto' },
+                width: { sm: '100%' },
+                maxWidth: { sm: 420 },
+                mb: { sm: 4 },
+                boxShadow: '0 -8px 40px rgba(0,0,0,0.6)',
+                border: '1px solid rgba(255,255,255,0.07)',
+            }}>
+                {/* Drag handle */}
+                <Box sx={{
+                    width: 36, height: 4, borderRadius: 2,
+                    bgcolor: 'rgba(255,255,255,0.15)', mx: 'auto', mb: 3,
+                    display: { sm: 'none' },
+                }} />
+
+                {/* Portal Tabs */}
+                {!locked && (
+                    <Box sx={{
+                        display: 'flex', gap: 1, mb: 3,
+                        bgcolor: 'rgba(255,255,255,0.05)',
+                        borderRadius: '14px', p: '4px',
+                    }}>
+                        {PORTALS.map(p => (
+                            <Box key={p.id} onClick={() => { setPortal(p.id); setError(''); }}
+                                sx={{
+                                    flex: 1, display: 'flex', flexDirection: 'column',
+                                    alignItems: 'center', gap: 0.4,
+                                    py: '8px', borderRadius: '10px', cursor: 'pointer',
+                                    bgcolor: portal === p.id ? 'rgba(66,133,244,0.15)' : 'transparent',
+                                    border: portal === p.id ? `1px solid rgba(66,133,244,0.4)` : '1px solid transparent',
+                                    transition: 'all 0.2s',
+                                }}>
+                                <Box sx={{ color: portal === p.id ? BLUE : 'rgba(255,255,255,0.35)' }}>
+                                    {p.icon}
+                                </Box>
+                                <Typography sx={{
+                                    fontSize: 10, fontWeight: portal === p.id ? 800 : 500,
+                                    color: portal === p.id ? BLUE : 'rgba(255,255,255,0.35)',
+                                    letterSpacing: 0.3,
+                                }}>
+                                    {p.label}
+                                </Typography>
+                            </Box>
+                        ))}
+                    </Box>
+                )}
+
+                {/* Locked badge */}
+                {locked && (
+                    <Chip
+                        label={lockedPump ? `${lockedPump} PUMP ADMIN` : (PORTALS.find(p => p.id === lockedPortal)?.label?.toUpperCase() + ' ADMIN')}
+                        size="small"
+                        sx={{
+                            mb: 2.5, bgcolor: 'rgba(66,133,244,0.15)', color: BLUE,
+                            fontWeight: 800, fontSize: 10, letterSpacing: 1,
+                            border: `1px solid rgba(66,133,244,0.35)`,
+                        }}
+                    />
+                )}
+
+                {/* Pump sub-selector */}
+                {isPump && !lockedPump && (
+                    <Box sx={{ display: 'flex', gap: 1.5, mb: 3 }}>
+                        {PUMPS.map(p => (
+                            <Box key={p} onClick={() => setPumpName(p)}
+                                sx={{
+                                    flex: 1, py: 1.5, borderRadius: '12px', textAlign: 'center',
+                                    bgcolor: pumpName === p ? 'rgba(66,133,244,0.15)' : 'rgba(255,255,255,0.04)',
+                                    border: pumpName === p ? `1.5px solid ${BLUE}` : '1.5px solid rgba(255,255,255,0.08)',
+                                    cursor: 'pointer', transition: 'all 0.2s',
+                                }}>
+                                <LocalGasStationIcon sx={{ fontSize: 16, color: BLUE, mb: 0.3 }} />
+                                <Typography sx={{ color: pumpName === p ? BLUE : 'rgba(255,255,255,0.4)', fontWeight: 800, fontSize: 12 }}>
+                                    {p}
+                                </Typography>
+                            </Box>
+                        ))}
+                    </Box>
+                )}
+
+                {/* Heading */}
+                <Typography sx={{ color: '#fff', fontWeight: 800, fontSize: 17, mb: 0.5 }}>
+                    Create Account
+                </Typography>
+                <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, mb: 2.5 }}>
+                    {isPump ? `${pumpName} Pump Admin Registration` : `${PORTALS.find(p => p.id === portal)?.label} Admin — New Account`}
+                </Typography>
+
+                {/* Error */}
+                {error && (
+                    <Alert severity="error" sx={{
+                        mb: 2, borderRadius: '12px', py: 0.5, fontSize: 12,
+                        bgcolor: 'rgba(239,68,68,0.1)', color: '#fca5a5',
+                        border: '1px solid rgba(239,68,68,0.2)',
+                        '& .MuiAlert-icon': { color: '#fca5a5', fontSize: 16 },
+                    }}>
+                        {error}
+                    </Alert>
+                )}
+
+                {/* Form */}
+                <form onSubmit={handleSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <TextField
+                        label="Full Name" type="text" fullWidth required size="small"
+                        value={name} onChange={e => setName(e.target.value)}
+                        autoComplete="off" sx={inputSx}
+                        InputProps={{ startAdornment: <InputAdornment position="start"><PersonOutlineIcon sx={{ color: 'rgba(255,255,255,0.25)', fontSize: 17, mr: 0.5 }} /></InputAdornment> }}
+                    />
+                    <TextField
+                        label="Email" type="email" fullWidth required size="small"
+                        value={email} onChange={e => setEmail(e.target.value)}
+                        autoComplete="new-password" sx={inputSx}
+                        InputProps={{ startAdornment: <InputAdornment position="start"><EmailIcon sx={{ color: 'rgba(255,255,255,0.25)', fontSize: 17, mr: 0.5 }} /></InputAdornment> }}
+                    />
+                    <TextField
+                        label="Password" fullWidth required size="small"
+                        type={showPass ? 'text' : 'password'}
+                        value={password} onChange={e => setPassword(e.target.value)}
+                        autoComplete="new-password" sx={inputSx}
+                        InputProps={{
+                            startAdornment: <InputAdornment position="start"><LockIcon sx={{ color: 'rgba(255,255,255,0.25)', fontSize: 17, mr: 0.5 }} /></InputAdornment>,
+                            endAdornment: (
+                                <InputAdornment position="end">
+                                    <IconButton size="small" onClick={() => setShowPass(!showPass)} edge="end" sx={{ color: 'rgba(255,255,255,0.25)', mr: -0.5 }}>
+                                        {showPass ? <VisibilityOffIcon sx={{ fontSize: 17 }} /> : <VisibilityIcon sx={{ fontSize: 17 }} />}
+                                    </IconButton>
+                                </InputAdornment>
+                            ),
+                        }}
+                    />
+                    <TextField
+                        label="Confirm Password" fullWidth required size="small"
+                        type={showPass ? 'text' : 'password'}
+                        value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                        autoComplete="new-password" sx={inputSx}
+                        InputProps={{ startAdornment: <InputAdornment position="start"><LockIcon sx={{ color: 'rgba(255,255,255,0.25)', fontSize: 17, mr: 0.5 }} /></InputAdornment> }}
+                    />
+
+                    {/* Registration Secret — only for HEAD_OFFICE */}
+                    {isHeadOffice && (
+                        <TextField
+                            label="Registration Secret *" type="password" fullWidth required size="small"
+                            value={registrationSecret} onChange={e => setRegistrationSecret(e.target.value)}
+                            autoComplete="new-password" sx={{
+                                ...inputSx,
+                                '& .MuiOutlinedInput-root': {
+                                    ...inputSx['& .MuiOutlinedInput-root'],
+                                    '& fieldset': { borderColor: 'rgba(245,158,11,0.3)' },
+                                    '&.Mui-focused fieldset': { borderColor: '#f59e0b', borderWidth: '1.5px' },
+                                },
+                                '& .MuiInputLabel-root': { ...inputSx['& .MuiInputLabel-root'], '&.Mui-focused': { color: '#f59e0b' } },
+                            }}
+                            helperText={<span style={{ color: 'rgba(245,158,11,0.7)', fontSize: 11 }}>Required for Head Office registration. Contact your system administrator.</span>}
+                            InputProps={{ startAdornment: <InputAdornment position="start"><VpnKeyIcon sx={{ color: 'rgba(245,158,11,0.5)', fontSize: 17, mr: 0.5 }} /></InputAdornment> }}
+                        />
+                    )}
+
+                    {/* Pending info notice for non-HEAD_OFFICE */}
+                    {!isHeadOffice && (
+                        <Box sx={{ bgcolor: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: '12px', px: 2, py: 1.2 }}>
+                            <Typography sx={{ color: 'rgba(245,158,11,0.85)', fontSize: 11, fontWeight: 600 }}>
+                                ⏳ Your account will require Head Office approval before you can log in.
+                            </Typography>
+                        </Box>
+                    )}
+
+                    <Button
+                        type="submit" variant="contained" fullWidth disabled={loading}
+                        endIcon={loading ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <PersonAddIcon sx={{ fontSize: 17 }} />}
+                        sx={{
+                            mt: 0.5, py: '13px', borderRadius: '14px',
+                            background: `linear-gradient(135deg, #1a56db 0%, ${BLUE} 100%)`,
+                            color: '#fff', fontWeight: 900, fontSize: 14, letterSpacing: 0.3,
+                            boxShadow: `0 8px 24px ${BLUE_GLOW}`,
+                            transition: 'all 0.25s ease',
+                            '&:hover': { opacity: 0.9, transform: 'translateY(-1px)', boxShadow: `0 12px 28px ${BLUE_GLOW}` },
+                            '&:disabled': { bgcolor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.3)', boxShadow: 'none' },
+                        }}
+                    >
+                        {loading ? 'Creating Account…' : 'Get Started'}
+                    </Button>
+                </form>
+
+                {onToggle && (
+                    <Typography sx={{ textAlign: 'center', mt: 2.5, color: 'rgba(255,255,255,0.25)', fontSize: 12 }}>
+                        Already have an account?{' '}
+                        <Box component="span" onClick={onToggle}
+                            sx={{ color: BLUE, fontWeight: 800, cursor: 'pointer', '&:hover': { opacity: 0.8 } }}>Sign In</Box>
+                    </Typography>
+                )}
+            </Box>
+            </>}
+        </Box>
     );
 };
 

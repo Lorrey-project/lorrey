@@ -10,3 +10,4 @@ Invoices/
 Lorrey_Scans/
 frontend/voucher/
 token.txt
+*.pem

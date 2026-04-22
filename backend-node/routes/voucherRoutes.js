@@ -137,7 +137,7 @@ router.put("/:id", async (req, res) => {
     const updated = await Voucher.findByIdAndUpdate(
       req.params.id,
       { vehicleNumber, date, amount, purpose, voucherNumber, remarks, invoiceId },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
     if (!updated) {
       return res
@@ -179,7 +179,7 @@ router.post("/:id/slip", voucherSlipUpload.single("slip"), async (req, res) => {
     const updated = await Voucher.findByIdAndUpdate(
       req.params.id,
       { slip_url: slipUrl },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!updated) {
       return res.status(404).json({ success: false, error: "Voucher not found." });

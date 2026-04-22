@@ -553,9 +553,9 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
             </>
           )}
           <Button
-            variant="contained" size="small"
+            variant="outlined" size="small"
             onClick={() => window.location.href = '/'}
-            sx={{ borderRadius: 2, bgcolor: '#333', '&:hover': { bgcolor: '#000' } }}
+            sx={{ borderRadius: 2, color: '#64748b', borderColor: '#e2e8f0' }}
           >
             Dashboard
           </Button>

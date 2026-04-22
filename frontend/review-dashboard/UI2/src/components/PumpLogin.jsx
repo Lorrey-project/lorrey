@@ -9,6 +9,7 @@ import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import LoginIcon from '@mui/icons-material/Login';
+import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import { useAuth } from '../context/AuthContext';
 
 const PUMPS = [
@@ -29,7 +30,7 @@ const PUMPS = [
 ];
 
 function PumpPanel({ pump, onToggle }) {
-    const { login } = useAuth();
+    const { login, loginWithPasskey, logout } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPass, setShowPass] = useState(false);
@@ -51,6 +52,29 @@ function PumpPanel({ pump, onToggle }) {
             }
         } catch (err) {
             setError(err.response?.data?.message || 'Invalid credentials.');
+        } finally {
+            setLoading(false);
+        }
+    };
+    const handleBiometricLogin = async () => {
+        if (!window.PublicKeyCredential) {
+            setError('Biometrics are not natively supported or are blocked in this environment.');
+            return;
+        }
+        if (!email) {
+            setError('Please enter your email to use FaceID/TouchID.');
+            return;
+        }
+        setError('');
+        setLoading(true);
+        try {
+            const loggedUser = await loginWithPasskey(email, 'PETROL PUMP');
+            if (loggedUser.pumpName && loggedUser.pumpName !== pump.id) {
+                setError(`This account belongs to ${loggedUser.pumpName}, not ${pump.id}.`);
+                logout();
+            }
+        } catch (err) {
+            setError(err.message || 'Biometric login failed.');
         } finally {
             setLoading(false);
         }
@@ -206,6 +230,26 @@ function PumpPanel({ pump, onToggle }) {
                     }}
                 >
                     {loading ? 'Signing In...' : `Sign In as ${pump.id}`}
+                </Button>
+                <Button
+                    variant="outlined"
+                    fullWidth
+                    disabled={loading}
+                    onClick={handleBiometricLogin}
+                    startIcon={<FingerprintIcon />}
+                    sx={{
+                        py: 1.5, borderRadius: '14px', fontWeight: 800, fontSize: 14,
+                        color: pump.accent, borderColor: pump.accent,
+                        boxShadow: 'none',
+                        '&:hover': {
+                            bgcolor: 'rgba(255,255,255,0.05)',
+                            borderColor: pump.accent,
+                            boxShadow: `0 0 15px ${pump.accent}30`
+                        },
+                        transition: 'all 0.2s',
+                    }}
+                >
+                    Biometric Unlock
                 </Button>
             </form>
 

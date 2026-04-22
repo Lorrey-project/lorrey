@@ -106,7 +106,7 @@ router.post('/save-group', async (req, res) => {
     await FinancialYearPayment.findOneAndUpdate(
       { id },
       { billNos, paymentAmount, paymentDate, referenceNo, debitAmount, remarks },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
     res.json({ success: true });
   } catch (err) {
@@ -123,7 +123,7 @@ router.post('/upload-proof', paymentProofUpload.single('proof'), async (req, res
       await FinancialYearPayment.findOneAndUpdate(
         { id },
         { paymentProofUrl: req.file.location },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after' }
       );
     }
     res.json({ message: "Proof saved successfully", url: req.file.location });
@@ -147,7 +147,7 @@ router.post('/save-row', async (req, res) => {
     await FinancialYearRow.findOneAndUpdate(
       { billNo },
       { $set: updateObj },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
     res.json({ success: true });
   } catch (err) {

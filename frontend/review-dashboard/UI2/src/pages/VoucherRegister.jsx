@@ -13,7 +13,7 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 
-const API_URL  = import.meta.env.VITE_API_URL  || 'http://localhost:3000';
+const API_URL  = import.meta.env.VITE_API_URL  || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
 
 // ─── Column Definitions ───────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ const PURPOSE_COLORS = {
 };
 
 // ─── Socket (singleton) ───────────────────────────────────────────────────────
-const socket = io(SOCKET_URL, { transports: ['websocket'], autoConnect: true });
+const socket = io('/', { transports: ['websocket'], autoConnect: true });
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function VoucherRegister({ onBack }) {

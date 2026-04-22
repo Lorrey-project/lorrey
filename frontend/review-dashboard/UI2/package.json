@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:office": "vite --port 5173",
-    "dev:site": "VITE_PORTAL=site vite --port 5174",
-    "dev:sas1": "VITE_PORTAL=sas1 vite --port 5175",
-    "dev:sas2": "VITE_PORTAL=sas2 vite --port 5176",
+    "dev": "vite --host",
+    "dev:office": "vite --port 5173 --host",
+    "dev:site": "VITE_PORTAL=site vite --port 5174 --host",
+    "dev:sas1": "VITE_PORTAL=sas1 vite --port 5175 --host",
+    "dev:sas2": "VITE_PORTAL=sas2 vite --port 5176 --host",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

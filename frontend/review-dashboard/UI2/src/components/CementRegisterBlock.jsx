@@ -4,9 +4,9 @@ import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 import '../styles/cementRegister.css';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-const socket = io(API_URL);
+const socket = io('/');
 
 export default function CementRegisterBlock() {
   const [entries, setEntries] = useState([]);

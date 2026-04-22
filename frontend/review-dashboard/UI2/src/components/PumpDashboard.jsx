@@ -25,7 +25,7 @@ const PumpDashboard = () => {
         }
         try {
             const token = localStorage.getItem('token');
-            const optRes = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/auth/generate-registration-options`, {
+            const optRes = await axios.get(`${import.meta.env.VITE_API_URL || '/api'}/auth/generate-registration-options`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
@@ -36,7 +36,7 @@ const PumpDashboard = () => {
                 return;
             }
 
-            const verifyRes = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/auth/verify-registration`, attResp, {
+            const verifyRes = await axios.post(`${import.meta.env.VITE_API_URL || '/api'}/auth/verify-registration`, attResp, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 

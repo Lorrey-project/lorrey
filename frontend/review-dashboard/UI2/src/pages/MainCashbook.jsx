@@ -12,9 +12,9 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
-const socket = io(SOCKET_URL, { autoConnect: true });
+const socket = io('/', { autoConnect: true });
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',

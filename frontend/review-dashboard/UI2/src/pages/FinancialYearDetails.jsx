@@ -12,7 +12,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return 0;

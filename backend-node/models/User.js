@@ -18,6 +18,16 @@ const userSchema = new mongoose.Schema({
         enum: ['OFFICE', 'PETROL PUMP', 'HEAD_OFFICE'],
         default: 'OFFICE'
     },
+    status: {
+        type: String,
+        enum: ['pending', 'active', 'rejected'],
+        default: 'pending'
+    },
+    name: {
+        type: String,
+        trim: true,
+        default: ''
+    },
     pumpName: {
         type: String,
         enum: ['SAS-1', 'SAS-2', null],

@@ -8,7 +8,7 @@ import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import SaveIcon from '@mui/icons-material/Save';
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const PUMPS = ['SAS-1', 'SAS-2'];
 

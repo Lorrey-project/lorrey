@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery } from '@mui/material';
 import InvoiceForm from './components/InvoiceForm';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
@@ -14,11 +14,15 @@ import CementRegister from './pages/CementRegister';
 import VoucherRegister from './pages/VoucherRegister';
 import GSTPortalRegister from './pages/GSTPortalRegister';
 import MainCashbook from './pages/MainCashbook';
+import FuelRateSettings from './pages/FuelRateSettings';
+import OfficePortal from './portals/office/OfficePortal';
+import SitePortal from './portals/site/SitePortal';
+import PumpPortal from './portals/pump/PumpPortal';
 import PumpPaymentDetails from './pages/PumpPaymentDetails';
 import PartyPaymentDetails from './pages/PartyPaymentDetails';
 import FinancialYearDetails from './pages/FinancialYearDetails';
-import FuelRateSettings from './pages/FuelRateSettings';
 import AccountDetails from './pages/AccountDetails';
+import AccountApprovalsPage from './pages/AccountApprovalsPage';
 
 const theme = createTheme({
   palette: {
@@ -77,6 +81,8 @@ const theme = createTheme({
 
 function AppContent() {
   const { user, loading } = useAuth();
+  const theme = createTheme(); // Need theme for media query
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [showSignup, setShowSignup] = useState(false);
   const [currentView, setCurrentView] = useState('dashboard');
   const [lorrySlipInvoiceId, setLorrySlipInvoiceId] = useState(null);
@@ -100,7 +106,7 @@ function AppContent() {
       return showSignup ? (
         <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-1" />
       ) : (
-        <PumpLogin onToggle={() => setShowSignup(true)} lockedPump="SAS-1" />
+        <Login onToggle={() => setShowSignup(true)} lockedPortal="PETROL PUMP" lockedPump="SAS-1" />
       );
     }
 
@@ -109,7 +115,7 @@ function AppContent() {
       return showSignup ? (
         <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-2" />
       ) : (
-        <PumpLogin onToggle={() => setShowSignup(true)} lockedPump="SAS-2" />
+        <Login onToggle={() => setShowSignup(true)} lockedPortal="PETROL PUMP" lockedPump="SAS-2" />
       );
     }
 
@@ -214,11 +220,51 @@ function AppContent() {
     return <AccountDetails onBack={() => setCurrentView('dashboard')} />;
   }
 
+  if (currentView === 'accountApprovals') {
+    return <AccountApprovalsPage onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'fuelRateSettings') {
     return <FuelRateSettings onBack={() => setCurrentView('dashboard')} />;
   }
 
   if (currentView === 'dashboard') {
+    if (isMobile) {
+      if (user.role === 'PETROL PUMP') {
+        return (
+          <PumpPortal 
+            onOpenBillingSheet={() => setCurrentView('pumpPayment')}
+            onRegisterBiometrics={() => {
+              alert("Biometric registration is initiated. Please follow the system prompt.");
+            }}
+          />
+        );
+      }
+      if (import.meta.env.VITE_PORTAL === 'site' || user.role === 'OFFICE') {
+        return (
+          <SitePortal 
+            onUploadNew={() => setCurrentView('upload')}
+            onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); setCurrentView('lorryHireSlip'); }}
+            onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); setCurrentView('fuelSlip'); }}
+            onOpenRegisters={() => setCurrentView('cementRegister')}
+            onOpenVouchers={() => setCurrentView('voucherRegister')}
+          />
+        );
+      }
+      return (
+        <OfficePortal 
+          onUploadNew={() => setCurrentView('upload')}
+          onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); setCurrentView('lorryHireSlip'); }}
+          onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); setCurrentView('fuelSlip'); }}
+          onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}
+          onOpenVouchers={() => setCurrentView('voucherRegister')}
+          onOpenContacts="truckManager"
+          onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
+        />
+      );
+    }
+
+    // Desktop Routing
     if (user.role === 'PETROL PUMP') {
       return (
         <PumpDashboard 
@@ -226,6 +272,7 @@ function AppContent() {
         />
       );
     }
+
     return (
       <Dashboard
         onUploadNew={() => setCurrentView('upload')}
@@ -240,6 +287,7 @@ function AppContent() {
         onOpenFYDetails={() => setCurrentView('fyDetails')}
         onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}
         onOpenAccountDetails={() => setCurrentView('accountDetails')}
+        onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
       />
     );
   }

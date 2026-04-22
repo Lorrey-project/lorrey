@@ -437,6 +437,59 @@ router.get("/lorry-data/:id", async (req, res) => {
     }
 });
 
+// GET recent verifications for a specific pump
+router.get("/pump-verifications/:pumpName", async (req, res) => {
+    try {
+        const { pumpName } = req.params;
+        // Search for invoices verified by this pump, sorted by most recent
+        const verifications = await Invoice.find({
+            "lorry_hire_slip_data.station_name": pumpName,
+            is_hsd_verified: true
+        })
+        .sort({ hsd_verified_at: -1 })
+        .limit(20)
+        .lean();
+        
+        res.json(verifications);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET stats for a specific pump (Daily total, Pending count)
+router.get("/pump-stats/:pumpName", async (req, res) => {
+    try {
+        const { pumpName } = req.params;
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+
+        // 1. Total Litres Verified Today
+        const todayVerifications = await Invoice.find({
+            "lorry_hire_slip_data.station_name": pumpName,
+            is_hsd_verified: true,
+            hsd_verified_at: { $gte: startOfDay }
+        }).lean();
+
+        const totalLitresToday = todayVerifications.reduce((sum, inv) => 
+            sum + (Number(inv.lorry_hire_slip_data?.diesel_litres) || 0), 0
+        );
+
+        // 2. Count of Pending Verifications (Slips tagged for this pump but not yet verified)
+        const pendingCount = await Invoice.countDocuments({
+            "lorry_hire_slip_data.station_name": pumpName,
+            is_hsd_verified: { $ne: true }
+        });
+
+        res.json({
+            totalLitresToday: parseFloat(totalLitresToday.toFixed(2)),
+            verifiedTodayCount: todayVerifications.length,
+            pendingCount
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Verify HSD Slip / Fuel Slip code
 router.get("/verify-fuel-slip/:code", async (req, res) => {
     try {
@@ -600,10 +653,14 @@ router.post("/fuel-slip-softcopy", fuelSlipUpload.single("softcopy"), async (req
     console.log(">>> Received slip_data:", slip_data);
 
     let parsedSlipData = {};
-    try {
-        parsedSlipData = JSON.parse(slip_data);
-    } catch (e) {
-        console.error(">>> Failed to parse slip_data:", e.message);
+    if (slip_data && slip_data !== "undefined") {
+        try {
+            parsedSlipData = JSON.parse(slip_data);
+        } catch (e) {
+            console.error(">>> Failed to parse slip_data:", e.message);
+        }
+    } else {
+        console.warn(">>> Fuel slip uploaded without slip_data details");
     }
 
     const updatePayload = {
@@ -620,7 +677,7 @@ router.post("/fuel-slip-softcopy", fuelSlipUpload.single("softcopy"), async (req
             const updated = await Invoice.findByIdAndUpdate(
                 invoice_id,
                 { $set: updatePayload },
-                { new: true }
+                { returnDocument: 'after' }
             );
             if (updated) {
                 console.log(">>> DB Update Success for invoice:", invoice_id);

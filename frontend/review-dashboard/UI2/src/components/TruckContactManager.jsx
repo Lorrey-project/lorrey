@@ -3,6 +3,7 @@ import {
   Dialog, DialogTitle, DialogContent, Box, Typography, TextField,
   Button, IconButton, CircularProgress, Snackbar, Alert,
   Tabs, Tab, Divider, Backdrop, MenuItem, Chip, Autocomplete,
+  useTheme, useMediaQuery
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
@@ -86,6 +87,9 @@ const getStr = (...candidates) => {
 };
 
 export default function TruckContactManager({ open, onClose }) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  
   const [tab, setTab] = useState(0);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -299,12 +303,13 @@ export default function TruckContactManager({ open, onClose }) {
         onClose={onClose}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
         PaperProps={{
           sx: {
-            borderRadius: '24px',
+            borderRadius: isMobile ? 0 : '24px',
             overflow: 'hidden',
             background: '#ffffff',
-            maxHeight: '92vh',
+            maxHeight: isMobile ? '100dvh' : '92vh',
           }
         }}
       >

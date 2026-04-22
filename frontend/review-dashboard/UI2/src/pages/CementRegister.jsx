@@ -16,9 +16,9 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
-const socket = io(SOCKET_URL, { autoConnect: true });
+const socket = io('/', { autoConnect: true });
 
 // ─── Column types ──────────────────────────────────────────────────────────────
 // 'auto'   = fetched from server, not editable
@@ -451,136 +451,108 @@ export default function CementRegister({ onBack }) {
 
       {/* ── Top Bar ─────────────────────────────────────────────────────── */}
       <Box sx={{
-        px: 2.5, py: 1.2,
-        display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: '#fff', borderBottom: '1px solid #e2e8f0',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flexShrink: 0
+        px: { xs: 1.5, md: 3 }, py: 1.5,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.03)', flexShrink: 0,
+        gap: 2, flexWrap: 'wrap'
       }}>
-        <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
-          <ArrowBackIcon fontSize="small" />
-        </IconButton>
-        <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-          Cement Register
-        </Typography>
-
-        {/* Legend */}
-        <Box sx={{ display: 'flex', gap: 1, ml: 1 }}>
-          {[
-            { label: 'Auto', bg: '#ede9fe', icon: <LockIcon sx={{ fontSize: 10 }} /> },
-            { label: 'Manual', bg: '#fff7ed', icon: '✏️' },
-            { label: 'Calculated', bg: '#f0fdf4', icon: <FunctionsIcon sx={{ fontSize: 10 }} /> },
-          ].map(l => (
-            <Chip key={l.label} size="small" label={<>{l.icon} {l.label}</>}
-              sx={{ bgcolor: l.bg, fontSize: '10px', fontWeight: 600, height: 20, cursor: 'default' }} />
-          ))}
+        <Box display="flex" alignItems="center" gap={2}>
+          <IconButton onClick={onBack} sx={{ bgcolor: '#f8fafc', '&:hover': { bgcolor: '#f1f5f9' }, p: 1 }}>
+            <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
+          </IconButton>
+          <Box>
+            <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
+              Cement Register
+            </Typography>
+            <Box display="flex" gap={1} mt={0.5} alignItems="center">
+              {dirtyCount > 0 && (
+                <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' }} />
+              )}
+              {selectedIds.size > 0 && (
+                <Chip label={`${selectedIds.size} selected`} size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' }} />
+              )}
+              {dirtyCount === 0 && selectedIds.size === 0 && (
+                <Typography variant="caption" color="text.secondary" fontWeight={500}>Central Database</Typography>
+              )}
+            </Box>
+          </Box>
         </Box>
 
-        {dirtyCount > 0 && (
-          <Chip label={`${dirtyCount} unsaved`} size="small" color="warning" sx={{ fontWeight: 700 }} />
-        )}
-        {selectedIds.size > 0 && (
-          <Chip
-            label={`${selectedIds.size} selected`}
-            size="small"
-            sx={{ fontWeight: 700, bgcolor: '#fee2e2', color: '#b91c1c' }}
-          />
-        )}
-
-        <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => alert("Incentive Calculation Sheet route pending!")}
-            sx={{
-              fontWeight: 700, 
-              borderRadius: '24px', 
-              px: 2.5, 
-              py: 0.5,
-              fontSize: '13px',
-              textTransform: 'none',
-              border: '2px solid #0891b2', 
-              color: '#0891b2',
-              whiteSpace: 'nowrap',
-              fontFamily: 'Inter, system-ui, sans-serif',
-              '&:hover': { 
-                bgcolor: '#0891b2', 
-                color: '#fff',
-                border: '2px solid #0891b2',
-                boxShadow: '0 4px 8px rgba(8, 145, 178, 0.2)'
-              }
-            }}
-          >
-            Incentive Calculation Sheet
-          </Button>
+        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
           {isBillingMode ? (
             <Box sx={{ 
-              display: 'flex', alignItems: 'center', gap: 2, 
-              bgcolor: '#f0f9ff', px: 2, py: 0.5, borderRadius: 2, border: '1px solid #bae6fd' 
+              display: 'flex', alignItems: 'center', gap: 1.5, 
+              bgcolor: '#f8fafc', px: 2, py: 0.75, borderRadius: '12px', border: '1px solid #e2e8f0' 
             }}>
-              <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#0369a1' }}>BILLING MODE:</Typography>
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#475569', letterSpacing: '0.5px' }}>BILLING STAGE</Typography>
               <input 
                 type="text" placeholder="Bill No" 
                 value={bulkBillInput.billNo}
                 onChange={e => setBulkBillInput(prev => ({ ...prev, billNo: e.target.value }))}
-                style={{ width: 220, padding: '6px 12px', borderRadius: 6, border: '1px solid #94a3b8', fontSize: 13, outline: 'none' }}
+                style={{ width: 140, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
               />
               <input 
                 type="date"
                 value={bulkBillInput.billDate}
                 onChange={e => setBulkBillInput(prev => ({ ...prev, billDate: e.target.value }))}
-                style={{ width: 160, padding: '6px 12px', borderRadius: 6, border: '1px solid #94a3b8', fontSize: 13, outline: 'none' }}
+                style={{ width: 130, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
               />
-              <Button size="small" variant="contained" color="primary" onClick={handleBulkBillApply}
+              <Button size="small" variant="contained" onClick={handleBulkBillApply}
                 disabled={selectedIds.size === 0}
-                sx={{ fontWeight: 800, fontSize: 10, px: 2, bgcolor: '#0284c7' }}>
-                Apply to {selectedIds.size}
+                sx={{ fontWeight: 700, fontSize: '0.75rem', px: 2, borderRadius: '8px', bgcolor: '#0f172a', '&:hover': { bgcolor: '#1e293b' }, boxShadow: 'none' }}>
+                Apply ({selectedIds.size})
               </Button>
-              <Button size="small" sx={{ fontWeight: 700, fontSize: 10, color: '#64748b' }} 
+              <Button size="small" sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b', minWidth: 0, px: 1, textTransform: 'none' }} 
                 onClick={() => setIsBillingMode(false)}>Exit</Button>
             </Box>
           ) : (
-            <Button size="small" variant="contained"
-              startIcon={<SyncIcon />}
+            <Button size="small" variant="outlined"
               onClick={() => {
                 setIsBillingMode(true);
                 setSelectedIds(new Set());
               }}
               sx={{
-                fontWeight: 800, borderRadius: 2, px: 2, fontSize: '11px',
-                background: 'linear-gradient(135deg,#0ea5e9,#0284c7)',
-                boxShadow: '0 4px 12px rgba(14,165,233,0.3)',
-                '&:hover': { background: 'linear-gradient(135deg,#0284c7,#0369a1)' },
+                fontWeight: 700, borderRadius: '10px', px: 2, fontSize: '0.8rem',
+                color: '#334155', borderColor: '#cbd5e1',
+                textTransform: 'none',
+                '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' },
               }}>
-              Bill Together
+              Run Batch Billing
             </Button>
           )}
 
-          <Tooltip title="Discard & reload">
-            <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: '#f1f5f9' }}>
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
-            sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>XLS</Button>
-          <Button size="small" component="label" variant="outlined" startIcon={<UploadIcon />}
-            sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>
+          <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
+
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }}/>} onClick={handleExport}
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>Export XLS</Button>
+          
+          <Button size="small" component="label" variant="outlined" startIcon={<UploadIcon sx={{ fontSize: '1rem' }}/>}
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
             Import
             <input type="file" accept=".csv" hidden onChange={handleImport} />
           </Button>
+
           <Button
             size="small" variant="contained"
-            startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
+            startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon sx={{ fontSize: '1.1rem' }} />}
             onClick={handleSave} disabled={dirtyCount === 0 || saving}
             sx={{
-              fontWeight: 800, borderRadius: 2, px: 2.5, fontSize: '12px',
-              background: dirtyCount > 0
-                ? 'linear-gradient(135deg,#7c3aed,#4f46e5)'
-                : '#cbd5e1',
-              boxShadow: dirtyCount > 0 ? '0 4px 12px rgba(124,58,237,0.35)' : 'none',
-              '&:disabled': { background: '#cbd5e1', color: '#94a3b8' },
+              fontWeight: 700, borderRadius: '10px', px: 2.5, fontSize: '0.85rem', textTransform: 'none',
+              background: dirtyCount > 0 ? '#10b981' : '#f1f5f9',
+              color: dirtyCount > 0 ? '#fff' : '#94a3b8',
+              boxShadow: dirtyCount > 0 ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'none',
+              '&:hover': { background: dirtyCount > 0 ? '#059669' : '#f1f5f9' },
+              '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' },
             }}>
-            {saving ? 'Saving…' : `Save${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+            {saving ? 'Saving…' : `Save Changes${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
           </Button>
+
+          <Tooltip title="Refresh Data">
+            <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', '&:hover': { bgcolor: '#f1f5f9' }, p: 0.75, borderRadius: '10px' }}>
+              <RefreshIcon sx={{ fontSize: '1.1rem', color: '#475569' }} />
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
 
