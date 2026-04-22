@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
-  Snackbar, Alert, Chip, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions
+  Snackbar, Alert, Chip, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
+  Autocomplete, TextField
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -29,6 +30,33 @@ export const COLUMNS = [
   { key: 'Withdraw', label: 'WITHDRAW', width: 130 },
   { key: 'Deposit', label: 'DEPOSIT', width: 130 },
   { key: 'Closing Balance', label: 'CLOSING\nBALANCE', width: 140 },
+];
+
+const LEDGER_OPTIONS = [
+  "CA charges", "Capital investment", "Capital investment refund", "Challan Sign",
+  "Employee P Tax", "Endhan Cash Back", "Fasttag payment", "Freight Advance",
+  "Freight payment", "Freight Payment Refund", "GST Paid", "interest Paid",
+  "ITR return", "Main cash", "Office Exp", "Partner Interest", "Partner Salary",
+  "Payment recived", "Printing&stationary", "Pump payment", "Room rent",
+  "Salary Advance", "Staff Salary", "subscription", "TDS on Cash Withdrawl",
+  "Tds Payment", "Toll Payment"
+];
+
+const NAMES_OPTIONS = [
+  "Abhijit Ghosh", "Animesh Banerjee", "Animesh mukherjee", "Arobindo Roy",
+  "Arup Mondol", "Avijit Gorai", "Bablu Bar", "Bhola Yadav", "Biplab Goswami",
+  "Bithi Nayak", "Challan Sign", "DAC GST paid", "Dilip Panja", "Dipali Nayak",
+  "Dipali Association", "Endhaan Cash Book", "Fasttag Payment", "Gorachand Dutta",
+  "Goutam Kumar roy", "Haradhan Mondal", "Indranil Ray", "Interest paid",
+  "ITR retund", "Jayanta maji", "Kanika nayak", "Kush Singh", "Main Cash",
+  "Manas Sarkar", "Manoj Modak", "Md Faiyaz Alam", "Mir Ahasan Ali", "NVCL",
+  "NVL", "Office Exp.", "Pbd Associations", "Prasanta Maji",
+  "Printing & Stationary", "Ragunath guin", "Room Rent", "Ruhul Sk",
+  "Sajal Banerjee", "satyanarayan Ghosh", "Sekh mustafa", "Suvadip Konar",
+  "Sonthalia Pump", "Sourav Ghosh", "Subscription", "Suman Ghosh",
+  "Supriyo Das CA charges", "Suraj Singh", "Swarup Bhowal", "Tapas Maji",
+  "TDS on CashWithdrawl", "TDS Payment", "Tushar Kanti Mondal", "Uday Malik",
+  "Uttam Roy"
 ];
 
 const AUTO_COLS = new Set(['Transaction Date', 'Remarks', 'Reference No', 'Cheque No', 'Withdraw', 'Deposit', 'Closing Balance']);
@@ -305,16 +333,86 @@ export default function AccountDetails({ onBack }) {
                   const isFromBank = row._source === 'bank_statement';
                   return (
                     <td key={col.key} style={{ border: '1px solid #e2e8f0', padding: 0 }}>
-                      <input
-                        type={col.isDate ? 'date' : 'text'}
-                        value={val}
-                        readOnly={isAuto && isFromBank && !localData[row._id]?.[col.key]}
-                        onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
-                        style={{
-                          width: '100%', height: '100%', border: 'none', padding: '6px 8px',
-                          background: 'transparent', outline: 'none', fontSize: '12px'
-                        }}
-                      />
+                      {col.key === 'Ledger Name' || col.key === 'Names' ? (
+                        <Autocomplete
+                          freeSolo
+                          disableClearable
+                          options={col.key === 'Ledger Name' ? LEDGER_OPTIONS : NAMES_OPTIONS}
+                          value={val}
+                          onChange={(e, newVal) => handleCellEdit(row._id, col.key, newVal)}
+                          onInputChange={(e, newVal) => handleCellEdit(row._id, col.key, newVal)}
+                          PaperComponent={({ children }) => (
+                            <Box sx={{ 
+                              bgcolor: 'rgba(255, 255, 255, 0.98)', 
+                              backdropFilter: 'blur(8px)',
+                              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: '10px',
+                              mt: 0.5,
+                              overflow: 'hidden',
+                              '& .MuiAutocomplete-listbox': {
+                                padding: '4px',
+                                maxHeight: '300px', // Limit height for Names list
+                                '& .MuiAutocomplete-option': {
+                                  fontSize: '13px',
+                                  padding: '8px 12px',
+                                  borderRadius: '6px',
+                                  color: '#334155',
+                                  '&[aria-selected="true"]': {
+                                    bgcolor: '#eff6ff',
+                                    color: '#2563eb',
+                                    fontWeight: 600
+                                  },
+                                  '&.Mui-focused': {
+                                    bgcolor: '#f1f5f9'
+                                  }
+                                }
+                              }
+                            }}>
+                              {children}
+                            </Box>
+                          )}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              variant="standard"
+                              placeholder={col.key === 'Ledger Name' ? "Search Ledger..." : "Search Name..."}
+                              InputProps={{
+                                ...params.InputProps,
+                                disableUnderline: true,
+                                style: { 
+                                  fontSize: '12px', 
+                                  padding: '4px 8px',
+                                  fontWeight: val ? 700 : 400,
+                                  color: '#1e293b'
+                                }
+                              }}
+                            />
+                          )}
+                          sx={{
+                            width: '100%',
+                            '& .MuiAutocomplete-inputRoot': { padding: 0 },
+                            '& .MuiAutocomplete-input': { 
+                              padding: '8px 8px !important',
+                              transition: 'background 0.2s',
+                              '&:hover': { bgcolor: '#f8fafc' },
+                              '&:focus': { bgcolor: '#fff' }
+                            },
+                            '& .MuiAutocomplete-endAdornment': { display: 'none' }
+                          }}
+                        />
+                      ) : (
+                        <input
+                          type={col.isDate ? 'date' : 'text'}
+                          value={val}
+                          readOnly={isAuto && isFromBank && !localData[row._id]?.[col.key]}
+                          onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
+                          style={{
+                            width: '100%', height: '100%', border: 'none', padding: '6px 8px',
+                            background: 'transparent', outline: 'none', fontSize: '12px'
+                          }}
+                        />
+                      )}
                     </td>
                   );
                 })}

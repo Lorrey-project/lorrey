@@ -12,20 +12,25 @@ function getCementCol() {
 function parseDate(val) {
   if (!val) return null;
   if (val instanceof Date) return isNaN(val) ? null : val;
-  const iso = new Date(val);
-  if (!isNaN(iso.getTime())) {
-    const str = String(val);
-    const parts = str.split(/[-\/]/);
-    if (parts.length === 3 && parts[2].length === 4) {
-      const d = parseInt(parts[0]), m = parseInt(parts[1]), y = parseInt(parts[2]);
-      if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
-        return new Date(y, m - 1, d);
-      }
+
+  const str = String(val).trim();
+
+  // ── Detect DD-MM-YYYY (Indian format) — MUST check first ──
+  const ddmmyyyy = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (ddmmyyyy) {
+    const d = parseInt(ddmmyyyy[1]), m = parseInt(ddmmyyyy[2]), y = parseInt(ddmmyyyy[3]);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d);
     }
-    return iso;
   }
+
+  // ── Try ISO / standard JS parsing ──
+  const iso = new Date(str);
+  if (!isNaN(iso.getTime())) return iso;
+
   return null;
 }
+
 
 const MONTH_NAMES = [
   'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',

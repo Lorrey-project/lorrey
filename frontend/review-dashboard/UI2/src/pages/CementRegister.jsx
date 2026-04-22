@@ -15,6 +15,7 @@ import SyncIcon from '@mui/icons-material/Sync';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
+import IncentiveAnalysis from '../components/IncentiveAnalysis';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
@@ -216,6 +217,7 @@ export default function CementRegister({ onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
+  const [showIncentive, setShowIncentive] = useState(false);
 
   const dirtyCount = Object.keys(localData).length;
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -376,7 +378,7 @@ export default function CementRegister({ onBack }) {
 
   // ── CSV Export ─────────────────────────────────────────────────────────────
   const handleExport = () => exportToCsv('cement_register.xls', computedRows);
-  
+
   // ── Apply Bulk Bill to selected rows (draft only) ─────────────────────────
   const handleBulkBillApply = () => {
     const { billNo, billDate } = bulkBillInput;
@@ -393,16 +395,16 @@ export default function CementRegister({ onBack }) {
     setLocalData(prev => {
       const next = { ...prev };
       ids.forEach(id => {
-        next[id] = { 
-          ...(next[id] || {}), 
-          'BILL NO': billNo, 
-          'BILL DATE': billDate 
+        next[id] = {
+          ...(next[id] || {}),
+          'BILL NO': billNo,
+          'BILL DATE': billDate
         };
       });
       return next;
     });
     setIsBillingMode(false);
-    setSelectedIds(new Set()); 
+    setSelectedIds(new Set());
     setSnack({ severity: 'success', msg: `Drafted Bill No: ${billNo} for ${ids.length} rows. Remember to click SAVE!` });
   };
 
@@ -434,6 +436,16 @@ export default function CementRegister({ onBack }) {
   };
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Show Incentive Analysis sheet (passes all computed rows as source data)
+  if (showIncentive) {
+    return (
+      <IncentiveAnalysis
+        rows={computedRows}
+        onBack={() => setShowIncentive(false)}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
@@ -476,7 +488,32 @@ export default function CementRegister({ onBack }) {
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', ml: 'auto' }}>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => setShowIncentive(true)}
+            sx={{
+              fontWeight: 700,
+              borderRadius: '24px',
+              px: 2.5,
+              py: 0.5,
+              fontSize: '13px',
+              textTransform: 'none',
+              border: '2px solid #0891b2',
+              color: '#0891b2',
+              whiteSpace: 'nowrap',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              '&:hover': {
+                bgcolor: '#0891b2',
+                color: '#fff',
+                border: '2px solid #0891b2',
+                boxShadow: '0 4px 8px rgba(8, 145, 178, 0.2)'
+              }
+            }}
+          >
+            📊 Incentive Calculation Sheet
+          </Button>
           {isBillingMode ? (
             <Box sx={{ 
               display: 'flex', alignItems: 'center', gap: 1.5, 
@@ -489,7 +526,7 @@ export default function CementRegister({ onBack }) {
                 onChange={e => setBulkBillInput(prev => ({ ...prev, billNo: e.target.value }))}
                 style={{ width: 140, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
               />
-              <input 
+              <input
                 type="date"
                 value={bulkBillInput.billDate}
                 onChange={e => setBulkBillInput(prev => ({ ...prev, billDate: e.target.value }))}
