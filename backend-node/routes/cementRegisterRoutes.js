@@ -47,12 +47,12 @@ router.get("/", async (req, res) => {
     const col = getCollection();
 
     const filter = {};
-    if (req.query.site)  filter["SITE"]       = req.query.site;
-    if (req.query.owner) filter["OWNER NAME"]  = req.query.owner;
+    if (req.query.site) filter["SITE"] = req.query.site;
+    if (req.query.owner) filter["OWNER NAME"] = req.query.owner;
     if (req.query.from || req.query.to) {
       filter["LOADING DATE"] = {};
       if (req.query.from) filter["LOADING DATE"]["$gte"] = new Date(req.query.from);
-      if (req.query.to)   filter["LOADING DATE"]["$lte"] = new Date(req.query.to);
+      if (req.query.to) filter["LOADING DATE"]["$lte"] = new Date(req.query.to);
     }
 
     const entries = await col.find(filter).sort({ "SL NO": 1 }).toArray();
@@ -258,10 +258,10 @@ router.post("/attach/:rowId/:attachType", auth, (req, res, next) => {
 }, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: "No file uploaded." });
-    const col      = getCollection();
+    const col = getCollection();
     const { rowId, attachType } = req.params;
-    const url      = req.file.location; // S3 public URL
-    const field    = attachType === "challan_proof" ? "CHALLAN_PROOF_URL" : "SITE_CASH_PROOF_URL";
+    const url = req.file.location; // S3 public URL
+    const field = attachType === "challan_proof" ? "CHALLAN_PROOF_URL" : "SITE_CASH_PROOF_URL";
 
     // Save URL into the row
     await col.updateOne(
