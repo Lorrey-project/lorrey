@@ -120,22 +120,11 @@ const FuelSlipDocument = forwardRef(({
                     {/* ITEM GRID */}
                     <tr>
                         <td className="fuel-td fuel-label">Description</td>
-                        <td className="fuel-td fuel-label">Qty(Ltrs)</td>
-                        <td className="fuel-td fuel-label">Rate (Rs.)</td>
-                        <td className="fuel-td fuel-label">Amount(Rs.)</td>
+                        <td colSpan="3" className="fuel-td fuel-label">Qty(Ltrs)</td>
                     </tr>
                     <tr>
                         <td className="fuel-td fuel-value">Diesel</td>
-                        <td className="fuel-td fuel-value">{fuelData.qty || ''}</td>
-                        <td className="fuel-td fuel-value">{Number(fuelData.rate) === 0 ? '--' : fuelData.rate}</td>
-                        <td className="fuel-td fuel-value" style={{ textAlign: 'left' }}>
-                            {Number(fuelData.amount) === 0 ? '--' : Number(fuelData.amount).toFixed(2)}
-                        </td>
-                    </tr>
-
-                    {/* AMOUNT IN WORDS */}
-                    <tr>
-                        <td colSpan="4" className="fuel-td"><span className="fuel-label">Amount In word:</span> <span style={{ marginLeft: '10px' }} className="fuel-value">{amountWords}</span></td>
+                        <td colSpan="3" className="fuel-td fuel-value">{fuelData.qty || ''}</td>
                     </tr>
 
                     {/* FOOTER & SIGNATURES */}

@@ -33,6 +33,10 @@ import { useAuth } from '../context/AuthContext';
 import CementRegisterBlock from './CementRegisterBlock';
 import VoucherDialog from './VoucherDialog';
 import TruckContactManager from './TruckContactManager';
+import AutoPdfRegenerator from './AutoPdfRegenerator';
+import { io } from 'socket.io-client';
+
+const _dashSocket = io('/', { autoConnect: true });
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -60,6 +64,8 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
     const [fuelRateModalPump, setFuelRateModalPump]   = useState('SAS-1');
     const [fuelRateModalValue, setFuelRateModalValue] = useState('');
     const [pendingCount, setPendingCount]             = useState(0);
+    // Invoice IDs queued for PDF regeneration after a fuel rate change
+    const [regenQueue, setRegenQueue] = useState([]);
 
     const [portalStatuses, setPortalStatuses] = useState([]);
 
@@ -85,6 +91,21 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
             return () => clearInterval(intervalId);
         }
     }, [user?.role]);
+
+    // Listen for fuel rate applied — auto-regenerate affected PDFs
+    useEffect(() => {
+        const handler = ({ pumpName, rate, invoiceIds }) => {
+            if (!invoiceIds?.length) return;
+            setRegenQueue(prev => {
+                const existing = new Set(prev);
+                invoiceIds.forEach(id => existing.add(id));
+                return [...existing];
+            });
+            setSnack({ msg: `⛽ Fuel rate updated to ₹${rate}/L. Regenerating ${invoiceIds.length} slip PDF(s)...`, sev: 'info' });
+        };
+        _dashSocket.on('fuelRateApplied', handler);
+        return () => _dashSocket.off('fuelRateApplied', handler);
+    }, []);
 
     const fetchPendingCount = async () => {
         try {
@@ -112,8 +133,12 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
             const token = localStorage.getItem('token');
             const res = await axios.get(`${API_URL}/pump-payment/fuel-rates`, { headers: { Authorization: `Bearer ${token}` } });
             if (res.data.success) {
-                setFuelRates(res.data.rates);
-                setFuelRateEdits({ 'SAS-1': String(res.data.rates['SAS-1'] ?? 90), 'SAS-2': String(res.data.rates['SAS-2'] ?? 90) });
+                const rates = res.data.rates || {};
+                setFuelRates(rates);
+                setFuelRateEdits({ 
+                    'SAS-1': String(rates['SAS-1'] ?? 90), 
+                    'SAS-2': String(rates['SAS-2'] ?? 90) 
+                });
             }
         } catch (e) { console.error('Failed to fetch fuel rates:', e); }
     };
@@ -1076,7 +1101,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                                 <Typography variant="body2" fontWeight={800} sx={{ opacity: 0.9 }}>{pump}</Typography>
                                                 <Box display="flex" alignItems="baseline" gap={0.4}>
                                                     <Typography variant="caption" sx={{ opacity: 0.6, fontWeight: 700 }}>₹</Typography>
-                                                    <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1 }}>{fuelRates[pump] ?? 90}</Typography>
+                                                    <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1 }}>{(fuelRates || {})[pump] ?? 90}</Typography>
                                                     <Typography variant="caption" sx={{ opacity: 0.5, fontWeight: 700 }}>/L</Typography>
                                                 </Box>
                                             </Box>
@@ -1142,7 +1167,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                         variant={fuelRateModalPump === p ? 'contained' : 'outlined'}
                                         onClick={() => {
                                             setFuelRateModalPump(p);
-                                            setFuelRateModalValue(String(fuelRates[p] ?? 90));
+                                            setFuelRateModalValue(String((fuelRates || {})[p] ?? 90));
                                         }}
                                         sx={{
                                             flex: 1, borderRadius: '12px', fontWeight: 800, py: 1.2,
@@ -1213,7 +1238,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             >Cancel</Button>
                             <Button
                                 variant="contained"
-                                disabled={fuelRateSaving[fuelRateModalPump]}
+                                disabled={(fuelRateSaving || {})[fuelRateModalPump]}
                                 onClick={async () => {
                                     const pump = fuelRateModalPump;
                                     const rateVal = parseFloat(fuelRateModalValue);
@@ -1241,7 +1266,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     '&:hover': { boxShadow: '0 12px 28px rgba(25,118,210,0.5)' },
                                 }}
                             >
-                                {fuelRateSaving[fuelRateModalPump] ? 'Saving...' : 'Save Rate'}
+                                {(fuelRateSaving || {})[fuelRateModalPump] ? 'Saving...' : 'Save Rate'}
                             </Button>
                         </DialogActions>
                     </Dialog>
@@ -1747,10 +1772,22 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
 
             {/* ── Snackbar for Download Errors ── */}
             <Snackbar open={!!snack} autoHideDuration={5000} onClose={() => setSnack(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-                <Alert severity={snack?.type || 'info'} variant="filled" onClose={() => setSnack(null)} sx={{ borderRadius: '14px', fontWeight: 700 }}>
-                    {snack?.message}
+                <Alert severity={snack?.sev || snack?.type || 'info'} variant="filled" onClose={() => setSnack(null)} sx={{ borderRadius: '14px', fontWeight: 700 }}>
+                    {snack?.msg || snack?.message}
                 </Alert>
             </Snackbar>
+
+            {/* ── Hidden PDF Regenerators (triggered by fuel rate changes) ── */}
+            {regenQueue.map(invoiceId => (
+                <AutoPdfRegenerator
+                    key={invoiceId}
+                    invoiceId={invoiceId}
+                    onComplete={(ok) => {
+                        setRegenQueue(prev => prev.filter(id => id !== invoiceId));
+                        if (ok) setSnack({ msg: `✅ Slip PDF updated for invoice ${invoiceId.slice(-6)}`, sev: 'success' });
+                    }}
+                />
+            ))}
         </>
     );
 };

@@ -53,6 +53,31 @@ router.put("/:id", async (req, res) => {
   }
 });
 
+// POST /truck-contacts/upload-temp — Upload temporary driver license PDF
+const cementAttachUpload = require("../middleware/cementAttachUpload");
+router.post("/upload-temp", cementAttachUpload.single("pdf"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: "No file uploaded" });
+    res.json({ success: true, url: req.file.location });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /truck-contacts/approve/:id — Approve a temporary driver
+router.put("/approve/:id", async (req, res) => {
+  try {
+    const col = getCollection();
+    await col.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { is_approved: true, approved_at: new Date() } }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // DELETE /truck-contacts/:id — Delete a contact
 router.delete("/:id", async (req, res) => {
   try {

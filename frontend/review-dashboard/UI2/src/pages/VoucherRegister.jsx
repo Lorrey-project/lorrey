@@ -21,9 +21,10 @@ const COLUMNS = [
   { key: 'voucherNumber', label: 'VOUCHER\nNO.',     width: 140, type: 'auto'    },
   { key: 'date',          label: 'DATE',              width: 120, type: 'auto', isDate: true },
   { key: 'vehicleNumber', label: 'VEHICLE\nNUMBER',  width: 130, type: 'auto'    },
+  { key: 'expenseType',   label: 'EXPENSE\nTYPE',     width: 130, type: 'auto'    },
   { key: 'purpose',       label: 'PURPOSE',           width: 110, type: 'dropdown',
-    options: ['Fuel', 'Advance', 'Repair', 'Toll', 'Others'],
-    colorMap: { Fuel: '#fff7ed', Advance: '#eff6ff', Repair: '#fef2f2', Toll: '#f0fdf4', Others: '#f5f3ff' }
+    options: ['Fuel', 'Advance', 'Repair', 'Toll', 'Others', 'Water', 'Cleaning', 'WiFi Recharge', 'Salary'],
+    colorMap: { Fuel: '#fff7ed', Advance: '#eff6ff', Repair: '#fef2f2', Toll: '#f0fdf4', Others: '#f5f3ff', Water: '#e0f2fe', Cleaning: '#d1fae5', 'WiFi Recharge': '#ede9fe', Salary: '#ffedd5' }
   },
   { key: 'name',          label: 'PAYEE NAME',        width: 150, type: 'manual'  },
   { key: 'reason',        label: 'REASON',            width: 160, type: 'manual'  },
@@ -50,7 +51,8 @@ const fmtAmt = (n) =>
     : '';
 
 const PURPOSE_COLORS = {
-  Fuel: '#c2410c', Advance: '#1d4ed8', Repair: '#b91c1c', Toll: '#15803d', Others: '#374151'
+  Fuel: '#c2410c', Advance: '#1d4ed8', Repair: '#b91c1c', Toll: '#15803d', Others: '#374151',
+  Water: '#0369a1', Cleaning: '#047857', 'WiFi Recharge': '#6d28d9', Salary: '#c2410c'
 };
 
 // ─── Socket (singleton) ───────────────────────────────────────────────────────

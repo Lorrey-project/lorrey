@@ -304,7 +304,7 @@ const LorryHireSlipDocument = forwardRef(({
                 </colgroup>
                 <tbody>
                     <tr>
-                        <td rowSpan={6} style={{ ...td, verticalAlign: 'top', padding: '5px 6px' }}>
+                        <td rowSpan={4} style={{ ...td, verticalAlign: 'top', padding: '5px 6px' }}>
                             <b style={{ fontSize: '9px' }}>Note:</b>
                             <ol style={{ margin: '3px 0 0 0', paddingLeft: '13px', fontSize: '8.5px', lineHeight: '1.7' }}>
                                 <li>Signing confirms acceptance of terms &amp; conditions.</li>
@@ -317,14 +317,6 @@ const LorryHireSlipDocument = forwardRef(({
                     <tr>
                         <td style={lbl}>Diesel (Ltrs.)</td>
                         <td style={{ ...td, ...r }}>{v(dieselLtrs)}</td>
-                    </tr>
-                    <tr>
-                        <td style={lbl}>Diesel Rate (Rs./Ltr)</td>
-                        <td style={{ ...td, ...r }}>{Number(dieselRate) === 0 ? '--' : dieselRate}</td>
-                    </tr>
-                    <tr>
-                        <td style={lbl}>Total Diesel Advance (Rs.)</td>
-                        <td style={{ ...td, ...r }}>{Number(dieselAdv) === 0 ? '--' : v(dieselAdv)}</td>
                     </tr>
                     <tr>
                         <td style={lbl}>Fuel Slip Number</td>

@@ -8,9 +8,13 @@ const voucherSchema = new mongoose.Schema(
       unique: true,
       trim: true,
     },
+    expenseType: {
+      type: String,
+      enum: ["Direct Expense", "Indirect Expense"],
+      default: "Indirect Expense",
+    },
     vehicleNumber: {
       type: String,
-      required: true,
       trim: true,
       uppercase: true,
     },
@@ -26,7 +30,7 @@ const voucherSchema = new mongoose.Schema(
     purpose: {
       type: String,
       required: true,
-      enum: ["Fuel", "Advance", "Repair", "Toll", "Others"],
+      enum: ["Fuel", "Advance", "Repair", "Toll", "Others", "Water", "Cleaning", "WiFi Recharge", "Salary"],
     },
     slip_url: {
       type: String,

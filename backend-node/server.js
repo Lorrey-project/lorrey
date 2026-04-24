@@ -43,11 +43,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
-app.use((req, res, next) => {
-  const fs = require('fs');
-  const path = require('path');
-  const logPath = path.join(__dirname, 'request_log.txt');
-  fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${req.method} ${req.url}\n`);
+// Async request logger — non-blocking, does NOT stall the event loop
+const _reqLogStream = require('fs').createWriteStream(
+  require('path').join(__dirname, 'request_log.txt'), { flags: 'a' }
+);
+app.use((req, _res, next) => {
+  _reqLogStream.write(`[${new Date().toISOString()}] ${req.method} ${req.url}\n`);
   next();
 });
 
@@ -111,7 +112,7 @@ app.post("/upload", auth, upload.single("invoice"), async (req, res) => {
   try {
     const fileUrl = req.file.location;
     console.log("File uploaded to S3:", fileUrl);
-    const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:8000";
+    const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:5000";
     const response = await axios.post(`${aiWorkerUrl}/process`, {
       file: fileUrl
     });

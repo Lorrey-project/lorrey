@@ -20,6 +20,7 @@ const VoucherSlipDocument = forwardRef(({ voucher, companyInfo }, ref) => {
   const purposeColors = {
     Fuel: '#e65100', Advance: '#1a237e', Repair: '#b71c1c',
     Toll: '#1b5e20', Others: '#37474f',
+    Water: '#0284c7', Cleaning: '#059669', 'WiFi Recharge': '#7c3aed', Salary: '#ea580c'
   };
   const color = purposeColors[voucher.purpose] || '#333';
 
@@ -103,12 +104,14 @@ const VoucherSlipDocument = forwardRef(({ voucher, companyInfo }, ref) => {
         {/* Main Content */}
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '12px' }}>
           <tbody>
-            <tr style={{ borderBottom: '1px solid #eee' }}>
-              <td style={{ padding: '7px 4px', color: '#666', width: '35%' }}>Vehicle Number</td>
-              <td style={{ padding: '7px 4px', fontWeight: 700, fontFamily: 'monospace', fontSize: '13px', color: '#1a1a1a' }}>
-                {voucher.vehicleNumber}
-              </td>
-            </tr>
+            {voucher.expenseType !== 'Direct Expense' && (
+              <tr style={{ borderBottom: '1px solid #eee' }}>
+                <td style={{ padding: '7px 4px', color: '#666', width: '35%' }}>Vehicle Number</td>
+                <td style={{ padding: '7px 4px', fontWeight: 700, fontFamily: 'monospace', fontSize: '13px', color: '#1a1a1a' }}>
+                  {voucher.vehicleNumber}
+                </td>
+              </tr>
+            )}
             <tr style={{ borderBottom: '1px solid #eee', background: '#fafafa' }}>
               <td style={{ padding: '7px 4px', color: '#666' }}>Purpose</td>
               <td style={{ padding: '7px 4px', fontWeight: 700 }}>{voucher.purpose}</td>
@@ -179,7 +182,8 @@ const VoucherSlipDocument = forwardRef(({ voucher, companyInfo }, ref) => {
 VoucherSlipDocument.displayName = 'VoucherSlipDocument';
 
 // ── Purpose meta ─────────────────────────────────────────────────────────────
-const PURPOSES = ['Fuel', 'Advance', 'Repair', 'Toll', 'Others'];
+const INDIRECT_PURPOSES = ['Fuel', 'Advance', 'Repair', 'Toll', 'Others'];
+const DIRECT_PURPOSES = ['Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Others'];
 const VEHICLE_REGEX = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{4}$/i;
 
 const COMPANY_INFO = {
@@ -211,6 +215,7 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
   // Form fields
   const [form, setForm] = useState({
     voucherNumber: genVoucherNo(),
+    expenseType: 'Indirect Expense',
     vehicleNumber: invoiceData?.human_verified_data?.supply_details?.vehicle_number || '',
     date: new Date().toISOString().split('T')[0],
     amount: '',
@@ -221,14 +226,22 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm(p => ({ ...p, [name]: value }));
+    setForm(p => {
+      let updates = { [name]: value };
+      if (name === 'expenseType') {
+        updates.purpose = value === 'Direct Expense' ? 'Water' : 'Fuel';
+      }
+      return { ...p, ...updates };
+    });
     if (errors[name]) setErrors(p => ({ ...p, [name]: '' }));
   };
 
   const validate = () => {
     const errs = {};
-    if (!form.vehicleNumber.trim()) errs.vehicleNumber = 'Required';
-    else if (!VEHICLE_REGEX.test(form.vehicleNumber.trim())) errs.vehicleNumber = 'Format: WB12AB1234';
+    if (form.expenseType === 'Indirect Expense') {
+      if (!form.vehicleNumber.trim()) errs.vehicleNumber = 'Required';
+      else if (!VEHICLE_REGEX.test(form.vehicleNumber.trim())) errs.vehicleNumber = 'Format: WB12AB1234';
+    }
     if (!form.date) errs.date = 'Required';
     if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Must be a positive number';
     if (!form.purpose) errs.purpose = 'Required';
@@ -247,7 +260,8 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
       // 1. Create voucher in MongoDB
       const payload = {
         voucherNumber: form.voucherNumber.trim(),
-        vehicleNumber: form.vehicleNumber.trim().toUpperCase(),
+        expenseType: form.expenseType,
+        vehicleNumber: form.expenseType === 'Indirect Expense' ? form.vehicleNumber.trim().toUpperCase() : '',
         date: form.date,
         amount: parseFloat(form.amount),
         purpose: form.purpose,
@@ -371,17 +385,31 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
               />
             </Grid>
 
-            {/* Vehicle Number */}
+            {/* Expense Type */}
             <Grid item xs={12} sm={6}>
               <TextField
-                fullWidth label="Vehicle Number" name="vehicleNumber"
-                value={form.vehicleNumber} onChange={handleChange}
-                placeholder="WB12AB1234"
-                error={!!errors.vehicleNumber} helperText={errors.vehicleNumber || 'Format: WB12AB1234'}
-                inputProps={{ style: { textTransform: 'uppercase' } }}
+                fullWidth select label="Expense Type" name="expenseType"
+                value={form.expenseType} onChange={handleChange}
                 InputProps={{ sx: { borderRadius: '14px' } }}
-              />
+              >
+                <MenuItem value="Indirect Expense">Indirect Expense (Trucks/Logistics)</MenuItem>
+                <MenuItem value="Direct Expense">Direct Expense (Office/Misc)</MenuItem>
+              </TextField>
             </Grid>
+
+            {/* Vehicle Number */}
+            {form.expenseType === 'Indirect Expense' && (
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth label="Vehicle Number" name="vehicleNumber"
+                  value={form.vehicleNumber} onChange={handleChange}
+                  placeholder="WB12AB1234"
+                  error={!!errors.vehicleNumber} helperText={errors.vehicleNumber || 'Format: WB12AB1234'}
+                  inputProps={{ style: { textTransform: 'uppercase' } }}
+                  InputProps={{ sx: { borderRadius: '14px' } }}
+                />
+              </Grid>
+            )}
 
             {/* Purpose */}
             <Grid item xs={12} sm={6}>
@@ -391,9 +419,9 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
                 error={!!errors.purpose} helperText={errors.purpose}
                 InputProps={{ sx: { borderRadius: '14px' } }}
               >
-                {PURPOSES.map(p => (
-                  <MenuItem key={p} value={p}>{p}</MenuItem>
-                ))}
+                {form.expenseType === 'Direct Expense' 
+                  ? DIRECT_PURPOSES.map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)
+                  : INDIRECT_PURPOSES.map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
               </TextField>
             </Grid>
 

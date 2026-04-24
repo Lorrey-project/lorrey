@@ -8,6 +8,49 @@ const { getIO } = require("../socket");
 const { pushToRegister, syncVoucherDummy } = require("../utils/syncManager");
 const auth = require("../middleware/authMiddleware");
 
+// Helper: compute expense totals for a specific date string and emit to all clients
+async function emitExpenseUpdate(dateIso) {
+  try {
+    const io = getIO();
+    const voucherCol = Voucher.collection;
+    const cementCol  = require('mongoose').connection.useDb('cement_register').collection('entries');
+
+    // Convert ISO date string to DD-MM-YYYY for matching stored dates
+    const d = new Date(dateIso);
+    const day   = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year  = d.getFullYear();
+    const normDate = `${day}-${month}-${year}`; // e.g. "24-04-2026"
+
+    // Run aggregations for this specific date in parallel
+    const startOfDay = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+    const endOfDay   = new Date(`${year}-${month}-${day}T23:59:59.999Z`);
+
+    const [indirectRes, directRes, cementRes] = await Promise.all([
+      voucherCol.aggregate([
+        { $match: { expenseType: { $ne: 'Direct Expense' }, date: { $gte: startOfDay, $lte: endOfDay } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]).toArray(),
+      voucherCol.aggregate([
+        { $match: { expenseType: 'Direct Expense', date: { $gte: startOfDay, $lte: endOfDay } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, details: { $push: { purpose: '$purpose', amount: '$amount' } } } }
+      ]).toArray(),
+      cementCol.aggregate([
+        { $match: { 'LOADING DT': { $in: [normDate, `${d.getDate()}-${d.getMonth()+1}-${year}`] } } },
+        { $group: { _id: null, total: { $sum: { $convert: { input: '$ADVANCE', to: 'double', onError: 0, onNull: 0 } } } } }
+      ]).toArray(),
+    ]);
+
+    const sExpense = (indirectRes[0]?.total || 0) + (cementRes[0]?.total || 0);
+    const oExpense  = directRes[0]?.total || 0;
+    const oDetails  = (directRes[0]?.details || []).map(d => `${d.purpose} (${d.amount})`).join(', ');
+
+    io.emit('expenseUpdate', { date: normDate, sExpense, oExpense, oDetails });
+  } catch (err) {
+    console.error('[voucherRoutes] emitExpenseUpdate failed:', err.message);
+  }
+}
+
 // Helper: re-sync cement register for a given vehicle number / invoiceId.
 // Now triggers the dummy logic from syncManager to natively handle standalone records
 async function resyncCementForVehicle(vehicleNumber, explicitInvoiceId, voucherId) {
@@ -74,7 +117,7 @@ router.post("/", auth, async (req, res) => {
   let attempt = 0;
   while (attempt < MAX_RETRIES) {
     try {
-      const { vehicleNumber, date, amount, purpose, name, reason, invoiceId } = req.body;
+      const { expenseType, vehicleNumber, date, amount, purpose, name, reason, invoiceId } = req.body;
 
       // Always generate server-side; ignore any client-supplied voucherNumber
       const vNum = await generateVoucherNumber();
@@ -85,6 +128,7 @@ router.post("/", auth, async (req, res) => {
 
       const voucher = new Voucher({
         voucherNumber: vNum,
+        expenseType: expenseType || "Indirect Expense",
         vehicleNumber,
         date,
         amount,
@@ -97,13 +141,16 @@ router.post("/", auth, async (req, res) => {
 
       await voucher.save();
 
-      // Notify Main Cashbook listeners that a new voucher was created
+      // 1. Emit instant expense patch to all cashbook clients (no round-trip needed)
+      emitExpenseUpdate(voucher.date).catch(() => {});
+
+      // 2. Notify Main Cashbook listeners that a new voucher was created
       try {
         const io = getIO();
         io.emit('voucherCreated', { voucher: voucher.toObject() });
       } catch (_) { /* socket not critical */ }
 
-      // Re-sync Cement Register so Site Cash column updates immediately
+      // 3. Re-sync Cement Register so Site Cash column updates immediately
       resyncCementForVehicle(vehicleNumber, invoiceId || null, voucher._id.toString());
 
       return res.status(201).json({ success: true, voucher });
@@ -147,6 +194,8 @@ router.put("/:id", async (req, res) => {
     
     // Trigger sync for potential dummy row updates
     resyncCementForVehicle(updated.vehicleNumber, updated.invoiceId || null, updated._id.toString());
+    // Emit instant expense patch
+    emitExpenseUpdate(updated.date).catch(() => {});
 
     res.json({ success: true, voucher: updated });
   } catch (error) {

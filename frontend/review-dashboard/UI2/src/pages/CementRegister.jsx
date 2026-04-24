@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
-  Snackbar, Alert, Chip, Tooltip, Select, MenuItem
+  Snackbar, Alert, Chip, Tooltip, Select, MenuItem,
+  Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -32,7 +33,7 @@ export const COLUMNS = [
   { key: 'SL NO', label: 'SL NO', width: 60, type: 'auto', group: 'id', sticky: true },
   { key: 'LOADING DT', label: 'LOADING DT', width: 120, type: 'auto', group: 'id' },
   { key: 'RECEIVING DATE', label: 'RECEIVING\nDATE', width: 120, type: 'manual', group: 'id', isDate: true },
-  { key: 'BILL NO', label: 'BILL NO', width: 160, type: 'manual', group: 'id' },
+  { key: 'BILL NO', label: 'BILL NO', width: 160, type: 'manual', group: 'id', hasAttach: 'bill_pdf' },
   { key: 'BILL DATE', label: 'BILL DATE', width: 120, type: 'manual', group: 'id', isDate: true },
   { key: 'By Portal', label: 'BY PORTAL', width: 120, type: 'dropdown', options: ['By Portal', ''], group: 'id' },
   { key: 'SITE', label: 'SITE', width: 190, type: 'auto', group: 'id' },
@@ -226,19 +227,47 @@ export default function CementRegister({ onBack }) {
   const [syncing, setSyncing] = useState(false);
   const [isBillingMode, setIsBillingMode] = useState(false);
   const [bulkBillInput, setBulkBillInput] = useState({ billNo: '', billDate: '' });
+  const [showChargePresets, setShowChargePresets] = useState(false);
+  const [activeRowId, setActiveRowId] = useState(null);
+
+  const STANDARD_CHARGES = [
+    { label: 'GPS Monitoring', field: 'GPS Monitoring Charge', amount: 500 },
+    { label: 'GPS Device', field: 'GPS DEVICE', amount: 1500 },
+    { label: 'RFID Tag', field: 'RFID TAG', amount: 200 },
+    { label: 'RFID Reassurance', field: 'RFID REASSURANCE', amount: 300 },
+    { label: 'Fastag', field: 'FASTAG', amount: 100 },
+    { label: 'Others Deduction', field: 'Others deduction', amount: 1000 }
+  ];
+
+  const applyChargePreset = (rowId, field, amount) => {
+    handleCellEdit(rowId, field, amount);
+    setSnack({ severity: 'success', msg: `Applied ${amount} to ${field}. Click SAVE to persist.` });
+  };
 
 
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
 
   const toggleSelect = (id) => setSelectedIds(prev => {
+    if (isBillingMode && !prev.has(id) && prev.size >= 8) {
+      setSnack({ severity: 'warning', msg: 'Maximum 8 bills can be selected for batch billing.' });
+      return prev;
+    }
     const s = new Set(prev);
     s.has(id) ? s.delete(id) : s.add(id);
     return s;
   });
   const toggleSelectAll = () => {
-    if (allSelected || someSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(entries.map(r => r._id)));
+    if (allSelected || someSelected) {
+      setSelectedIds(new Set());
+    } else {
+      if (isBillingMode && computedRows.length > 8) {
+        setSnack({ severity: 'warning', msg: 'Selecting first 8 bills. Maximum 8 bills can be processed at once.' });
+        setSelectedIds(new Set(computedRows.slice(0, 8).map(r => r._id)));
+      } else {
+        setSelectedIds(new Set(computedRows.map(r => r._id)));
+      }
+    }
   };
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
@@ -391,6 +420,10 @@ export default function CementRegister({ onBack }) {
       setSnack({ severity: 'warning', msg: 'No rows selected for billing' });
       return;
     }
+    if (ids.length > 8) {
+      setSnack({ severity: 'error', msg: 'Batch billing is limited to a maximum of 8 bills at a time.' });
+      return;
+    }
 
     setLocalData(prev => {
       const next = { ...prev };
@@ -514,6 +547,19 @@ export default function CementRegister({ onBack }) {
           >
             📊 Incentive Calculation Sheet
           </Button>
+
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => setShowChargePresets(true)}
+            sx={{
+              fontWeight: 700, borderRadius: '24px', px: 2, py: 0.5, fontSize: '13px', textTransform: 'none',
+              border: '2px solid #7c3aed', color: '#7c3aed',
+              '&:hover': { bgcolor: '#7c3aed', color: '#fff' }
+            }}
+          >
+            🏷️ Charge Presets
+          </Button>
           {isBillingMode ? (
             <Box sx={{ 
               display: 'flex', alignItems: 'center', gap: 1.5, 
@@ -533,7 +579,7 @@ export default function CementRegister({ onBack }) {
                 style={{ width: 130, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
               />
               <Button size="small" variant="contained" onClick={handleBulkBillApply}
-                disabled={selectedIds.size === 0}
+                disabled={selectedIds.size === 0 || selectedIds.size > 8}
                 sx={{ fontWeight: 700, fontSize: '0.75rem', px: 2, borderRadius: '8px', bgcolor: '#0f172a', '&:hover': { bgcolor: '#1e293b' }, boxShadow: 'none' }}>
                 Apply ({selectedIds.size})
               </Button>
@@ -683,8 +729,9 @@ export default function CementRegister({ onBack }) {
                     <input
                       type="checkbox"
                       checked={isSelected}
+                      disabled={isBillingMode && !isSelected && selectedIds.size >= 8}
                       onChange={() => toggleSelect(row._id)}
-                      style={{ cursor: 'pointer', width: 13, height: 13, accentColor: '#7c3aed' }}
+                      style={{ cursor: isBillingMode && !isSelected && selectedIds.size >= 8 ? 'not-allowed' : 'pointer', width: 13, height: 13, accentColor: '#7c3aed' }}
                     />
                   </td>
                   {VISIBLE_COLS.map((col) => {
@@ -705,9 +752,15 @@ export default function CementRegister({ onBack }) {
                         rowIndex={ri}
                         row={row}
                         onChange={(val) => handleCellEdit(row._id, col.key, val)}
-                        onAttachSaved={(field, url) => setEntries(prev =>
-                          prev.map(r => r._id === row._id ? { ...r, [field]: url } : r)
-                        )}
+                        onAttachSaved={(field, url) => {
+                          const billNo = row['BILL NO'];
+                          setEntries(prev => prev.map(r => {
+                            if (field === 'BILL_PDF_URL' && billNo && r['BILL NO'] === billNo) {
+                              return { ...r, [field]: url };
+                            }
+                            return r._id === row._id ? { ...r, [field]: url } : r;
+                          }));
+                        }}
                       />
                     );
                   })}
@@ -769,6 +822,45 @@ export default function CementRegister({ onBack }) {
           {liveMsg}
         </Alert>
       </Snackbar>
+
+
+      {/* ── Charge Presets Dialog ────────────────────────────────────────── */}
+      <Dialog open={showChargePresets} onClose={() => setShowChargePresets(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800 }}>Standard Charge Presets</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            Select a row in the table first, then click a charge below to apply its standard price.
+            Each charge can only be applied once per row.
+          </Typography>
+          <Box display="grid" gridTemplateColumns="repeat(auto-fill, minmax(200px, 1fr))" gap={2}>
+            {STANDARD_CHARGES.map(charge => (
+              <Button
+                key={charge.label}
+                variant="outlined"
+                onClick={() => {
+                  if (selectedIds.size === 0) {
+                    setSnack({ severity: 'warning', msg: 'Select at least one row first!' });
+                    return;
+                  }
+                  selectedIds.forEach(id => applyChargePreset(id, charge.field, charge.amount));
+                }}
+                sx={{
+                  justifyContent: 'space-between', px: 2, py: 1.5,
+                  borderRadius: '12px', textTransform: 'none', fontWeight: 600,
+                  borderColor: '#e2e8f0', color: '#1e293b',
+                  '&:hover': { bgcolor: '#f1f5f9', borderColor: '#cbd5e1' }
+                }}
+              >
+                <span>{charge.label}</span>
+                <Typography variant="caption" fontWeight={800} color="primary">₹{charge.amount}</Typography>
+              </Button>
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowChargePresets(false)} sx={{ fontWeight: 700 }}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
 
     </Box>
@@ -897,23 +989,47 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
   // ── Date picker for isDate columns ──────────────────────────────────────────
   if (col.isDate) {
     return (
-      <DatePickerCell
-        value={value}
-        isDirty={isDirty}
-        onChange={onChange}
-        style={cellStyle}
-      />
+      <td style={{
+        ...cellStyle,
+        padding: 0,
+        background: isDirty ? 'rgba(254,243,199,0.75)' : 'rgba(255,247,237,0.04)',
+      }}>
+        <DatePickerCell
+          value={value}
+          onChange={onChange}
+          style={cellStyle}
+        />
+      </td>
     );
   }
 
   // ── Manual editable ────────────────────────────────────────────────────────
+  if (col.hasAttach) {
+    const attachUrl = row?.['BILL_PDF_URL'];
+    return (
+      <td style={{ ...cellStyle, padding: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+          <EditableCell
+            value={value}
+            isDirty={isDirty}
+            onChange={onChange}
+            style={{ ...cellStyle, flex: 1, borderRight: 'none' }}
+          />
+          <AttachButton rowId={row?._id} attachType={col.hasAttach} existingUrl={attachUrl} onSaved={onAttachSaved} />
+        </div>
+      </td>
+    );
+  }
+
   return (
-    <EditableCell
-      value={value}
-      isDirty={isDirty}
-      onChange={onChange}
-      style={cellStyle}
-    />
+    <td style={{ ...cellStyle, padding: 0 }}>
+      <EditableCell
+        value={value}
+        isDirty={isDirty}
+        onChange={onChange}
+        style={{ ...cellStyle, width: '100%' }}
+      />
+    </td>
   );
 }
 
@@ -1010,46 +1126,40 @@ function isoToDdmmyyyy(str) {
 }
 
 // ─── Calendar date picker cell ────────────────────────────────────────────────
-function DatePickerCell({ value, isDirty, onChange, style }) {
+function DatePickerCell({ value, onChange, style }) {
   const isoVal = ddmmyyyyToIso(value);
   return (
-    <td style={{
-      ...style,
-      padding: 0,
-      background: isDirty ? 'rgba(254,243,199,0.75)' : 'rgba(255,247,237,0.04)',
-    }}>
-      <input
-        type="date"
-        value={isoVal}
-        onChange={e => onChange(isoToDdmmyyyy(e.target.value))}
-        style={{
-          width: '100%',
-          height: '100%',
-          border: 'none',
-          background: 'transparent',
-          fontSize: '11px',
-          padding: '4px 6px',
-          cursor: 'pointer',
-          color: isoVal ? '#0f172a' : '#94a3b8',
-          outline: 'none',
-          fontFamily: 'inherit',
-          boxSizing: 'border-box',
-        }}
-        onFocus={e => {
-          e.currentTarget.parentElement.style.boxShadow = 'inset 0 0 0 2px #3b82f6';
-          e.currentTarget.style.background = '#eff6ff';
-        }}
-        onBlur={e => {
-          e.currentTarget.parentElement.style.boxShadow = '';
-          e.currentTarget.style.background = 'transparent';
-        }}
-      />
-    </td>
+    <input
+      type="date"
+      value={isoVal}
+      onChange={e => onChange(isoToDdmmyyyy(e.target.value))}
+      style={{
+        width: '100%',
+        height: '100%',
+        border: 'none',
+        background: 'transparent',
+        fontSize: '11px',
+        padding: '4px 6px',
+        cursor: 'pointer',
+        color: isoVal ? '#0f172a' : '#94a3b8',
+        outline: 'none',
+        fontFamily: 'inherit',
+        boxSizing: 'border-box',
+      }}
+      onFocus={e => {
+        e.currentTarget.parentElement.style.boxShadow = 'inset 0 0 0 2px #3b82f6';
+        e.currentTarget.style.background = '#eff6ff';
+      }}
+      onBlur={e => {
+        e.currentTarget.parentElement.style.boxShadow = '';
+        e.currentTarget.style.background = 'transparent';
+      }}
+    />
   );
 }
 
 // ─── Editable cell using contentEditable ──────────────────────────────────────
-function EditableCell({ value, isDirty, onChange, style }) {
+function EditableCell({ value, onChange, style }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -1064,7 +1174,7 @@ function EditableCell({ value, isDirty, onChange, style }) {
   };
 
   return (
-    <td
+    <div
       ref={ref}
       contentEditable
       suppressContentEditableWarning
@@ -1073,7 +1183,11 @@ function EditableCell({ value, isDirty, onChange, style }) {
         ...style,
         outline: 'none',
         cursor: 'text',
-        background: isDirty ? 'rgba(254,243,199,0.6)' : '#fff7ed0a',
+        minHeight: '24px',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '4px 6px',
+        boxSizing: 'border-box'
       }}
       onFocus={e => {
         e.currentTarget.style.boxShadow = 'inset 0 0 0 2px #3b82f6';

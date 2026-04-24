@@ -57,7 +57,10 @@ export const COLUMNS = [
     formula: r => fmt2(num(r.S_OPENING) + num(r.S_RECV_SANGRAM) + num(r.S_TRANS_OFFICE))
   },
   { key: 'S_TRANS_TO_OFFICE', label: 'Transferred\nto office cash', width: 130, type: 'manual', group: 'site' },
-  { key: 'S_EXPENSE', label: 'Site Cash\nExp', width: 120, type: 'manual', group: 'site' },
+  {
+    key: 'S_EXPENSE', label: 'Site Cash\nExp', width: 120, type: 'calc', group: 'site',
+    formula: r => fmt2(r.S_EXPENSE || 0)
+  },
   {
     key: 'S_CLOSING', label: 'Site Cash\nClosing', width: 120, type: 'calc', group: 'site',
     formula: r => fmt2(num(r.S_TOTAL) - num(r.S_EXPENSE))
@@ -77,7 +80,10 @@ export const COLUMNS = [
     key: 'O_TOTAL', label: 'Total Office\nCash', width: 120, type: 'calc', group: 'office',
     formula: r => fmt2(num(r.O_OPENING) + num(r.O_RECV_HFS) + num(r.O_RECV_SITE))
   },
-  { key: 'O_EXPENSE', label: 'Office Exp', width: 120, type: 'manual', group: 'office' },
+  {
+    key: 'O_EXPENSE', label: 'Office Exp', width: 120, type: 'calc', group: 'office',
+    formula: r => fmt2(r.O_EXPENSE || 0)
+  },
   {
     key: 'O_CLOSING', label: 'Closing\nBalance', width: 120, type: 'calc', group: 'office',
     formula: r => fmt2(num(r.O_TOTAL) - num(r.O_EXPENSE))
@@ -94,7 +100,10 @@ export const COLUMNS = [
   },
 
   // Remarks
-  { key: 'REMARKS_EXP', label: 'Office exp details', width: 250, type: 'manual', group: 'remarks' },
+  {
+    key: 'REMARKS_EXP', label: 'Office exp details', width: 250, type: 'calc', group: 'remarks',
+    formula: r => r.REMARKS_EXP || ''
+  },
   { key: 'REMARKS', label: 'Remarks', width: 250, type: 'manual', group: 'remarks' },
 ];
 
@@ -197,12 +206,41 @@ export default function MainCashbook({ onBack }) {
     fetchPrevClosing(selMonth, selYear);
   }, [selMonth, selYear, fetchData, fetchPrevClosing]);
 
-  // Socket: re-fetch silently on cashbook updates
+  // Socket: re-fetch silently on cashbook updates (debounced to avoid hammering)
   useEffect(() => {
-    const handler = () => fetchData(selMonth, selYear, true);
+    let timer = null;
+    const handler = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fetchData(selMonth, selYear, true), 150); // 150 ms debounce
+    };
     socket.on('mainCashbookUpdates', handler);
-    return () => socket.off('mainCashbookUpdates', handler);
+    return () => { socket.off('mainCashbookUpdates', handler); clearTimeout(timer); };
   }, [selMonth, selYear, fetchData]);
+
+  // Socket: instant expense patch — no round-trip needed
+  // Server emits { date, sExpense, oExpense, oDetails } after a voucher changes.
+  useEffect(() => {
+    const handler = ({ date, sExpense, oExpense, oDetails }) => {
+      if (!date) return;
+      // Normalise date to DD-MM-YYYY for comparison
+      const normDate = (() => {
+        const p = String(date).trim().split(/[-\/]/);
+        if (p.length === 3) return `${p[0].padStart(2,'0')}-${p[1].padStart(2,'0')}-${p[2]}`;
+        return date;
+      })();
+      setEntries(prev => prev.map(row => {
+        const rDate = (() => {
+          const p = String(row.DATE || '').trim().split(/[-\/]/);
+          if (p.length === 3) return `${p[0].padStart(2,'0')}-${p[1].padStart(2,'0')}-${p[2]}`;
+          return row.DATE;
+        })();
+        if (rDate !== normDate) return row;
+        return { ...row, S_EXPENSE: sExpense, O_EXPENSE: oExpense, REMARKS_EXP: oDetails || '' };
+      }));
+    };
+    socket.on('expenseUpdate', handler);
+    return () => socket.off('expenseUpdate', handler);
+  }, []);
 
   // Socket: listen for new voucher creation and show a prompt
   useEffect(() => {

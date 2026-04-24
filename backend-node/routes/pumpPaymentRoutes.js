@@ -356,61 +356,155 @@ router.put("/remove-period-proof", auth, async (req, res) => {
 });
 
 // ── GET /pump-payment/fuel-rates ─────────────────────────────────────────────
-// Returns current diesel rate for each pump. Any authenticated user can read.
+// Returns full history of diesel rates for each pump.
 router.get("/fuel-rates", auth, async (req, res) => {
   try {
     const col = mongoose.connection.useDb("pump_payment").collection("fuel_rates");
-    const rates = await col.find({}).toArray();
-    // Seed defaults if nothing stored yet
-    const defaults = { "SAS-1": 90, "SAS-2": 90 };
-    const result = {};
-    for (const [pump, defaultRate] of Object.entries(defaults)) {
-      const record = rates.find(r => r.pumpName === pump);
-      result[pump] = record ? record.rate : defaultRate;
-    }
-    res.json({ success: true, rates: result });
+    const history = await col.find({}).sort({ effectiveDate: -1 }).toArray();
+    
+    // Group by pumpName for easier UI consumption
+    const grouped = {};
+    const latestRates = {};
+    const pumps = ["SAS-1", "SAS-2"];
+    pumps.forEach(p => {
+      const pumpHistory = history.filter(r => r.pumpName === p);
+      grouped[p] = pumpHistory;
+      latestRates[p] = pumpHistory.length > 0 ? pumpHistory[0].rate : 90;
+    });
+    
+    res.json({ success: true, history: grouped, rates: latestRates });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // ── PUT /pump-payment/fuel-rates ─────────────────────────────────────────────
-// Update diesel rate for a pump (HEAD_OFFICE only).
-// Body: { pumpName: "SAS-1", rate: 92.5 }
+// Add or update a diesel rate for a specific date (HEAD_OFFICE only).
+// Body: { pumpName: "SAS-1", rate: 92.5, effectiveDate: "2026-04-24" }
 router.put("/fuel-rates", auth, async (req, res) => {
   try {
     if (req.user.role !== "HEAD_OFFICE") {
-      return res.status(403).json({ success: false, error: "Only Office Admin can update fuel rates." });
+      return res.status(403).json({ success: false, error: "Only Head Office can update fuel rates." });
     }
-    const { pumpName, rate } = req.body;
-    if (!pumpName || rate === undefined || rate === null) {
-      return res.status(400).json({ success: false, error: "pumpName and rate are required." });
+    const { pumpName, rate, effectiveDate } = req.body;
+    if (!pumpName || rate === undefined || !effectiveDate) {
+      return res.status(400).json({ success: false, error: "pumpName, rate, and effectiveDate are required." });
     }
     const numRate = parseFloat(rate);
+    const date = new Date(effectiveDate);
+    date.setHours(0,0,0,0); // normalize to start of day
+
     if (isNaN(numRate) || numRate <= 0) {
       return res.status(400).json({ success: false, error: "Rate must be a positive number." });
     }
-    const allowedPumps = ["SAS-1", "SAS-2"];
-    if (!allowedPumps.includes(pumpName)) {
-      return res.status(400).json({ success: false, error: `Pump must be one of: ${allowedPumps.join(", ")}` });
+    if (isNaN(date.getTime())) {
+      return res.status(400).json({ success: false, error: "Invalid date format." });
     }
+
     const col = mongoose.connection.useDb("pump_payment").collection("fuel_rates");
+    
+    // Upsert by pump + exact effective date
     await col.updateOne(
-      { pumpName },
-      { $set: { pumpName, rate: numRate, updatedAt: new Date(), updatedBy: req.user.userId } },
+      { pumpName, effectiveDate: date },
+      { $set: { pumpName, rate: numRate, effectiveDate: date, updatedAt: new Date(), updatedBy: req.user.userId } },
       { upsert: true }
     );
-    // Broadcast live rate update to all connected clients
+
+    // ── BULK UPDATE TRIGGER ──
+    // Find all invoices from this date onwards and re-sync them to apply the new rate
+    const Invoice = require("../models/Invoice");
+    const { pushToRegister } = require("../utils/syncManager");
+    
+    // Match invoices whose station_name starts with the pump prefix (SAS, SAS-1, SAS-2 etc.)
+    const pumpPrefix = pumpName.split('-')[0]; // "SAS-1" → "SAS"
+    const affectedInvoices = await Invoice.find({
+      "lorry_hire_slip_data.station_name": { $regex: new RegExp(`^${pumpPrefix}`, 'i') },
+      // Match invoices whose lorry hire slip was created on or after the effective date
+      $or: [
+        { "lorry_hire_slip_data.created_at": { $gte: date } },
+        { created_at: { $gte: date } }
+      ]
+    }).select("_id lorry_hire_slip_data").lean();
+
+    console.log(`[FuelRate] Updated ${pumpName} → ₹${numRate}/L from ${effectiveDate}. Applying to ${affectedInvoices.length} invoices...`);
+
+    // Update each invoice: recalculate diesel_advance = diesel_litres × new rate
+    const bulkOps = affectedInvoices
+      .filter(inv => inv.lorry_hire_slip_data?.diesel_litres != null)
+      .map(inv => {
+        const litres  = Number(inv.lorry_hire_slip_data.diesel_litres) || 0;
+        const loadAdv = Number(inv.lorry_hire_slip_data.loading_advance) || 0;
+        const newDieselAdv = parseFloat((litres * numRate).toFixed(2));
+        const newTotalAdv  = parseFloat((loadAdv + newDieselAdv).toFixed(2));
+        return {
+          updateOne: {
+            filter: { _id: inv._id },
+            update: { $set: {
+              "lorry_hire_slip_data.diesel_rate":     numRate,
+              "lorry_hire_slip_data.diesel_advance":  newDieselAdv,
+              "lorry_hire_slip_data.total_advance":   newTotalAdv,
+            }}
+          }
+        };
+      });
+
+    if (bulkOps.length > 0) {
+      await Invoice.bulkWrite(bulkOps);
+      console.log(`[FuelRate] DB update complete for ${bulkOps.length} invoices.`);
+    }
+
+    // Run cement-register re-sync in background (non-blocking)
+    const affectedIds = affectedInvoices.map(inv => inv._id.toString());
+    (async () => {
+      for (const id of affectedIds) {
+        await pushToRegister(id);
+      }
+      console.log(`[FuelRate] Cement register re-sync complete for ${pumpName}.`);
+    })();
+
+    // Broadcast live rate update AND affected invoice IDs so frontend can regenerate PDFs
     try {
       const { getIO } = require("../socket");
-      getIO().emit("fuelRateUpdated", { pumpName, rate: numRate });
+      const io = getIO();
+      io.emit("fuelRateUpdated", { pumpName, rate: numRate, effectiveDate: date });
+      // Emit in batches of 10 so the frontend doesn't get overwhelmed
+      for (let i = 0; i < affectedIds.length; i += 10) {
+        io.emit("fuelRateApplied", {
+          pumpName, rate: numRate,
+          invoiceIds: affectedIds.slice(i, i + 10)
+        });
+      }
     } catch (_) {}
-    res.json({ success: true, pumpName, rate: numRate });
+
+    res.json({ success: true, pumpName, rate: numRate, effectiveDate: date, reSyncCount: affectedInvoices.length });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
+// Helper for other routes/modules
+async function getRateForDate(pumpName, dateVal) {
+  try {
+    const col = mongoose.connection.useDb("pump_payment").collection("fuel_rates");
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return 90;
+
+    // Find the latest rate that is effective on or before this date
+    const record = await col.find({ 
+      pumpName: { $regex: new RegExp(`^${pumpName.split('-')[0]}`, 'i') },
+      effectiveDate: { $lte: d } 
+    })
+    .sort({ effectiveDate: -1 })
+    .limit(1)
+    .toArray();
+
+    return record[0] ? record[0].rate : 90;
+  } catch (e) {
+    return 90;
+  }
+}
+
 module.exports = router;
+module.exports.getRateForDate = getRateForDate;
 
 

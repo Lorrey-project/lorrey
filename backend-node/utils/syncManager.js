@@ -124,6 +124,27 @@ async function generateHsdBillNo(pumpName, loadingDate, invoiceId) {
   return `${prefix}/${fy}/${intervalIndex}`;
 }
 
+async function getFuelRate(pumpName, dateVal) {
+  try {
+    const col = mongoose.connection.useDb("pump_payment").collection("fuel_rates");
+    const d = new Date(dateVal);
+    if (!pumpName || isNaN(d.getTime())) return 91.99;
+
+    // Find latest rate effective on or before this date
+    const record = await col.find({
+      pumpName: { $regex: new RegExp(`^${pumpName.trim().split(/[-\s]/)[0]}`, "i") },
+      effectiveDate: { $lte: d }
+    })
+    .sort({ effectiveDate: -1 })
+    .limit(1)
+    .toArray();
+
+    return record[0] ? num(record[0].rate) : 91.99;
+  } catch (e) {
+    return 91.99;
+  }
+}
+
 // ─── Central sync function ────────────────────────────────────────────────────
 // overrides: optional extra fields to force onto the invoice (e.g. is_hsd_verified:true)
 // This fixes a race condition where the DB write and re-read happen on the same tick
@@ -270,8 +291,12 @@ async function pushToRegister(invoiceId, overrides) {
     const hsdSlipNo    = safe(slip.fuel_slip_no);
     const fuelRequired = num(slip.estimated_required_fuel);
     const hsdLtr       = num(slip.diesel_litres);
-    const hsdRate      = num(slip.diesel_rate, 91.99);
-    const hsdAmount    = num(slip.diesel_advance);
+    
+    // Fetch historical rate based on pump and loading date
+    const hsdRate      = await getFuelRate(pumpName, loadingDate);
+    // HSD AMOUNT is always LTR * RATE as per user request for automatic updates
+    const hsdAmount    = fmt2(hsdLtr * hsdRate);
+
     const advance      = num(slip.total_advance || slip.loading_advance);
     const hsdBillNo    = await generateHsdBillNo(pumpName, loadingDate, invoiceId);
 

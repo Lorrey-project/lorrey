@@ -247,8 +247,8 @@ router.delete("/:id", auth, adminOnly, async (req, res) => {
 });
 
 // ── POST /cement-register/attach/:rowId/:attachType ──────────────────────────
-// Upload a PDF/image for challan_proof or site_cash for a specific row
-// attachType: "challan_proof" | "site_cash"
+// Upload a PDF/image for challan_proof, site_cash, or bill_pdf for a specific row
+// attachType: "challan_proof" | "site_cash" | "bill_pdf"
 // Returns: { success, url, field }
 router.post("/attach/:rowId/:attachType", auth, (req, res, next) => {
   cementAttachUpload.single("file")(req, res, (err) => {
@@ -261,16 +261,42 @@ router.post("/attach/:rowId/:attachType", auth, (req, res, next) => {
     const col = getCollection();
     const { rowId, attachType } = req.params;
     const url = req.file.location; // S3 public URL
-    const field = attachType === "challan_proof" ? "CHALLAN_PROOF_URL" : "SITE_CASH_PROOF_URL";
 
-    // Save URL into the row
-    await col.updateOne(
-      { _id: new ObjectId(rowId) },
-      { $set: { [field]: url } }
-    );
+    const fieldMap = {
+      "challan_proof": "CHALLAN_PROOF_URL",
+      "site_cash": "SITE_CASH_PROOF_URL",
+      "bill_pdf": "BILL_PDF_URL"
+    };
+    const field = fieldMap[attachType];
+    if (!field) return res.status(400).json({ success: false, error: "Invalid attachment type." });
+
+    if (attachType === "bill_pdf") {
+      // Logic for Bill PDF: find current row's BILL NO, then update all rows with that same BILL NO
+      const currentRow = await col.findOne({ _id: new ObjectId(rowId) });
+      const billNo = currentRow?.["BILL NO"];
+      
+      if (billNo && String(billNo).trim()) {
+        await col.updateMany(
+          { "BILL NO": billNo },
+          { $set: { [field]: url } }
+        );
+      } else {
+        // If no Bill No, just save to this row
+        await col.updateOne(
+          { _id: new ObjectId(rowId) },
+          { $set: { [field]: url } }
+        );
+      }
+    } else {
+      // Standard logic: Save URL into the specific row only
+      await col.updateOne(
+        { _id: new ObjectId(rowId) },
+        { $set: { [field]: url } }
+      );
+    }
 
     const io = getIO();
-    io.emit("cementUpdates", { action: "attach", rowId, field, url });
+    io.emit("cementUpdates", { action: "attach", rowId, field, url, attachType });
 
     res.json({ success: true, url, field });
   } catch (err) {

@@ -51,32 +51,32 @@ const inputSx = { borderRadius: '14px' };
 // These MUST exactly match the column names already in MongoDB (including trailing spaces)
 // DO NOT change these strings — they are the real column names in the "Truck Contact Number" collection
 const DB_KEYS = {
-  truckNo:           'Truck No ',
-  vehType:           'Type of vehicle ',
-  custType:          'TYPE OF CUSTOMER ',
-  ownerName:         'Owner Name ',
-  panNo:             'PAN No. ',
-  aadharNo:          'Aadhar No. ',
-  panAadharLink:     'PAN Addahar Link ',
-  contactNo:         'Contact No. ',
-  address:           'Adress ',
-  nilTds:            'NIL TDS Declaration ',
-  tdsApp:            'TDS Applicability ',
-  basicFreight:      'Basic Freight Comission Applicability ',
-  incentiveComm:     'Incentive Comission Appliciability ',
-  gstType:           'GST TYPE ',
-  gstNo:             'GST NO ',
-  gstPercent:        'GST % ',
-  rcValidity:        'RC Validity ',
+  truckNo: 'Truck No ',
+  vehType: 'Type of vehicle ',
+  custType: 'TYPE OF CUSTOMER ',
+  ownerName: 'Owner Name ',
+  panNo: 'PAN No. ',
+  aadharNo: 'Aadhar No. ',
+  panAadharLink: 'PAN Addahar Link ',
+  contactNo: 'Contact No. ',
+  address: 'Adress ',
+  nilTds: 'NIL TDS Declaration ',
+  tdsApp: 'TDS Applicability ',
+  basicFreight: 'Basic Freight Comission Applicability ',
+  incentiveComm: 'Incentive Comission Appliciability ',
+  gstType: 'GST TYPE ',
+  gstNo: 'GST NO ',
+  gstPercent: 'GST % ',
+  rcValidity: 'RC Validity ',
   insuranceValidity: 'Insurance Validity ',
-  fitnessValidity:   'Fitness Validity ',
-  roadTaxValidity:   'Road Tax Validity ',
-  permit:            'Permit ',
-  puc:               'PUC ',
-  npValidity:        'NP Validity ',
-  driverName:        'Driver Name ',
-  licenseNo:         'License No ',
-  licenseValidity:   'License Validity ',
+  fitnessValidity: 'Fitness Validity ',
+  roadTaxValidity: 'Road Tax Validity ',
+  permit: 'Permit ',
+  puc: 'PUC ',
+  npValidity: 'NP Validity ',
+  driverName: 'Driver Name ',
+  licenseNo: 'License No ',
+  licenseValidity: 'License Validity ',
 };
 
 const getStr = (...candidates) => {
@@ -89,15 +89,17 @@ const getStr = (...candidates) => {
 export default function TruckContactManager({ open, onClose }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  
+
   const [tab, setTab] = useState(0);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
-  const [form, setForm] = useState({});
+  const [form, setForm] = useState({ isTemporary: false });
   const [errors, setErrors] = useState({});
   const [editId, setEditId] = useState(null);
+  const [isTempMode, setIsTempMode] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -135,12 +137,12 @@ export default function TruckContactManager({ open, onClose }) {
         // Auto-populate owner-level fields — read from legacy DB keys first
         setForm(prev => ({
           ...prev,
-          ownerName:     newValue,
-          panNo:         prev.panNo         || getStr(match["PAN No. "],         match["PAN No."],   match.pan_no),
-          aadharNo:      prev.aadharNo      || getStr(match["Aadhar No. "],      match["Aadhar No."], match.aadhar_no),
-          contactNo:     prev.contactNo     || getStr(match["Contact No. "],     match["Contact No."], match.contact_no),
-          address:       prev.address       || getStr(match["Adress "],          match["Address"],    match.address),
-          custType:      prev.custType      || getStr(match["TYPE OF CUSTOMER "], match.type),
+          ownerName: newValue,
+          panNo: prev.panNo || getStr(match["PAN No. "], match["PAN No."], match.pan_no),
+          aadharNo: prev.aadharNo || getStr(match["Aadhar No. "], match["Aadhar No."], match.aadhar_no),
+          contactNo: prev.contactNo || getStr(match["Contact No. "], match["Contact No."], match.contact_no),
+          address: prev.address || getStr(match["Adress "], match["Address"], match.address),
+          custType: prev.custType || getStr(match["TYPE OF CUSTOMER "], match.type),
           panAadharLink: prev.panAadharLink || getStr(match["PAN Addahar Link "], match.pan_aadhar_link),
         }));
       }
@@ -160,32 +162,32 @@ export default function TruckContactManager({ open, onClose }) {
       // These string keys must stay exactly as-is (including trailing spaces)
       const payload = {};
       const formToKey = {
-        truckNo:           form.truckNo,
-        vehType:           form.vehType,
-        custType:          form.custType,
-        ownerName:         form.ownerName,
-        panNo:             form.panNo,
-        aadharNo:          form.aadharNo,
-        panAadharLink:     form.panAadharLink,
-        contactNo:         form.contactNo,
-        address:           form.address,
-        nilTds:            form.nilTds,
-        tdsApp:            form.tdsApp,
-        basicFreight:      form.basicFreight,
-        incentiveComm:     form.incentiveComm,
-        gstType:           form.gstType,
-        gstNo:             form.gstNo,
-        gstPercent:        form.gstPercent,
-        rcValidity:        form.rcValidity,
+        truckNo: form.truckNo,
+        vehType: form.vehType,
+        custType: form.custType,
+        ownerName: form.ownerName,
+        panNo: form.panNo,
+        aadharNo: form.aadharNo,
+        panAadharLink: form.panAadharLink,
+        contactNo: form.contactNo,
+        address: form.address,
+        nilTds: form.nilTds,
+        tdsApp: form.tdsApp,
+        basicFreight: form.basicFreight,
+        incentiveComm: form.incentiveComm,
+        gstType: form.gstType,
+        gstNo: form.gstNo,
+        gstPercent: form.gstPercent,
+        rcValidity: form.rcValidity,
         insuranceValidity: form.insuranceValidity,
-        fitnessValidity:   form.fitnessValidity,
-        roadTaxValidity:   form.roadTaxValidity,
-        permit:            form.permit,
-        puc:               form.puc,
-        npValidity:        form.npValidity,
-        driverName:        form.driverName,
-        licenseNo:         form.licenseNo,
-        licenseValidity:   form.licenseValidity,
+        fitnessValidity: form.fitnessValidity,
+        roadTaxValidity: form.roadTaxValidity,
+        permit: form.permit,
+        puc: form.puc,
+        npValidity: form.npValidity,
+        driverName: form.driverName,
+        licenseNo: form.licenseNo,
+        licenseValidity: form.licenseValidity,
       };
 
       Object.entries(formToKey).forEach(([k, v]) => {
@@ -195,6 +197,13 @@ export default function TruckContactManager({ open, onClose }) {
           if (val !== '' || !editId) payload[dbKey] = val;
         }
       });
+
+      // Special flags for temporary driver workflow
+      if (isTempMode) {
+        payload.is_temporary = true;
+        payload.is_approved = false; // Requires Head Office approval
+        payload.driver_pdf_url = form.driverPdfUrl || "";
+      }
 
       if (editId) {
         const res = await axios.put(`${API_URL}/truck-contacts/${editId}`, payload);
@@ -218,35 +227,66 @@ export default function TruckContactManager({ open, onClose }) {
   const handleEdit = (c) => {
     // Read from legacy DB column names first (that's where real data lives)
     setForm({
-      truckNo:           getStr(c["Truck No "],                           c["Truck No"],        c.truck_no),
-      ownerName:         getStr(c["Owner Name "],                         c["Owner Name"],      c.owner_name),
-      driverName:        getStr(c["Driver Name "],                        c["Driver Name"],     c.driver_name),
-      contactNo:         getStr(c["Contact No. "],                        c["Contact No."],     c.contact_no),
-      address:           getStr(c["Adress "],                             c["Address"],         c.address),
-      panNo:             getStr(c["PAN No. "],                            c["PAN No."],         c.pan_no),
-      aadharNo:          getStr(c["Aadhar No. "],                         c["Aadhar No."],      c.aadhar_no),
-      panAadharLink:     getStr(c["PAN Addahar Link "],                   c.pan_aadhar_link),
-      vehType:           getStr(c["Type of vehicle "],                    c.type),
-      custType:          getStr(c["TYPE OF CUSTOMER "],                   c.type),
-      nilTds:            getStr(c["NIL TDS Declaration "],                c.nil_tds_declaration),
-      tdsApp:            getStr(c["TDS Applicability "],                  c.tds_applicability),
-      basicFreight:      getStr(c["Basic Freight Comission Applicability "], c.incentive_commission_applicability),
-      incentiveComm:     getStr(c["Incentive Comission Appliciability "], c.incentive_commission_applicability),
-      gstType:           getStr(c["GST TYPE "],                           c.gst_type),
-      gstNo:             getStr(c["GST NO "],                             c.gst_no),
-      gstPercent:        getStr(c["GST % "],                              c.gst_percent),
-      rcValidity:        getStr(c["RC Validity "],                        c.rc_validity),
-      insuranceValidity: getStr(c["Insurance Validity "],                 c.insurance_validity),
-      fitnessValidity:   getStr(c["Fitness Validity "],                   c.fitness_validity),
-      roadTaxValidity:   getStr(c["Road Tax Validity "],                  c.road_tax_validity),
-      puc:               getStr(c["PUC "],                                c.puc),
-      npValidity:        getStr(c["NP Validity "],                        c.np_validity),
-      permit:            getStr(c["Permit "],                             c.permit),
-      licenseNo:         getStr(c["License No "],                         c.license_no),
-      licenseValidity:   getStr(c["License Validity "],                   c.license_validity),
+      truckNo: getStr(c["Truck No "], c["Truck No"], c.truck_no),
+      ownerName: getStr(c["Owner Name "], c["Owner Name"], c.owner_name),
+      driverName: getStr(c["Driver Name "], c["Driver Name"], c.driver_name),
+      contactNo: getStr(c["Contact No. "], c["Contact No."], c.contact_no),
+      address: getStr(c["Adress "], c["Address"], c.address),
+      panNo: getStr(c["PAN No. "], c["PAN No."], c.pan_no),
+      aadharNo: getStr(c["Aadhar No. "], c["Aadhar No."], c.aadhar_no),
+      panAadharLink: getStr(c["PAN Addahar Link "], c.pan_aadhar_link),
+      vehType: getStr(c["Type of vehicle "], c.type),
+      custType: getStr(c["TYPE OF CUSTOMER "], c.type),
+      nilTds: getStr(c["NIL TDS Declaration "], c.nil_tds_declaration),
+      tdsApp: getStr(c["TDS Applicability "], c.tds_applicability),
+      basicFreight: getStr(c["Basic Freight Comission Applicability "], c.incentive_commission_applicability),
+      incentiveComm: getStr(c["Incentive Comission Appliciability "], c.incentive_commission_applicability),
+      gstType: getStr(c["GST TYPE "], c.gst_type),
+      gstNo: getStr(c["GST NO "], c.gst_no),
+      gstPercent: getStr(c["GST % "], c.gst_percent),
+      rcValidity: getStr(c["RC Validity "], c.rc_validity),
+      insuranceValidity: getStr(c["Insurance Validity "], c.insurance_validity),
+      fitnessValidity: getStr(c["Fitness Validity "], c.fitness_validity),
+      roadTaxValidity: getStr(c["Road Tax Validity "], c.road_tax_validity),
+      puc: getStr(c["PUC "], c.puc),
+      npValidity: getStr(c["NP Validity "], c.np_validity),
+      permit: getStr(c["Permit "], c.permit),
+      licenseNo: getStr(c["License No "], c.license_no),
+      licenseValidity: getStr(c["License Validity "], c.license_validity),
     });
     setEditId(c._id);
+    setIsTempMode(!!c.is_temporary);
     setTab(0);
+  };
+
+  const handleApprove = async (id) => {
+    try {
+      setSaving(true);
+      await axios.put(`${API_URL}/truck-contacts/approve/${id}`);
+      setSnack({ type: 'success', message: 'Driver approved!' });
+      fetchContacts();
+    } catch {
+      setSnack({ type: 'error', message: 'Approval failed.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.append('pdf', file);
+    try {
+      const res = await axios.post(`${API_URL}/truck-contacts/upload-temp`, fd);
+      setForm(prev => ({ ...prev, driverPdfUrl: res.data.url }));
+      setSnack({ type: 'success', message: 'Document uploaded!' });
+    } catch {
+      setSnack({ type: 'error', message: 'Upload failed.' });
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleDelete = async (id) => {
@@ -380,81 +420,115 @@ export default function TruckContactManager({ open, onClose }) {
                   )}
                 </Box>
 
-                {/* ─── PRIMARY IDENTIFIERS ─── */}
                 <SectionLabel icon={PersonIcon} label="Primary Identifiers" />
 
-                <FieldBox>
-                  {tf('Truck Number *', 'truckNo')}
-                </FieldBox>
+                <Box sx={{ mb: 3, p: 2, borderRadius: '16px', bgcolor: isTempMode ? 'rgba(245,158,11,0.05)' : 'rgba(123,31,162,0.05)', border: '1px solid', borderColor: isTempMode ? 'rgba(245,158,11,0.2)' : 'rgba(123,31,162,0.1)' }}>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Box>
+                      <Typography variant="subtitle2" fontWeight={900} color={isTempMode ? '#f59e0b' : '#7b1fa2'}>
+                        {isTempMode ? 'TEMPORARY DRIVER MODE' : 'STANDARD TRUCK PROFILE'}
+                      </Typography>
+                      <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                        {isTempMode ? 'Assigning a new driver to an existing vehicle' : 'Registering a permanent truck and owner'}
+                      </Typography>
+                    </Box>
+                    <Button 
+                      variant="outlined" 
+                      size="small" 
+                      onClick={() => {
+                        setIsTempMode(!isTempMode);
+                        setForm({});
+                      }}
+                      sx={{ borderRadius: '10px', fontWeight: 800, color: isTempMode ? '#f59e0b' : '#7b1fa2', borderColor: 'currentColor' }}
+                    >
+                      Switch to {isTempMode ? 'Standard' : 'Temporary'}
+                    </Button>
+                  </Box>
+                </Box>
 
-                <FieldBox>
-                  <Autocomplete
-                    freeSolo
-                    options={uniqueOwners}
-                    value={form.ownerName || ''}
-                    onChange={handleOwnerSelect}
-                    onInputChange={(_, v) => handleChange('ownerName', v)}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Owner Name *"
-                        error={!!errors.ownerName}
-                        helperText={errors.ownerName || (uniqueOwners.length > 0 ? `${uniqueOwners.length} existing owners — or type a new name` : 'Type a new owner name')}
-                        InputProps={{
-                          ...params.InputProps,
-                          sx: inputSx,
-                          startAdornment: <PersonIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
+                <SectionLabel icon={LocalShippingIcon} label="Truck Information" />
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                  <FieldBox>
+                    {isTempMode ? (
+                      <Autocomplete
+                        options={contacts.map(c => getStr(c["Truck No "], c["Truck No"], c.truck_no))}
+                        value={form.truckNo || ''}
+                        onChange={(_, v) => {
+                          handleChange('truckNo', v || '');
+                          const match = contacts.find(c => getStr(c["Truck No "], c["Truck No"], c.truck_no) === v);
+                          if (match) {
+                            handleChange('ownerName', getStr(match["Owner Name "], match["Owner Name"], match.owner_name));
+                          }
                         }}
+                        renderInput={(params) => (
+                          <TextField {...params} label="Select Truck No. *" error={!!errors.truckNo} helperText={errors.truckNo} InputProps={{ ...params.InputProps, sx: inputSx }} />
+                        )}
+                      />
+                    ) : (
+                      <TextField fullWidth label="Truck Number *" value={form.truckNo || ''} onChange={e => handleChange('truckNo', e.target.value)} error={!!errors.truckNo} helperText={errors.truckNo} InputProps={{ sx: inputSx }} />
+                    )}
+                  </FieldBox>
+                  <FieldBox>
+                    {isTempMode ? (
+                      <TextField fullWidth label="Owner Name" value={form.ownerName || ''} disabled InputProps={{ sx: inputSx }} />
+                    ) : (
+                      <Autocomplete
+                        freeSolo
+                        options={uniqueOwners}
+                        value={form.ownerName || ''}
+                        onInputChange={(_, v) => handleChange('ownerName', v)}
+                        onChange={handleOwnerSelect}
+                        renderInput={(params) => (
+                          <TextField {...params} label="Owner Name *" error={!!errors.ownerName} helperText={errors.ownerName} InputProps={{ ...params.InputProps, sx: inputSx }} />
+                        )}
                       />
                     )}
-                    renderOption={(props, option) => (
-                      <li {...props} key={option}>
-                        <Box>
-                          <Typography variant="body2" fontWeight={700}>{option}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {contacts.filter(c => getStr(c.owner_name, c["Owner Name"], c["Owner Name "]) === option).length} truck(s)
-                          </Typography>
-                        </Box>
-                      </li>
+                  </FieldBox>
+                </Box>
+
+                <SectionLabel icon={PersonIcon} label="Driver Details" />
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                  <FieldBox>
+                    <TextField fullWidth label="Driver Name" value={form.driverName || ''} onChange={e => handleChange('driverName', e.target.value)} InputProps={{ sx: inputSx }} />
+                  </FieldBox>
+                  <FieldBox>
+                    <TextField fullWidth label="Driver Phone" value={form.contactNo || ''} onChange={e => handleChange('contactNo', e.target.value)} InputProps={{ sx: inputSx }} />
+                  </FieldBox>
+                </Box>
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                  <FieldBox>
+                    <TextField fullWidth label="License No." value={form.licenseNo || ''} onChange={e => handleChange('licenseNo', e.target.value)} InputProps={{ sx: inputSx }} />
+                  </FieldBox>
+                  <FieldBox>
+                    {isTempMode ? (
+                      <Box sx={{ 
+                        p: 1.5, borderRadius: '14px', border: '1px dashed #7b1fa2', 
+                        display: 'flex', alignItems: 'center', gap: 2, minHeight: 56,
+                        bgcolor: form.driverPdfUrl ? 'rgba(52,211,153,0.1)' : 'rgba(123,31,162,0.05)'
+                      }}>
+                        <Typography variant="caption" fontWeight={700} color={form.driverPdfUrl ? '#059669' : '#7b1fa2'}>
+                          {form.driverPdfUrl ? 'License PDF Attached' : 'Attach License (PDF)'}
+                        </Typography>
+                        <Button variant="contained" component="label" size="small" disabled={uploading} sx={{ ml: 'auto', borderRadius: '8px', bgcolor: '#7b1fa2', textTransform: 'none' }}>
+                          {uploading ? '...' : 'Upload'}
+                          <input type="file" hidden accept="application/pdf" onChange={handleFileUpload} />
+                        </Button>
+                      </Box>
+                    ) : (
+                      <TextField fullWidth label="License Validity" value={form.licenseValidity || ''} onChange={e => handleChange('licenseValidity', e.target.value)} placeholder="DD-MM-YYYY" InputProps={{ sx: inputSx }} />
                     )}
-                  />
-                </FieldBox>
+                  </FieldBox>
+                </Box>
 
-                <FieldBox>
+                <SectionLabel icon={HomeIcon} label="Contact & Address" />
+                <Box sx={{ mb: 2 }}>
                   <TextField
-                    fullWidth label="Driver Name"
-                    value={form.driverName || ''}
-                    onChange={e => handleChange('driverName', e.target.value)}
-                    InputProps={{
-                      sx: inputSx,
-                      startAdornment: <BadgeIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                    }}
-                  />
-                </FieldBox>
-
-                <FieldBox>
-                  <TextField
-                    fullWidth label="Contact No."
-                    value={form.contactNo || ''}
-                    onChange={e => handleChange('contactNo', e.target.value)}
-                    InputProps={{
-                      sx: inputSx,
-                      startAdornment: <PhoneIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                    }}
-                  />
-                </FieldBox>
-
-                <FieldBox>
-                  <TextField
-                    fullWidth label="Address"
+                    fullWidth multiline rows={2} label="Permanent Address"
                     value={form.address || ''}
                     onChange={e => handleChange('address', e.target.value)}
-                    InputProps={{
-                      sx: inputSx,
-                      startAdornment: <HomeIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                    }}
+                    InputProps={{ sx: inputSx }}
                   />
-                </FieldBox>
+                </Box>
 
                 {/* ─── VEHICLE DETAILS ─── */}
                 <SectionLabel icon={DirectionsCarIcon} label="Vehicle Details" />
@@ -524,11 +598,11 @@ export default function TruckContactManager({ open, onClose }) {
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                     {contacts.map((c) => {
                       // Read legacy DB keys first — that's where existing data lives in MongoDB
-                      const tNo =   getStr(c["Truck No "],    c["Truck No"],   c.truck_no)  || 'No Truck No.';
-                      const oName = getStr(c["Owner Name "],  c["Owner Name"], c.owner_name) || 'Unknown Owner';
+                      const tNo = getStr(c["Truck No "], c["Truck No"], c.truck_no) || 'No Truck No.';
+                      const oName = getStr(c["Owner Name "], c["Owner Name"], c.owner_name) || 'Unknown Owner';
                       const dName = getStr(c["Driver Name "], c["Driver Name"], c.driver_name);
                       const phone = getStr(c["Contact No. "], c["Contact No."], c.contact_no);
-                      const pan =   getStr(c["PAN No. "],     c["PAN No."],    c.pan_no);
+                      const pan = getStr(c["PAN No. "], c["PAN No."], c.pan_no);
 
                       return (
                         <Box
@@ -558,6 +632,27 @@ export default function TruckContactManager({ open, onClose }) {
                                   size="small"
                                   sx={{ bgcolor: '#f3e5f5', color: '#7b1fa2', fontWeight: 700, fontSize: '12px' }}
                                 />
+                                {c.is_temporary && (
+                                  <Chip
+                                    label="TEMPORARY"
+                                    size="small"
+                                    sx={{ bgcolor: '#fff7ed', color: '#f59e0b', fontWeight: 900, fontSize: '10px', height: 20, border: '1px solid rgba(245,158,11,0.3)' }}
+                                  />
+                                )}
+                                {c.is_temporary && !c.is_approved && (
+                                  <Chip
+                                    label="PENDING APPROVAL"
+                                    size="small"
+                                    sx={{ bgcolor: '#fef2f2', color: '#dc2626', fontWeight: 900, fontSize: '10px', height: 20, border: '1px solid rgba(220,38,38,0.2)' }}
+                                  />
+                                )}
+                                {c.is_approved && (
+                                  <Chip
+                                    label="APPROVED"
+                                    size="small"
+                                    sx={{ bgcolor: '#f0fdf4', color: '#16a34a', fontWeight: 900, fontSize: '10px', height: 20, border: '1px solid rgba(22,163,74,0.2)' }}
+                                  />
+                                )}
                               </Box>
                               <Box display="flex" flexWrap="wrap" gap={1.5}>
                                 {dName && (
@@ -581,8 +676,29 @@ export default function TruckContactManager({ open, onClose }) {
                               </Box>
                             </Box>
 
-                            {/* Actions */}
-                            <Box display="flex" gap={0.5} flexShrink={0}>
+                             {/* Actions */}
+                             <Box display="flex" gap={1} flexShrink={0} alignItems="center">
+                              {c.is_temporary && !c.is_approved && (
+                                <Button
+                                  variant="contained"
+                                  size="small"
+                                  onClick={() => handleApprove(c._id)}
+                                  sx={{ bgcolor: '#16a34a', borderRadius: '8px', fontWeight: 800, fontSize: '11px', px: 2, '&:hover': { bgcolor: '#15803d' } }}
+                                >
+                                  Approve
+                                </Button>
+                              )}
+                              {c.driver_pdf_url && (
+                                <Tooltip title="View License PDF">
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={() => window.open(c.driver_pdf_url, '_blank')}
+                                    sx={{ color: '#7b1fa2', bgcolor: 'rgba(123,31,162,0.05)' }}
+                                  >
+                                    <ReceiptIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
                               <IconButton
                                 size="small"
                                 onClick={() => handleEdit(c)}

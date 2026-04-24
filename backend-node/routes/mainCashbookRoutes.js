@@ -7,6 +7,9 @@ const adminOnly = require("../middleware/adminOnly");
 
 const router = express.Router();
 
+// One-time migration flag — reset on server restart only
+let _migrationDone = false;
+
 function getCollection() {
   return mongoose.connection.useDb("main_cashbook").collection("entries");
 }
@@ -14,11 +17,13 @@ function getCollection() {
 // ── Auto-migration helper ────────────────────────────────────────────────
 // Parses DATE strings like "5-4-2026" / "05-04-2026" (DD-M-YYYY, Indian format)
 // and back-fills month + year for any entries that are missing those fields.
+// Cached: after the first clean pass, subsequent calls are instant no-ops.
 async function migrateMonthYear(col) {
+  if (_migrationDone) return; // ← instant exit on all subsequent calls
   const stale = await col.find({
     $or: [{ month: { $exists: false } }, { year: { $exists: false } }]
   }).toArray();
-  if (!stale.length) return;
+  if (!stale.length) { _migrationDone = true; return; }
 
   const ops = [];
   for (const entry of stale) {
@@ -32,23 +37,111 @@ async function migrateMonthYear(col) {
     }
   }
   if (ops.length) await col.bulkWrite(ops);
+  _migrationDone = true; // ← never run again this session
 }
 
-// ── GET /main-cashbook ───────────────────────────────────────────────────
+
+  // ── GET /main-cashbook ───────────────────────────────────────────────────
 // Optional query params: ?month=4&year=2025
 router.get("/", auth, async (req, res) => {
   try {
     const col = getCollection();
-    await migrateMonthYear(col); // no-op once all entries have month/year
+    await migrateMonthYear(col); // instant no-op once _migrationDone = true
     const filter = {};
     if (req.query.month) filter.month = parseInt(req.query.month);
     if (req.query.year)  filter.year  = parseInt(req.query.year);
     const entries = await col.find(filter).sort({ "SL NO": 1, "_created_at": 1 }).toArray();
+
+    const voucherCol = mongoose.connection.collection("vouchers");
+    const cementCol  = mongoose.connection.useDb("cement_register").collection("entries");
+
+    // ── Run all 3 aggregations IN PARALLEL (3 serial → 1 parallel round-trip) ──
+    const [voucherAdvances, directVouchers, cementAdvances] = await Promise.all([
+
+      // 1a. Indirect Vouchers (Site Cash) — strictly NOT "Direct Expense"
+      voucherCol.aggregate([
+        { $match: { expenseType: { $ne: "Direct Expense" } } },
+        { $group: {
+            _id: { $dateToString: { format: "%d-%m-%Y", date: "$date" } },
+            total: { $sum: "$amount" }
+        }}
+      ]).toArray(),
+
+      // 1b. Direct Vouchers (Office Exp) — strictly "Direct Expense"
+      voucherCol.aggregate([
+        { $match: { expenseType: "Direct Expense" } },
+        { $group: {
+            _id: { $dateToString: { format: "%d-%m-%Y", date: "$date" } },
+            total: { $sum: "$amount" },
+            details: { $push: { purpose: "$purpose", amount: "$amount" } }
+        }}
+      ]).toArray(),
+
+      // 2. Cement Register loading advances (Site Cash)
+      cementCol.aggregate([
+        { $group: {
+            _id: "$LOADING DT",
+            totalAdvance: {
+              $sum: { $convert: { input: "$ADVANCE", to: "double", onError: 0, onNull: 0 } }
+            }
+        }}
+      ]).toArray(),
+    ]);
+
+    const advanceMap = {};
+    const officeExpMap = {};
+    const officeDetailsMap = {};
+
+    voucherAdvances.forEach(a => {
+      if (a._id) advanceMap[a._id] = (advanceMap[a._id] || 0) + a.total;
+    });
+
+    directVouchers.forEach(a => {
+      if (a._id) {
+        officeExpMap[a._id] = (officeExpMap[a._id] || 0) + a.total;
+        officeDetailsMap[a._id] = a.details.map(d => `${d.purpose} (${d.amount})`).join(", ");
+      }
+    });
+
+    cementAdvances.forEach(a => {
+      if (a._id) {
+        let dStr = String(a._id).trim();
+        let parts = dStr.split(/[-\/]/);
+        if (parts.length === 3) {
+          let [d, m, y] = parts;
+          const normDate = `${d.padStart(2, '0')}-${m.padStart(2, '0')}-${y}`;
+          advanceMap[normDate] = (advanceMap[normDate] || 0) + a.totalAdvance;
+        } else {
+          advanceMap[a._id] = (advanceMap[a._id] || 0) + a.totalAdvance;
+        }
+      }
+    });
+
+    entries.forEach(entry => {
+      if (entry.DATE) {
+        let dStr = String(entry.DATE).trim();
+        let parts = dStr.split(/[-\/]/);
+        let normDate = dStr;
+        if (parts.length === 3) {
+          let [d, m, y] = parts;
+          normDate = `${d.padStart(2, '0')}-${m.padStart(2, '0')}-${y}`;
+        }
+        entry.S_EXPENSE  = advanceMap[normDate]      || advanceMap[entry.DATE]      || 0;
+        entry.O_EXPENSE  = officeExpMap[normDate]    || officeExpMap[entry.DATE]    || 0;
+        entry.REMARKS_EXP= officeDetailsMap[normDate]|| officeDetailsMap[entry.DATE]|| "";
+      } else {
+        entry.S_EXPENSE = 0;
+        entry.O_EXPENSE = 0;
+        entry.REMARKS_EXP = "";
+      }
+    });
+
     res.json({ success: true, count: entries.length, entries });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 // ── GET /main-cashbook/month-end?month=3&year=2025 ────────────────────────
 // Returns the last computed closing balances of a given month for carry-forward

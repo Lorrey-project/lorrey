@@ -4,7 +4,7 @@ import {
   Button, Grid, IconButton, CircularProgress, Chip, Autocomplete,
   Snackbar, Alert, Backdrop, Fade, List, ListItem, ListItemText,
   ListItemButton, Divider, Tabs, Tab, Badge, InputAdornment,
-  useTheme, useMediaQuery
+  useTheme, useMediaQuery, MenuItem
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
@@ -79,8 +79,10 @@ const VoucherSlipDoc = forwardRef(({ voucher }, ref) => {
           <tbody>
             {[
               { label: 'Name', value: voucher.name || '—', bold: true },
-              { label: 'Vehicle Number', value: voucher.vehicleNumber || '—', mono: true },
-              { label: 'Reason / Purpose', value: voucher.reason || '—' },
+              ...(voucher.expenseType === 'Direct Expense' ? [] : [
+                { label: 'Vehicle Number', value: voucher.vehicleNumber || '—', mono: true }
+              ]),
+              { label: voucher.expenseType === 'Direct Expense' ? 'Expense Category' : 'Reason / Purpose', value: voucher.expenseType === 'Direct Expense' ? `${voucher.purpose} - ${voucher.reason || ''}` : voucher.reason || '—' },
               { label: 'Date & Time', value: `${fmtDate(voucher.date)}  |  ${fmtTime(voucher.createdAt || new Date())}` },
             ].map(({ label, value, bold, mono }, i) => (
               <tr key={label} style={{ background: i % 2 === 1 ? '#f8f9fa' : '#fff' }}>
@@ -150,7 +152,7 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
   const [selectedVoucher, setSelectedVoucher] = useState(null);  // for Download tab
 
   // Form
-  const [form, setForm] = useState({ name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
+  const [form, setForm] = useState({ expenseType: 'Indirect Expense', name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
   const [errors, setErrors] = useState({});
 
   // Live clock
@@ -177,7 +179,7 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
     setSavedVoucher(null);
     setSlipUrl(null);
     setSelectedVoucher(null);
-    setForm({ name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
+    setForm({ expenseType: 'Indirect Expense', name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
     setErrors({});
   }, [open]);
 
@@ -223,8 +225,11 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
 
   const validate = () => {
     const errs = {};
-    if (!form.name) errs.name = 'Select a truck owner';
-    if (!form.vehicleNumber) errs.vehicleNumber = 'Select a vehicle';
+    if (form.expenseType === 'Indirect Expense') {
+      if (!form.name) errs.name = 'Select a truck owner';
+      if (!form.vehicleNumber) errs.vehicleNumber = 'Select a vehicle';
+    }
+    if (form.expenseType === 'Direct Expense' && !form.reasonCategory) errs.reasonCategory = 'Select an expense category';
     if (!form.reason.trim()) errs.reason = 'Reason is required';
     if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Enter a positive amount';
     setErrors(errs);
@@ -237,11 +242,12 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
     try {
       const token = localStorage.getItem('token');
       const payload = {
-        vehicleNumber: form.vehicleNumber,
+        expenseType: form.expenseType,
+        vehicleNumber: form.expenseType === 'Indirect Expense' ? form.vehicleNumber : undefined,
         date: new Date().toISOString(),
         amount: parseFloat(form.amount),
-        purpose: 'Others',
-        name: form.name,
+        purpose: form.expenseType === 'Direct Expense' ? form.reasonCategory : 'Others',
+        name: form.expenseType === 'Indirect Expense' ? form.name : 'Dipali Associates & Co.',
         reason: form.reason,
       };
 
@@ -331,9 +337,11 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
 
   const previewVoucher = {
     voucherNumber: savedVoucher?.voucherNumber || '—',
-    vehicleNumber: form.vehicleNumber || '',
+    expenseType: form.expenseType,
+    vehicleNumber: form.expenseType === 'Indirect Expense' ? form.vehicleNumber || '' : undefined,
     date: new Date(),
-    name: form.name || '',
+    name: form.expenseType === 'Indirect Expense' ? form.name || '' : 'Dipali Associates & Co.',
+    purpose: form.expenseType === 'Direct Expense' ? form.reasonCategory : 'Others',
     reason: form.reason,
     amount: parseFloat(form.amount) || 0,
     createdAt: new Date().toISOString(),
@@ -446,7 +454,7 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                 <Button variant="contained" onClick={() => {
                   setSlipStep(false);
                   setSavedVoucher(null);
-                  setForm({ name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
+                  setForm({ expenseType: 'Indirect Expense', name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
                 }}
                   sx={{ borderRadius: '12px', fontWeight: 700, bgcolor: '#7b1fa2' }}>
                   Create Another
@@ -487,7 +495,23 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                   </Box>
 
                   <Box display="flex" flexDirection="column" gap={2.5}>
+                    {/* Expense Type Toggle */}
+                    <Box>
+                      <TextField
+                        select
+                        fullWidth
+                        label="Expense Type *"
+                        value={form.expenseType}
+                        onChange={(e) => setForm(p => ({ ...p, expenseType: e.target.value, reasonCategory: null, reason: '' }))}
+                        InputProps={{ sx: { borderRadius: '14px' } }}
+                      >
+                        <MenuItem value="Indirect Expense">Indirect Expense (Trucks/Logistics)</MenuItem>
+                        <MenuItem value="Direct Expense">Direct Expense (Office/Misc)</MenuItem>
+                      </TextField>
+                    </Box>
+
                     {/* Owner Name dropdown */}
+                    {form.expenseType === 'Indirect Expense' && (
                     <Box>
                       <Autocomplete
                         fullWidth
@@ -526,8 +550,10 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                         )}
                       />
                     </Box>
+                    )}
 
                     {/* Vehicle Number dropdown — filtered by owner */}
+                    {form.expenseType === 'Indirect Expense' && (
                     <Box>
                       <Autocomplete
                         fullWidth
@@ -561,12 +587,15 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                         )}
                       />
                     </Box>
+                    )}
 
                     {/* Reason Category Dropdown & Reason Input */}
                     <Box display="flex" flexDirection="column" gap={2}>
                       <Autocomplete
                         fullWidth
-                        options={['Service Road Maintanance', 'Service/Maintanance', 'Extra wages', 'Extra(Additional) Toll', 'Others']}
+                        options={form.expenseType === 'Direct Expense' 
+                          ? ['Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Others'] 
+                          : ['Service Road Maintanance', 'Service/Maintanance', 'Extra wages', 'Extra(Additional) Toll', 'Others']}
                         value={form.reasonCategory}
                         onChange={(_, val) => {
                           setForm(p => ({
