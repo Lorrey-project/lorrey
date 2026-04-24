@@ -102,24 +102,24 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
         const dbNo = (c['Truck No '] || c['Truck No'] || c.truck_no || '').trim().toUpperCase();
         return dbNo === truck;
       });
-      
+
       const dbWheel = contact ? (
-        contact['Type of vehicle '] || 
-        contact['Type of vehicle'] || 
-        contact['type_of_vehicle'] || 
-        contact.veh_type || 
+        contact['Type of vehicle '] ||
+        contact['Type of vehicle'] ||
+        contact['type_of_vehicle'] ||
+        contact.veh_type ||
         ''
       ) : '';
-      
+
       const owner = contact ? (contact['Owner Name '] || contact['Owner Name'] || contact.owner_name || '') : '';
-      
+
       // Determine Customer Type (ATOA vs MKT) from Database primary
       const dbCustType = contact ? (
-        contact['TYPE OF CUSTOMER '] || 
-        contact['type_of_customer'] || 
-        contact['type_of_customers'] || 
-        contact.cust_type || 
-        contact.type || 
+        contact['TYPE OF CUSTOMER '] ||
+        contact['type_of_customer'] ||
+        contact['type_of_customers'] ||
+        contact.cust_type ||
+        contact.type ||
         ''
       ) : '';
       let displayType = truckDisplayType(row); // fallback to trip logic
@@ -151,9 +151,8 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
     const mt = num(row['MT']);
     const billing = num(row['BILLING']);
     const orgFreight = billing * mt;
-    
-    // Track trips
-    entry.tripsCount += 1;
+
+    // Track trips (now calculated below from total MT)
 
     // Rule 1: 9.5% Base Incentive on all wheels/bills (SO/STO/NT)
     const baseIncentive = orgFreight * 0.095;
@@ -171,7 +170,7 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
     // Rule 2 & 3: Wheel Bonuses (Only on SO/NT)
     const bType = (row['Bill Type'] || '').toUpperCase();
     const isSoOrNt = bType === 'SO' || bType === 'NT';
-    
+
     if (isSoOrNt) {
       const wheelStr = String(entry.wheel).toLowerCase();
       if (wheelStr.includes('10')) {
@@ -193,8 +192,20 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
 
   // 3. Final Aggregation with Achievement Criteria
   return Object.values(byTruck).map(t => {
+    // New logic for trips count: (Total MT) / (Wheel Capacity)
+    // 6wh - 13mt, 10wh-19mt, 12wh-25mt, 14wh-30mt
+    const wheelStr = String(t.wheel || '').toLowerCase();
+    let capacity = 25; // default (12wh)
+    if (wheelStr.includes('6')) capacity = 13;
+    else if (wheelStr.includes('10')) capacity = 19;
+    else if (wheelStr.includes('12')) capacity = 25;
+    else if (wheelStr.includes('14')) capacity = 30;
+
+    const totalQty = t.nvl.invQty + t.nvcl.invQty;
+    t.tripsCount = totalQty > 0 ? Math.ceil(totalQty / capacity) : 0;
+
     const metCriteria = t.tripsCount > 6;
-    
+
     // If criteria not met (> 6 trips), incentives are 0
     if (!metCriteria) {
       t.nvl.amt = 0;
@@ -203,10 +214,11 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
       t.extra6W = 0;
     }
 
-    const totalIncentive = t.nvl.amt + t.nvcl.amt + t.extra10W + t.extra6W;
-    const totalFinal = totalIncentive - t.commission; // Final Settlement
-    
-    return { ...t, total: totalIncentive, totalFinal };
+    const nvlNvclTotal = t.nvl.amt + t.nvcl.amt;
+    const totalIncentiveWithBonus = nvlNvclTotal + t.extra10W + t.extra6W;
+    const totalFinal = totalIncentiveWithBonus - t.commission; // Final Settlement
+
+    return { ...t, total: nvlNvclTotal, totalFinal };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.ownerName.localeCompare(b.ownerName));
 }
 
@@ -274,7 +286,7 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
       row[OUR_START_COL + 7] = Math.round(m.nvcl.orgFreight) || 0;
       row[OUR_START_COL + 8] = Math.round(m.nvcl.amt) || 0;
       row[OUR_START_COL + 9] = Math.round(m.total) || 0;
-      row[OUR_START_COL + 10] = Math.round(m.extraW10) || 0;
+      row[OUR_START_COL + 10] = Math.round(m.extra10W) || 0;
       row[OUR_START_COL + 11] = Math.round(m.totalFinal) || 0;
     }
   }
@@ -295,7 +307,7 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
       newRow[OUR_START_COL + 7] = Math.round(m.nvcl.orgFreight) || 0;
       newRow[OUR_START_COL + 8] = Math.round(m.nvcl.amt) || 0;
       newRow[OUR_START_COL + 9] = Math.round(m.total) || 0;
-      newRow[OUR_START_COL + 10] = Math.round(m.extraW10) || 0;
+      newRow[OUR_START_COL + 10] = Math.round(m.extra10W) || 0;
       newRow[OUR_START_COL + 11] = Math.round(m.totalFinal) || 0;
       aoa.push(newRow);
     }
@@ -378,7 +390,7 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
       t.nvcl.orgFreight ? Math.round(t.nvcl.orgFreight) : '',
       t.nvcl.amt ? Math.round(t.nvcl.amt) : '',
       t.total || 0,
-      t.extraW10 ? Math.round(t.extraW10) : 0,
+      t.extra10W ? Math.round(t.extra10W) : 0,
       t.totalFinal || 0,
       act || 0,
       diff || 0,
@@ -395,7 +407,7 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
     acc.nvclFreight += t.nvcl.orgFreight;
     acc.nvclAmt += t.nvcl.amt;
     acc.total += t.total;
-    acc.w10 += t.extraW10;
+    acc.w10 += t.extra10W;
     acc.grand += t.totalFinal;
     const act = parseFloat(actuals[t.truckNo]) || 0;
     acc.actual += act;
@@ -991,18 +1003,18 @@ export default function IncentiveAnalysis({ rows, onBack }) {
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {[
                       { label: `Dedicated Freight Incentive 9.5% on all bills for ${MONTH_NAMES[month].slice(0, 3)}'${String(year).slice(2)}`, our: totals.nvlAmt + totals.nvclAmt, value: mailNvlTotal, setter: setMailNvlTotal },
-                      { label: `Extra Wheel Bonus (10W/6W) for SO/NT bills on ${MONTH_NAMES[month].slice(0, 3)}'${String(year).slice(2)}`, our: totals.extra, value: mailW10Total, setter: setMailW10Total },
+                      { label: `Extra Wheel Bonus (10W/6W) for SO/NT bills on ${MONTH_NAMES[month].slice(0, 3)}'${String(year).slice(2)}`, our: totals.extra10W + totals.extra6W, value: mailW10Total, setter: setMailW10Total },
                       { label: `Other Adjustments/Settlements for ${MONTH_NAMES[month].slice(0, 3)}'${String(year).slice(2)}`, our: 0, value: mailNvclTotal, setter: setMailNvclTotal }
                     ].map((item, idx) => (
-                      <Box key={idx} sx={{ 
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
+                      <Box key={idx} sx={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         p: 2, borderRadius: 2, bgcolor: idx % 2 === 0 ? '#f8fafc' : '#fff',
                         border: '1px solid #f1f5f9'
                       }}>
                         <Typography variant="body2" fontWeight={600} sx={{ width: '40%', color: '#334155', lineHeight: 1.4 }}>
                           {item.label}
                         </Typography>
-                        
+
                         <Box sx={{ display: 'flex', gap: 4, width: '60%', alignItems: 'center', justifyContent: 'flex-end' }}>
                           <Box sx={{ textAlign: 'center', minWidth: 80 }}>
                             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, textTransform: 'uppercase', fontSize: 10 }}>Total (Projected)</Typography>
@@ -1012,12 +1024,12 @@ export default function IncentiveAnalysis({ rows, onBack }) {
                           <Box sx={{ width: 140 }}>
                             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, textTransform: 'uppercase', fontSize: 10, mb: 0.5, display: 'block' }}>Total (Actual)</Typography>
                             <input
-                              type="number" 
-                              value={item.value} 
+                              type="number"
+                              value={item.value}
                               onChange={e => item.setter(e.target.value)}
                               placeholder="Enter manual total..."
-                              style={{ 
-                                width: '100%', padding: '8px 12px', border: '1.5px solid #e2e8f0', 
+                              style={{
+                                width: '100%', padding: '8px 12px', border: '1.5px solid #e2e8f0',
                                 borderRadius: '6px', fontSize: '13px', fontWeight: 600,
                                 outline: 'none', transition: 'border-color 0.2s',
                                 backgroundColor: '#fff'
@@ -1027,13 +1039,13 @@ export default function IncentiveAnalysis({ rows, onBack }) {
 
                           <Box sx={{ textAlign: 'right', minWidth: 100 }}>
                             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, textTransform: 'uppercase', fontSize: 10 }}>Difference</Typography>
-                            <Typography 
-                              variant="body2" 
-                              fontWeight={900} 
-                              sx={{ 
-                                color: item.value && (Number(item.value) - item.our !== 0) 
-                                  ? (Number(item.value) - item.our < 0 ? '#dc2626' : '#16a34a') 
-                                  : '#94a3b8' 
+                            <Typography
+                              variant="body2"
+                              fontWeight={900}
+                              sx={{
+                                color: item.value && (Number(item.value) - item.our !== 0)
+                                  ? (Number(item.value) - item.our < 0 ? '#dc2626' : '#16a34a')
+                                  : '#94a3b8'
                               }}
                             >
                               {item.value ? (Number(item.value) - item.our > 0 ? '+' : '') + fmt(Number(item.value) - item.our) : '—'}

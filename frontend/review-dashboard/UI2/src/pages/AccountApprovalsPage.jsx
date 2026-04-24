@@ -16,6 +16,9 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import BadgeIcon from '@mui/icons-material/Badge';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -34,6 +37,7 @@ const AccountApprovalsPage = ({ onBack }) => {
     const [tabIndex, setTabIndex] = useState(0);
     const [requests, setRequests] = useState([]);
     const [activeUsers, setActiveUsers] = useState([]);
+    const [truckRequests, setTruckRequests] = useState([]);
     const [loading, setLoading]   = useState(true);
     const [actionId, setActionId] = useState(null);
     const [snack, setSnack]       = useState(null);
@@ -42,14 +46,16 @@ const AccountApprovalsPage = ({ onBack }) => {
         setLoading(true);
         try {
             const token = localStorage.getItem('token');
-            const [pendingRes, activeRes] = await Promise.all([
+            const [pendingRes, activeRes, truckRes] = await Promise.all([
                 axios.get(`${API_URL}/auth/admin/pending-registrations`, { headers: { Authorization: `Bearer ${token}` } }),
-                axios.get(`${API_URL}/auth/admin/active-users`, { headers: { Authorization: `Bearer ${token}` } })
+                axios.get(`${API_URL}/auth/admin/active-users`, { headers: { Authorization: `Bearer ${token}` } }),
+                axios.get(`${API_URL}/truck-contacts/approvals`, { headers: { Authorization: `Bearer ${token}` } })
             ]);
             if (pendingRes.data.success) setRequests(pendingRes.data.users);
             if (activeRes.data.success) setActiveUsers(activeRes.data.users);
+            if (truckRes.data.success) setTruckRequests(truckRes.data.requests);
         } catch (e) {
-            setSnack({ type: 'error', message: 'Failed to load user data.' });
+            setSnack({ type: 'error', message: 'Failed to load approval data.' });
         } finally {
             setLoading(false);
         }
@@ -95,6 +101,28 @@ const AccountApprovalsPage = ({ onBack }) => {
         }
     };
 
+    const handleProcessTruck = async (id, status) => {
+        setActionId(id);
+        try {
+            const token = localStorage.getItem('token');
+            await axios.put(`${API_URL}/truck-contacts/approvals/${id}`, { 
+                status, 
+                isVerified: status === 'approved',
+                actionBy: localStorage.getItem('username') || 'Head Office' 
+            }, { headers: { Authorization: `Bearer ${token}` } });
+
+            setTruckRequests(prev => prev.filter(r => r._id !== id));
+            setSnack({ 
+                type: 'success', 
+                message: status === 'approved' ? '✅ Profile Verified & Approved!' : 'Rejected.' 
+            });
+        } catch (e) {
+            setSnack({ type: 'error', message: 'Failed to process truck profile.' });
+        } finally {
+            setActionId(null);
+        }
+    };
+
     return (
         <Box sx={{ minHeight: '100vh', bgcolor: '#f4f7f9', fontFamily: '"Outfit", "Inter", system-ui, sans-serif' }}>
 
@@ -121,16 +149,17 @@ const AccountApprovalsPage = ({ onBack }) => {
                 <Box display="flex" alignItems="center" gap={1.5}>
                     {/* Live count pill */}
                     <Box sx={{
-                        bgcolor: requests.length > 0 ? '#fbbf24' : 'rgba(255,255,255,0.15)',
+                        bgcolor: (requests.length + truckRequests.length) > 0 ? '#ef4444' : 'rgba(255,255,255,0.15)',
                         borderRadius: '20px', px: 2, py: 0.6,
-                        display: 'flex', alignItems: 'center', gap: 1
+                        display: 'flex', alignItems: 'center', gap: 1,
+                        animation: (requests.length + truckRequests.length) > 0 ? 'pulse 2s infinite' : 'none'
                     }}>
-                        <PeopleAltIcon sx={{ fontSize: 16, color: requests.length > 0 ? '#1e0a3c' : '#fff' }} />
-                        <Typography sx={{ fontWeight: 900, fontSize: 13, color: requests.length > 0 ? '#1e0a3c' : '#fff' }}>
-                            {loading ? '…' : requests.length} waiting
+                        <HourglassTopIcon sx={{ fontSize: 13, color: '#fff' }} />
+                        <Typography sx={{ fontWeight: 900, fontSize: 13, color: '#fff' }}>
+                            {loading ? '…' : requests.length + truckRequests.length} Total Pending
                         </Typography>
                     </Box>
-                    <Tooltip title="Refresh">
+                    <Tooltip title="Refresh All Data">
                         <IconButton onClick={fetchData} sx={{ color: 'rgba(255,255,255,0.8)', bgcolor: 'rgba(255,255,255,0.1)', borderRadius: '10px', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}>
                             <RefreshIcon sx={{ fontSize: 18 }} />
                         </IconButton>
@@ -138,11 +167,71 @@ const AccountApprovalsPage = ({ onBack }) => {
                 </Box>
             </Box>
 
-            {/* ── Tabs ───────────────────────────────────────── */}
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', px: { xs: 1, md: 4 } }}>
-                <Tabs value={tabIndex} onChange={(e, v) => setTabIndex(v)} centered variant="fullWidth" TabIndicatorProps={{ sx: { height: 3, borderRadius: '3px 3px 0 0', bgcolor: '#7c3aed' } }}>
-                    <Tab label={`Pending (${requests.length})`} sx={{ fontWeight: 800, textTransform: 'none', fontSize: 15, py: 2, '&.Mui-selected': { color: '#7c3aed' } }} />
-                    <Tab label={`Active Accounts (${activeUsers.length})`} sx={{ fontWeight: 800, textTransform: 'none', fontSize: 15, py: 2, '&.Mui-selected': { color: '#7c3aed' } }} />
+            {/* ── Stat Overview Bar — MODERN ADDITION ────────────────── */}
+            <Box sx={{ bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', py: 3 }}>
+                <Container maxWidth="md">
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr 1fr' }, gap: 2 }}>
+                        {[
+                            { label: 'User Apps', count: requests.length, color: '#7c3aed', icon: PeopleAltIcon },
+                            { label: 'Truck Profiles', count: truckRequests.length, color: '#0ea5e9', icon: LocalShippingIcon },
+                            { label: 'Active Staff', count: activeUsers.length, color: '#16a34a', icon: VerifiedUserIcon }
+                        ].map((stat, i) => (
+                            <Box 
+                                key={stat.label}
+                                onClick={() => setTabIndex(i)}
+                                sx={{ 
+                                    p: 2, borderRadius: '16px', bgcolor: tabIndex === i ? `${stat.color}08` : '#fafafa',
+                                    border: '1.5px solid', borderColor: tabIndex === i ? stat.color : '#f1f5f9',
+                                    cursor: 'pointer', transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 8px 16px ${stat.color}15`, borderColor: stat.color }
+                                }}
+                            >
+                                <Box display="flex" alignItems="center" gap={1.5}>
+                                    <Box sx={{ p: 1, bgcolor: `${stat.color}15`, color: stat.color, borderRadius: '10px', display: 'flex' }}>
+                                        <stat.icon sx={{ fontSize: 20 }} />
+                                    </Box>
+                                    <Box>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 800, textTransform: 'uppercase', fontSize: 10 }}>{stat.label}</Typography>
+                                        <Typography variant="h6" sx={{ fontWeight: 900, lineHeight: 1, color: '#0f172a' }}>{stat.count}</Typography>
+                                    </Box>
+                                </Box>
+                            </Box>
+                        ))}
+                    </Box>
+                </Container>
+            </Box>
+
+            {/* ── Custom Tab Nav ────────────────────────────────────── */}
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', px: { xs: 1, md: 4 }, position: 'sticky', top: 0, zIndex: 10 }}>
+                <Tabs 
+                    value={tabIndex} 
+                    onChange={(e, v) => setTabIndex(v)} 
+                    centered 
+                    variant="fullWidth" 
+                    TabIndicatorProps={{ sx: { height: 4, borderRadius: '4px 4px 0 0', bgcolor: tabIndex === 0 ? '#7c3aed' : (tabIndex === 1 ? '#0ea5e9' : '#16a34a') } }}
+                    sx={{
+                        '& .MuiTab-root': { py: 2.5, transition: 'all 0.2s' },
+                        '& .Mui-selected': { 
+                            bgcolor: 'rgba(0,0,0,0.02)',
+                            color: `${tabIndex === 0 ? '#7c3aed' : (tabIndex === 1 ? '#0ea5e9' : '#16a34a')} !important`
+                        }
+                    }}
+                >
+                    <Tab 
+                      icon={<PeopleAltIcon sx={{ fontSize: 20 }} />} iconPosition="start"
+                      label={`User Apps (${requests.length})`} 
+                      sx={{ fontWeight: 900, textTransform: 'none', fontSize: 14 }} 
+                    />
+                    <Tab 
+                      icon={<LocalShippingIcon sx={{ fontSize: 20 }} />} iconPosition="start"
+                      label={`Truck Profiles (${truckRequests.length})`} 
+                      sx={{ fontWeight: 900, textTransform: 'none', fontSize: 14 }} 
+                    />
+                    <Tab 
+                      icon={<VerifiedUserIcon sx={{ fontSize: 20 }} />} iconPosition="start"
+                      label={`Active Staff (${activeUsers.length})`} 
+                      sx={{ fontWeight: 900, textTransform: 'none', fontSize: 14 }} 
+                    />
                 </Tabs>
             </Box>
 
@@ -188,84 +277,103 @@ const AccountApprovalsPage = ({ onBack }) => {
                 )}
 
                 {/* Request / Active cards */}
-                {!loading && (tabIndex === 0 ? requests : activeUsers).map((req, idx) => {
+                {!loading && (tabIndex === 0 ? requests : (tabIndex === 1 ? truckRequests : activeUsers)).map((req, idx) => {
                     const roleInfo = ROLE_MAP[req.role] || ROLE_MAP['OFFICE'];
                     const isActioning = actionId === req._id;
 
                     return (
                         <Card key={req._id} elevation={0} sx={{
-                            mb: 2.5, borderRadius: '20px',
+                            mb: 2.5, borderRadius: '24px',
                             border: '1.5px solid #e2e8f0',
                             bgcolor: '#fff',
-                            transition: 'all 0.2s',
-                            '&:hover': { boxShadow: '0 8px 32px rgba(0,0,0,0.07)', borderColor: '#c4b5fd' }
+                            transition: 'all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                            '&:hover': { 
+                                boxShadow: '0 20px 40px rgba(0,0,0,0.08)', 
+                                borderColor: tabIndex === 0 ? '#c4b5fd' : (tabIndex === 1 ? '#bae6fd' : '#bbf7d0'),
+                                transform: 'scale(1.01)'
+                            }
                         }}>
                             {/* Color top accent bar based on tab */}
-                            <Box sx={{ height: 4, background: tabIndex === 0 ? 'linear-gradient(90deg, #7c3aed, #a78bfa)' : 'linear-gradient(90deg, #0ea5e9, #38bdf8)', borderRadius: '20px 20px 0 0' }} />
+                            <Box sx={{ 
+                                height: 6, 
+                                background: tabIndex === 0 ? 'linear-gradient(90deg, #7c3aed, #a78bfa)' : (tabIndex === 1 ? 'linear-gradient(90deg, #0ea5e9, #38bdf8)' : 'linear-gradient(90deg, #16a34a, #4ade80)'), 
+                                borderRadius: '20px 20px 0 0' 
+                            }} />
 
                             <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
                                 {/* Header row */}
                                 <Box display="flex" alignItems="flex-start" justifyContent="space-between" mb={2}>
                                     <Box display="flex" alignItems="center" gap={2}>
                                         <Avatar sx={{
-                                            width: 50, height: 50, bgcolor: roleInfo.bg, color: roleInfo.color,
-                                            fontWeight: 900, fontSize: 20, border: `2px solid ${roleInfo.color}22`
+                                            width: 50, height: 50, bgcolor: tabIndex === 1 ? '#faf5ff' : roleInfo.bg, color: tabIndex === 1 ? '#7c3aed' : roleInfo.color,
+                                            fontWeight: 900, fontSize: 20, border: `2px solid ${tabIndex === 1 ? '#7c3aed' : roleInfo.color}22`
                                         }}>
-                                            {(req.name || req.email || 'U')[0].toUpperCase()}
+                                            {tabIndex === 1 ? (req["Truck No "] || 'T')[0] : (req.name || req.email || 'U')[0].toUpperCase()}
                                         </Avatar>
                                         <Box>
                                             <Typography fontWeight={900} fontSize={16} color="#0f172a">
-                                                {req.name || '(No name provided)'}
+                                                {tabIndex === 1 ? req["Truck No "] : (req.name || '(No name provided)')}
                                             </Typography>
                                             <Typography variant="body2" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-                                                {req.email}
+                                                {tabIndex === 1 ? req["Owner Name "] : req.email}
                                             </Typography>
                                         </Box>
                                     </Box>
-                                    <Box display="flex" alignItems="center" gap={0.5} sx={{ bgcolor: tabIndex === 0 ? '#fff8e1' : '#f0fdf4', borderRadius: '10px', px: 1.5, py: 0.7 }}>
-                                        {tabIndex === 0 ? <HourglassTopIcon sx={{ fontSize: 14, color: '#d97706' }} /> : <VerifiedUserIcon sx={{ fontSize: 14, color: '#16a34a' }} />}
-                                        <Typography sx={{ fontSize: 11, fontWeight: 800, color: tabIndex === 0 ? '#d97706' : '#16a34a' }}>
-                                            {tabIndex === 0 ? 'PENDING' : 'ACTIVE'}
+                                    <Box display="flex" alignItems="center" gap={0.5} sx={{ bgcolor: (tabIndex === 0 || tabIndex === 1) ? '#fff8e1' : '#f0fdf4', borderRadius: '10px', px: 1.5, py: 0.7 }}>
+                                        {(tabIndex === 0 || tabIndex === 1) ? <HourglassTopIcon sx={{ fontSize: 14, color: '#d97706' }} /> : <VerifiedUserIcon sx={{ fontSize: 14, color: '#16a34a' }} />}
+                                        <Typography sx={{ fontSize: 11, fontWeight: 800, color: (tabIndex === 0 || tabIndex === 1) ? '#d97706' : '#16a34a' }}>
+                                            {(tabIndex === 0 || tabIndex === 1) ? 'PENDING' : 'ACTIVE'}
                                         </Typography>
                                     </Box>
                                 </Box>
 
                                 {/* Chips */}
                                 <Box display="flex" gap={1} mb={2} flexWrap="wrap">
-                                    <Chip icon={roleInfo.icon} label={roleInfo.label} size="small"
-                                        sx={{ bgcolor: roleInfo.bg, color: roleInfo.color, fontWeight: 700, fontSize: 12 }} />
-                                    {req.pumpName && (
-                                        <Chip label={req.pumpName} size="small"
-                                            sx={{ bgcolor: '#dcfce7', color: '#059669', fontWeight: 700, fontSize: 12 }} />
+                                    {tabIndex === 1 ? (
+                                        <>
+                                            <Chip icon={<BadgeIcon sx={{ fontSize: 14 }} />} label={req.requestType || 'New Registration'} size="small"
+                                                sx={{ bgcolor: '#ede9fe', color: '#7c3aed', fontWeight: 700, fontSize: 12 }} />
+                                            <Chip label={req["TYPE OF CUSTOMER "] || 'ATOA'} size="small"
+                                                sx={{ bgcolor: '#f1f5f9', color: '#475569', fontWeight: 700, fontSize: 12 }} />
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Chip icon={roleInfo.icon} label={roleInfo.label} size="small"
+                                                sx={{ bgcolor: roleInfo.bg, color: roleInfo.color, fontWeight: 700, fontSize: 12 }} />
+                                            {req.pumpName && (
+                                                <Chip label={req.pumpName} size="small"
+                                                    sx={{ bgcolor: '#dcfce7', color: '#059669', fontWeight: 700, fontSize: 12 }} />
+                                            )}
+                                        </>
                                     )}
                                 </Box>
 
                                 {/* Date */}
                                 <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ display: 'block', mb: 2.5 }}>
-                                    Applied: {fmtDate(req.createdAt)}
+                                    {tabIndex === 1 ? `Driver: ${req["Driver Name "] || 'N/A'}` : `Applied: ${fmtDate(req.createdAt)}`}
                                 </Typography>
 
                                 <Divider sx={{ mb: 2.5 }} />
 
-                                {/* Actions */}
                                 <Box display="flex" gap={2}>
-                                    {tabIndex === 0 ? (
+                                    {(tabIndex === 0 || tabIndex === 1) ? (
                                         <>
                                             <Button
                                                 variant="contained" fullWidth disabled={isActioning}
                                                 startIcon={isActioning ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <CheckCircleIcon />}
-                                                onClick={() => handleApprove(req._id)}
+                                                onClick={() => tabIndex === 0 ? handleApprove(req._id) : handleProcessTruck(req._id, 'approved')}
                                                 sx={{
                                                     py: 1.5, borderRadius: '12px', fontWeight: 800, fontSize: 14,
                                                     bgcolor: '#16a34a', '&:hover': { bgcolor: '#15803d' },
                                                     boxShadow: '0 4px 14px rgba(22,163,74,0.3)', textTransform: 'none',
                                                 }}
                                             >
-                                                Approve
+                                                {tabIndex === 1 ? 'Verify & Approve' : 'Approve'}
                                             </Button>
                                             <Button
                                                 variant="outlined" fullWidth disabled={isActioning}
-                                                startIcon={<CancelIcon />} onClick={() => handleReject(req._id)}
+                                                startIcon={<CancelIcon />} 
+                                                onClick={() => tabIndex === 0 ? handleReject(req._id) : handleProcessTruck(req._id, 'rejected')}
                                                 sx={{
                                                     py: 1.5, borderRadius: '12px', fontWeight: 800, fontSize: 14,
                                                     borderColor: '#ef4444', color: '#ef4444', borderWidth: 1.5,

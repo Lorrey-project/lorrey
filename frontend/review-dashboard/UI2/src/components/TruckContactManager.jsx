@@ -19,6 +19,10 @@ import HomeIcon from '@mui/icons-material/Home';
 import ArticleIcon from '@mui/icons-material/Article';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import EventIcon from '@mui/icons-material/Event';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import AddCircleIcon from '@mui/icons-material/AddCircle';
+import DescriptionIcon from '@mui/icons-material/Description';
 import axios from 'axios';
 import { API_URL } from '../config';
 
@@ -51,32 +55,32 @@ const inputSx = { borderRadius: '14px' };
 // These MUST exactly match the column names already in MongoDB (including trailing spaces)
 // DO NOT change these strings — they are the real column names in the "Truck Contact Number" collection
 const DB_KEYS = {
-  truckNo:           'Truck No ',
-  vehType:           'Type of vehicle ',
-  custType:          'TYPE OF CUSTOMER ',
-  ownerName:         'Owner Name ',
-  panNo:             'PAN No. ',
-  aadharNo:          'Aadhar No. ',
-  panAadharLink:     'PAN Addahar Link ',
-  contactNo:         'Contact No. ',
-  address:           'Adress ',
-  nilTds:            'NIL TDS Declaration ',
-  tdsApp:            'TDS Applicability ',
-  basicFreight:      'Basic Freight Comission Applicability ',
-  incentiveComm:     'Incentive Comission Appliciability ',
-  gstType:           'GST TYPE ',
-  gstNo:             'GST NO ',
-  gstPercent:        'GST % ',
-  rcValidity:        'RC Validity ',
+  truckNo: 'Truck No ',
+  vehType: 'Type of vehicle ',
+  custType: 'TYPE OF CUSTOMER ',
+  ownerName: 'Owner Name ',
+  panNo: 'PAN No. ',
+  aadharNo: 'Aadhar No. ',
+  panAadharLink: 'PAN Addahar Link ',
+  contactNo: 'Contact No. ',
+  address: 'Adress ',
+  nilTds: 'NIL TDS Declaration ',
+  tdsApp: 'TDS Applicability ',
+  basicFreight: 'Basic Freight Comission Applicability ',
+  incentiveComm: 'Incentive Comission Appliciability ',
+  gstType: 'GST TYPE ',
+  gstNo: 'GST NO ',
+  gstPercent: 'GST % ',
+  rcValidity: 'RC Validity ',
   insuranceValidity: 'Insurance Validity ',
-  fitnessValidity:   'Fitness Validity ',
-  roadTaxValidity:   'Road Tax Validity ',
-  permit:            'Permit ',
-  puc:               'PUC ',
-  npValidity:        'NP Validity ',
-  driverName:        'Driver Name ',
-  licenseNo:         'License No ',
-  licenseValidity:   'License Validity ',
+  fitnessValidity: 'Fitness Validity ',
+  roadTaxValidity: 'Road Tax Validity ',
+  permit: 'Permit ',
+  puc: 'PUC ',
+  npValidity: 'NP Validity ',
+  driverName: 'Driver Name ',
+  licenseNo: 'License No ',
+  licenseValidity: 'License Validity ',
 };
 
 const getStr = (...candidates) => {
@@ -89,7 +93,7 @@ const getStr = (...candidates) => {
 export default function TruckContactManager({ open, onClose }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  
+
   const [tab, setTab] = useState(0);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -98,16 +102,42 @@ export default function TruckContactManager({ open, onClose }) {
   const [form, setForm] = useState({});
   const [errors, setErrors] = useState({});
   const [editId, setEditId] = useState(null);
+  const [formTab, setFormTab] = useState(0); // Sub-tab within form (Owner, Driver, Vehicle)
+  const [approvals, setApprovals] = useState([]);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+  const userRole = localStorage.getItem('role') || 'Site';
+  const [docs, setDocs] = useState([
+    { id: 'pan', label: 'PAN Card Copy', status: 'Pending' },
+    { id: 'aadhar', label: 'Aadhar Card Copy', status: 'Pending' },
+    { id: 'bank', label: 'Bank Passbook / Cheque', status: 'Pending' },
+    { id: 'rc', label: 'RC (Registration Certificate)', status: 'Pending' },
+    { id: 'dl', label: 'Driving License', status: 'Pending' },
+    { id: 'insurance', label: 'Insurance Policy', status: 'Pending' },
+  ]);
 
   useEffect(() => {
     if (open) {
       setTab(0);
+      setFormTab(0);
       setForm({});
       setErrors({});
       setEditId(null);
       fetchContacts();
+      if (userRole === 'Head-office') fetchApprovals();
     }
   }, [open]);
+
+  const fetchApprovals = async () => {
+    setApprovalLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/truck-contacts/approvals`);
+      if (res.data.success) setApprovals(res.data.requests);
+    } catch {
+      setSnack({ type: 'error', message: 'Failed to load approvals.' });
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
 
   const fetchContacts = async () => {
     setLoading(true);
@@ -135,12 +165,12 @@ export default function TruckContactManager({ open, onClose }) {
         // Auto-populate owner-level fields — read from legacy DB keys first
         setForm(prev => ({
           ...prev,
-          ownerName:     newValue,
-          panNo:         prev.panNo         || getStr(match["PAN No. "],         match["PAN No."],   match.pan_no),
-          aadharNo:      prev.aadharNo      || getStr(match["Aadhar No. "],      match["Aadhar No."], match.aadhar_no),
-          contactNo:     prev.contactNo     || getStr(match["Contact No. "],     match["Contact No."], match.contact_no),
-          address:       prev.address       || getStr(match["Adress "],          match["Address"],    match.address),
-          custType:      prev.custType      || getStr(match["TYPE OF CUSTOMER "], match.type),
+          ownerName: newValue,
+          panNo: prev.panNo || getStr(match["PAN No. "], match["PAN No."], match.pan_no),
+          aadharNo: prev.aadharNo || getStr(match["Aadhar No. "], match["Aadhar No."], match.aadhar_no),
+          contactNo: prev.contactNo || getStr(match["Contact No. "], match["Contact No."], match.contact_no),
+          address: prev.address || getStr(match["Adress "], match["Address"], match.address),
+          custType: prev.custType || getStr(match["TYPE OF CUSTOMER "], match.type),
           panAadharLink: prev.panAadharLink || getStr(match["PAN Addahar Link "], match.pan_aadhar_link),
         }));
       }
@@ -160,32 +190,32 @@ export default function TruckContactManager({ open, onClose }) {
       // These string keys must stay exactly as-is (including trailing spaces)
       const payload = {};
       const formToKey = {
-        truckNo:           form.truckNo,
-        vehType:           form.vehType,
-        custType:          form.custType,
-        ownerName:         form.ownerName,
-        panNo:             form.panNo,
-        aadharNo:          form.aadharNo,
-        panAadharLink:     form.panAadharLink,
-        contactNo:         form.contactNo,
-        address:           form.address,
-        nilTds:            form.nilTds,
-        tdsApp:            form.tdsApp,
-        basicFreight:      form.basicFreight,
-        incentiveComm:     form.incentiveComm,
-        gstType:           form.gstType,
-        gstNo:             form.gstNo,
-        gstPercent:        form.gstPercent,
-        rcValidity:        form.rcValidity,
+        truckNo: form.truckNo,
+        vehType: form.vehType,
+        custType: form.custType,
+        ownerName: form.ownerName,
+        panNo: form.panNo,
+        aadharNo: form.aadharNo,
+        panAadharLink: form.panAadharLink,
+        contactNo: form.contactNo,
+        address: form.address,
+        nilTds: form.nilTds,
+        tdsApp: form.tdsApp,
+        basicFreight: form.basicFreight,
+        incentiveComm: form.incentiveComm,
+        gstType: form.gstType,
+        gstNo: form.gstNo,
+        gstPercent: form.gstPercent,
+        rcValidity: form.rcValidity,
         insuranceValidity: form.insuranceValidity,
-        fitnessValidity:   form.fitnessValidity,
-        roadTaxValidity:   form.roadTaxValidity,
-        permit:            form.permit,
-        puc:               form.puc,
-        npValidity:        form.npValidity,
-        driverName:        form.driverName,
-        licenseNo:         form.licenseNo,
-        licenseValidity:   form.licenseValidity,
+        fitnessValidity: form.fitnessValidity,
+        roadTaxValidity: form.roadTaxValidity,
+        permit: form.permit,
+        puc: form.puc,
+        npValidity: form.npValidity,
+        driverName: form.driverName,
+        licenseNo: form.licenseNo,
+        licenseValidity: form.licenseValidity,
       };
 
       Object.entries(formToKey).forEach(([k, v]) => {
@@ -196,20 +226,45 @@ export default function TruckContactManager({ open, onClose }) {
         }
       });
 
-      if (editId) {
-        const res = await axios.put(`${API_URL}/truck-contacts/${editId}`, payload);
-        if (res.data.success) setSnack({ type: 'success', message: 'Profile updated!' });
+      if (userRole !== 'Head-office') {
+        // Site / SAS User: Submit Request
+        await axios.post(`${API_URL}/truck-contacts/request`, payload);
+        setSnack({ type: 'success', message: 'Registration request sent for Head Office approval!' });
       } else {
-        const res = await axios.post(`${API_URL}/truck-contacts`, payload);
-        if (res.data.success) setSnack({ type: 'success', message: 'Profile saved!' });
+        // Head Office User: Save Directly
+        if (editId) {
+          const res = await axios.put(`${API_URL}/truck-contacts/${editId}`, payload);
+          if (res.data.success) setSnack({ type: 'success', message: 'Profile updated!' });
+        } else {
+          const res = await axios.post(`${API_URL}/truck-contacts`, payload);
+          if (res.data.success) setSnack({ type: 'success', message: 'Profile saved!' });
+        }
       }
 
       setForm({});
       setEditId(null);
       fetchContacts();
-      setTab(1);
+      if (userRole === 'Head-office') fetchApprovals();
+      setTab(userRole === 'Head-office' ? 3 : 0); // Open contacts for HO, or stay for Site
     } catch {
       setSnack({ type: 'error', message: 'Failed to save.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleProcessApproval = async (id, status) => {
+    setSaving(true);
+    try {
+      await axios.put(`${API_URL}/truck-contacts/approvals/${id}`, {
+        status,
+        actionBy: localStorage.getItem('username') || 'Head Office'
+      });
+      setSnack({ type: 'success', message: `Request ${status} successfully!` });
+      fetchApprovals();
+      fetchContacts();
+    } catch {
+      setSnack({ type: 'error', message: 'Failed to process approval.' });
     } finally {
       setSaving(false);
     }
@@ -218,35 +273,36 @@ export default function TruckContactManager({ open, onClose }) {
   const handleEdit = (c) => {
     // Read from legacy DB column names first (that's where real data lives)
     setForm({
-      truckNo:           getStr(c["Truck No "],                           c["Truck No"],        c.truck_no),
-      ownerName:         getStr(c["Owner Name "],                         c["Owner Name"],      c.owner_name),
-      driverName:        getStr(c["Driver Name "],                        c["Driver Name"],     c.driver_name),
-      contactNo:         getStr(c["Contact No. "],                        c["Contact No."],     c.contact_no),
-      address:           getStr(c["Adress "],                             c["Address"],         c.address),
-      panNo:             getStr(c["PAN No. "],                            c["PAN No."],         c.pan_no),
-      aadharNo:          getStr(c["Aadhar No. "],                         c["Aadhar No."],      c.aadhar_no),
-      panAadharLink:     getStr(c["PAN Addahar Link "],                   c.pan_aadhar_link),
-      vehType:           getStr(c["Type of vehicle "],                    c.type),
-      custType:          getStr(c["TYPE OF CUSTOMER "],                   c.type),
-      nilTds:            getStr(c["NIL TDS Declaration "],                c.nil_tds_declaration),
-      tdsApp:            getStr(c["TDS Applicability "],                  c.tds_applicability),
-      basicFreight:      getStr(c["Basic Freight Comission Applicability "], c.incentive_commission_applicability),
-      incentiveComm:     getStr(c["Incentive Comission Appliciability "], c.incentive_commission_applicability),
-      gstType:           getStr(c["GST TYPE "],                           c.gst_type),
-      gstNo:             getStr(c["GST NO "],                             c.gst_no),
-      gstPercent:        getStr(c["GST % "],                              c.gst_percent),
-      rcValidity:        getStr(c["RC Validity "],                        c.rc_validity),
-      insuranceValidity: getStr(c["Insurance Validity "],                 c.insurance_validity),
-      fitnessValidity:   getStr(c["Fitness Validity "],                   c.fitness_validity),
-      roadTaxValidity:   getStr(c["Road Tax Validity "],                  c.road_tax_validity),
-      puc:               getStr(c["PUC "],                                c.puc),
-      npValidity:        getStr(c["NP Validity "],                        c.np_validity),
-      permit:            getStr(c["Permit "],                             c.permit),
-      licenseNo:         getStr(c["License No "],                         c.license_no),
-      licenseValidity:   getStr(c["License Validity "],                   c.license_validity),
+      truckNo: getStr(c["Truck No "], c["Truck No"], c.truck_no),
+      ownerName: getStr(c["Owner Name "], c["Owner Name"], c.owner_name),
+      driverName: getStr(c["Driver Name "], c["Driver Name"], c.driver_name),
+      contactNo: getStr(c["Contact No. "], c["Contact No."], c.contact_no),
+      address: getStr(c["Adress "], c["Address"], c.address),
+      panNo: getStr(c["PAN No. "], c["PAN No."], c.pan_no),
+      aadharNo: getStr(c["Aadhar No. "], c["Aadhar No."], c.aadhar_no),
+      panAadharLink: getStr(c["PAN Addahar Link "], c.pan_aadhar_link),
+      vehType: getStr(c["Type of vehicle "], c.type),
+      custType: getStr(c["TYPE OF CUSTOMER "], c.type),
+      nilTds: getStr(c["NIL TDS Declaration "], c.nil_tds_declaration),
+      tdsApp: getStr(c["TDS Applicability "], c.tds_applicability),
+      basicFreight: getStr(c["Basic Freight Comission Applicability "], c.incentive_commission_applicability),
+      incentiveComm: getStr(c["Incentive Comission Appliciability "], c.incentive_commission_applicability),
+      gstType: getStr(c["GST TYPE "], c.gst_type),
+      gstNo: getStr(c["GST NO "], c.gst_no),
+      gstPercent: getStr(c["GST % "], c.gst_percent),
+      rcValidity: getStr(c["RC Validity "], c.rc_validity),
+      insuranceValidity: getStr(c["Insurance Validity "], c.insurance_validity),
+      fitnessValidity: getStr(c["Fitness Validity "], c.fitness_validity),
+      roadTaxValidity: getStr(c["Road Tax Validity "], c.road_tax_validity),
+      puc: getStr(c["PUC "], c.puc),
+      npValidity: getStr(c["NP Validity "], c.np_validity),
+      permit: getStr(c["Permit "], c.permit),
+      licenseNo: getStr(c["License No "], c.license_no),
+      licenseValidity: getStr(c["License Validity "], c.license_validity),
     });
     setEditId(c._id);
     setTab(0);
+    setFormTab(0);
   };
 
   const handleDelete = async (id) => {
@@ -270,30 +326,44 @@ export default function TruckContactManager({ open, onClose }) {
     if (errors[field]) setErrors(p => ({ ...p, [field]: null }));
   };
 
-  const tf = (label, field, extra = {}) => (
-    <TextField
-      fullWidth
-      label={label}
-      value={form[field] || ''}
-      onChange={e => handleChange(field, e.target.value)}
-      error={!!errors[field]}
-      helperText={errors[field]}
-      InputProps={{ sx: inputSx }}
-      {...extra}
-    />
+  const tf = (label, field, Icon = null, extra = {}) => (
+    <FieldBox>
+      <TextField
+        fullWidth
+        label={label}
+        value={form[field] || ''}
+        onChange={e => handleChange(field, e.target.value)}
+        error={!!errors[field]}
+        helperText={errors[field]}
+        InputProps={{
+          sx: inputSx,
+          startAdornment: Icon ? (
+            <Icon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} />
+          ) : null
+        }}
+        {...extra}
+      />
+    </FieldBox>
   );
 
-  const selectTf = (label, field, options) => (
-    <TextField
-      fullWidth
-      select
-      label={label}
-      value={form[field] || ''}
-      onChange={e => handleChange(field, e.target.value)}
-      InputProps={{ sx: inputSx }}
-    >
-      {options.map(o => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-    </TextField>
+  const selectTf = (label, field, options, Icon = null) => (
+    <FieldBox>
+      <TextField
+        fullWidth
+        select
+        label={label}
+        value={form[field] || ''}
+        onChange={e => handleChange(field, e.target.value)}
+        InputProps={{
+          sx: inputSx,
+          startAdornment: Icon ? (
+            <Icon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} />
+          ) : null
+        }}
+      >
+        {options.map(o => <MenuItem key={o} value={o}>{o}</MenuItem>)}
+      </TextField>
+    </FieldBox>
   );
 
   return (
@@ -348,8 +418,17 @@ export default function TruckContactManager({ open, onClose }) {
             >
               <Tab icon={<AddCircleOutlineIcon sx={{ fontSize: 18 }} />} iconPosition="start"
                 label={editId ? 'Edit Contact' : 'Add New Contact'} />
+              <Tab icon={<BadgeIcon sx={{ fontSize: 18 }} />} iconPosition="start"
+                label="Temp Driver Assign" />
               <Tab icon={<ListAltIcon sx={{ fontSize: 18 }} />} iconPosition="start"
                 label={`Existing Contacts (${contacts.length})`} />
+              {userRole === 'Head-office' && (
+                <Tab
+                  icon={<ReceiptIcon sx={{ fontSize: 18 }} />} iconPosition="start"
+                  label={`Approvals (${approvals.length})`}
+                  sx={{ color: approvals.length > 0 ? '#d32f2f !important' : 'inherit' }}
+                />
+              )}
             </Tabs>
           </Box>
         </DialogTitle>
@@ -380,116 +459,197 @@ export default function TruckContactManager({ open, onClose }) {
                   )}
                 </Box>
 
-                {/* ─── PRIMARY IDENTIFIERS ─── */}
-                <SectionLabel icon={PersonIcon} label="Primary Identifiers" />
+                {/* ─── FIXED PRIMARY HEADER ─── */}
+                <Box sx={{ bgcolor: '#faf5ff', p: 2.5, borderRadius: '20px', mb: 3, border: '1px solid #ede7f6', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr' }, gap: 3, alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
+                        Vehicle Primary ID
+                      </Typography>
+                      {tf('Truck Number *', 'truckNo', LocalShippingIcon)}
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
+                        Relationship Type
+                      </Typography>
+                      {tf('ATOA / MKT / Site', 'custType', ArticleIcon)}
+                    </Box>
+                  </Box>
+                </Box>
 
-                <FieldBox>
-                  {tf('Truck Number *', 'truckNo')}
-                </FieldBox>
+                {/* ─── NESTED FORM TABS ─── */}
+                <Box sx={{ bgcolor: '#fff', borderRadius: '16px', border: '1px solid #f3e5f5', overflow: 'hidden', boxShadow: '0 4px 20px rgba(123,31,162,0.05)' }}>
+                  <Tabs
+                    value={formTab}
+                    onChange={(_, v) => setFormTab(v)}
+                    variant="fullWidth"
+                    sx={{
+                      bgcolor: '#faf5ff',
+                      '& .MuiTab-root': { fontWeight: 900, fontSize: '13px', py: 2, minHeight: 60, textTransform: 'none', color: '#64748b' },
+                      '& .Mui-selected': { color: '#4a148c !important', bgcolor: '#fff' },
+                      '& .MuiTabs-indicator': { backgroundColor: '#4a148c', height: 4, borderRadius: '4px 4px 0 0' }
+                    }}
+                  >
+                    <Tab label="Truck Owner" icon={<PersonIcon sx={{ fontSize: 20 }} />} iconPosition="start" />
+                    <Tab label="Truck Driver" icon={<BadgeIcon sx={{ fontSize: 20 }} />} iconPosition="start" />
+                    <Tab label="Compliance & Validity" icon={<ArticleIcon sx={{ fontSize: 20 }} />} iconPosition="start" />
+                  </Tabs>
 
-                <FieldBox>
-                  <Autocomplete
-                    freeSolo
-                    options={uniqueOwners}
-                    value={form.ownerName || ''}
-                    onChange={handleOwnerSelect}
-                    onInputChange={(_, v) => handleChange('ownerName', v)}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Owner Name *"
-                        error={!!errors.ownerName}
-                        helperText={errors.ownerName || (uniqueOwners.length > 0 ? `${uniqueOwners.length} existing owners — or type a new name` : 'Type a new owner name')}
-                        InputProps={{
-                          ...params.InputProps,
-                          sx: inputSx,
-                          startAdornment: <PersonIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                        }}
-                      />
+                  <Box sx={{ p: 3 }}>
+                    {/* Sub-Tab 0: OWNER */}
+                    {formTab === 0 && (
+                      <Box sx={{ animation: 'fadeIn 0.3s ease-in-out' }}>
+                        <SectionLabel icon={PersonIcon} label="Full Owner Details" />
+                        <FieldBox>
+                          <Autocomplete
+                            freeSolo
+                            options={uniqueOwners}
+                            value={form.ownerName || ''}
+                            onChange={handleOwnerSelect}
+                            onInputChange={(_, v) => handleChange('ownerName', v)}
+                            renderInput={(params) => (
+                              <TextField
+                                {...params}
+                                label="Owner Name *"
+                                error={!!errors.ownerName}
+                                helperText={errors.ownerName || `${uniqueOwners.length} owners in database`}
+                                InputProps={{
+                                  ...params.InputProps,
+                                  sx: inputSx,
+                                  startAdornment: (
+                                    <>
+                                      <PersonIcon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} />
+                                      {params.InputProps.startAdornment}
+                                    </>
+                                  ),
+                                }}
+                              />
+                            )}
+                          />
+                        </FieldBox>
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr' }, gap: 2 }}>
+                          {tf('Owner Contact No.', 'contactNo', PhoneIcon)}
+                          {tf('PAN Card No.', 'panNo', ArticleIcon)}
+                        </Box>
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                          {tf('Aadhar Number', 'aadharNo', BadgeIcon)}
+                          {selectTf('PAN-Aadhar Link Status', 'panAadharLink', ['Yes', 'No'], BadgeIcon)}
+                        </Box>
+                        {tf('Complete Correspondence Address', 'address', HomeIcon)}
+
+                        <SectionLabel icon={ReceiptIcon} label="GST Information" />
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1.5fr 0.5fr' }, gap: 2 }}>
+                          {tf('GST Type', 'gstType')}
+                          {tf('GST No', 'gstNo')}
+                          {tf('GST %', 'gstPercent')}
+                        </Box>
+                      </Box>
                     )}
-                    renderOption={(props, option) => (
-                      <li {...props} key={option}>
-                        <Box>
-                          <Typography variant="body2" fontWeight={700}>{option}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {contacts.filter(c => getStr(c.owner_name, c["Owner Name"], c["Owner Name "]) === option).length} truck(s)
+
+                    {/* Sub-Tab 1: DRIVER */}
+                    {formTab === 1 && (
+                      <Box sx={{ animation: 'fadeIn 0.3s ease-in-out' }}>
+                        <SectionLabel icon={BadgeIcon} label="Truck Driver Information" />
+                        {tf('Full Driver Name', 'driverName', PersonIcon)}
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                          {tf('License No (DL)', 'licenseNo', ArticleIcon)}
+                          {tf('License Expiry Date', 'licenseValidity', EventIcon)}
+                        </Box>
+                        <Box sx={{ mt: 4, p: 3, bgcolor: '#f8fafc', borderRadius: '12px', border: '1px dashed #e2e8f0', textAlign: 'center' }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Ensure Driver License details match regional transport records.
                           </Typography>
                         </Box>
-                      </li>
+                      </Box>
                     )}
-                  />
-                </FieldBox>
 
-                <FieldBox>
-                  <TextField
-                    fullWidth label="Driver Name"
-                    value={form.driverName || ''}
-                    onChange={e => handleChange('driverName', e.target.value)}
-                    InputProps={{
-                      sx: inputSx,
-                      startAdornment: <BadgeIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                    }}
-                  />
-                </FieldBox>
+                    {/* Sub-Tab 2: COMPLIANCE & VALIDITY */}
+                    {formTab === 2 && (
+                      <Box sx={{ animation: 'fadeIn 0.3s ease-in-out' }}>
+                        <SectionLabel icon={EventIcon} label="Road Side Validities" />
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+                          {tf('RC Validity', 'rcValidity', EventIcon)}
+                          {tf('Insurance Validity', 'insuranceValidity', EventIcon)}
+                          {tf('Fitness Validity', 'fitnessValidity', EventIcon)}
+                          {tf('Road Tax Validity', 'roadTaxValidity', EventIcon)}
+                          {tf('PUC Validity', 'puc', EventIcon)}
+                          {tf('NP Validity', 'npValidity', EventIcon)}
+                        </Box>
+                        {tf('Permit Details & Serial', 'permit', ArticleIcon)}
 
-                <FieldBox>
-                  <TextField
-                    fullWidth label="Contact No."
-                    value={form.contactNo || ''}
-                    onChange={e => handleChange('contactNo', e.target.value)}
-                    InputProps={{
-                      sx: inputSx,
-                      startAdornment: <PhoneIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                    }}
-                  />
-                </FieldBox>
+                        <SectionLabel icon={ReceiptIcon} label="Financial Settings" />
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                          {selectTf('NIL TDS Option', 'nilTds', ['Yes', 'No'], ArticleIcon)}
+                          {tf('TDS Category', 'tdsApp', ReceiptIcon)}
+                        </Box>
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                          {tf('Basic Freight Comm', 'basicFreight', ReceiptIcon)}
+                          {tf('Incentive Comm', 'incentiveComm', ReceiptIcon)}
+                        </Box>
+                        {tf('Specific Vehicle Detail', 'vehType', DirectionsCarIcon)}
+                      </Box>
+                    )}
+                  </Box>
+                </Box>
 
-                <FieldBox>
-                  <TextField
-                    fullWidth label="Address"
-                    value={form.address || ''}
-                    onChange={e => handleChange('address', e.target.value)}
-                    InputProps={{
-                      sx: inputSx,
-                      startAdornment: <HomeIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                    }}
-                  />
-                </FieldBox>
+                {/* ─── DIGITAL DOCUMENT VAULT (Universal to all tabs) ─── */}
+                <Box sx={{ px: 3, pb: 3 }}>
+                  <SectionLabel icon={CloudUploadIcon} label="Digital Document Vault" />
+                  <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+                    Upload scanned PDFs of mandatory documents for one-to-one verification.
+                  </Typography>
 
-                {/* ─── VEHICLE DETAILS ─── */}
-                <SectionLabel icon={DirectionsCarIcon} label="Vehicle Details" />
+                  <Box sx={{ border: '1px solid #f3e5f5', borderRadius: '16px', overflow: 'hidden' }}>
+                    {docs.map((doc, idx) => (
+                      <Box key={doc.id} sx={{
+                        display: 'flex', alignItems: 'center', gap: 2, p: 1.5,
+                        borderBottom: idx === docs.length - 1 ? 'none' : '1px solid #f1f5f9',
+                        bgcolor: doc.status === 'Uploaded' ? '#f0fdf4' : 'transparent'
+                      }}>
+                        <DescriptionIcon sx={{ color: doc.status === 'Uploaded' ? '#16a34a' : '#94a3b8', fontSize: 20 }} />
+                        <Typography flex={1} variant="body2" fontWeight={700} color={doc.status === 'Uploaded' ? '#166534' : '#475569'}>
+                          {doc.label}
+                        </Typography>
 
-                <FieldBox>{tf('Type of Vehicle', 'vehType')}</FieldBox>
-                <FieldBox>{tf('Customer Type', 'custType')}</FieldBox>
+                        <Chip
+                          label={doc.status}
+                          size="small"
+                          icon={doc.status === 'Uploaded' ? <CheckCircleIcon /> : undefined}
+                          sx={{
+                            fontSize: '10px', height: 20, fontWeight: 800,
+                            bgcolor: doc.status === 'Uploaded' ? '#dcfce7' : '#f1f5f9',
+                            color: doc.status === 'Uploaded' ? '#166534' : '#64748b'
+                          }}
+                        />
 
-                {/* ─── DOCUMENTS & TAX ─── */}
-                <SectionLabel icon={ArticleIcon} label="Documents & Tax" />
-
-                <FieldBox>{tf('PAN No.', 'panNo')}</FieldBox>
-                <FieldBox>{tf('Aadhar No.', 'aadharNo')}</FieldBox>
-                <FieldBox>{selectTf('PAN / Aadhar Linked', 'panAadharLink', ['Yes', 'No'])}</FieldBox>
-                <FieldBox>{selectTf('NIL TDS Declaration', 'nilTds', ['Yes', 'No'])}</FieldBox>
-                <FieldBox>{tf('TDS Applicability', 'tdsApp')}</FieldBox>
-                <FieldBox>{tf('Basic Freight Commission Applicability', 'basicFreight')}</FieldBox>
-                <FieldBox>{tf('Incentive Commission Applicability', 'incentiveComm')}</FieldBox>
-
-                {/* ─── GST ─── */}
-                <SectionLabel icon={ReceiptIcon} label="GST Information" />
-
-                <FieldBox>{tf('GST Type', 'gstType')}</FieldBox>
-                <FieldBox>{tf('GST No', 'gstNo')}</FieldBox>
-                <FieldBox>{tf('GST %', 'gstPercent')}</FieldBox>
-
-                {/* ─── VALIDITY DATES ─── */}
-                <SectionLabel icon={EventIcon} label="Validity Dates" />
-
-                <FieldBox>{tf('RC Validity', 'rcValidity')}</FieldBox>
-                <FieldBox>{tf('Insurance Validity', 'insuranceValidity')}</FieldBox>
-                <FieldBox>{tf('Fitness Validity', 'fitnessValidity')}</FieldBox>
-                <FieldBox>{tf('Road Tax Validity', 'roadTaxValidity')}</FieldBox>
-                <FieldBox>{tf('PUC Validity', 'puc')}</FieldBox>
-                <FieldBox>{tf('NP Validity', 'npValidity')}</FieldBox>
-                <FieldBox>{tf('Permit Details', 'permit')}</FieldBox>
+                        <Button
+                          component="label" size="small" variant="text"
+                          sx={{ textTransform: 'none', fontWeight: 800, color: '#7b1fa2' }}
+                        >
+                          {doc.status === 'Uploaded' ? 'Change PDF' : 'Upload PDF'}
+                          <input type="file" hidden accept="application/pdf" onChange={(e) => {
+                            if (e.target.files[0]) {
+                              const newDocs = [...docs];
+                              newDocs[idx].status = 'Uploaded';
+                              newDocs[idx].fileName = e.target.files[0].name;
+                              setDocs(newDocs);
+                            }
+                          }} />
+                        </Button>
+                      </Box>
+                    ))}
+                    <Button
+                      fullWidth size="small" startIcon={<AddCircleIcon />}
+                      onClick={() => {
+                        const label = window.prompt("Enter Document Name (e.g. Fitness Certificate):");
+                        if (label) setDocs([...docs, { id: Date.now(), label, status: 'Pending' }]);
+                      }}
+                      sx={{ py: 1.5, bgcolor: '#faf5ff', color: '#7b1fa2', fontWeight: 800, textTransform: 'none', borderRadius: 0, '&:hover': { bgcolor: '#f3e5f5' } }}
+                    >
+                      Add One-to-One More Column (Custom Document)
+                    </Button>
+                  </Box>
+                </Box>
 
                 {/* ── Save Button — matches VoucherDialog purple gradient ── */}
                 <Button
@@ -508,8 +668,130 @@ export default function TruckContactManager({ open, onClose }) {
               </Box>
             </TabPanel>
 
-            {/* ── TAB 1: EXISTING CONTACTS ── */}
+            {/* ── TAB 1: TEMPORARY DRIVER ASSIGN ── */}
             <TabPanel value={tab} index={1}>
+              <Box sx={{ p: { xs: 2.5, sm: 3.5 } }}>
+                <Box mb={3} display="flex" justifyContent="space-between" alignItems="flex-start">
+                  <Box>
+                    <Typography variant="h6" fontWeight={900} color="#4a148c">Assign Temporary Driver</Typography>
+                    <Typography variant="caption" color="text.secondary">Fast-track driver updates for trucks already in your database</Typography>
+                  </Box>
+                  <Chip label="Existing Fleet Only" color="primary" variant="outlined" sx={{ fontWeight: 800, fontSize: '10px' }} />
+                </Box>
+
+                <SectionLabel icon={LocalShippingIcon} label="Select Registered Vehicle" />
+                <FieldBox>
+                  <Autocomplete
+                    options={contacts}
+                    getOptionLabel={(c) => `${getStr(c["Truck No "], c["Truck No"], c.truck_no)} — ${getStr(c["Owner Name "], c["Owner Name"], c.owner_name)}`}
+                    onChange={(_, c) => {
+                      if (c) {
+                        handleEdit(c);
+                        setTab(1); // Stay in this tab
+                      } else {
+                        setForm({});
+                      }
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        placeholder="Type Truck No... (e.g. WB39...)"
+                        label="Search Database *"
+                        InputProps={{ ...params.InputProps, sx: inputSx, startAdornment: <LocalShippingIcon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} /> }}
+                      />
+                    )}
+                  />
+                </FieldBox>
+
+                {form.truckNo ? (
+                  <Box sx={{ animation: 'fadeIn 0.3s' }}>
+                    {/* Display Current Owner info (Read Only) */}
+                    <Box sx={{ p: 2.5, bgcolor: '#faf5ff', borderRadius: '20px', mb: 3, border: '1px solid #ede7f6', display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Box sx={{ width: 45, height: 45, bgcolor: '#fff', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e9d5ff' }}>
+                        <PersonIcon sx={{ color: '#7b1fa2' }} />
+                      </Box>
+                      <Box flex={1}>
+                        <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ textTransform: 'uppercase', fontSize: '10px' }}>Owner Verified</Typography>
+                        <Typography variant="body2" fontWeight={800} color="#4a148c">{form.ownerName}</Typography>
+                        <Typography variant="caption" color="text.secondary">{form.contactNo || 'No contact found in DB'}</Typography>
+                      </Box>
+                      <Box sx={{ textAlign: 'right' }}>
+                        <Typography variant="h6" fontWeight={900} color="#7b1fa2" sx={{ fontFamily: 'monospace' }}>{form.truckNo}</Typography>
+                      </Box>
+                    </Box>
+
+                    <SectionLabel icon={BadgeIcon} label="New Temporary Driver Information" />
+                    {tf('Driver Full Name *', 'driverName', PersonIcon)}
+                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                      {tf('License No (DL)', 'licenseNo', ArticleIcon)}
+                      {tf('License Validity', 'licenseValidity', EventIcon)}
+                    </Box>
+
+                    {/* Full Digital Document Vault for Temp Driver */}
+                    <Box sx={{ mt: 2 }}>
+                      <SectionLabel icon={CloudUploadIcon} label="Verification Vault" />
+                      <Box sx={{ border: '1px solid #f3e5f5', borderRadius: '16px', overflow: 'hidden', bgcolor: '#fff' }}>
+                        {docs.map((doc, idx) => (
+                          <Box key={doc.id} sx={{
+                            display: 'flex', alignItems: 'center', gap: 2, p: 1.5,
+                            borderBottom: idx === docs.length - 1 ? 'none' : '1px solid #f1f5f9',
+                            bgcolor: doc.status === 'Uploaded' ? '#f0fdf4' : 'transparent'
+                          }}>
+                            <DescriptionIcon sx={{ color: doc.status === 'Uploaded' ? '#16a34a' : '#94a3b8', fontSize: 18 }} />
+                            <Typography flex={1} variant="caption" fontWeight={800} color={doc.status === 'Uploaded' ? '#166534' : '#475569'}>
+                              {doc.label}
+                            </Typography>
+                            <Chip label={doc.status} size="small" sx={{ fontSize: '9px', height: 18, fontWeight: 800, bgcolor: doc.status === 'Uploaded' ? '#dcfce7' : '#f1f5f9' }} />
+                            <Button component="label" size="small" variant="text" sx={{ textTransform: 'none', fontWeight: 800, color: '#7b1fa2', fontSize: '11px' }}>
+                              {doc.status === 'Uploaded' ? 'Change' : 'Upload'}
+                              <input type="file" hidden accept="application/pdf" onChange={(e) => {
+                                if (e.target.files[0]) {
+                                  const newDocs = [...docs];
+                                  newDocs[idx].status = 'Uploaded';
+                                  setDocs(newDocs);
+                                }
+                              }} />
+                            </Button>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+
+                    <Alert severity="info" sx={{ mt: 3, mb: 1, borderRadius: '12px', backgroundColor: '#f0f9ff', color: '#075985', border: '1px solid #bae6fd' }}>
+                      <Typography variant="caption" fontWeight={700}>
+                        Updating this will only change the Driver details. All owner and vehicle records remain protected.
+                      </Typography>
+                    </Alert>
+
+                    <Button
+                      fullWidth variant="contained" size="large" onClick={handleSave}
+                      disabled={saving || !form.driverName}
+                      sx={{
+                        mt: 2, py: 1.8, borderRadius: '16px', fontWeight: 900, fontSize: '1rem',
+                        background: 'linear-gradient(45deg, #7b1fa2, #9c27b0)',
+                        boxShadow: '0 8px 24px rgba(123,31,162,0.2)',
+                        '&:hover': { transform: 'translateY(-2px)' }
+                      }}
+                    >
+                      {saving ? <CircularProgress size={22} color="inherit" /> : 'Confirm & Update Driver'}
+                    </Button>
+                  </Box>
+                ) : (
+                  <Box sx={{ textAlign: 'center', py: 10, px: 4, bgcolor: '#fbfbff', borderRadius: '24px', border: '2px dashed #e2e8f0' }}>
+                    <Box sx={{ width: 64, height: 64, bgcolor: '#fff', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
+                      <BadgeIcon sx={{ fontSize: 32, color: '#94a3b8' }} />
+                    </Box>
+                    <Typography fontWeight={800} color="#64748b" gutterBottom>No Vehicle Selected</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 300, display: 'block', mx: 'auto' }}>
+                      Please search and select a truck number above to update its driver profile.
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </TabPanel>
+
+            {/* ── TAB 2: EXISTING CONTACTS ── */}
+            <TabPanel value={tab} index={2}>
               <Box sx={{ p: 2 }}>
                 {loading ? (
                   <Box display="flex" justifyContent="center" py={6}>
@@ -524,11 +806,11 @@ export default function TruckContactManager({ open, onClose }) {
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                     {contacts.map((c) => {
                       // Read legacy DB keys first — that's where existing data lives in MongoDB
-                      const tNo =   getStr(c["Truck No "],    c["Truck No"],   c.truck_no)  || 'No Truck No.';
-                      const oName = getStr(c["Owner Name "],  c["Owner Name"], c.owner_name) || 'Unknown Owner';
+                      const tNo = getStr(c["Truck No "], c["Truck No"], c.truck_no) || 'No Truck No.';
+                      const oName = getStr(c["Owner Name "], c["Owner Name"], c.owner_name) || 'Unknown Owner';
                       const dName = getStr(c["Driver Name "], c["Driver Name"], c.driver_name);
                       const phone = getStr(c["Contact No. "], c["Contact No."], c.contact_no);
-                      const pan =   getStr(c["PAN No. "],     c["PAN No."],    c.pan_no);
+                      const pan = getStr(c["PAN No. "], c["PAN No."], c.pan_no);
 
                       return (
                         <Box
@@ -616,6 +898,63 @@ export default function TruckContactManager({ open, onClose }) {
                 )}
               </Box>
             </TabPanel>
+
+            {/* ── TAB 3: APPROVALS QUEUE (Head Office Only) ── */}
+            {userRole === 'Head-office' && (
+              <TabPanel value={tab} index={3}>
+                <Box sx={{ p: 2.5 }}>
+                  <Box mb={3} display="flex" justifyContent="space-between" alignItems="center">
+                    <Box>
+                      <Typography variant="h6" fontWeight={900} color="#4a148c">Approvals Queue</Typography>
+                      <Typography variant="caption" color="text.secondary">Review and authorize new truck/driver registrations</Typography>
+                    </Box>
+                    <Button startIcon={<ListAltIcon />} size="small" onClick={fetchApprovals}>Refresh</Button>
+                  </Box>
+
+                  {approvalLoading ? <CircularProgress sx={{ display: 'block', mx: 'auto', mt: 4 }} /> :
+                    approvals.length === 0 ? (
+                      <Box sx={{ textAlign: 'center', py: 10, bgcolor: '#f8fafc', borderRadius: '24px', border: '2px dashed #e2e8f0' }}>
+                        <CheckCircleIcon sx={{ fontSize: 48, color: '#16a34a', mb: 2, opacity: 0.3 }} />
+                        <Typography color="text.secondary">All clear! No pending approvals found.</Typography>
+                      </Box>
+                    ) : (
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {approvals.map((req) => (
+                          <Box key={req._id} sx={{ p: 2, bgcolor: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+                            <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={2}>
+                              <Box flex={1}>
+                                <Box display="flex" alignItems="center" gap={1} mb={1}>
+                                  <Chip label={req.requestType} size="small" sx={{ fontWeight: 800, bgcolor: '#4a148c', color: '#fff', fontSize: '10px' }} />
+                                  <Typography variant="caption" color="text.secondary">Requested: {new Date(req.requestedAt).toLocaleDateString()}</Typography>
+                                </Box>
+                                <Typography variant="body2" fontWeight={900}>{req["Truck No "] || 'N/A'}</Typography>
+                                <Typography variant="caption" sx={{ display: 'block' }}>Owner: {req["Owner Name "]}</Typography>
+                                <Typography variant="caption" sx={{ display: 'block' }}>Driver: {req["Driver Name "]}</Typography>
+                              </Box>
+                              <Box display="flex" gap={1}>
+                                <Button
+                                  variant="contained" color="success" size="small"
+                                  sx={{ borderRadius: '8px', fontWeight: 800, textTransform: 'none' }}
+                                  onClick={() => handleProcessApproval(req._id, 'approved')}
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  variant="outlined" color="error" size="small"
+                                  sx={{ borderRadius: '8px', fontWeight: 800, textTransform: 'none' }}
+                                  onClick={() => handleProcessApproval(req._id, 'rejected')}
+                                >
+                                  Reject
+                                </Button>
+                              </Box>
+                            </Box>
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
+                </Box>
+              </TabPanel>
+            )}
 
           </Box>
         </DialogContent>
