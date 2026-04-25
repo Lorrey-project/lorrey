@@ -227,22 +227,8 @@ export default function CementRegister({ onBack }) {
   const [syncing, setSyncing] = useState(false);
   const [isBillingMode, setIsBillingMode] = useState(false);
   const [bulkBillInput, setBulkBillInput] = useState({ billNo: '', billDate: '' });
-  const [showChargePresets, setShowChargePresets] = useState(false);
   const [activeRowId, setActiveRowId] = useState(null);
 
-  const STANDARD_CHARGES = [
-    { label: 'GPS Monitoring', field: 'GPS Monitoring Charge', amount: 500 },
-    { label: 'GPS Device', field: 'GPS DEVICE', amount: 1500 },
-    { label: 'RFID Tag', field: 'RFID TAG', amount: 200 },
-    { label: 'RFID Reassurance', field: 'RFID REASSURANCE', amount: 300 },
-    { label: 'Fastag', field: 'FASTAG', amount: 100 },
-    { label: 'Others Deduction', field: 'Others deduction', amount: 1000 }
-  ];
-
-  const applyChargePreset = (rowId, field, amount) => {
-    handleCellEdit(rowId, field, amount);
-    setSnack({ severity: 'success', msg: `Applied ${amount} to ${field}. Click SAVE to persist.` });
-  };
 
 
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
@@ -548,18 +534,6 @@ export default function CementRegister({ onBack }) {
             📊 Incentive Calculation Sheet
           </Button>
 
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => setShowChargePresets(true)}
-            sx={{
-              fontWeight: 700, borderRadius: '24px', px: 2, py: 0.5, fontSize: '13px', textTransform: 'none',
-              border: '2px solid #7c3aed', color: '#7c3aed',
-              '&:hover': { bgcolor: '#7c3aed', color: '#fff' }
-            }}
-          >
-            🏷️ Charge Presets
-          </Button>
           {isBillingMode ? (
             <Box sx={{ 
               display: 'flex', alignItems: 'center', gap: 1.5, 
@@ -824,43 +798,6 @@ export default function CementRegister({ onBack }) {
       </Snackbar>
 
 
-      {/* ── Charge Presets Dialog ────────────────────────────────────────── */}
-      <Dialog open={showChargePresets} onClose={() => setShowChargePresets(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Standard Charge Presets</DialogTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" color="text.secondary" mb={2}>
-            Select a row in the table first, then click a charge below to apply its standard price.
-            Each charge can only be applied once per row.
-          </Typography>
-          <Box display="grid" gridTemplateColumns="repeat(auto-fill, minmax(200px, 1fr))" gap={2}>
-            {STANDARD_CHARGES.map(charge => (
-              <Button
-                key={charge.label}
-                variant="outlined"
-                onClick={() => {
-                  if (selectedIds.size === 0) {
-                    setSnack({ severity: 'warning', msg: 'Select at least one row first!' });
-                    return;
-                  }
-                  selectedIds.forEach(id => applyChargePreset(id, charge.field, charge.amount));
-                }}
-                sx={{
-                  justifyContent: 'space-between', px: 2, py: 1.5,
-                  borderRadius: '12px', textTransform: 'none', fontWeight: 600,
-                  borderColor: '#e2e8f0', color: '#1e293b',
-                  '&:hover': { bgcolor: '#f1f5f9', borderColor: '#cbd5e1' }
-                }}
-              >
-                <span>{charge.label}</span>
-                <Typography variant="caption" fontWeight={800} color="primary">₹{charge.amount}</Typography>
-              </Button>
-            ))}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowChargePresets(false)} sx={{ fontWeight: 700 }}>Close</Button>
-        </DialogActions>
-      </Dialog>
 
 
     </Box>
