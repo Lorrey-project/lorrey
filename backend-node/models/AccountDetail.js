@@ -11,6 +11,8 @@ const accountDetailSchema = new mongoose.Schema({
   withdraw: { type: String, default: '' },
   deposit: { type: String, default: '' },
   closingBalance: { type: String, default: '' },
+  remittanceFileUrl: { type: String, default: '' },
+  remittanceFileName: { type: String, default: '' },
   _source: { type: String, default: 'manual' }
 }, {
   timestamps: true,

@@ -62,6 +62,7 @@ app.use("/pump-payment", require("./routes/pumpPaymentRoutes"));
 app.use("/party-payment", require("./routes/partyPaymentRoutes"));
 app.use("/fy-details", require("./routes/financialYearRoutes"));
 app.use("/account-details", require("./routes/accountDetailRoutes"));
+app.use("/remittance-advise", require("./routes/remittanceAdviseRoutes"));
 
 const activePortals = {
   office: 0,
@@ -165,6 +166,6 @@ mongoose.connect(process.env.MONGO_URI)
 
 app.use("/invoice", auth, invoiceRoutes);
 
-server.listen(3000, () => {
-  console.log("Server is running on port 3000");
+server.listen(3000, '0.0.0.0', () => {
+  console.log("Server is running on port 3000 (0.0.0.0)");
 });
