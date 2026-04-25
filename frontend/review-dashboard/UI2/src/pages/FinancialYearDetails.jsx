@@ -115,18 +115,6 @@ export default function FinancialYearDetails({ onBack }) {
     }).sort((a, b) => (a.invoiceDate || '').localeCompare(b.invoiceDate || '') || (a.invoiceNumber || '').localeCompare(b.invoiceNumber || ''));
   }, [rows, payments]);
 
-  const groupSpanMap = useMemo(() => {
-    const map = {};
-    for (let i = 0; i < computedRows.length; i++) {
-      const gid = computedRows[i].groupId;
-      if (gid) {
-        if (map[gid]) map[gid].count++;
-        else map[gid] = { startIdx: i, count: 1 };
-      }
-    }
-    return map;
-  }, [computedRows]);
-
   // Site filter helpers
   const isNVL  = useCallback((site) => /^NVL$/i.test((site || '').trim()), []);
   const isNVCL = useCallback((site) => /^NVCL$/i.test((site || '').trim()), []);
@@ -136,6 +124,18 @@ export default function FinancialYearDetails({ onBack }) {
     if (siteFilter === 'NVCL') return computedRows.filter(r => isNVCL(r.site));
     return computedRows;
   }, [computedRows, siteFilter, isNVL, isNVCL]);
+
+  const groupSpanMap = useMemo(() => {
+    const map = {};
+    for (let i = 0; i < filteredRows.length; i++) {
+      const gid = filteredRows[i].groupId;
+      if (gid) {
+        if (map[gid]) map[gid].count++;
+        else map[gid] = { startIdx: i, count: 1 };
+      }
+    }
+    return map;
+  }, [filteredRows]);
 
   // Pagination
   const totalPages = Math.ceil(filteredRows.length / PAGE_SIZE);
@@ -442,7 +442,7 @@ export default function FinancialYearDetails({ onBack }) {
         {/* Debit Amount */}
         {(!gid || isGroupStart) && (
           <td style={td({ textAlign: 'right', background: '#fdf2f8', fontWeight: 700, color: calcDebit > 0 ? '#166534' : (calcDebit < 0 ? '#dc2626' : 'inherit') })} rowSpan={rowSpan}>
-            {isGroupStart && calcDebit !== 0 ? `₹${calcDebit.toLocaleString('en-IN')}` : ''}
+            {isGroupStart ? (calcDebit === 0 ? '0' : `₹${calcDebit.toLocaleString('en-IN')}`) : ''}
           </td>
         )}
 
