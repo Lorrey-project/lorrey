@@ -452,43 +452,53 @@ export default function TruckContactManager({ open, onClose }) {
         />
       </FieldBox>
     );
-  const TabVault = (ids) => {
-    const relevantDocs = docs.filter(d => ids.includes(d.id));
-    if (relevantDocs.length === 0) return null;
+  };
 
+  const TabDocVault = (allowedIds, label = "Mandatory Documents") => {
+    const filteredDocs = docs.filter(d => allowedIds.includes(d.id));
     return (
-      <Box sx={{ mt: 3, p: 2, bgcolor: '#faf5ff', borderRadius: '16px', border: '1px solid #ede7f6' }}>
-        <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ display: 'block', mb: 1.5, textTransform: 'uppercase', letterSpacing: 1 }}>
-          Mandatory Verification Uploads
-        </Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
-          {relevantDocs.map((doc) => (
-            <Box key={doc.id} sx={{ 
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
-              p: 1.2, bgcolor: '#fff', borderRadius: '12px', border: '1px solid #f3e5f5',
-              boxShadow: '0 2px 4px rgba(123,31,162,0.02)'
-            }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-                <DescriptionIcon sx={{ fontSize: 18, color: doc.status === 'Uploaded' ? '#16a34a' : '#94a3b8' }} />
-                <Typography variant="caption" fontWeight={800} color="#475569" noWrap>
+      <Box sx={{ mt: 3, pt: 3, borderTop: '1px dashed #e2e8f0' }}>
+        <SectionLabel icon={CloudUploadIcon} label={label} />
+        <Box sx={{ border: '1px solid #f3e5f5', borderRadius: '16px', overflow: 'hidden' }}>
+          {filteredDocs.map((doc, idx) => {
+            const globalIdx = docs.findIndex(d => d.id === doc.id);
+            return (
+              <Box key={doc.id} sx={{
+                display: 'flex', alignItems: 'center', gap: 2, p: 1.5,
+                borderBottom: idx === filteredDocs.length - 1 ? 'none' : '1px solid #f1f5f9',
+                bgcolor: doc.status === 'Uploaded' ? '#f0fdf4' : 'transparent'
+              }}>
+                <DescriptionIcon sx={{ color: doc.status === 'Uploaded' ? '#16a34a' : '#94a3b8', fontSize: 20 }} />
+                <Typography flex={1} variant="body2" fontWeight={700} color={doc.status === 'Uploaded' ? '#166534' : '#475569'}>
                   {doc.label}
                 </Typography>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-                {doc.status === 'Uploaded' && <CheckCircleIcon sx={{ fontSize: 16, color: '#16a34a' }} />}
-                <Button component="label" size="small" sx={{ textTransform: 'none', fontWeight: 900, minWidth: 0, px: 1, py: 0.2, color: '#7b1fa2', fontSize: '10px', '&:hover': { bgcolor: '#f3e5f5' } }}>
-                  {doc.status === 'Uploaded' ? 'Change' : 'Upload PDF'}
+                <Chip
+                  label={doc.status}
+                  size="small"
+                  icon={doc.status === 'Uploaded' ? <CheckCircleIcon /> : undefined}
+                  sx={{
+                    fontSize: '10px', height: 20, fontWeight: 800,
+                    bgcolor: doc.status === 'Uploaded' ? '#dcfce7' : '#f1f5f9',
+                    color: doc.status === 'Uploaded' ? '#166534' : '#64748b'
+                  }}
+                />
+                <Button
+                  component="label" size="small" variant="text"
+                  sx={{ textTransform: 'none', fontWeight: 800, color: '#7b1fa2' }}
+                >
+                  {doc.status === 'Uploaded' ? 'Change PDF' : 'Upload PDF'}
                   <input type="file" hidden accept="application/pdf" onChange={(e) => {
                     if (e.target.files[0]) {
-                      const newDocs = docs.map(d => d.id === doc.id ? { ...d, status: 'Uploaded', fileName: e.target.files[0].name } : d);
+                      const newDocs = [...docs];
+                      newDocs[globalIdx].status = 'Uploaded';
+                      newDocs[globalIdx].fileName = e.target.files[0].name;
                       setDocs(newDocs);
-                      setSnack({ type: 'success', message: `${doc.label} attached.` });
                     }
                   }} />
                 </Button>
               </Box>
-            </Box>
-          ))}
+            );
+          })}
         </Box>
       </Box>
     );
@@ -677,7 +687,7 @@ export default function TruckContactManager({ open, onClose }) {
                           {tf('GST No', 'gstNo')}
                           {tf('GST %', 'gstPercent')}
                         </Box>
-                        {TabVault(['pan', 'aadhar', 'bank'])}
+                        {TabDocVault(['pan', 'aadhar', 'bank'], "Owner Identification Documents")}
                       </Box>
                     )}
 
@@ -703,7 +713,7 @@ export default function TruckContactManager({ open, onClose }) {
                           {tf('Driver Bank Acc No.', 'driverBankAcc', ReceiptIcon)}
                         </Box>
                         {tf('Driver IFSC Code', 'driverIfsc', ReceiptIcon)}
-                        {TabVault(['dl'])}
+                        {TabDocVault(['dl'], "Driver License Verification")}
                       </Box>
                     )}
 
@@ -731,11 +741,12 @@ export default function TruckContactManager({ open, onClose }) {
                           {tf('Incentive Comm', 'incentiveComm', ReceiptIcon)}
                         </Box>
                         {tf('Specific Vehicle Detail', 'vehType', DirectionsCarIcon)}
-                        {TabVault(['rc', 'insurance', 'fitness', 'roadtax', 'np'])}
+                        {TabDocVault(['rc', 'insurance', 'fitness', 'roadtax', 'np'], "Legal Compliance Vault")}
                       </Box>
                     )}
                   </Box>
                 </Box>
+
 
                 {/* ── Save Button — matches VoucherDialog purple gradient ── */}
                 <Button
