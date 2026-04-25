@@ -125,6 +125,9 @@ export default function TruckContactManager({ open, onClose }) {
     { id: 'fitness', label: 'Fitness Certificate', status: 'Pending' },
     { id: 'roadtax', label: 'Road Tax Copy', status: 'Pending' },
     { id: 'np', label: 'NP (National Permit) Copy', status: 'Pending' },
+    { id: 'driverPan', label: 'Driver PAN Card Copy', status: 'Pending' },
+    { id: 'driverAadhar', label: 'Driver Aadhar Copy', status: 'Pending' },
+    { id: 'driverBank', label: 'Driver Bank Passbook / Cheque', status: 'Pending' },
   ]);
 
   useEffect(() => {
@@ -667,17 +670,17 @@ export default function TruckContactManager({ open, onClose }) {
                         </FieldBox>
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr' }, gap: 2 }}>
                           {tf('Owner Contact No.', 'contactNo', PhoneIcon)}
-                          {uploadTf('PAN Card No.', 'panNo', 'pan', ArticleIcon)}
+                          {tf('PAN Card No.', 'panNo', ArticleIcon)}
                         </Box>
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-                          {uploadTf('Aadhar Number', 'aadharNo', 'aadhar', BadgeIcon)}
+                          {tf('Aadhar Number', 'aadharNo', BadgeIcon)}
                           {selectTf('PAN-Aadhar Link Status', 'panAadharLink', ['Yes', 'No'], BadgeIcon)}
                         </Box>
                         {tf('Complete Correspondence Address', 'address', HomeIcon)}
 
                         <SectionLabel icon={ReceiptIcon} label="Owner Banking Details" />
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr' }, gap: 2 }}>
-                          {uploadTf('Bank Account No.', 'ownerBankAcc', 'bank', ArticleIcon)}
+                          {tf('Bank Account No.', 'ownerBankAcc', ArticleIcon)}
                           {tf('IFSC Code', 'ownerIfsc', ArticleIcon)}
                         </Box>
 
@@ -701,7 +704,7 @@ export default function TruckContactManager({ open, onClose }) {
                           {tf('Driver Address', 'driverAddress', HomeIcon)}
                         </Box>
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-                          {uploadTf('License No (DL)', 'licenseNo', 'dl', ArticleIcon)}
+                          {tf('License No (DL)', 'licenseNo', ArticleIcon)}
                           {tf('License Expiry Date', 'licenseValidity', EventIcon)}
                         </Box>
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
@@ -713,7 +716,7 @@ export default function TruckContactManager({ open, onClose }) {
                           {tf('Driver Bank Acc No.', 'driverBankAcc', ReceiptIcon)}
                         </Box>
                         {tf('Driver IFSC Code', 'driverIfsc', ReceiptIcon)}
-                        {TabDocVault(['dl'], "Driver License Verification")}
+                        {TabDocVault(['dl', 'driverPan', 'driverAadhar', 'driverBank'], "Driver Identification & Document Verification")}
                       </Box>
                     )}
 
