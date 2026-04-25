@@ -208,10 +208,19 @@ router.post('/clear-main-cash', async (req, res) => {
       return res.status(400).json({ success: false, error: 'transactionDate required' });
     }
 
-    const [yyyy, mm, dd] = transactionDate.split('-');
-    const d = parseInt(dd, 10);
-    const m = parseInt(mm, 10);
-    const y = parseInt(yyyy, 10);
+    // Normalized date parsing: handles YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY
+    const parts = transactionDate.split(/[-\/]/);
+    let d, m, y;
+    if (parts[0].length === 4) { // YYYY-MM-DD
+      y = parseInt(parts[0], 10); m = parseInt(parts[1], 10); d = parseInt(parts[2], 10);
+    } else { // DD-MM-YYYY or DD/MM/YYYY
+      d = parseInt(parts[0], 10); m = parseInt(parts[1], 10); y = parseInt(parts[2], 10);
+    }
+
+    if (isNaN(d) || isNaN(m) || isNaN(y)) {
+      return res.status(400).json({ success: false, error: `Invalid date format: ${transactionDate}` });
+    }
+
     const dateVariants = [
       `${d}-${m}-${y}`,
       `${String(d).padStart(2, '0')}-${m}-${y}`,
@@ -254,7 +263,6 @@ router.post('/clear-main-cash', async (req, res) => {
 router.post('/sync-main-cash', async (req, res) => {
   try {
     const { transactionDate, withdrawAmount } = req.body;
-    // transactionDate is YYYY-MM-DD from AccountDetail
     if (!transactionDate || withdrawAmount === undefined) {
       return res.status(400).json({ success: false, error: 'transactionDate and withdrawAmount required' });
     }
@@ -264,12 +272,19 @@ router.post('/sync-main-cash', async (req, res) => {
       return res.status(400).json({ success: false, error: 'withdrawAmount must be a positive number' });
     }
 
-    // Convert YYYY-MM-DD → possible cashbook date formats: D-M-YYYY, DD-M-YYYY, D-MM-YYYY, DD-MM-YYYY
-    const [yyyy, mm, dd] = transactionDate.split('-');
-    const d = parseInt(dd, 10);
-    const m = parseInt(mm, 10);
-    const y = parseInt(yyyy, 10);
-    // Build all variant strings the cashbook might store
+    // Normalized date parsing: handles YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY
+    const parts = transactionDate.split(/[-\/]/);
+    let d, m, y;
+    if (parts[0].length === 4) { // YYYY-MM-DD
+      y = parseInt(parts[0], 10); m = parseInt(parts[1], 10); d = parseInt(parts[2], 10);
+    } else { // DD-MM-YYYY or DD/MM/YYYY
+      d = parseInt(parts[0], 10); m = parseInt(parts[1], 10); y = parseInt(parts[2], 10);
+    }
+
+    if (isNaN(d) || isNaN(m) || isNaN(y)) {
+      return res.status(400).json({ success: false, error: `Invalid date format: ${transactionDate}` });
+    }
+
     const dateVariants = [
       `${d}-${m}-${y}`,
       `${String(d).padStart(2, '0')}-${m}-${y}`,
@@ -280,22 +295,46 @@ router.post('/sync-main-cash', async (req, res) => {
     const mongoose = require('mongoose');
     const col = mongoose.connection.useDb('main_cashbook').collection('entries');
 
-    // Find matching cashbook row
-    const cashbookRow = await col.findOne({ DATE: { $in: dateVariants }, month: m, year: y });
-    if (!cashbookRow) {
-      return res.status(404).json({
-        success: false,
-        error: `No Main Cashbook entry found for date ${transactionDate}. Please add a row for this date in Main Cashbook first.`
-      });
-    }
-
-    // Update P_WITHDRAW and P_SOURCE
     const sourceText = `DAC-RS-${amount}\\-`;
-    const { ObjectId } = require('mongodb');
-    await col.updateOne(
-      { _id: cashbookRow._id },
-      { $set: { P_WITHDRAW: amount, P_SOURCE: sourceText } }
-    );
+
+    // Find matching cashbook row
+    let cashbookRow = await col.findOne({ DATE: { $in: dateVariants }, month: m, year: y });
+    
+    if (!cashbookRow) {
+      // Create new row if missing
+      const highest = await col.find({ month: m, year: y }).sort({ "SL NO": -1 }).limit(1).toArray();
+      const nextSl = highest.length > 0 && typeof highest[0]["SL NO"] === 'number'
+        ? highest[0]["SL NO"] + 1 : 1;
+
+      const newEntry = {
+        DATE: `${d}-${m}-${y}`,
+        month: m,
+        year: y,
+        "SL NO": nextSl,
+        P_OPENING: 0,
+        P_SOURCE: sourceText,
+        P_WITHDRAW: amount,
+        P_GIVEN_DAC: 0,
+        P_GIVEN_OFFICE: 0,
+        P_OTHERS: 0,
+        S_OPENING: 0,
+        S_TRANS_OFFICE: 0,
+        S_TRANS_TO_OFFICE: 0,
+        O_OPENING: 0,
+        _created_at: new Date()
+      };
+      
+      const result = await col.insertOne(newEntry);
+      cashbookRow = { _id: result.insertedId, ...newEntry };
+      console.log(`[SyncMainCash] Created new cashbook row for ${transactionDate}`);
+    } else {
+      // Update existing row
+      await col.updateOne(
+        { _id: cashbookRow._id },
+        { $set: { P_WITHDRAW: amount, P_SOURCE: sourceText } }
+      );
+      console.log(`[SyncMainCash] Updated existing cashbook row for ${transactionDate}`);
+    }
 
     try {
       const io = getIO();
