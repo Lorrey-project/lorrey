@@ -115,11 +115,7 @@ export default function TruckContactManager({ open, onClose }) {
   const [approvalLoading, setApprovalLoading] = useState(false);
   const userRole = localStorage.getItem('role') || 'Site';
   const [docs, setDocs] = useState([
-    { id: 'pan', label: 'PAN Card Copy', status: 'Pending' },
-    { id: 'aadhar', label: 'Aadhar Card Copy', status: 'Pending' },
-    { id: 'bank', label: 'Bank Passbook / Cheque', status: 'Pending' },
     { id: 'rc', label: 'RC (Registration Certificate)', status: 'Pending' },
-    { id: 'dl', label: 'Driving License', status: 'Pending' },
     { id: 'insurance', label: 'Insurance Policy', status: 'Pending' },
     { id: 'puc', label: 'PUC Copy', status: 'Pending' },
     { id: 'fitness', label: 'Fitness Certificate', status: 'Pending' },
