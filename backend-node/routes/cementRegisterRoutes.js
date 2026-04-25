@@ -124,20 +124,41 @@ router.get("/next-batch-serial", auth, async (req, res) => {
     const month = dObj.getMonth() + 1;
     let currentFy = (month >= 4) ? `${String(year).slice(-2)}-${String(year+1).slice(-2)}` : `${String(year-1).slice(-2)}-${String(year).slice(-2)}`;
 
+    // Format the dateQuery to check both DD/MM/YYYY and YYYY-MM-DD
+    let targetFormattedDate = null;
+    let targetRawDate = null;
+    if (dateQuery) {
+      const parts = dateQuery.split('-');
+      if (parts.length === 3) {
+        targetRawDate = dateQuery; // YYYY-MM-DD
+        targetFormattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`; // DD/MM/YYYY
+      }
+    }
+
     const existing = await col.find({"BILL NO": { $regex: /\d{2}-\d{2}\/\d+$/ }}).toArray();
     let maxSerial = 0;
+    let existingSerialForDate = null;
     
     for (const row of existing) {
        const match = String(row['BILL NO']).match(/(\d{2}-\d{2})\/(\d+)$/);
        if (match) {
          const serial = parseInt(match[2], 10);
-         if (match[1] === currentFy && serial > maxSerial) {
-           maxSerial = serial;
+         if (match[1] === currentFy) {
+           if (serial > maxSerial) {
+             maxSerial = serial;
+           }
+           if (
+             (targetFormattedDate && row['BILL DATE'] === targetFormattedDate) ||
+             (targetRawDate && row['BILL DATE'] === targetRawDate)
+           ) {
+             existingSerialForDate = serial;
+           }
          }
        }
     }
     
-    const autoBatchSerial = `${currentFy}/${String(maxSerial + 1).padStart(4, '0')}`;
+    const finalSerial = existingSerialForDate !== null ? existingSerialForDate : (maxSerial + 1);
+    const autoBatchSerial = `${currentFy}/${String(finalSerial).padStart(4, '0')}`;
     res.json({ success: true, nextSerial: autoBatchSerial });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
