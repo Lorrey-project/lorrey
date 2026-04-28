@@ -62,7 +62,7 @@ function startWatcher() {
             console.log(`[ScannerWatcher] Uploaded to S3: ${s3Url}`);
 
             // AI Extraction
-            const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:5000";
+            const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:8000";
             const aiResponse = await axios.post(
                 `${aiWorkerUrl}/process`,
                 { file: s3Url },

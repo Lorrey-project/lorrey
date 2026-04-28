@@ -113,7 +113,7 @@ app.post("/upload", auth, upload.single("invoice"), async (req, res) => {
   try {
     const fileUrl = req.file.location;
     console.log("File uploaded to S3:", fileUrl);
-    const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:5000";
+    const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:8000";
     const response = await axios.post(`${aiWorkerUrl}/process`, {
       file: fileUrl
     });

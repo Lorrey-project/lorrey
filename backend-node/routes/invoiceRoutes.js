@@ -216,7 +216,7 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
         // Call FastAPI pipeline for AI extraction
         let aiData = null;
         try {
-            const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:5000";
+            const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:8000";
             const aiResponse = await require("axios").post(
                 `${aiWorkerUrl}/process`,
                 { file: fileUrl },
@@ -361,7 +361,7 @@ async function processScanFile(scanOutputPath, io) {
         console.log("[Scan] Uploaded to S3:", s3Url);
         if (io) io.emit("scanner_status", { message: "📤 Scan uploaded. Running AI extraction..." });
 
-        const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:5000";
+        const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:8000";
         const aiResponse = await require("axios").post(
             `${aiWorkerUrl}/process`,
             { file: s3Url },
