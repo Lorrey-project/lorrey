@@ -197,8 +197,12 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
   return Object.values(byTruck).map(t => {
     const metCriteria = t.tripsCount > 6;
 
-    // PERFORMANCE RULE: User requested to show all amounts regardless of trip count qualification.
-    // Trips column still shows red/green to indicate the >6 trip threshold.
+    // PERFORMANCE RULE: Base 9.5% incentive (NVL/NVCL) is always shown.
+    // However, 10W (8.5%) and 6W (15%) bonuses are ONLY paid if the truck makes > 6 trips.
+    if (!metCriteria) {
+      t.extra10W = 0;
+      t.extra6W = 0;
+    }
 
     // Round the sub-amounts for visual consistency
     t.nvl.amt = Math.round(t.nvl.amt);
