@@ -100,9 +100,24 @@ const rpName = 'DIPALI ASSOCIATES & CO.';
 // .local mDNS names (e.g. Gourabs-MacBook-Air.local) ARE valid domains.
 // When accessed via bare IPv4, fall back to 'localhost'.
 const getRPID = (req) => {
+    // WebAuthn RP ID MUST match the domain the browser is running on (the frontend).
+    // The 'Origin' header gives us exactly that (e.g. https://p2.onrender.com).
+    // The 'Host' header gives the backend domain, which will DIFFER when
+    // frontend and backend are deployed on separate subdomains — causing the
+    // "RP ID invalid for this domain" error.
+    const origin = req.headers.origin || '';
+    if (origin) {
+        try {
+            const parsed = new URL(origin);
+            const hostname = parsed.hostname; // e.g. 'p2.onrender.com', 'localhost'
+            const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+            return isIPv4 ? 'localhost' : hostname;
+        } catch (_) { /* fall through */ }
+    }
+    // Fallback: use Host header (works when frontend & backend share the same domain)
     const host = (req.headers.host || 'localhost').split(':')[0];
     const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
-    return isIPv4 ? 'localhost' : host;   // .local / real domain → use as-is
+    return isIPv4 ? 'localhost' : host;
 };
 
 // GET /generate-registration-options
