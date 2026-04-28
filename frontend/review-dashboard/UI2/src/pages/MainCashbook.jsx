@@ -31,8 +31,8 @@ export const COLUMNS = [
 
   // Pump Cash Details
   { key: 'P_OPENING', label: 'Opening Balance', width: 120, type: 'manual', group: 'pump' },
-  { key: 'P_LOAN_RECV', label: 'Loan Recv', width: 140, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
-  { key: 'P_LOAN_PAY', label: 'Loan Pay', width: 140, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
+  { key: 'P_LOAN_RECV', label: 'Loan Recv', width: 420, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
+  { key: 'P_LOAN_PAY', label: 'Loan Pay', width: 420, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
   { key: 'P_WITHDRAW', label: 'Cash withdraw', width: 120, type: 'manual', group: 'pump' },
   {
     key: 'P_TOTAL', label: 'Total Amount', width: 120, type: 'calc', group: 'pump',
@@ -269,10 +269,11 @@ export default function MainCashbook({ onBack }) {
     for (let i = 0; i < rawList.length; i++) {
       const r = { ...rawList[i] };
       if (i === 0) {
-        // First row: auto-carry P and O openings only; S_OPENING is always manual
+        // First row: auto-carry openings from previous month
         if (!rawList[i].P_OPENING && !localData[rawList[i]._id]?.P_OPENING)
           r.P_OPENING = prevClosing.P_CLOSING;
-        // S_OPENING: do NOT auto-fill — it must be entered manually
+        if (!rawList[i].S_OPENING && !localData[rawList[i]._id]?.S_OPENING)
+          r.S_OPENING = prevClosing.S_CLOSING;
         if (!rawList[i].O_OPENING && !localData[rawList[i]._id]?.O_OPENING)
           r.O_OPENING = prevClosing.O_CLOSING;
       } else {
@@ -289,8 +290,18 @@ export default function MainCashbook({ onBack }) {
   // Monthly column totals for summary row
   const monthSums = useMemo(() => {
     const s = {};
+    if (computedRows.length === 0) return s;
+    const firstRow = computedRows[0];
+    const lastRow = computedRows[computedRows.length - 1];
+
     for (const col of NUMERIC_COLS) {
-      s[col.key] = fmt2(computedRows.reduce((acc, r) => acc + num(r[col.key]), 0));
+      if (['P_OPENING', 'S_OPENING', 'O_OPENING'].includes(col.key)) {
+        s[col.key] = fmt2(lastRow[col.key]);
+      } else if (['P_CLOSING', 'S_CLOSING', 'O_CLOSING'].includes(col.key)) {
+        s[col.key] = fmt2(lastRow[col.key]);
+      } else {
+        s[col.key] = fmt2(computedRows.reduce((acc, r) => acc + num(r[col.key]), 0));
+      }
     }
     return s;
   }, [computedRows]);
@@ -443,7 +454,7 @@ export default function MainCashbook({ onBack }) {
           </Select>
         </FormControl>
 
-        <Chip label={`${MONTH_NAMES[selMonth - 1]} ${selMonth >= 4 ? selYear.split('-')[0] : parseInt(selYear.split('-')[0],10)+1}`}
+        <Chip label={`${MONTH_NAMES[selMonth - 1]} ${selMonth >= 4 ? selYear.split('-')[0] : parseInt(selYear.split('-')[0], 10) + 1}`}
           size="small" sx={{ fontWeight: 800, bgcolor: '#f0e6ff', color: '#6d28d9' }} />
 
         {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" color="warning" sx={{ fontWeight: 700 }} />}
@@ -483,7 +494,7 @@ export default function MainCashbook({ onBack }) {
       {/* ── Table ── */}
       <Box sx={{ overflow: 'auto', flex: 1 }}>
         <table style={{
-          borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%',
+          borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content',
           fontFamily: 'Inter, system-ui, sans-serif', fontSize: '12px'
         }}>
           <colgroup>
@@ -530,7 +541,7 @@ export default function MainCashbook({ onBack }) {
                 for (let i = 0; i < COLUMNS.length; i++) {
                   const col = COLUMNS[i];
                   const gc = GROUP_COLORS[col.group];
-                  
+
                   if (col.subGroup) {
                     if (!seenSubGroups.has(col.subGroup)) {
                       seenSubGroups.add(col.subGroup);

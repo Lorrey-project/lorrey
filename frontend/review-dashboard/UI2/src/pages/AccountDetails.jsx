@@ -24,7 +24,7 @@ export const COLUMNS = [
   { key: 'Ledger Name', label: 'LEDGER\nNAME', width: 180 },
   { key: 'Names', label: 'NAMES', width: 160 },
   { key: 'Particulars', label: 'PARTICULARS', width: 220 },
-  { key: 'Remarks', label: 'REMARKS', width: 200 },
+  { key: 'Remarks', label: 'REMARKS', width: 800 },
   { key: 'Reference No', label: 'REFERENCE\nNO', width: 140 },
   { key: 'Cheque No', label: 'CHEQUE\nNO', width: 140 },
   { key: 'Withdraw', label: 'WITHDRAW', width: 130 },
@@ -565,7 +565,7 @@ export default function AccountDetails({ onBack }) {
       </Box>
 
       <Box sx={{ overflow: 'auto', flex: 1 }}>
-        <table style={{ borderCollapse: 'collapse', minWidth: '100%', tableLayout: 'fixed', fontFamily: 'Inter, sans-serif', fontSize: '12px' }}>
+        <table style={{ borderCollapse: 'collapse', width: 'max-content', tableLayout: 'fixed', fontFamily: 'Inter, sans-serif', fontSize: '12px' }}>
           <colgroup>
             <col style={{ width: 40 }} />
             {COLUMNS.map(c => <col key={c.key} style={{ width: c.width }} />)}

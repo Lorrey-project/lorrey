@@ -50,6 +50,54 @@ router.get("/", auth, async (req, res) => {
     const filter = {};
     if (req.query.month) filter.month = parseInt(req.query.month);
     if (req.query.year)  filter.year  = parseInt(req.query.year);
+
+    // Auto-create daily rows up to today
+    if (filter.month && filter.year) {
+      const today = new Date();
+      // month is 1-based
+      const isCurrentMonth = filter.month === (today.getMonth() + 1) && filter.year === today.getFullYear();
+      const isPastMonth = filter.year < today.getFullYear() || (filter.year === today.getFullYear() && filter.month < (today.getMonth() + 1));
+      
+      let targetDays = 0;
+      if (isCurrentMonth) {
+        targetDays = today.getDate();
+      } else if (isPastMonth) {
+        targetDays = new Date(filter.year, filter.month, 0).getDate();
+      }
+      
+      if (targetDays > 0) {
+        const existingEntries = await col.find(filter).project({ DATE: 1 }).toArray();
+        const existingDates = new Set(existingEntries.map(e => {
+          const parts = (e.DATE || '').split('-');
+          if (parts.length === 3) return `${parseInt(parts[0])}-${parseInt(parts[1])}-${parseInt(parts[2])}`;
+          return String(e.DATE).trim();
+        }));
+        
+        const newDocs = [];
+        for (let day = 1; day <= targetDays; day++) {
+          const dateStr = `${day}-${filter.month}-${filter.year}`;
+          if (!existingDates.has(dateStr)) {
+            newDocs.push({
+              DATE: dateStr,
+              month: filter.month,
+              year: filter.year,
+              _created_at: new Date()
+            });
+          }
+        }
+        
+        if (newDocs.length > 0) {
+          let highest = await col.find(filter).sort({ "SL NO": -1 }).limit(1).toArray();
+          let nextSlNo = highest.length > 0 && typeof highest[0]["SL NO"] === 'number' ? highest[0]["SL NO"] + 1 : 1;
+          
+          newDocs.forEach(d => {
+            d["SL NO"] = nextSlNo++;
+          });
+          
+          await col.insertMany(newDocs, { ordered: false });
+        }
+      }
+    }
     const entries = await col.find(filter).sort({ "SL NO": 1, "_created_at": 1 }).toArray();
 
     const voucherCol = mongoose.connection.collection("vouchers");

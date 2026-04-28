@@ -587,6 +587,14 @@ export default function CementRegister({ onBack }) {
 
           <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
 
+          {selectedIds.size > 0 && !isBillingMode && (
+            <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }}/>}
+              onClick={() => setConfirmDel(true)}
+              sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', boxShadow: 'none' }}>
+              Delete Selected
+            </Button>
+          )}
+
           <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }}/>} onClick={handleExport}
             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>Export XLS</Button>
           
