@@ -82,6 +82,9 @@ export const AuthProvider = ({ children }) => {
 
     const login = async (email, password, role) => {
         const response = await axios.post(`${API_URL}/auth/login`, { email, password, role });
+        if (!response.data || !response.data.token || !response.data.user) {
+            throw new Error("Invalid response from server. Please check your VITE_API_URL environment variable.");
+        }
         const { token, user: loggedInUser } = response.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(loggedInUser));

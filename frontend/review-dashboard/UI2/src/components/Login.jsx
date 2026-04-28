@@ -70,7 +70,7 @@ const Login = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
         setLoading(true);
         try {
             const user = await login(email, password, portal);
-            if (isPump && user.pumpName && user.pumpName !== pumpId) {
+            if (isPump && user?.pumpName && user.pumpName !== pumpId) {
                 setError(`This account belongs to ${user.pumpName}, not ${pumpId}.`);
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
