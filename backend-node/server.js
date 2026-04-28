@@ -25,11 +25,11 @@ console.log("Running on HTTP (no SSL)");
 initSocket(server);
 startWatcher();
 
-// Allow all frontend dev ports (5173–5176) on localhost and local network
 const allowedOrigins = [
   /^http:\/\/localhost:(5173|5174|5175|5176)$/,
   /^http:\/\/192\.168\.\d+\.\d+:(5173|5174|5175|5176)$/,
   /^http:\/\/10\.\d+\.\d+\.\d+:(5173|5174|5175|5176)$/,
+  /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/
 ];
 
 app.use(cors({
