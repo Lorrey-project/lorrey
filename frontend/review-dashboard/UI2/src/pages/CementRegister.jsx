@@ -68,11 +68,53 @@ export const COLUMNS = [
   { key: 'PARTY NAME', label: 'PARTY NAME', width: 160, type: 'auto', group: 'billing' },
   { key: 'BILLING', label: 'BILLING', width: 80, type: 'auto', group: 'billing', hint: 'From freight dataset' },
   { key: 'MT', label: 'MT', width: 60, type: 'auto', group: 'billing' },
-  { key: 'PARTY RATE', label: 'PARTY RATE\n(95%)', width: 95, type: 'calc', group: 'billing', formula: r => fmt2(num(r.BILLING) * 0.95) },
+  {
+    key: 'PARTY RATE', label: 'PARTY RATE\n(95%)', width: 95, type: 'calc', group: 'billing',
+    hint: 'Billing × 95%. Shows 0 when owner has a variable commission rate.',
+    formula: r => {
+      const comm = r._freight_commission;
+      const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
+      return isStd ? fmt2(num(r.BILLING) * 0.95) : 0;
+    }
+  },
+  {
+    key: 'PARTY RATE VAR', label: 'PARTY RATE\n(Variable %)', width: 120, type: 'calc', group: 'billing',
+    hint: 'Billing × (1 - variable commission). Shows 0 for standard 95% owners.',
+    formula: r => {
+      const comm = r._freight_commission;
+      if (comm === undefined || comm === null || Number(comm) === 0.05) return 0;
+      return fmt2(num(r.BILLING) * (1 - Number(comm)));
+    }
+  },
   { key: 'Billing Amount', label: 'BILLING\nAMOUNT', width: 105, type: 'calc', group: 'billing', formula: r => fmt2(num(r.BILLING) * num(r.MT)) },
-  { key: 'BILLING ER 95%', label: 'BILLING ER 95%\n(PARTY PAYABLE)', width: 130, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.95) },
+  {
+    key: 'BILLING ER 95%', label: 'BILLING ER 95%\n(PARTY PAYABLE)', width: 130, type: 'calc', group: 'billing',
+    hint: 'Billing Amount × 95%. Shows 0 for variable-commission owners.',
+    formula: r => {
+      const comm = r._freight_commission;
+      const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
+      return isStd ? fmt2(num(r['Billing Amount']) * 0.95) : 0;
+    }
+  },
+  {
+    key: 'BILLING ER VAR', label: 'BILLING ER\n(Variable %)', width: 130, type: 'calc', group: 'billing',
+    hint: 'Billing Amount × (1 - variable commission). Shows 0 for standard 95% owners.',
+    formula: r => {
+      const comm = r._freight_commission;
+      if (comm === undefined || comm === null || Number(comm) === 0.05) return 0;
+      return fmt2(num(r['Billing Amount']) * (1 - Number(comm)));
+    }
+  },
   { key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.05) },
-  { key: 'TDS@1%', label: 'TDS@1%', width: 80, type: 'calc', group: 'billing', formula: r => fmt2(num(r['BILLING ER 95%']) * num(r._tds_percent) / 100) },
+  {
+    key: 'TDS@1%', label: 'TDS@1%', width: 80, type: 'calc', group: 'billing',
+    formula: r => {
+      const comm = r._freight_commission;
+      const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
+      const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
+      return fmt2(base * num(r._tds_percent) / 100);
+    }
+  },
   { key: 'ADVANCE', label: 'LOADING ADVANCE', width: 110, type: 'auto', group: 'billing' },
   { key: 'Site Cash', label: 'SITE CASH ADVANCE', width: 160, type: 'auto', group: 'billing', hasAttach: 'site_cash_auto' },
   { key: 'OFFICE CASH', label: 'OFFICE CASH ADVANCE', width: 160, type: 'auto', group: 'billing', hasAttach: 'office_cash_auto' },
@@ -101,8 +143,10 @@ export const COLUMNS = [
   {
     key: '% OF ADV', label: '% OF ADV', width: 100, type: 'calc', group: 'hsd',
     formula: r => {
-      const amt = num(r['BILLING ER 95%']);
-      return amt > 0 ? fmt2(((num(r.ADVANCE) + num(r['HSD AMOUNT'])) / amt) * 100) : 0;
+      const comm = r._freight_commission;
+      const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
+      const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
+      return base > 0 ? fmt2(((num(r.ADVANCE) + num(r['HSD AMOUNT'])) / base) * 100) : 0;
     }
   },
   { key: 'TRAVELLING EXP', label: 'TRAVELLING EXP', width: 130, type: 'manual', group: 'hsd' },
@@ -116,24 +160,29 @@ export const COLUMNS = [
   // ── Group 5: Net / Gross ───────────────────────────────────────────────────
   {
     key: 'NET AMOUNT', label: 'NET AMOUNT', width: 100, type: 'calc', group: 'net',
-    formula: r => fmt2(
-      num(r['BILLING ER 95%'])
-      - num(r['TDS@1%'])
-      - num(r.ADVANCE)
-      - num(r['Site Cash'])
-      - num(r['OFFICE CASH'])
-      - num(r['Bank TF'])
-      - num(r['Others deduction'])
-      - num(r['GPS Monitoring Charge'])
-      - num(r['GPS DEVICE'])
-      - num(r['RFID TAG'])
-      - num(r['RFID REASSURANCE'])
-      - num(r['FASTAG'])
-      - num(r['HSD AMOUNT'])
-      - num(r['TRAVELLING EXP'])
-      - num(r['SHORTAGE (AMOUNT)'])
-      - num(r['Other'])
-    )
+    formula: r => {
+      const comm = r._freight_commission;
+      const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
+      const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
+      return fmt2(
+        base
+        - num(r['TDS@1%'])
+        - num(r.ADVANCE)
+        - num(r['Site Cash'])
+        - num(r['OFFICE CASH'])
+        - num(r['Bank TF'])
+        - num(r['Others deduction'])
+        - num(r['GPS Monitoring Charge'])
+        - num(r['GPS DEVICE'])
+        - num(r['RFID TAG'])
+        - num(r['RFID REASSURANCE'])
+        - num(r['FASTAG'])
+        - num(r['HSD AMOUNT'])
+        - num(r['TRAVELLING EXP'])
+        - num(r['SHORTAGE (AMOUNT)'])
+        - num(r['Other'])
+      );
+    }
   },
   { key: 'UP TOLL', label: 'UP TOLL', width: 100, type: 'manual', group: 'net' },
   { key: 'DOWN TOLL', label: 'DOWN TOLL', width: 110, type: 'manual', group: 'net' },
@@ -178,7 +227,7 @@ export const COLUMNS = [
 ];
 
 // ─── Internal fields not shown ────────────────────────────────────────────────
-const HIDDEN_KEYS = new Set(['_id', '__v', '_invoiceId', '_tds_percent', '_is_ato', '_is_10w', '_source', '_auto_updated_at', '_created_at']);
+const HIDDEN_KEYS = new Set(['_id', '__v', '_invoiceId', '_tds_percent', '_is_ato', '_is_10w', '_source', '_auto_updated_at', '_created_at', '_freight_commission']);
 
 // ─── Calc helpers ─────────────────────────────────────────────────────────────
 function num(val, fallback = 0) { const n = parseFloat(val); return isNaN(n) ? fallback : n; }

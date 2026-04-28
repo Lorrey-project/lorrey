@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
-const Invoice  = require("../models/Invoice");
-const Voucher  = require("../models/Voucher");
+const Invoice = require("../models/Invoice");
+const Voucher = require("../models/Voucher");
 
 function safeGetIO() {
   try { const { getIO } = require("../socket"); return getIO(); }
@@ -74,13 +74,13 @@ async function getOrAssignGcnNo(col, invoiceId, loadingDate) {
   const date = new Date(loadingDate || Date.now());
   const fy = getFinancialYear(date);
   const prefix = `DAC/${fy}/`;
-  
+
   // Find max GCN number in this FY assigned natively. Format: DAC/25-26/N
   const docs = await col.find(
     { "GCN NO": { $regex: new RegExp(`^DAC/${fy}/\\d+$`) } },
     { projection: { "GCN NO": 1 } }
   ).toArray();
-  
+
   let maxSeq = 0;
   for (const doc of docs) {
     if (!doc["GCN NO"]) continue;
@@ -135,9 +135,9 @@ async function getFuelRate(pumpName, dateVal) {
       pumpName: { $regex: new RegExp(`^${pumpName.trim().split(/[-\s]/)[0]}`, "i") },
       effectiveDate: { $lte: d }
     })
-    .sort({ effectiveDate: -1 })
-    .limit(1)
-    .toArray();
+      .sort({ effectiveDate: -1 })
+      .limit(1)
+      .toArray();
 
     return record[0] ? num(record[0].rate) : 91.99;
   } catch (e) {
@@ -158,26 +158,26 @@ async function pushToRegister(invoiceId, overrides) {
     // Apply overrides on top so caller-forced values are always present
     const invoice = Object.assign({}, invoiceRaw, overrides);
 
-    const hvd  = invoice.human_verified_data || invoice.ai_data || {};
+    const hvd = invoice.human_verified_data || invoice.ai_data || {};
     const slip = invoice.lorry_hire_slip_data || {};
-    const gcn  = invoice.gcn_data || {};
+    const gcn = invoice.gcn_data || {};
 
     // ── Extract core invoice fields ──────────────────────────────────────
-    const invoiceDetails   = hvd.invoice_details   || {};
-    const supplyDetails    = hvd.supply_details    || {};
+    const invoiceDetails = hvd.invoice_details || {};
+    const supplyDetails = hvd.supply_details || {};
     const consigneeDetails = hvd.consignee_details || {};
-    const ewbDetails       = hvd.ewb_details       || {};
-    const items            = hvd.items             || [];
-    const sellerDetails    = hvd.seller_details    || {};
+    const ewbDetails = hvd.ewb_details || {};
+    const items = hvd.items || [];
+    const sellerDetails = hvd.seller_details || {};
 
     const vehicleNumber = safe(supplyDetails.vehicle_number);
-    const destination   = safe(supplyDetails.destination);
-    const invoiceNo     = safe(invoiceDetails.invoice_number);
-    const billType      = safe(invoiceDetails.invoice_type);
-    const shipmentNo    = safe(supplyDetails.shipment_number);
-    const partyName     = safe(consigneeDetails.consignee_name || invoice.consignee_name);
-    
-    const buyerDetails  = hvd.buyer_details || {};
+    const destination = safe(supplyDetails.destination);
+    const invoiceNo = safe(invoiceDetails.invoice_number);
+    const billType = safe(invoiceDetails.invoice_type);
+    const shipmentNo = safe(supplyDetails.shipment_number);
+    const partyName = safe(consigneeDetails.consignee_name || invoice.consignee_name);
+
+    const buyerDetails = hvd.buyer_details || {};
     const rawSite = safe(sellerDetails.seller_name) || safe(buyerDetails.buyer_name) || "";
     const rawSiteUpper = rawSite.toUpperCase();
     let site = "";
@@ -185,7 +185,7 @@ async function pushToRegister(invoiceId, overrides) {
     else if (rawSiteUpper.includes("VISTA") || rawSiteUpper === "NVL") site = "NVL";
     else site = rawSiteUpper.includes("DIPALI") ? "" : rawSite;
 
-    const loadingDate   = invoice.created_at;
+    const loadingDate = invoice.created_at;
 
     // MT = total quantity from items
     const mt = fmt2(items.reduce((sum, item) => sum + num(item.quantity), 0));
@@ -196,10 +196,10 @@ async function pushToRegister(invoiceId, overrides) {
       const found = addonCharges.find(c => c.type === typeName);
       return found ? num(found.amount) : 0;
     };
-    const addonGpsDevice      = getAddon("GPS Device");
-    const addonRfidTag        = getAddon("RFID Tag");
-    const addonRfidReassure   = getAddon("RFID Tag Reassurance");
-    const addonFastag         = getAddon("Fastag");
+    const addonGpsDevice = getAddon("GPS Device");
+    const addonRfidTag = getAddon("RFID Tag");
+    const addonRfidReassure = getAddon("RFID Tag Reassurance");
+    const addonFastag = getAddon("Fastag");
 
     // ── Truck Contact lookup ─────────────────────────────────────────────
     let wheel = "", ownerName = "", tdsPercent = 1, isATO = false, driverNo = "", hasStO = false;
@@ -208,22 +208,22 @@ async function pushToRegister(invoiceId, overrides) {
       const truck = await truckCol.findOne({
         $or: [
           { "Truck No": { $regex: new RegExp(`^${vehicleNumber.trim()}$`, "i") } },
-          { truck_no:   { $regex: new RegExp(`^${vehicleNumber.trim()}$`, "i") } }
+          { truck_no: { $regex: new RegExp(`^${vehicleNumber.trim()}$`, "i") } }
         ]
       });
       if (truck) {
         const vType = safe(truck["Type of vehicle"] || truck.type || "");
         const wheelMatch = vType.match(/(\d+)/);
-        wheel     = wheelMatch ? `${wheelMatch[1]}W` : vType;
+        wheel = wheelMatch ? `${wheelMatch[1]}W` : vType;
         ownerName = safe(truck["Owner Name"] || truck.owner_name);
-        driverNo  = safe(truck["DRIVER CONTACT"] || truck.contact_no);
+        driverNo = safe(truck["DRIVER CONTACT"] || truck.contact_no);
 
-        const pan    = safe(truck["PAN No."]    || truck.pan_no);
+        const pan = safe(truck["PAN No."] || truck.pan_no);
         const aadhar = safe(truck["Aadhar No."] || truck.aadhar_no);
-        tdsPercent   = (pan && aadhar) ? 0 : 1;
+        tdsPercent = (pan && aadhar) ? 0 : 1;
 
         const custType = safe(truck["TYPE OF CUSTOMER"] || "").toUpperCase();
-        isATO  = custType.includes("ATO");
+        isATO = custType.includes("ATO");
         hasStO = custType.includes("STO");
       }
     }
@@ -247,7 +247,7 @@ async function pushToRegister(invoiceId, overrides) {
         }
       }
       if (freight) {
-        billing    = num(freight.Rate);
+        billing = num(freight.Rate);
         distanceKm = num(freight.Distance) * 2; // round trip (UP+DOWN)
       }
     }
@@ -295,23 +295,23 @@ async function pushToRegister(invoiceId, overrides) {
     }
 
     // ── Fuel / slip fields ───────────────────────────────────────────────
-    const pumpName     = safe(slip.station_name);
-    const hsdSlipNo    = safe(slip.fuel_slip_no);
+    const pumpName = safe(slip.station_name);
+    const hsdSlipNo = safe(slip.fuel_slip_no);
     const fuelRequired = num(slip.estimated_required_fuel);
-    const hsdLtr       = num(slip.diesel_litres);
-    
-    // Fetch historical rate based on pump and loading date
-    const hsdRate      = await getFuelRate(pumpName, loadingDate);
-    // HSD AMOUNT is always LTR * RATE as per user request for automatic updates
-    const hsdAmount    = fmt2(hsdLtr * hsdRate);
+    const hsdLtr = num(slip.diesel_litres);
 
-    const advance      = num(slip.total_advance || slip.loading_advance);
-    const hsdBillNo    = await generateHsdBillNo(pumpName, loadingDate, invoiceId);
+    // Fetch historical rate based on pump and loading date
+    const hsdRate = await getFuelRate(pumpName, loadingDate);
+    // HSD AMOUNT is always LTR * RATE as per user request for automatic updates
+    const hsdAmount = fmt2(hsdLtr * hsdRate);
+
+    const advance = num(slip.total_advance || slip.loading_advance);
+    const hsdBillNo = await generateHsdBillNo(pumpName, loadingDate, invoiceId);
 
     // ── SL NO & GCN NO ───────────────────────────────────────────────────
-    const col  = getCementCol();
+    const col = getCementCol();
     const slNo = await getOrAssignSlNo(col, invoiceId);
-    
+
     // ── Delete any existing dummy voucher rows for this truck on this exact date ────
     const vDateStr = fmtDate(loadingDate);
     const dummyRegex = new RegExp("^dummy_vch_");
@@ -324,7 +324,7 @@ async function pushToRegister(invoiceId, overrides) {
     let finalGcnNo = safe(gcn.gcn_no);
     if (!finalGcnNo || finalGcnNo.includes('-')) {
       finalGcnNo = await getOrAssignGcnNo(col, invoiceId, loadingDate);
-      
+
       // Crucial Step: Save the auto-generated GCN natively back to the central Invoice doc
       // so the frontend can fetch it and generate the PDF with the correct sequence number!
       await Invoice.findByIdAndUpdate(invoiceId, {
@@ -333,69 +333,69 @@ async function pushToRegister(invoiceId, overrides) {
     }
 
     // ── Calculated fields ────────────────────────────────────────────────
-    const partyRate    = fmt2(billing * 0.95);
-    const billingAmt   = fmt2(billing * mt);
-    const billingEr95  = fmt2(billingAmt * 0.95);
-    const amount       = billingEr95;
-    const profit       = fmt2(billingAmt * 0.05);
-    const tdsAmount    = fmt2(amount * tdsPercent / 100);
-    const balance      = fmt2(hsdLtr - fuelRequired);
-    const pctAdv       = amount > 0 ? fmt2(((advance + hsdAmount) / amount) * 100) : 0;
-    const dedicated    = isATO ? fmt2(billingAmt * 0.095) : fmt2(partyRate * 0.085);
-    const tenWExtra    = (!hasStO && wheel.startsWith("10")) ? fmt2(partyRate * 0.085) : 0;
+    const partyRate = fmt2(billing * 0.95);
+    const billingAmt = fmt2(billing * mt);
+    const billingEr95 = fmt2(billingAmt * 0.95);
+    const amount = billingEr95;
+    const profit = fmt2(billingAmt * 0.05);
+    const tdsAmount = fmt2(amount * tdsPercent / 100);
+    const balance = fmt2(hsdLtr - fuelRequired);
+    const pctAdv = amount > 0 ? fmt2(((advance + hsdAmount) / amount) * 100) : 0;
+    const dedicated = isATO ? fmt2(billingAmt * 0.095) : fmt2(partyRate * 0.085);
+    const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(partyRate * 0.085) : 0;
 
     // ── Compose final document ───────────────────────────────────────────
     const payload = {
-      "_invoiceId":            invoiceId.toString(),
-      "SL NO":                 slNo,
-      "LOADING DT":            fmtDate(loadingDate),
-      "SITE":                  site,
-      "VEHICLE NUMBER":        vehicleNumber,
-      "WHEEL":                 wheel,
-      "E-WAY BILL NO":         safe(ewbDetails.ewb_number),
-      "E-WAY BILL VALIDITY":   safe(ewbDetails.ewb_valid_date ? fmtDate(ewbDetails.ewb_valid_date) : ""),
-      "GCN NO":                finalGcnNo,
-      "INVOICE NO":            invoiceNo,
-      "Bill Type":             billType,
-      "SHIPMENT NO":           shipmentNo,
-      "DN":                    driverNo,
-      "DESTINATION":           destination,
-      "PARTY NAME":            partyName,
-      "MT":                    mt || "",
-      "BILLING":               billing || "",
-      "PARTY RATE":            partyRate || "",
-      "Billing Amount":        billingAmt || "",
-      "BILLING ER 95%":        billingEr95 || "",
-      "AMOUNT":                amount || "",
-      "PROFIT":                profit || "",
-      "TDS@1%":                tdsAmount || "",
-      "ADVANCE":               advance || "",
-      "Site Cash":             siteCash || "",
-      "OFFICE CASH":           officeCash || "",
-      "SITE_CASH_PROOF_URL":   siteCashProofUrl,  // auto-fetched from voucher slip PDF
+      "_invoiceId": invoiceId.toString(),
+      "SL NO": slNo,
+      "LOADING DT": fmtDate(loadingDate),
+      "SITE": site,
+      "VEHICLE NUMBER": vehicleNumber,
+      "WHEEL": wheel,
+      "E-WAY BILL NO": safe(ewbDetails.ewb_number),
+      "E-WAY BILL VALIDITY": safe(ewbDetails.ewb_valid_date ? fmtDate(ewbDetails.ewb_valid_date) : ""),
+      "GCN NO": finalGcnNo,
+      "INVOICE NO": invoiceNo,
+      "Bill Type": billType,
+      "SHIPMENT NO": shipmentNo,
+      "DN": driverNo,
+      "DESTINATION": destination,
+      "PARTY NAME": partyName,
+      "MT": mt || "",
+      "BILLING": billing || "",
+      "PARTY RATE": partyRate || "",
+      "Billing Amount": billingAmt || "",
+      "BILLING ER 95%": billingEr95 || "",
+      "AMOUNT": amount || "",
+      "PROFIT": profit || "",
+      "TDS@1%": tdsAmount || "",
+      "ADVANCE": advance || "",
+      "Site Cash": siteCash || "",
+      "OFFICE CASH": officeCash || "",
+      "SITE_CASH_PROOF_URL": siteCashProofUrl,  // auto-fetched from voucher slip PDF
       "OFFICE_CASH_PROOF_URL": officeCashProofUrl,
-      "PUMP NAME":             pumpName,
-      "HSD SLIP NO":           hsdSlipNo,
-      "HSD BILL NO":           hsdBillNo,
-      "KM AS PER RATE CHART":  distanceKm > 0 ? distanceKm : "",
-      "FUEL REQUIRED":         fuelRequired || "",
-      "HSD (LTR)":             hsdLtr || "",
-      "BALANCE":               balance,
-      "HSD RATE":              hsdRate || "",
-      "HSD AMOUNT":            hsdAmount || "",
-      "% OF ADV":              pctAdv || "",
-      "DEDICATED":             dedicated || "",
-      "10W EXTRA 8.5%":        tenWExtra || "",
-      "OWNER NAME":            ownerName,
-      "GPS DEVICE":            addonGpsDevice || "",
-      "RFID TAG":              addonRfidTag || "",
-      "RFID REASSURANCE":      addonRfidReassure || "",
-      "FASTAG":                addonFastag || "",
-      "VERIFICATION STATUS":     invoice.is_hsd_verified ? "Verified" : "Not Verified",
-      "_tds_percent":          tdsPercent,
-      "_is_ato":               isATO,
-      "_source":               "auto",
-      "_auto_updated_at":      new Date(),
+      "PUMP NAME": pumpName,
+      "HSD SLIP NO": hsdSlipNo,
+      "HSD BILL NO": hsdBillNo,
+      "KM AS PER RATE CHART": distanceKm > 0 ? distanceKm : "",
+      "FUEL REQUIRED": fuelRequired || "",
+      "HSD (LTR)": hsdLtr || "",
+      "BALANCE": balance,
+      "HSD RATE": hsdRate || "",
+      "HSD AMOUNT": hsdAmount || "",
+      "% OF ADV": pctAdv || "",
+      "DEDICATED": dedicated || "",
+      "10W EXTRA 8.5%": tenWExtra || "",
+      "OWNER NAME": ownerName,
+      "GPS DEVICE": addonGpsDevice || "",
+      "RFID TAG": addonRfidTag || "",
+      "RFID REASSURANCE": addonRfidReassure || "",
+      "FASTAG": addonFastag || "",
+      "VERIFICATION STATUS": invoice.is_hsd_verified ? "Verified" : "Not Verified",
+      "_tds_percent": tdsPercent,
+      "_is_ato": isATO,
+      "_source": "auto",
+      "_auto_updated_at": new Date(),
     };
 
     // Keep existing manually-entered fields — only overwrite non-empty auto values
@@ -417,7 +417,7 @@ async function pushToRegister(invoiceId, overrides) {
     if (existing) {
       if (existing["PAYMENT STATUS"]) clean["PAYMENT STATUS"] = existing["PAYMENT STATUS"];
       if (existing["PAYMENT PROOF URL"]) clean["PAYMENT PROOF URL"] = existing["PAYMENT PROOF URL"];
-      
+
       // Preserve manually edited OFFICE CASH only if there's no auto-fetched value
       if (existing["OFFICE CASH"] !== undefined && officeCash === 0) {
         clean["OFFICE CASH"] = existing["OFFICE CASH"];
@@ -445,17 +445,17 @@ async function pushToInvoice(cementRowId, modifications) {
     if (!row || !row._invoiceId) return;
 
     const invUpdate = {};
-    if ("PARTY NAME"    in modifications) invUpdate["consignee_name"]                         = modifications["PARTY NAME"];
-    if ("HSD AMOUNT"    in modifications) invUpdate["lorry_hire_slip_data.diesel_advance"]     = num(modifications["HSD AMOUNT"]);
-    if ("HSD (LTR)"     in modifications) invUpdate["lorry_hire_slip_data.diesel_litres"]      = num(modifications["HSD (LTR)"]);
-    if ("HSD RATE"      in modifications) invUpdate["lorry_hire_slip_data.diesel_rate"]        = num(modifications["HSD RATE"]);
-    if ("HSD SLIP NO"   in modifications) invUpdate["lorry_hire_slip_data.fuel_slip_no"]       = modifications["HSD SLIP NO"];
-    if ("ADVANCE"       in modifications) invUpdate["lorry_hire_slip_data.total_advance"]      = num(modifications["ADVANCE"]);
-    if ("PUMP NAME"     in modifications) invUpdate["lorry_hire_slip_data.station_name"]       = modifications["PUMP NAME"];
-    if ("GCN NO"        in modifications) invUpdate["gcn_data.gcn_no"]                        = modifications["GCN NO"];
+    if ("PARTY NAME" in modifications) invUpdate["consignee_name"] = modifications["PARTY NAME"];
+    if ("HSD AMOUNT" in modifications) invUpdate["lorry_hire_slip_data.diesel_advance"] = num(modifications["HSD AMOUNT"]);
+    if ("HSD (LTR)" in modifications) invUpdate["lorry_hire_slip_data.diesel_litres"] = num(modifications["HSD (LTR)"]);
+    if ("HSD RATE" in modifications) invUpdate["lorry_hire_slip_data.diesel_rate"] = num(modifications["HSD RATE"]);
+    if ("HSD SLIP NO" in modifications) invUpdate["lorry_hire_slip_data.fuel_slip_no"] = modifications["HSD SLIP NO"];
+    if ("ADVANCE" in modifications) invUpdate["lorry_hire_slip_data.total_advance"] = num(modifications["ADVANCE"]);
+    if ("PUMP NAME" in modifications) invUpdate["lorry_hire_slip_data.station_name"] = modifications["PUMP NAME"];
+    if ("GCN NO" in modifications) invUpdate["gcn_data.gcn_no"] = modifications["GCN NO"];
     if ("VEHICLE NUMBER" in modifications) {
       invUpdate["human_verified_data.supply_details.vehicle_number"] = modifications["VEHICLE NUMBER"];
-      invUpdate["ai_data.supply_details.vehicle_number"]             = modifications["VEHICLE NUMBER"];
+      invUpdate["ai_data.supply_details.vehicle_number"] = modifications["VEHICLE NUMBER"];
     }
     if (Object.keys(invUpdate).length > 0) {
       await Invoice.findByIdAndUpdate(row._invoiceId, { $set: invUpdate });
@@ -486,7 +486,7 @@ async function removeFromRegister(invoiceId) {
 // ─── Re-sequence SL NOs to be gapless: 1, 2, 3... ───────────────────────────
 async function resequenceSlNos() {
   try {
-    const col  = getCementCol();
+    const col = getCementCol();
     const rows = await col.find({}).sort({ "SL NO": 1, "_auto_updated_at": 1 }).toArray();
     const bulkOps = rows.map((row, idx) => ({
       updateOne: {
@@ -543,7 +543,7 @@ async function syncVoucherDummy(voucherId) {
       "LOADING DT": vDateStr,
       "SITE": "",
       "VEHICLE NUMBER": voucher.vehicleNumber,
-      
+
       // Clearly label it in the central registry
       "INVOICE NO": "CASH VOUCHER",
       "DESTINATION": "NO SLIP",
