@@ -226,6 +226,7 @@ async function pushToRegister(invoiceId, overrides) {
 
     // ── Truck Contact lookup ─────────────────────────────────────────────
     let wheel = "", ownerName = "", tdsPercent = 1, isATO = false, driverNo = "", hasStO = false;
+    let basicFreightCommission = 0.05; // default — owner gets 5% deducted (party gets 95%)
     if (vehicleNumber) {
       const truckCol = getInvoiceSystemDb().db.collection("Truck Contact Number");
       const truckRegex = makeSpaceAgnosticRegex(vehicleNumber);
@@ -261,9 +262,13 @@ async function pushToRegister(invoiceId, overrides) {
         const aadhar = safe(truck["Aadhar No."] || truck.aadhar_no);
         tdsPercent = (pan && aadhar) ? 0 : 1;
 
-        const custType = safe(truck["TYPE OF CUSTOMER"] || "").toUpperCase();
+        const custType = safe(truck["TYPE OF CUSTOMER"] || truck["type_of_customer"] || "").toUpperCase();
         isATO = custType.includes("ATO");
         hasStO = custType.includes("STO");
+
+        // Read basic freight commission; null/undefined → default 0.05
+        const rawComm = truck["basic_freight_commission"];
+        basicFreightCommission = (rawComm !== null && rawComm !== undefined) ? num(rawComm) : 0.05;
       }
     }
     // ── Freight lookup — match by destination against DEST ZONE DESC ────
@@ -390,10 +395,19 @@ async function pushToRegister(invoiceId, overrides) {
     }
 
     // ── Calculated fields ────────────────────────────────────────────────
-    const partyRate = fmt2(billing * 0.95);
+    // Commission-aware rate logic:
+    // If basic_freight_commission == 0.05 → standard 95% path
+    // Else → variable path (e.g. 0.04 → 96%, 0 → 100%)
+    const isStandard95 = basicFreightCommission === 0.05;
+    const varPartyPct = fmt2(1 - basicFreightCommission); // e.g. 0.96, 1.0
+
+    const partyRate = isStandard95 ? fmt2(billing * 0.95) : 0;          // PARTY RATE (95%)
+    const partyRateVar = isStandard95 ? 0 : fmt2(billing * varPartyPct);   // PARTY RATE (VAR%)
     const billingAmt = fmt2(billing * mt);
-    const billingEr95 = fmt2(billingAmt * 0.95);
-    const amount = billingEr95;
+    const billingEr95 = isStandard95 ? fmt2(billingAmt * 0.95) : 0;       // BILLING ER 95%
+    const billingErVar = isStandard95 ? 0 : fmt2(billingAmt * varPartyPct);// BILLING ER (VAR%)
+
+    const amount = isStandard95 ? billingEr95 : billingErVar;        // effective payable
     const profit = fmt2(billingAmt * 0.05);
     const tdsAmount = fmt2(amount * tdsPercent / 100);
     const balance = fmt2(hsdLtr - fuelRequired);
@@ -420,12 +434,15 @@ async function pushToRegister(invoiceId, overrides) {
       "PARTY NAME": partyName,
       "MT": mt || "",
       "BILLING": billing || "",
-      "PARTY RATE": partyRate || "",
+      "PARTY RATE": partyRate !== undefined ? partyRate : "",
+      "PARTY RATE VAR": partyRateVar !== undefined ? partyRateVar : "",
       "Billing Amount": billingAmt || "",
-      "BILLING ER 95%": billingEr95 || "",
+      "BILLING ER 95%": billingEr95 !== undefined ? billingEr95 : "",
+      "BILLING ER VAR": billingErVar !== undefined ? billingErVar : "",
       "AMOUNT": amount || "",
       "PROFIT": profit || "",
       "TDS@1%": tdsAmount || "",
+      "_freight_commission": basicFreightCommission,
       "ADVANCE": advance || "",
       "Site Cash": siteCash || "",
       "OFFICE CASH": officeCash || "",
