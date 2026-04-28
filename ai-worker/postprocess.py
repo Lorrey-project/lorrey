@@ -59,4 +59,17 @@ def validate_invoice(invoice_json):
         invoice_json["tax_details"]["sgst_amount"]
     )
 
+    # Standardize Seller Name
+    seller_name = invoice_json.get("seller_details", {}).get("seller_name", "")
+    if seller_name:
+        upper_name = seller_name.upper().strip()
+        if "NUVOCO" in upper_name:
+            invoice_json["seller_details"]["seller_name"] = "NVCL"
+        elif "NU" in upper_name and "VISTA" in upper_name:
+            invoice_json["seller_details"]["seller_name"] = "NVL"
+        elif "NVCL" in upper_name:
+            invoice_json["seller_details"]["seller_name"] = "NVCL"
+        elif "NVL" in upper_name:
+            invoice_json["seller_details"]["seller_name"] = "NVL"
+
     return invoice_json
