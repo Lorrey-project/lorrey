@@ -35,8 +35,8 @@ export default function SellerDetails({ data, errors, onChange }) {
               sx={{ bgcolor: '#fff' }}
             >
               <MenuItem value="" disabled><em>— Select Seller Name —</em></MenuItem>
-              <MenuItem value="NVL">NVL</MenuItem>
-              <MenuItem value="NVCL">NVCL</MenuItem>
+              <MenuItem value="NVL">NU VISTA LTD</MenuItem>
+              <MenuItem value="NVCL">NUVOCO VISTAS CORP. LTD</MenuItem>
             </Select>
           </FormControl>
 
@@ -44,8 +44,8 @@ export default function SellerDetails({ data, errors, onChange }) {
           <TextField fullWidth label="State" name="seller_state" value="WEST BENGAL" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
           <TextField fullWidth label="State Code" name="seller_state_code" value="19" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
           <TextField fullWidth label="Pincode" name="seller_pincode" value="713148" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
-          <TextField fullWidth label="GSTIN" name="seller_gstin" value="19AAACN8008H1ZX" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
-          <TextField fullWidth label="PAN" name="seller_pan" value="AAACN8008H" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
+          <TextField fullWidth label="GSTIN" name="seller_gstin" value="19AAACL4159L1Z5" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
+          <TextField fullWidth label="PAN" name="seller_pan" value="AAACL4159L" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
         </Box>
       </CardContent>
     </Card>

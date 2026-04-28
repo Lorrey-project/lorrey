@@ -83,21 +83,23 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
         return `DAC/${fyShort}/TBD`; // Prevent generating fake serial numbers
     };
 
+    const getFullName = (name) => name === 'NVCL' ? 'NUVOCO VISTAS CORP. LTD' : name === 'NVL' ? 'NU VISTA LTD' : name;
+
     const gcnData = {
         gcn_no: computeGCNNo(),
         gcn_date: inv.invoice_date || new Date().toLocaleDateString('en-IN'),
         company_office_address: 'No.144, Plot No-3, Nayak Villa, Netaji Subhas Pally, Durgapur - 713201',
         company_site_office_address: '1st Floor, Panja Hotel, Darjeeling More, Panagarh',
-        company_phone_number: '7810935738 / 8116221063 / 9474485192',
+        company_phone_number: '7810935738 / 9091418737',
         company_email: 'dipaliassociates.durgapur@gmail.com',
         company_gst: '19AATFD1733C1ZH',
-        consignor_name: seller.seller_name || buyer.buyer_name || '',
-        consignor_address: seller.seller_address || buyer.buyer_address || '',
+        consignor_name: getFullName(seller.seller_name) || getFullName(buyer.buyer_name) || '',
+        consignor_address: 'Panagarh, Panagarh Industrial Park Kotagram, Bardhaman-19, West Bengal - 713148',
         seller_gstin: seller.seller_gstin || '',
-        consignee_name: consignee.consignee_name || '',
-        consignee_address: consignee.consignee_address || '',
+        consignee_name: getFullName(buyer.buyer_name) || '',
+        consignee_address: buyer.buyer_address || consignee.consignee_address || '',
         destination: supply.destination || '',
-        consignee_pincode: consignee.consignee_pincode || '',
+        consignee_pincode: consignee.consignee_pincode || buyer.buyer_pincode || '',
         truck_no: supply.vehicle_number || '',
         agent_name: supply.transporter_name || '',
         invoice_no: inv.invoice_number || '',
@@ -284,7 +286,7 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
                                         {[
                                             ['GCN No.', gcnData.gcn_no],
                                             ['Date', gcnData.gcn_date],
-                                            ['From', gcnData.consignor_name],
+                                            ['From', gcnData.consignor_address],
                                             ['Destination', gcnData.destination],
                                             ['Pin', gcnData.consignee_pincode],
                                         ].map(([label, val]) => (

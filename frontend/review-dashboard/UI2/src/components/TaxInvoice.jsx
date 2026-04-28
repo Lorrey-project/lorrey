@@ -131,7 +131,7 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                                     <div style={{ fontSize: F.md, fontWeight: '700', marginBottom: '4px' }}>Fleet Owner & Transport Service Provider</div>
                                     <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Office:</strong> No.144, Plot No-3, Nayak Villa, Netaji Subhas Pally, Durgapur - 713201</div>
                                     <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Site Office:</strong> 1st Floor, Panja Hotel, Darjeeling More, Panagarh</div>
-                                    <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Mobile:</strong> 7810935738 / 8116221063 / 9474485192</div>
+                                    <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Mobile:</strong> 7810935738 / 9091418737</div>
                                     <div style={{ fontSize: F.sm, marginBottom: '2px' }}><strong>Email:</strong> dipaliassociates.durgapur@gmail.com</div>
                                     <div style={{ fontSize: F.sm }}><strong>GST No.:</strong> {supply.transporter_gstin || "19AATFD1733C1ZH"}</div>
                                 </td>
@@ -146,9 +146,15 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                                 </td>
                             </tr>
                             <tr>
-                                <td style={{ ...cellBase, borderRight: '1px solid #000' }}>
-                                    <span style={lbl}>Sales Order No.:</span>
-                                    <div style={{ fontSize: F.md }}>{supply.order_reference_number}</div>
+                                <td style={{ ...cellBase, padding: 0, borderRight: '1px solid #000' }}>
+                                    <div style={{ padding: '3px 5px', borderBottom: '1px solid #000' }}>
+                                        <span style={lbl}>Sales Order No.:</span>
+                                        <div style={{ fontSize: F.md }}>{supply.order_reference_number}</div>
+                                    </div>
+                                    <div style={{ padding: '3px 5px' }}>
+                                        <span style={lbl}>Shipment No.:</span>
+                                        <div style={{ fontSize: F.md }}>{supply.shipment_number}</div>
+                                    </div>
                                 </td>
                                 <td style={{ ...cellBase, textAlign: 'center' }}>
                                     <QRCodeCanvas value={qrPayload} size={58} level="M" />
@@ -163,7 +169,7 @@ const TaxInvoice = React.forwardRef(({ data }, ref) => {
                             <tr>
                                 <td style={{ ...cellBase, width: '50%', borderRight: '1px solid #000' }}>
                                     <span style={lbl}>Customer :</span>
-                                    <div style={bold}>{seller.seller_name}</div>
+                                    <div style={bold}>{seller.seller_name === 'NVCL' ? 'NUVOCO VISTAS CORP. LTD' : seller.seller_name === 'NVL' ? 'NU VISTA LTD' : seller.seller_name}</div>
                                     <div style={{ fontSize: F.sm, marginTop: '2px' }}>{seller.seller_address}</div>
                                     {seller.seller_pincode && <div style={{ fontSize: F.sm }}>PIN: <strong>{seller.seller_pincode}</strong></div>}
                                     <div style={{ fontSize: F.sm, marginTop: '3px' }}>GSTIN: <strong>{seller.seller_gstin}</strong></div>

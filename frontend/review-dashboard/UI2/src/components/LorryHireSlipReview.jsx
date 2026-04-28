@@ -51,17 +51,20 @@ export const buildGcnDataFromInvoice = (data) => {
     const ref = details.reference_number || '';
     const gcnNo = supply.lorrey_receipt_number || (inv?.gcn_data?.gcn_no && inv.gcn_data.gcn_no !== '' ? inv.gcn_data.gcn_no : `DAC/${fyShort}/?`);
 
+    const getFullName = (name) => name === 'NVCL' ? 'NUVOCO VISTAS CORP. LTD' : name === 'NVL' ? 'NU VISTA LTD' : name;
+
     return {
         company_name: 'DIPALI ASSOCIATES & CO.',
         gcn_no: gcnNo,
         gcn_date: details.invoice_date || new Date().toLocaleDateString('en-IN'),
         company_site_office_address: '1st Floor, Panja Hotel, Darjeeling More, Panagarh',
-        company_phone_number: '7810935738 / 8116221063 / 9474485192',
+        company_phone_number: '7810935738 / 9091418737',
         company_email: 'dipaliassociates.durgapur@gmail.com',
         company_gst: '19AATFD1733C1ZH',
-        consignor_name: seller.seller_name || buyer.buyer_name || '',
-        consignee_name: consignee.consignee_name || '',
-        consignee_address: consignee.consignee_address || '',
+        consignor_name: getFullName(seller.seller_name) || getFullName(buyer.buyer_name) || '',
+        consignor_address: 'Panagarh, Panagarh Industrial Park Kotagram, Bardhaman-19, West Bengal - 713148',
+        consignee_name: getFullName(buyer.buyer_name) || '',
+        consignee_address: buyer.buyer_address || consignee.consignee_address || '',
         destination: supply.destination || '',
         consignee_pincode: consignee.consignee_pincode || '',
         truck_no: supply.vehicle_number || '',

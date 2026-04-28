@@ -108,7 +108,7 @@ export default function InvoiceForm({ onBack }) {
     if (destState === 'west bengal') {
       const qtyStr = formData?.items?.[0]?.quantity;
       if (qtyStr) {
-        const qty = parseFloat(qtyStr);
+        const qty = parseFloat(String(qtyStr).replace(/,/g, ''));
         if (!isNaN(qty)) {
           const calc = (qty * 30).toFixed(2);
           if (formData.nt_details?.unloading_charges !== calc) {
@@ -130,11 +130,34 @@ export default function InvoiceForm({ onBack }) {
     }
   }, [formData?.supply_details?.destination_state, formData?.items]);
 
+  // Auto-calculate Total Net Payable from items
+  useEffect(() => {
+    if (!formData?.items || formData.items.length === 0) return;
+    
+    let total = 0;
+    formData.items.forEach(item => {
+      const valStr = item.net_payable || item.taxable_value || '0';
+      const val = parseFloat(String(valStr).replace(/,/g, ''));
+      if (!isNaN(val)) total += val;
+    });
+    
+    if (total > 0) {
+      // Use standard formatting to avoid scientific notation
+      const formattedTotal = total.toFixed(2);
+      if (formData.amount_summary?.net_payable !== formattedTotal) {
+        setFormData(prev => ({
+          ...prev,
+          amount_summary: { ...prev?.amount_summary, net_payable: formattedTotal }
+        }));
+      }
+    }
+  }, [formData?.items]);
+
   // Auto-calculate Amount in Words when Net Payable changes
   useEffect(() => {
     const netPayableStr = formData?.amount_summary?.net_payable;
     if (netPayableStr) {
-      const amt = parseFloat(netPayableStr);
+      const amt = parseFloat(String(netPayableStr).replace(/,/g, ''));
       if (!isNaN(amt)) {
         const words = toIndianWords(amt);
         if (formData.amount_summary?.amount_in_words !== words) {

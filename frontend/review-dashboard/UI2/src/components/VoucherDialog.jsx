@@ -25,7 +25,7 @@ import { toIndianWords } from '../utils/toIndianWords';
 const COMPANY = {
   name: 'DIPALI ASSOCIATES & CO.',
   address: '1st Floor, Panja Hotel, Darjeeling More, Panagarh',
-  phone: '7810935738 / 8116221063',
+  phone: '7810935738 / 9091418737',
   gst: '19AATFD1733C1ZH',
 };
 

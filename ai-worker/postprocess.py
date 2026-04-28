@@ -46,6 +46,13 @@ def validate_invoice(invoice_json):
     if buyer_addr == consignee_addr:
         invoice_json["consignee_details"]["consignee_address"] = ""
 
+    # Normalize seller name to NVCL or NVL for frontend compatibility
+    seller_name = invoice_json.get("seller_details", {}).get("seller_name", "").upper()
+    if "NUVOCO" in seller_name or "NVCL" in seller_name:
+        invoice_json["seller_details"]["seller_name"] = "NVCL"
+    elif "NU VISTA" in seller_name or "NUVISTA" in seller_name or "NVL" in seller_name:
+        invoice_json["seller_details"]["seller_name"] = "NVL"
+
     # Clean numbers
     for item in invoice_json["items"]:
         item["rate"] = clean_number(item["rate"])
@@ -58,18 +65,5 @@ def validate_invoice(invoice_json):
     invoice_json["tax_details"]["sgst_amount"] = clean_number(
         invoice_json["tax_details"]["sgst_amount"]
     )
-
-    # Standardize Seller Name
-    seller_name = invoice_json.get("seller_details", {}).get("seller_name", "")
-    if seller_name:
-        upper_name = seller_name.upper().strip()
-        if "NUVOCO" in upper_name:
-            invoice_json["seller_details"]["seller_name"] = "NVCL"
-        elif "NU" in upper_name and "VISTA" in upper_name:
-            invoice_json["seller_details"]["seller_name"] = "NVL"
-        elif "NVCL" in upper_name:
-            invoice_json["seller_details"]["seller_name"] = "NVCL"
-        elif "NVL" in upper_name:
-            invoice_json["seller_details"]["seller_name"] = "NVL"
 
     return invoice_json

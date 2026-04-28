@@ -159,7 +159,7 @@ const LorryHireSlipDocument = forwardRef(({
                 </colgroup>
                 <tbody>
                     {[
-                        ['From', gcnData?.consignor_name, 'Destination', gcnData?.destination],
+                        ['From', gcnData?.consignor_address, 'Destination', gcnData?.destination],
                         ['Pin', gcnData?.consignee_pincode, 'Invoice No.', gcnData?.invoice_no],
                         ['Shipment No.', gcnData?.shipment_no, 'Challan No.', gcnData?.challan_number],
                     ].map(([l1, v1, l2, v2]) => (

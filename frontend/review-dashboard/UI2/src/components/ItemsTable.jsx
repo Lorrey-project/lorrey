@@ -17,16 +17,15 @@ export default function ItemsTable({ items = [], amountSummary = {}, onChange, e
             let updated = { ...item };
             
             if (item.quantity && !item.bags) {
-                const q = parseFloat(item.quantity);
+                const q = parseFloat(String(item.quantity).replace(/,/g, ''));
                 if (!isNaN(q)) {
                     needsUpdate = true;
                     updated.bags = String(Math.round(q * 20));
                 }
             }
             
-            // Only backfill net_payable for the first item from the global invoice sum if it's currently holding the raw taxable_value
-            if (idx === 0 && amountSummary?.net_payable && updated.net_payable !== amountSummary.net_payable) {
-                // if it's completely empty OR it was defaulting to taxable_value
+            // Only backfill net_payable for the first item from the global invoice sum if it's completely empty
+            if (idx === 0 && amountSummary?.net_payable && !updated.net_payable) {
                 needsUpdate = true;
                 updated.net_payable = amountSummary.net_payable;
             }
@@ -45,7 +44,7 @@ export default function ItemsTable({ items = [], amountSummary = {}, onChange, e
         
         // Auto-calculate bags from quantity (1 MT = 20 bags)
         if (field === 'quantity' && value !== '') {
-            const qty = parseFloat(value);
+            const qty = parseFloat(String(value).replace(/,/g, ''));
             if (!isNaN(qty)) {
                 updatedItem.bags = String(Math.round(qty * 20));
             } else {
@@ -138,11 +137,11 @@ export default function ItemsTable({ items = [], amountSummary = {}, onChange, e
                                     helperText={itemErrors.net_payable || "Total Invoice Amount"}
                                     variant="outlined"
                                 />
-                                {item.net_payable && !isNaN(parseFloat(item.net_payable)) && (
+                                {item.net_payable && !isNaN(parseFloat(String(item.net_payable).replace(/,/g, ''))) && (
                                     <TextField
                                         fullWidth
                                         label="Net Payable Amount In Words"
-                                        value={toIndianWords(parseFloat(item.net_payable))}
+                                        value={toIndianWords(parseFloat(String(item.net_payable).replace(/,/g, '')))}
                                         variant="outlined"
                                         InputProps={{ readOnly: true }}
                                         sx={{

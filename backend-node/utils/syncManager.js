@@ -176,7 +176,15 @@ async function pushToRegister(invoiceId, overrides) {
     const billType      = safe(invoiceDetails.invoice_type);
     const shipmentNo    = safe(supplyDetails.shipment_number);
     const partyName     = safe(consigneeDetails.consignee_name || invoice.consignee_name);
-    const site          = safe(sellerDetails.seller_name, "DIPALI ASSOCIATES & CO");
+    
+    const buyerDetails  = hvd.buyer_details || {};
+    const rawSite = safe(sellerDetails.seller_name) || safe(buyerDetails.buyer_name) || "";
+    const rawSiteUpper = rawSite.toUpperCase();
+    let site = "";
+    if (rawSiteUpper.includes("NUVOCO") || rawSiteUpper === "NVCL") site = "NVCL";
+    else if (rawSiteUpper.includes("VISTA") || rawSiteUpper === "NVL") site = "NVL";
+    else site = rawSiteUpper.includes("DIPALI") ? "" : rawSite;
+
     const loadingDate   = invoice.created_at;
 
     // MT = total quantity from items
@@ -533,7 +541,7 @@ async function syncVoucherDummy(voucherId) {
       _invoiceId: dummyId,
       "SL NO": slNo,
       "LOADING DT": vDateStr,
-      "SITE": "DIPALI ASSOCIATES & CO",
+      "SITE": "",
       "VEHICLE NUMBER": voucher.vehicleNumber,
       
       // Clearly label it in the central registry
