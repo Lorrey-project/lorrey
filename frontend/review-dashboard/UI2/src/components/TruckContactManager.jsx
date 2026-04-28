@@ -23,6 +23,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import DescriptionIcon from '@mui/icons-material/Description';
+import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import axios from 'axios';
 import { API_URL } from '../config';
 
@@ -89,6 +90,8 @@ const DB_KEYS = {
   driverBankAcc: 'Driver Bank Account No ',
   driverIfsc: 'Driver IFSC Code ',
   driverPanAadharLink: 'Driver PAN Aadhar Link ',
+  basicFreightComm: 'basic_freight_commission',
+  incentiveCommVal: 'incentive_commission',
 };
 
 const getStr = (...candidates) => {
@@ -242,6 +245,8 @@ export default function TruckContactManager({ open, onClose }) {
         driverBankAcc: form.driverBankAcc,
         driverIfsc: form.driverIfsc,
         driverPanAadharLink: form.driverPanAadharLink,
+        basicFreightComm: form.basicFreightComm,
+        incentiveCommVal: form.incentiveCommVal,
       };
 
       Object.entries(formToKey).forEach(([k, v]) => {
@@ -334,6 +339,8 @@ export default function TruckContactManager({ open, onClose }) {
       driverBankAcc: getStr(c["Driver Bank Account No "], c.driver_bank_acc),
       driverIfsc: getStr(c["Driver IFSC Code "], c.driver_ifsc),
       driverPanAadharLink: getStr(c["Driver PAN Aadhar Link "], c.driver_pan_aadhar_link),
+      basicFreightComm: getStr(c.basic_freight_commission, c["basic_freight_commission "]),
+      incentiveCommVal: getStr(c.incentive_commission, c["incentive_commission "]),
     });
     setEditId(c._id);
     setTab(0);
@@ -684,12 +691,32 @@ export default function TruckContactManager({ open, onClose }) {
                           {tf('IFSC Code', 'ownerIfsc', ArticleIcon)}
                         </Box>
 
+                        <SectionLabel icon={CurrencyRupeeIcon} label="Financial & Commission Settings" />
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                          <Box>
+                            {tf('Basic Freight Comm (e.g. 0.05)', 'basicFreightComm', ReceiptIcon)}
+                            {form.basicFreightComm && !isNaN(parseFloat(form.basicFreightComm)) && (
+                              <Typography variant="caption" sx={{ color: '#16a34a', fontWeight: 800, ml: 1 }}>
+                                {(100 - (parseFloat(form.basicFreightComm) * 100)).toFixed(0)}% Payout to Owner
+                              </Typography>
+                            )}
+                          </Box>
+                          <Box>
+                            {tf('Incentive Commission', 'incentiveCommVal', ReceiptIcon)}
+                          </Box>
+                        </Box>
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                          {selectTf('NIL TDS Option', 'nilTds', ['Yes', 'No'], ArticleIcon)}
+                          {tf('TDS Category (%)', 'tdsApp', ReceiptIcon)}
+                        </Box>
+
                         <SectionLabel icon={ReceiptIcon} label="GST Information" />
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1.5fr 0.5fr' }, gap: 2 }}>
                           {tf('GST Type', 'gstType')}
                           {tf('GST No', 'gstNo')}
                           {tf('GST %', 'gstPercent')}
                         </Box>
+
                         {TabDocVault(['pan', 'aadhar', 'bank'], "Owner Identification Documents")}
                       </Box>
                     )}
@@ -740,8 +767,8 @@ export default function TruckContactManager({ open, onClose }) {
                           {tf('TDS Category', 'tdsApp', ReceiptIcon)}
                         </Box>
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-                          {tf('Basic Freight Comm', 'basicFreight', ReceiptIcon)}
-                          {tf('Incentive Comm', 'incentiveComm', ReceiptIcon)}
+                          {tf('Basic Freight Comm Applicability', 'basicFreight', ReceiptIcon)}
+                          {tf('Incentive Comm Applicability', 'incentiveComm', ReceiptIcon)}
                         </Box>
                         {tf('Specific Vehicle Detail', 'vehType', DirectionsCarIcon)}
                         {TabDocVault(['rc', 'insurance', 'fitness', 'roadtax', 'np'], "Legal Compliance Vault")}

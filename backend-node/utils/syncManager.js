@@ -33,6 +33,20 @@ function fmt2(n) {
 /** Format any date value to dd-mm-yyyy */
 function fmtDate(val) {
   if (!val) return "";
+
+  // If it's already in DD/MM/YYYY or DD-MM-YYYY, normalize to DD-MM-YYYY
+  if (typeof val === 'string') {
+    const clean = val.trim();
+    // Match DD/MM/YYYY or DD-MM-YYYY
+    const match = clean.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (match) {
+      const dd = match[1].padStart(2, "0");
+      const mm = match[2].padStart(2, "0");
+      const yyyy = match[3];
+      return `${dd}-${mm}-${yyyy}`;
+    }
+  }
+
   const d = new Date(val);
   if (isNaN(d.getTime())) return String(val);
   const dd = String(d.getDate()).padStart(2, "0");
@@ -145,6 +159,13 @@ async function getFuelRate(pumpName, dateVal) {
   }
 }
 
+function makeSpaceAgnosticRegex(str) {
+  if (!str) return /^$/;
+  const stripped = str.replace(/[^a-zA-Z0-9]/g, '');
+  const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
+  return new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
+}
+
 // ─── Central sync function ────────────────────────────────────────────────────
 // overrides: optional extra fields to force onto the invoice (e.g. is_hsd_verified:true)
 // This fixes a race condition where the DB write and re-read happen on the same tick
@@ -177,6 +198,7 @@ async function pushToRegister(invoiceId, overrides) {
     const shipmentNo = safe(supplyDetails.shipment_number);
     const partyName = safe(consigneeDetails.consignee_name || invoice.consignee_name);
 
+    // Site determination logic
     const buyerDetails = hvd.buyer_details || {};
     const rawSite = safe(sellerDetails.seller_name) || safe(buyerDetails.buyer_name) || "";
     const rawSiteUpper = rawSite.toUpperCase();
@@ -185,7 +207,8 @@ async function pushToRegister(invoiceId, overrides) {
     else if (rawSiteUpper.includes("VISTA") || rawSiteUpper === "NVL") site = "NVL";
     else site = rawSiteUpper.includes("DIPALI") ? "" : rawSite;
 
-    const loadingDate = invoice.created_at;
+    // Prioritize extracted invoice_date over system created_at
+    const loadingDate = invoiceDetails.invoice_date || invoice.created_at;
 
     // MT = total quantity from items
     const mt = fmt2(items.reduce((sum, item) => sum + num(item.quantity), 0));
@@ -205,8 +228,10 @@ async function pushToRegister(invoiceId, overrides) {
     let wheel = "", ownerName = "", tdsPercent = 1, isATO = false, driverNo = "", hasStO = false;
     if (vehicleNumber) {
       const truckCol = getInvoiceSystemDb().db.collection("Truck Contact Number");
+      const truckRegex = makeSpaceAgnosticRegex(vehicleNumber);
       const truck = await truckCol.findOne({
         $or: [
+<<<<<<< HEAD
           { "Truck No": { $regex: new RegExp(`^${vehicleNumber.trim()}$`, "i") } },
           { truck_no: { $regex: new RegExp(`^${vehicleNumber.trim()}$`, "i") } }
         ]
@@ -218,6 +243,34 @@ async function pushToRegister(invoiceId, overrides) {
         ownerName = safe(truck["Owner Name"] || truck.owner_name);
         driverNo = safe(truck["DRIVER CONTACT"] || truck.contact_no);
 
+=======
+          { "Truck No": { $regex: truckRegex } },
+          { truck_no: { $regex: truckRegex } },
+          { "Contact No.(Truck No.)": { $regex: truckRegex } },
+          { "Contact No\.(Truck No\.)": { $regex: truckRegex } }
+        ]
+      });
+      if (truck) {
+        // Robust vehicle type / wheel count detection
+        let vType = truck["Type of vehicle"] || truck.type || truck["Vehicle Type"] || truck.type_of_vehicle || truck.vehicle_type || "";
+
+        if (!vType) {
+          for (let key in truck) {
+            const lk = key.toLowerCase();
+            if (lk.includes("type") || lk.includes("wheel") || lk.includes("vehicle")) {
+              const val = truck[key];
+              if (val && typeof val === "string") { vType = val; break; }
+              if (val && typeof val === "number") { vType = val.toString(); break; }
+            }
+          }
+        }
+
+        const wheelMatch = vType ? vType.toString().match(/(\d+)/) : null;
+        wheel = wheelMatch ? `${wheelMatch[1]}W` : vType;
+        ownerName = safe(truck["Owner Name"] || truck.owner_name);
+        driverNo = safe(truck["DRIVER CONTACT"] || truck.contact_no || truck["Contact No."]);
+
+>>>>>>> 8e3eac3 (Fix incentive totals, freight rate lookup for Suri, and add basic freight commission field in contacts)
         const pan = safe(truck["PAN No."] || truck.pan_no);
         const aadhar = safe(truck["Aadhar No."] || truck.aadhar_no);
         tdsPercent = (pan && aadhar) ? 0 : 1;
@@ -228,24 +281,42 @@ async function pushToRegister(invoiceId, overrides) {
       }
     }
     // ── Freight lookup — match by destination against DEST ZONE DESC ────
-    // Strategy: try exact match first, then fallback to first significant word
     let billing = 0, distanceKm = 0;
     if (destination) {
       const freightCol = getInvoiceSystemDb().db.collection("freight_data");
-      // Try exact DEST ZONE DESC match
-      let freight = await freightCol.findOne({
-        "DEST ZONE DESC": { $regex: new RegExp(destination.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "i") }
-      });
-      // Fallback: strip leading/trailing digits and use first word
+      
+      // 1. Try matching by Pincode if present in destination string (6 digits)
+      const pinMatch = destination.match(/\b\d{6}\b/);
+      let freight = null;
+      if (pinMatch) {
+        const pincode = pinMatch[0];
+        freight = await freightCol.findOne({
+          $or: [
+            { "DEST ZONE DESC": { $regex: new RegExp(pincode) } },
+            { "PINCODE": { $regex: new RegExp(pincode) } },
+            { "Pincode": { $regex: new RegExp(pincode) } }
+          ]
+        });
+      }
+
+      // 2. Try exact/regex match of the whole destination string
+      if (!freight) {
+        freight = await freightCol.findOne({
+          "DEST ZONE DESC": { $regex: new RegExp(`\\b${destination.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i") }
+        });
+      }
+
+      // 3. Fallback: strip leading/trailing digits and use first word with word boundaries
       if (!freight) {
         const destText = destination.replace(/^\d+[-\s]*/, '').replace(/[-\s]*\d+$/, '').trim();
         const firstWord = destText.split(/[\s,(]/)[0];
         if (firstWord && firstWord.length > 2) {
           freight = await freightCol.findOne({
-            "DEST ZONE DESC": { $regex: new RegExp(firstWord, "i") }
+            "DEST ZONE DESC": { $regex: new RegExp(`\\b${firstWord}\\b`, "i") }
           });
         }
       }
+
       if (freight) {
         billing = num(freight.Rate);
         distanceKm = num(freight.Distance) * 2; // round trip (UP+DOWN)

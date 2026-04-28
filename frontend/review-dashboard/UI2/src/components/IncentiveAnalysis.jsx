@@ -129,7 +129,8 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
         else if (upper === 'MKT') displayType = 'MKT';
       }
 
-      const incentiveComm = contact ? (contact['Incentive Comission Appliciability '] || contact['incentive_comm'] || '0') : '0';
+      const commApp = contact ? (contact['Basic Freight Comission Applicability '] || contact.basic_freight_commission_applicability || '') : '';
+      const commValue = contact ? (contact.basic_freight_commission || contact['basic_freight_commission '] || 0.05) : 0.05;
 
       byTruck[truck] = {
         type: displayType,
@@ -142,7 +143,8 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
         extra10W: 0,
         extra6W: 0,
         commission: 0,
-        hasComm: String(incentiveComm).includes('5')
+        hasComm: String(commApp).toUpperCase().includes('YES'),
+        commRate: num(commValue, 0.05)
       };
     }
 
@@ -152,7 +154,8 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
     const billing = num(row['BILLING']);
     const orgFreight = billing * mt;
 
-    // Track trips (now calculated below from total MT)
+    // Track actual trip count (number of loading entries)
+    entry.tripsCount += 1;
 
     // Rule 1: 9.5% Base Incentive on all wheels/bills (SO/STO/NT)
     const baseIncentive = orgFreight * 0.095;
@@ -180,43 +183,36 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
       }
     }
 
-    // Commission logic (assume 5% of freight if applicable)
+    // Commission logic (use dynamic rate from contact, fallback to 5%)
     if (entry.hasComm) {
-      entry.commission += orgFreight * 0.05;
+      const commRate = num(entry.commRate, 0.05);
+      entry.commission += orgFreight * commRate;
     }
 
     // Add any manual override extra if present in row
     const manualW10 = num(row['10W EXTRA 8.5%']);
     if (manualW10 > 0) entry.extra10W += manualW10;
   }
-
   // 3. Final Aggregation with Achievement Criteria
   return Object.values(byTruck).map(t => {
-    // New logic for trips count: (Total MT) / (Wheel Capacity)
-    // 6wh - 13mt, 10wh-19mt, 12wh-25mt, 14wh-30mt
-    const wheelStr = String(t.wheel || '').toLowerCase();
-    let capacity = 25; // default (12wh)
-    if (wheelStr.includes('6')) capacity = 13;
-    else if (wheelStr.includes('10')) capacity = 19;
-    else if (wheelStr.includes('12')) capacity = 25;
-    else if (wheelStr.includes('14')) capacity = 30;
-
-    const totalQty = t.nvl.invQty + t.nvcl.invQty;
-    t.tripsCount = totalQty > 0 ? Math.ceil(totalQty / capacity) : 0;
-
     const metCriteria = t.tripsCount > 6;
 
-    // If criteria not met (> 6 trips), incentives are 0
+    // PERFORMANCE RULE: Bonuses (10W/6W extra) are only paid if > 6 trips
+    // Base 9.5% (nvl.amt/nvcl.amt) is now always shown as per user request
     if (!metCriteria) {
-      t.nvl.amt = 0;
-      t.nvcl.amt = 0;
       t.extra10W = 0;
       t.extra6W = 0;
     }
 
+    // Round the sub-amounts for visual consistency
+    t.nvl.amt = Math.round(t.nvl.amt);
+    t.nvcl.amt = Math.round(t.nvcl.amt);
+    t.extra10W = Math.round(t.extra10W);
+    t.extra6W = Math.round(t.extra6W);
+
     const nvlNvclTotal = t.nvl.amt + t.nvcl.amt;
     const totalIncentiveWithBonus = nvlNvclTotal + t.extra10W + t.extra6W;
-    const totalFinal = totalIncentiveWithBonus - t.commission; // Final Settlement
+    const totalFinal = totalIncentiveWithBonus - Math.round(t.commission); // Final Settlement
 
     return { ...t, total: nvlNvclTotal, totalFinal };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.ownerName.localeCompare(b.ownerName));
@@ -562,10 +558,10 @@ export default function IncentiveAnalysis({ rows, onBack }) {
   const totals = useMemo(() => data.reduce((acc, t) => {
     acc.nvlQty += t.nvl.invQty;
     acc.nvlFreight += t.nvl.orgFreight;
-    acc.nvlAmt += t.nvl.amt;
+    acc.nvlAmt += t.nvl.amt; // already rounded in buildIncentiveData
     acc.nvclQty += t.nvcl.invQty;
     acc.nvclFreight += t.nvcl.orgFreight;
-    acc.nvclAmt += t.nvcl.amt;
+    acc.nvclAmt += t.nvcl.amt; // already rounded in buildIncentiveData
     acc.total += t.total;
     acc.extra10W += t.extra10W;
     acc.extra6W += t.extra6W;

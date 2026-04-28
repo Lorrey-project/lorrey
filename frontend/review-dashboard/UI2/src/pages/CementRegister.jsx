@@ -31,7 +31,7 @@ const socket = io('/', { autoConnect: true });
 export const COLUMNS = [
   // ── Group 1: Identification ────────────────────────────────────────────────
   { key: 'SL NO', label: 'SL NO', width: 60, type: 'auto', group: 'id', sticky: true },
-  { key: 'LOADING DT', label: 'LOADING DT', width: 120, type: 'auto', group: 'id' },
+  { key: 'LOADING DT', label: 'INVOICE DATE', width: 120, type: 'auto', group: 'id' },
   { key: 'RECEIVING DATE', label: 'RECEIVING\nDATE', width: 120, type: 'manual', group: 'id', isDate: true },
   { key: 'BILL NO', label: 'BILL NO', width: 160, type: 'auto', group: 'id', hasAttach: 'bill_pdf_auto' },
   { key: 'BILL DATE', label: 'BILL DATE', width: 120, type: 'auto', group: 'id' },

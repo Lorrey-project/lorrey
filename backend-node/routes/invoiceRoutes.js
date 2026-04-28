@@ -64,7 +64,7 @@ router.get("/fuel-requirement/:truck_no/:destination", async (req, res) => {
 
         // Step 2: Extract wheel count from vehicle type (e.g. "12-wh" -> 12, "10-wh" -> 10)
         let vehicleType = truckRecord["Type of vehicle"] || truckRecord.type || truckRecord["Vehicle Type"] || truckRecord.type_of_vehicle || truckRecord.vehicle_type || "";
-        
+
         // Intelligent fallback to find wheel count from poorly named Excel columns
         if (!vehicleType) {
             for (let key in truckRecord) {
@@ -81,7 +81,7 @@ router.get("/fuel-requirement/:truck_no/:destination", async (req, res) => {
                 }
             }
         }
-        
+
         const wheelMatch = vehicleType.match(/(\d+)/);
         const wheels = wheelMatch ? parseInt(wheelMatch[1]) : null;
 
@@ -241,10 +241,10 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
         });
         await invoice.save();
         console.log("Invoice saved with _id:", invoice._id);
-        
+
         // Propagate to Cement Register
         await pushToRegister(invoice._id.toString());
-        
+
         res.json({
             message: "Invoice uploaded and processed",
             file_url: fileUrl,
@@ -268,11 +268,11 @@ router.post("/scan-now", async (req, res) => {
     const path = require("path");
 
     const scanOutputPath = path.join(os.tmpdir(), `lorrey_scan_${Date.now()}.jpg`);
-    const SCANIMAGE  = "/opt/homebrew/bin/scanimage";
-    const HP_SCAN    = "/opt/homebrew/bin/hp-scan";
+    const SCANIMAGE = "/opt/homebrew/bin/scanimage";
+    const HP_SCAN = "/opt/homebrew/bin/hp-scan";
 
     let io = null;
-    try { const { getIO } = require("../socket"); io = getIO(); } catch(_) {}
+    try { const { getIO } = require("../socket"); io = getIO(); } catch (_) { }
     if (io) io.emit("scanner_status", { message: "🔍 Detecting connected scanner..." });
 
     // Respond immediately — result arrives via socket
@@ -293,10 +293,10 @@ router.post("/scan-now", async (req, res) => {
                 const devId = match[1].toLowerCase();
                 const brand = devId.includes('epson') ? 'Epson'
                     : devId.includes('hp') || devId.includes('hpaio') ? 'HP'
-                    : devId.includes('canon') ? 'Canon'
-                    : devId.includes('brother') ? 'Brother'
-                    : devId.includes('fujitsu') ? 'Fujitsu'
-                    : 'Scanner';
+                        : devId.includes('canon') ? 'Canon'
+                            : devId.includes('brother') ? 'Brother'
+                                : devId.includes('fujitsu') ? 'Fujitsu'
+                                    : 'Scanner';
                 console.log(`[Scan] Detected ${brand} device: ${match[1]}`);
                 if (io) io.emit("scanner_status", { message: `🖨️ ${brand} scanner detected! Place document and wait...` });
             } else {
@@ -384,7 +384,7 @@ async function processScanFile(scanOutputPath, io) {
             ai_data: aiData,
             invoice_id: invoice._id
         });
-    } catch(e) {
+    } catch (e) {
         console.error("[Scan] processScanFile failed:", e.message);
         if (io) io.emit("scanner_error", { error: "AI extraction or save failed: " + e.message });
     }
@@ -481,10 +481,10 @@ router.get("/pump-verifications/:pumpName", async (req, res) => {
             "lorry_hire_slip_data.station_name": pumpName,
             is_hsd_verified: true
         })
-        .sort({ hsd_verified_at: -1 })
-        .limit(20)
-        .lean();
-        
+            .sort({ hsd_verified_at: -1 })
+            .limit(20)
+            .lean();
+
         res.json(verifications);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -505,7 +505,7 @@ router.get("/pump-stats/:pumpName", async (req, res) => {
             hsd_verified_at: { $gte: startOfDay }
         }).lean();
 
-        const totalLitresToday = todayVerifications.reduce((sum, inv) => 
+        const totalLitresToday = todayVerifications.reduce((sum, inv) =>
             sum + (Number(inv.lorry_hire_slip_data?.diesel_litres) || 0), 0
         );
 
@@ -561,7 +561,7 @@ router.get("/verify-fuel-slip/:code", async (req, res) => {
         }
 
         // Mark it as verified in DB
-        await Invoice.findByIdAndUpdate(invoice._id, { 
+        await Invoice.findByIdAndUpdate(invoice._id, {
             is_hsd_verified: true,
             hsd_verified_at: new Date()
         });
@@ -573,10 +573,10 @@ router.get("/verify-fuel-slip/:code", async (req, res) => {
 
         // Extract required fields
         // Extract required fields - checking all common invoice patterns
-        let truck_no = invoice.human_verified_data?.supply_details?.vehicle_number 
+        let truck_no = invoice.human_verified_data?.supply_details?.vehicle_number
             || invoice.ai_data?.invoice_data?.supply_details?.vehicle_number
-            || invoice.human_verified_data?.invoice_details?.truck_no 
-            || invoice.ai_data?.invoice_data?.invoice_details?.truck_no 
+            || invoice.human_verified_data?.invoice_details?.truck_no
+            || invoice.ai_data?.invoice_data?.invoice_details?.truck_no
             || invoice.lorry_hire_slip_data?.truck_no
             || "Unknown Vehicle";
 
@@ -585,16 +585,16 @@ router.get("/verify-fuel-slip/:code", async (req, res) => {
         const diesel_advance = invoice.lorry_hire_slip_data?.diesel_advance || 0;
 
         // Prioritize data already entered on the Lorry Hire Slip / GCN forms
-        let driver_name = invoice.gcn_data?.driver_name 
-            || invoice.human_verified_data?.supply_details?.driver_name 
+        let driver_name = invoice.gcn_data?.driver_name
+            || invoice.human_verified_data?.supply_details?.driver_name
             || "Not Available";
-            
-        let truck_owner = invoice.gcn_data?.agent_name 
-            || invoice.human_verified_data?.supply_details?.transporter_name 
+
+        let truck_owner = invoice.gcn_data?.agent_name
+            || invoice.human_verified_data?.supply_details?.transporter_name
             || "Not Available";
 
         const TruckContact = require("../models/TruckContact");
-        
+
         if (truck_no !== "Unknown Vehicle" && (driver_name === "Not Available" || truck_owner === "Not Available")) {
             const strippedTruckNo = truck_no.replace(/[^a-zA-Z0-9]/g, ''); // "WB39A1234"
             // We'll try to find a TruckContact where "Truck No" (or "truck_no") stripped of non-alphanumerics equals strippedTruckNo
