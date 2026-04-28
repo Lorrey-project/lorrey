@@ -161,11 +161,11 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
     const baseIncentive = orgFreight * 0.095;
 
     if (cat === 'NVL') {
-      entry.nvl.invQty = Math.round((entry.nvl.invQty + mt) * 1000) / 1000;
+      entry.nvl.invQty = Math.round(entry.nvl.invQty + mt);
       entry.nvl.orgFreight += orgFreight;
       entry.nvl.amt += baseIncentive;
     } else {
-      entry.nvcl.invQty = Math.round((entry.nvcl.invQty + mt) * 1000) / 1000;
+      entry.nvcl.invQty = Math.round(entry.nvcl.invQty + mt);
       entry.nvcl.orgFreight += orgFreight;
       entry.nvcl.amt += baseIncentive;
     }
@@ -396,10 +396,10 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
 
   // Footer totals row
   const totals = data.reduce((acc, t) => {
-    acc.nvlQty += t.nvl.invQty;
+    acc.nvlQty = Math.round(acc.nvlQty + t.nvl.invQty);
     acc.nvlFreight += t.nvl.orgFreight;
     acc.nvlAmt += t.nvl.amt;
-    acc.nvclQty += t.nvcl.invQty;
+    acc.nvclQty = Math.round(acc.nvclQty + t.nvcl.invQty);
     acc.nvclFreight += t.nvcl.orgFreight;
     acc.nvclAmt += t.nvcl.amt;
     acc.total += t.total;
@@ -556,10 +556,10 @@ export default function IncentiveAnalysis({ rows, onBack }) {
 
   // Column totals for footer
   const totals = useMemo(() => data.reduce((acc, t) => {
-    acc.nvlQty += t.nvl.invQty;
+    acc.nvlQty = Math.round(acc.nvlQty + t.nvl.invQty);
     acc.nvlFreight += t.nvl.orgFreight;
     acc.nvlAmt += t.nvl.amt; // already rounded in buildIncentiveData
-    acc.nvclQty += t.nvcl.invQty;
+    acc.nvclQty = Math.round(acc.nvclQty + t.nvcl.invQty);
     acc.nvclFreight += t.nvcl.orgFreight;
     acc.nvclAmt += t.nvcl.amt; // already rounded in buildIncentiveData
     acc.total += t.total;
@@ -803,12 +803,12 @@ export default function IncentiveAnalysis({ rows, onBack }) {
                   <td style={{ ...tdBase, textAlign: 'center', fontWeight: 800, color: t.tripsCount > 6 ? '#16a34a' : '#dc2626' }}>{t.tripsCount}</td>
 
                   {/* NVL */}
-                  <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.invQty ? Math.round(t.nvl.invQty * 1000) / 1000 : ''}</td>
+                  <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.invQty ? Math.round(t.nvl.invQty) : ''}</td>
                   <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.orgFreight ? fmt(t.nvl.orgFreight) : ''}</td>
                   <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.amt ? fmt(t.nvl.amt) : ''}</td>
 
                   {/* NVCL */}
-                  <td style={{ ...tdBase, background: 'rgba(220,252,231,0.3)' }}>{t.nvcl.invQty ? Math.round(t.nvcl.invQty * 1000) / 1000 : ''}</td>
+                  <td style={{ ...tdBase, background: 'rgba(220,252,231,0.3)' }}>{t.nvcl.invQty ? Math.round(t.nvcl.invQty) : ''}</td>
                   <td style={{ ...tdBase, background: 'rgba(220,252,231,0.3)' }}>{t.nvcl.orgFreight ? fmt(t.nvcl.orgFreight) : ''}</td>
                   <td style={{ ...tdBase, background: 'rgba(220,252,231,0.3)' }}>{t.nvcl.amt ? fmt(t.nvcl.amt) : ''}</td>
 
@@ -977,9 +977,9 @@ export default function IncentiveAnalysis({ rows, onBack }) {
                         <td style={tdBase}>{t.ownerName}</td>
                         <td style={tdBase}>{t.truckNo}</td>
                         <td style={{ ...tdBase, fontWeight: 800 }}>{t.tripsCount}</td>
-                        <td style={{ ...tdBase, background: '#f8fafc' }}>{t.nvl.invQty ? Math.round(t.nvl.invQty * 1000) / 1000 : ''}</td>
+                        <td style={{ ...tdBase, background: '#f8fafc' }}>{t.nvl.invQty ? Math.round(t.nvl.invQty) : ''}</td>
                         <td style={{ ...tdBase, background: '#f8fafc' }}>{fmt(t.nvl.amt)}</td>
-                        <td style={{ ...tdBase, background: '#f1f5f9' }}>{t.nvcl.invQty ? Math.round(t.nvcl.invQty * 1000) / 1000 : ''}</td>
+                        <td style={{ ...tdBase, background: '#f1f5f9' }}>{t.nvcl.invQty ? Math.round(t.nvcl.invQty) : ''}</td>
                         <td style={{ ...tdBase, background: '#f1f5f9' }}>{fmt(t.nvcl.amt)}</td>
                         <td style={tdBase}>{fmt(t.extra10W)}</td>
                         <td style={tdBase}>{fmt(t.extra6W)}</td>
