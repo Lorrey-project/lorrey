@@ -231,23 +231,10 @@ async function pushToRegister(invoiceId, overrides) {
       const truckRegex = makeSpaceAgnosticRegex(vehicleNumber);
       const truck = await truckCol.findOne({
         $or: [
-<<<<<<< HEAD
-          { "Truck No": { $regex: new RegExp(`^${vehicleNumber.trim()}$`, "i") } },
-          { truck_no: { $regex: new RegExp(`^${vehicleNumber.trim()}$`, "i") } }
-        ]
-      });
-      if (truck) {
-        const vType = safe(truck["Type of vehicle"] || truck.type || "");
-        const wheelMatch = vType.match(/(\d+)/);
-        wheel = wheelMatch ? `${wheelMatch[1]}W` : vType;
-        ownerName = safe(truck["Owner Name"] || truck.owner_name);
-        driverNo = safe(truck["DRIVER CONTACT"] || truck.contact_no);
-
-=======
           { "Truck No": { $regex: truckRegex } },
           { truck_no: { $regex: truckRegex } },
           { "Contact No.(Truck No.)": { $regex: truckRegex } },
-          { "Contact No\.(Truck No\.)": { $regex: truckRegex } }
+          { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
         ]
       });
       if (truck) {
@@ -270,7 +257,6 @@ async function pushToRegister(invoiceId, overrides) {
         ownerName = safe(truck["Owner Name"] || truck.owner_name);
         driverNo = safe(truck["DRIVER CONTACT"] || truck.contact_no || truck["Contact No."]);
 
->>>>>>> 8e3eac3 (Fix incentive totals, freight rate lookup for Suri, and add basic freight commission field in contacts)
         const pan = safe(truck["PAN No."] || truck.pan_no);
         const aadhar = safe(truck["Aadhar No."] || truck.aadhar_no);
         tdsPercent = (pan && aadhar) ? 0 : 1;
