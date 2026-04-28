@@ -197,12 +197,8 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
   return Object.values(byTruck).map(t => {
     const metCriteria = t.tripsCount > 6;
 
-    // PERFORMANCE RULE: Bonuses (10W/6W extra) are only paid if > 6 trips
-    // Base 9.5% (nvl.amt/nvcl.amt) is now always shown as per user request
-    if (!metCriteria) {
-      t.extra10W = 0;
-      t.extra6W = 0;
-    }
+    // PERFORMANCE RULE: User requested to show all amounts regardless of trip count qualification.
+    // Trips column still shows red/green to indicate the >6 trip threshold.
 
     // Round the sub-amounts for visual consistency
     t.nvl.amt = Math.round(t.nvl.amt);
