@@ -1,10 +1,10 @@
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const {
-  generateRegistrationOptions,
-  verifyRegistrationResponse,
-  generateAuthenticationOptions,
-  verifyAuthenticationResponse,
+    generateRegistrationOptions,
+    verifyRegistrationResponse,
+    generateAuthenticationOptions,
+    verifyAuthenticationResponse,
 } = require('@simplewebauthn/server');
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
@@ -100,34 +100,19 @@ const rpName = 'DIPALI ASSOCIATES & CO.';
 // .local mDNS names (e.g. Gourabs-MacBook-Air.local) ARE valid domains.
 // When accessed via bare IPv4, fall back to 'localhost'.
 const getRPID = (req) => {
-    // WebAuthn RP ID MUST match the domain the browser is running on (the frontend).
-    // The 'Origin' header gives us exactly that (e.g. https://p2.onrender.com).
-    // The 'Host' header gives the backend domain, which will DIFFER when
-    // frontend and backend are deployed on separate subdomains — causing the
-    // "RP ID invalid for this domain" error.
-    const origin = req.headers.origin || '';
-    if (origin) {
-        try {
-            const parsed = new URL(origin);
-            const hostname = parsed.hostname; // e.g. 'p2.onrender.com', 'localhost'
-            const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
-            return isIPv4 ? 'localhost' : hostname;
-        } catch (_) { /* fall through */ }
-    }
-    // Fallback: use Host header (works when frontend & backend share the same domain)
     const host = (req.headers.host || 'localhost').split(':')[0];
     const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
-    return isIPv4 ? 'localhost' : host;
+    return isIPv4 ? 'localhost' : host;   // .local / real domain → use as-is
 };
 
 // GET /generate-registration-options
 exports.generateRegOptions = async (req, res) => {
     try {
         const user = await User.findById(req.user.userId);
-        if (!user) return res.status(404).json({error: "User not found"});
+        if (!user) return res.status(404).json({ error: "User not found" });
 
         if (!user.email) {
-            return res.status(400).json({error: "User email is explicitly missing."});
+            return res.status(400).json({ error: "User email is explicitly missing." });
         }
 
         const userPasskeys = user.passkeys.reduce((acc, passkey) => {
@@ -158,9 +143,9 @@ exports.generateRegOptions = async (req, res) => {
         await user.save();
 
         res.json(options);
-    } catch(err) {
+    } catch (err) {
         console.error("GenRegOpts error:", err);
-        res.status(500).json({error: err.message});
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -193,7 +178,7 @@ exports.verifyRegResponse = async (req, res) => {
             const { credential } = registrationInfo;
             // Clear challenge
             user.currentChallenge = null;
-            
+
             // Clean up any previously corrupted passkeys
             user.passkeys = user.passkeys.filter(p => p.credentialID);
 
@@ -207,9 +192,9 @@ exports.verifyRegResponse = async (req, res) => {
             return res.json({ verified: true });
         }
         res.status(400).json({ error: "Verification failed" });
-    } catch(err) {
+    } catch (err) {
         console.error("VerifyReg error 2:", err);
-        res.status(500).json({error: err.message});
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -218,8 +203,8 @@ exports.generateAuthOptions = async (req, res) => {
     try {
         let { email } = req.body;
         if (email) email = email.trim().toLowerCase();
-        const user = await User.findOne({email});
-        if(!user) return res.status(404).json({error: "User not found"});
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "User not found" });
 
         const validPasskeys = user.passkeys.filter(k => k.credentialID);
 
@@ -237,9 +222,9 @@ exports.generateAuthOptions = async (req, res) => {
         await user.save();
 
         res.json(options);
-    } catch(err){
+    } catch (err) {
         console.error("GenAuthOpts error:", err);
-        res.status(500).json({error: err.message});
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -247,8 +232,8 @@ exports.generateAuthOptions = async (req, res) => {
 exports.verifyAuthResponse = async (req, res) => {
     try {
         const { email, body, role } = req.body;
-        const user = await User.findOne({email});
-        if(!user) return res.status(404).json({error: "User not found"});
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "User not found" });
 
         // ── Block pending / rejected accounts ────────────────────────────────────
         // (Existing users with no status field are treated as 'active' for backward compat)
@@ -272,7 +257,7 @@ exports.verifyAuthResponse = async (req, res) => {
             : ['https://localhost:5173', 'http://localhost:5173'];
 
         const passkey = user.passkeys.find(k => k.credentialID === body.id);
-        if(!passkey) return res.status(400).json({error: "Unregistered credential"});
+        if (!passkey) return res.status(400).json({ error: "Unregistered credential" });
 
         let verification;
         try {
@@ -303,8 +288,8 @@ exports.verifyAuthResponse = async (req, res) => {
             return res.json({ verified: true, token, user: { id: user._id, email: user.email, role: user.role, pumpName: user.pumpName || null } });
         }
         res.status(400).json({ error: "Verification failed" });
-    } catch(err){
+    } catch (err) {
         console.error("VerifyAuth error 2:", err);
-        res.status(500).json({error: err.message});
+        res.status(500).json({ error: err.message });
     }
 };
