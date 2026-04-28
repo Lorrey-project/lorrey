@@ -160,14 +160,15 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
     // Rule 1: 9.5% Base Incentive on all wheels/bills (SO/STO/NT)
     const baseIncentive = orgFreight * 0.095;
 
+    // Round to 3dp for qty, keep running for amounts (rounded at end)
     if (cat === 'NVL') {
-      entry.nvl.invQty = Math.round((entry.nvl.invQty + mt) * 1000) / 1000;
-      entry.nvl.orgFreight += orgFreight;
-      entry.nvl.amt += baseIncentive;
+      entry.nvl.invQty   = Math.round((entry.nvl.invQty + mt) * 1000) / 1000;
+      entry.nvl.orgFreight = Math.round((entry.nvl.orgFreight + orgFreight) * 100) / 100;
+      entry.nvl.amt      += baseIncentive;
     } else {
-      entry.nvcl.invQty = Math.round((entry.nvcl.invQty + mt) * 1000) / 1000;
-      entry.nvcl.orgFreight += orgFreight;
-      entry.nvcl.amt += baseIncentive;
+      entry.nvcl.invQty   = Math.round((entry.nvcl.invQty + mt) * 1000) / 1000;
+      entry.nvcl.orgFreight = Math.round((entry.nvcl.orgFreight + orgFreight) * 100) / 100;
+      entry.nvcl.amt      += baseIncentive;
     }
 
     // Rule 2 & 3: Wheel Bonuses (Only on SO/NT)
@@ -396,15 +397,15 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
 
   // Footer totals row
   const totals = data.reduce((acc, t) => {
-    acc.nvlQty = Math.round((acc.nvlQty + t.nvl.invQty) * 1000) / 1000;
-    acc.nvlFreight += t.nvl.orgFreight;
-    acc.nvlAmt += t.nvl.amt;
-    acc.nvclQty = Math.round((acc.nvclQty + t.nvcl.invQty) * 1000) / 1000;
-    acc.nvclFreight += t.nvcl.orgFreight;
-    acc.nvclAmt += t.nvcl.amt;
-    acc.total += t.total;
-    acc.w10 += t.extra10W;
-    acc.grand += t.totalFinal;
+    acc.nvlQty      = Math.round((acc.nvlQty + t.nvl.invQty) * 1000) / 1000;
+    acc.nvlFreight  = Math.round((acc.nvlFreight + t.nvl.orgFreight) * 100) / 100;
+    acc.nvlAmt      += t.nvl.amt;
+    acc.nvclQty     = Math.round((acc.nvclQty + t.nvcl.invQty) * 1000) / 1000;
+    acc.nvclFreight = Math.round((acc.nvclFreight + t.nvcl.orgFreight) * 100) / 100;
+    acc.nvclAmt     += t.nvcl.amt;
+    acc.total       += t.total;
+    acc.w10         += t.extra10W;
+    acc.grand       += t.totalFinal;
     const act = parseFloat(actuals[t.truckNo]) || 0;
     acc.actual += act;
     acc.diff += act - t.totalFinal;
@@ -556,13 +557,13 @@ export default function IncentiveAnalysis({ rows, onBack }) {
 
   // Column totals for footer
   const totals = useMemo(() => data.reduce((acc, t) => {
-    acc.nvlQty = Math.round((acc.nvlQty + t.nvl.invQty) * 1000) / 1000;
-    acc.nvlFreight += t.nvl.orgFreight;
-    acc.nvlAmt += t.nvl.amt; // already rounded in buildIncentiveData
-    acc.nvclQty = Math.round((acc.nvclQty + t.nvcl.invQty) * 1000) / 1000;
-    acc.nvclFreight += t.nvcl.orgFreight;
-    acc.nvclAmt += t.nvcl.amt; // already rounded in buildIncentiveData
-    acc.total += t.total;
+    acc.nvlQty      = Math.round((acc.nvlQty + t.nvl.invQty) * 1000) / 1000;
+    acc.nvlFreight  = Math.round((acc.nvlFreight + t.nvl.orgFreight) * 100) / 100;
+    acc.nvlAmt      += t.nvl.amt; // already rounded in buildIncentiveData
+    acc.nvclQty     = Math.round((acc.nvclQty + t.nvcl.invQty) * 1000) / 1000;
+    acc.nvclFreight = Math.round((acc.nvclFreight + t.nvcl.orgFreight) * 100) / 100;
+    acc.nvclAmt     += t.nvcl.amt; // already rounded in buildIncentiveData
+    acc.total       += t.total;
     acc.extra10W += t.extra10W;
     acc.extra6W += t.extra6W;
     acc.grand += t.totalFinal;
