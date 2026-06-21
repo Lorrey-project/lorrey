@@ -9,6 +9,40 @@ const adminOnly = require("../middleware/adminOnly");
 const { cementValidationRules, validateCement } = require("../middleware/validateCement");
 const cementAttachUpload = require("../middleware/cementAttachUpload");
 
+// Chronological Date Parsing and Formatting Helpers
+const parseToDate = (dStr) => {
+  if (!dStr) return new Date(0);
+  let d = new Date(dStr);
+  if (!isNaN(d.getTime())) return d;
+  const clean = String(dStr).trim();
+  const parts = clean.split(/[-\/\.]/);
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    let year = parseInt(parts[2], 10);
+    if (parts[2].length === 2) {
+      year += (year >= 70 ? 1900 : 2000);
+    }
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) return date;
+  }
+  return new Date(0);
+};
+
+const formatDateToDDMMYY = (dStr) => {
+  if (!dStr) return '';
+  const clean = String(dStr).trim();
+  if (/^\d{2}\.\d{2}\.\d{2}$/.test(clean)) return clean;
+  
+  const date = parseToDate(clean);
+  if (isNaN(date.getTime()) || date.getTime() === 0) return dStr;
+  
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = String(date.getFullYear()).slice(-2);
+  return `${day}.${month}.${year}`;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Database  : cement_register  (separate DB on the same Atlas cluster)
 // Collection: entries
@@ -58,15 +92,37 @@ router.get("/", async (req, res) => {
     if (req.query.month && req.query.year) {
       const monthStr = String(req.query.month).padStart(2, '0');
       const yearStr = String(req.query.year);
-      const dateRegex = new RegExp(`^\\d{2}[-/]${monthStr}[-/]${yearStr}`);
+      const yr2 = yearStr.slice(-2);
+      const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.](${yearStr}|${yr2})`);
       filter["$or"] = [
         { "LOADING DT": { $regex: dateRegex } },
         { "LOADING DATE": { $regex: dateRegex } }
       ];
     }
 
-    const entries = await col.find(filter).sort({ "SL NO": 1 }).toArray();
-    res.json({ success: true, count: entries.length, entries });
+    const entries = await col.find(filter).toArray();
+
+    // Sort chronologically by date
+    entries.sort((a, b) => {
+      const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"]);
+      const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"]);
+      if (dateA.getTime() !== dateB.getTime()) {
+        return dateA.getTime() - dateB.getTime();
+      }
+      const slA = parseInt(String(a["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+      const slB = parseInt(String(b["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+      return slA - slB;
+    });
+
+    // Format dates to DD.MM.YY and assign sequential SL NO
+    const formattedEntries = entries.map((entry, index) => {
+      entry["SL NO"] = String(index + 1);
+      if (entry["LOADING DT"]) entry["LOADING DT"] = formatDateToDDMMYY(entry["LOADING DT"]);
+      if (entry["LOADING DATE"]) entry["LOADING DATE"] = formatDateToDDMMYY(entry["LOADING DATE"]);
+      return entry;
+    });
+
+    res.json({ success: true, count: formattedEntries.length, entries: formattedEntries });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -344,7 +400,15 @@ router.delete("/by-period", auth, async (req, res) => {
     const result = await col.deleteMany(filter);
 
     // Re-sequence remaining SL NOs to stay gapless after deletion
-    const remaining = await col.find({}).sort({ "SL NO": 1, "_auto_updated_at": 1 }).toArray();
+    const remaining = await col.find({}).toArray();
+    remaining.sort((a, b) => {
+      const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"]);
+      const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"]);
+      if (dateA.getTime() !== dateB.getTime()) return dateA.getTime() - dateB.getTime();
+      const slA = parseInt(String(a["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+      const slB = parseInt(String(b["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+      return slA - slB;
+    });
     const bulkOps = remaining.map((row, idx) => ({
       updateOne: { filter: { _id: row._id }, update: { $set: { "SL NO": idx + 1 } } }
     }));
@@ -373,7 +437,15 @@ router.delete("/bulk-delete", auth, async (req, res) => {
     const result = await col.deleteMany({ _id: { $in: objectIds } });
 
     // Re-sequence SL NOs to stay gapless after deletion
-    const remaining = await col.find({}).sort({ "SL NO": 1, "_auto_updated_at": 1 }).toArray();
+    const remaining = await col.find({}).toArray();
+    remaining.sort((a, b) => {
+      const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"]);
+      const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"]);
+      if (dateA.getTime() !== dateB.getTime()) return dateA.getTime() - dateB.getTime();
+      const slA = parseInt(String(a["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+      const slB = parseInt(String(b["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+      return slA - slB;
+    });
     const bulkOps = remaining.map((row, idx) => ({
       updateOne: { filter: { _id: row._id }, update: { $set: { "SL NO": idx + 1 } } }
     }));

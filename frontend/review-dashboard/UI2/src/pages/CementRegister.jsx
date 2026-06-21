@@ -256,6 +256,39 @@ function num(val, fallback = 0) {
 }
 function fmt2(n) { return Math.round(num(n) * 100) / 100; }
 
+function parseToDate(dStr) {
+  if (!dStr) return new Date(0);
+  let d = new Date(dStr);
+  if (!isNaN(d.getTime())) return d;
+  const clean = String(dStr).trim();
+  const parts = clean.split(/[-\/\.]/);
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    let year = parseInt(parts[2], 10);
+    if (parts[2].length === 2) {
+      year += (year >= 70 ? 1900 : 2000);
+    }
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) return date;
+  }
+  return new Date(0);
+}
+
+function formatDateToDDMMYY(dStr) {
+  if (!dStr) return '';
+  const clean = String(dStr).trim();
+  if (/^\d{2}\.\d{2}\.\d{2}$/.test(clean)) return clean;
+  
+  const date = parseToDate(clean);
+  if (isNaN(date.getTime()) || date.getTime() === 0) return dStr;
+  
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = String(date.getFullYear()).slice(-2);
+  return `${day}.${month}.${year}`;
+}
+
 // Calculate all computed fields for a single row
 function applyCalcs(row) {
   const r = { ...row };
@@ -729,7 +762,24 @@ export default function CementRegister({ onBack }) {
       rows = rows.filter(r => r['CHALLAN STATUS'] === 'STAMP' && !r['BILL NO']);
     }
 
-    return rows;
+    // Sort chronologically by date
+    rows.sort((a, b) => {
+      const dateA = parseToDate(a['LOADING DT'] || a['LOADING DATE']);
+      const dateB = parseToDate(b['LOADING DT'] || b['LOADING DATE']);
+      if (dateA.getTime() !== dateB.getTime()) {
+        return dateA.getTime() - dateB.getTime();
+      }
+      const slA = parseInt(String(a['SL NO'] || '').replace(/\D/g, ''), 10) || 0;
+      const slB = parseInt(String(b['SL NO'] || '').replace(/\D/g, ''), 10) || 0;
+      return slA - slB;
+    });
+
+    // Format dates to DD.MM.YY and assign sequential SL NO
+    return rows.map((r, index) => ({
+      ...r,
+      'SL NO': String(index + 1),
+      'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
+    }));
   }, [entries, unsavedImportRows, localData, isBillingMode]);
 
   // ── Cell edit (local draft) ────────────────────────────────────────────────
@@ -799,9 +849,12 @@ export default function CementRegister({ onBack }) {
           if (!id.startsWith('temp-')) {
             const originalRow = entries.find(r => r._id === id);
             if (originalRow) {
+              const compRow = computedRows.find(cr => cr._id === id);
+              const finalSlNo = compRow ? compRow['SL NO'] : (originalRow['SL NO'] || '');
+              
               const merged = { ...originalRow, ...changes };
               const calculated = applyCalcs(merged);
-              const changesWithCalcs = { ...changes };
+              const changesWithCalcs = { ...changes, 'SL NO': finalSlNo };
               COLUMNS.forEach(col => {
                 if (col.type === 'calc') {
                   changesWithCalcs[col.key] = calculated[col.key];
@@ -835,8 +888,11 @@ export default function CementRegister({ onBack }) {
           // Merge any local edits made on this preview row
           const merged = { ...row, ...(tempEdits[row._id] || {}) };
           const calculated = applyCalcs(merged);
+          // Find the corresponding computed row to get the final sorted SL NO and formatted date
+          const compRow = computedRows.find(cr => cr._id === row._id);
+          const finalSlNo = compRow ? compRow['SL NO'] : row['SL NO'];
           // Strip temporary React metadata
-          const cleaned = { ...calculated };
+          const cleaned = { ...calculated, 'SL NO': finalSlNo };
           delete cleaned._id;
           delete cleaned.isUnsavedImport;
           return cleaned;
