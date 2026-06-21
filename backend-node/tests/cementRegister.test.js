@@ -66,4 +66,40 @@ describe('Cement Register Routes', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.insertedCount).toBe(2);
   });
+
+  it('should save, fetch, and delete incentive state', async () => {
+    const postRes = await request(app)
+      .post('/cement-register/incentive-state')
+      .send({
+        year: 2026,
+        month: 5,
+        actuals: { 'WB1234': 5000 },
+        excelName: 'test.xlsx',
+        excelData: [['col1', 'col2']]
+      });
+    
+    expect(postRes.status).toBe(200);
+    expect(postRes.body.success).toBe(true);
+
+    const getRes = await request(app)
+      .get('/cement-register/incentive-state?year=2026&month=5');
+    
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.success).toBe(true);
+    expect(getRes.body.state.excelName).toBe('test.xlsx');
+    expect(getRes.body.state.actuals).toEqual({ 'WB1234': 5000 });
+
+    const delRes = await request(app)
+      .delete('/cement-register/incentive-state?year=2026&month=5');
+    
+    expect(delRes.status).toBe(200);
+    expect(delRes.body.success).toBe(true);
+
+    const getRes2 = await request(app)
+      .get('/cement-register/incentive-state?year=2026&month=5');
+    
+    expect(getRes2.status).toBe(200);
+    expect(getRes2.body.success).toBe(true);
+    expect(getRes2.body.state).toBeNull();
+  });
 });

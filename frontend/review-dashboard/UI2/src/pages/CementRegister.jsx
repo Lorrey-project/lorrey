@@ -15,6 +15,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SyncIcon from '@mui/icons-material/Sync';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import * as XLSX from 'xlsx';
 import { exportToCsv } from '../utils/exportCsv';
 import IncentiveAnalysis from '../components/IncentiveAnalysis';
 
@@ -230,7 +231,12 @@ export const COLUMNS = [
 const HIDDEN_KEYS = new Set(['_id', '__v', '_invoiceId', '_tds_percent', '_is_ato', '_is_10w', '_source', '_auto_updated_at', '_created_at', '_freight_commission']);
 
 // ─── Calc helpers ─────────────────────────────────────────────────────────────
-function num(val, fallback = 0) { const n = parseFloat(val); return isNaN(n) ? fallback : n; }
+function num(val, fallback = 0) {
+  if (val === undefined || val === null || val === '') return fallback;
+  const cleaned = String(val).replace(/,/g, '');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? fallback : n;
+}
 function fmt2(n) { return Math.round(num(n) * 100) / 100; }
 
 // Calculate all computed fields for a single row
@@ -260,6 +266,314 @@ const VISIBLE_COLS = COLUMNS.filter((c, i, arr) =>
   !c.hidden && arr.findIndex(x => x.key === c.key) === i
 );
 
+// ─── Excel header alias map ────────────────────────────────────────────────────
+
+export const normalizeHeader = (str) => {
+  if (!str) return '';
+  return String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\-_]+/g, ' ')
+    .replace(/[^\w\s\.\/%]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+export function parseWorksheetToAOA(ws) {
+  if (!ws) return [];
+  if (ws['!merges']) {
+    ws['!merges'].forEach(merge => {
+      const startRef = XLSX.utils.encode_cell(merge.s);
+      const startCell = ws[startRef];
+      if (!startCell) return;
+      for (let r = merge.s.r; r <= merge.e.r; r++) {
+        for (let c = merge.s.c; c <= merge.e.c; c++) {
+          const cellRef = XLSX.utils.encode_cell({ r, c });
+          if (!ws[cellRef]) {
+            ws[cellRef] = { ...startCell };
+          } else if (ws[cellRef].v === undefined || ws[cellRef].v === '' || ws[cellRef].v === null) {
+            ws[cellRef] = { ...startCell };
+          }
+        }
+      }
+    });
+  }
+
+  if (ws['!ref']) {
+    try {
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      const aoa = [];
+      for (let r = range.s.r; r <= range.e.r; r++) {
+        const row = [];
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const cellRef = XLSX.utils.encode_cell({ r, c });
+          const cell = ws[cellRef];
+          if (!cell) {
+            row.push('');
+          } else {
+            const val = cell.w !== undefined ? String(cell.w).trim() : (cell.v !== undefined && cell.v !== null ? String(cell.v).trim() : '');
+            row.push(val);
+          }
+        }
+        aoa.push(row);
+      }
+      return aoa;
+    } catch (e) {
+      console.error("Custom range parser failed, falling back to sheet_to_json", e);
+    }
+  }
+
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }).map(row => 
+    (row || []).map(cell => (cell !== undefined && cell !== null ? String(cell).trim() : ''))
+  );
+}
+
+const RAW_EXCEL_HEADER_MAP = {
+  // Identification
+  'sl no': 'SL NO', 'sl': 'SL NO', 'serial no': 'SL NO', 's.no': 'SL NO', 'sno': 'SL NO',
+  'invoice date': 'LOADING DT', 'loading dt': 'LOADING DT', 'loading date': 'LOADING DT', 'date': 'LOADING DT',
+  'receiving date': 'RECEIVING DATE', 'recv date': 'RECEIVING DATE', 'received date': 'RECEIVING DATE',
+  'bill no': 'BILL NO', 'bill number': 'BILL NO', 'bill no.': 'BILL NO',
+  'bill date': 'BILL DATE',
+  'by portal': 'By Portal', 'portal': 'By Portal',
+  'site': 'SITE', 'site name': 'SITE',
+  'vehicle number': 'VEHICLE NUMBER', 'vehicle no': 'VEHICLE NUMBER', 'truck no': 'VEHICLE NUMBER',
+  'vehicle no.': 'VEHICLE NUMBER', 'veh no': 'VEHICLE NUMBER',
+  'wheel': 'WHEEL', 'wheels': 'WHEEL',
+  'unloading status': 'UNLOADING STATUS', 'unloading date': 'UNLOADING STATUS', 'unload date': 'UNLOADING STATUS',
+  'e-way bill no': 'E-WAY BILL NO', 'eway bill no': 'E-WAY BILL NO', 'eway bill': 'E-WAY BILL NO',
+  'e way bill no': 'E-WAY BILL NO', 'e-way bill no.': 'E-WAY BILL NO', 'ewb no': 'E-WAY BILL NO',
+  'dn': 'DN', 'dn (driver)': 'DN', 'driver': 'DN', 'driver name': 'DN',
+  'e-way bill validity': 'E-WAY BILL VALIDITY', 'eway validity': 'E-WAY BILL VALIDITY', 'ewb validity': 'E-WAY BILL VALIDITY',
+  'gcn no': 'GCN NO', 'gcn': 'GCN NO', 'gcn no.': 'GCN NO',
+  'invoice no': 'INVOICE NO', 'invoice number': 'INVOICE NO', 'invoice no.': 'INVOICE NO',
+  'shipment no': 'SHIPMENT NO', 'shipment number': 'SHIPMENT NO', 'shipment no.': 'SHIPMENT NO',
+  'challan status': 'CHALLAN STATUS', 'challan': 'CHALLAN STATUS',
+  'bill type': 'Bill Type',
+  // Billing
+  'destination': 'DESTINATION', 'dest': 'DESTINATION',
+  'party name': 'PARTY NAME', 'party': 'PARTY NAME', 'consignee': 'PARTY NAME',
+  'billing': 'BILLING', 'freight': 'BILLING', 'rate': 'BILLING', 'billing rate': 'BILLING',
+  'mt': 'MT', 'metric ton': 'MT', 'tonnes': 'MT', 'qty': 'MT', 'quantity': 'MT', 'wt': 'MT', 'party rate': 'PARTY RATE',
+  'advance': 'ADVANCE', 'loading advance': 'ADVANCE', 'adv': 'ADVANCE', 'advance ': 'ADVANCE',
+  'site cash': 'Site Cash', 'site cash advance': 'Site Cash',
+  'office cash': 'OFFICE CASH', 'office cash advance': 'OFFICE CASH',
+  'bank tf': 'Bank TF', 'bank transfer': 'Bank TF', 'advance (bank tf)': 'Bank TF', 'neft': 'Bank TF',
+  'billing amount': 'Billing Amount', 'billing  amount': 'Billing Amount',
+  'billing er 95%': 'BILLING ER 95%', 'billing er 95 %': 'BILLING ER 95%', 'billing er 95% (party payable)': 'BILLING ER 95%', 'billing er 95 % (party payable)': 'BILLING ER 95%', 'billing er 95 % party payable': 'BILLING ER 95%',
+  'amount': 'AMOUNT',
+  'profit': 'PROFIT',
+  'tds@1%': 'TDS@1%', 'tds': 'TDS@1%', 'tds1%': 'TDS@1%',
+  // Deductions
+  'others deduction': 'Others deduction', 'other deduction': 'Others deduction', 'deduction': 'Others deduction',
+  'other': 'Other',
+  'gps monitoring charge': 'GPS Monitoring Charge', 'gps charge': 'GPS Monitoring Charge', 'gps': 'GPS Monitoring Charge', 'gps monitaring charge': 'GPS Monitoring Charge',
+  'gps device': 'GPS DEVICE',
+  'rfid tag': 'RFID TAG', 'rfid': 'RFID TAG',
+  'rfid reassurance': 'RFID REASSURANCE',
+  'fastag': 'FASTAG', 'fas tag': 'FASTAG',
+  // HSD / Fuel
+  'pump name': 'PUMP NAME', 'pump': 'PUMP NAME',
+  'hsd slip no': 'HSD SLIP NO', 'hsd slip': 'HSD SLIP NO',
+  'hsd bill no': 'HSD BILL NO',
+  'km as per rate chart': 'KM AS PER RATE CHART', 'km': 'KM AS PER RATE CHART', 'distance': 'KM AS PER RATE CHART', 'km as per rate chart (up+down)': 'KM AS PER RATE CHART', 'k.m as per rate chart (up+down)': 'KM AS PER RATE CHART', 'k.m as per rate chart updown': 'KM AS PER RATE CHART',
+  'fuel required': 'FUEL REQUIRED',
+  'hsd (ltr)': 'HSD (LTR)', 'hsd ltr': 'HSD (LTR)', 'hsd litre': 'HSD (LTR)', 'hsd': 'HSD (LTR)', 'diesel': 'HSD (LTR)',
+  'balance': 'BALANCE',
+  'extra allowed': 'EXTRA ALLOWED',
+  'actual extra': 'ACTUAL EXTRA',
+  'hsd rate': 'HSD RATE', 'diesel rate': 'HSD RATE',
+  'hsd amount': 'HSD AMOUNT', 'diesel amount': 'HSD AMOUNT', 'hsd-amount': 'HSD AMOUNT',
+  'travelling exp': 'TRAVELLING EXP', 'travel exp': 'TRAVELLING EXP', 'travelling': 'TRAVELLING EXP',
+  'shortage (bag)': 'SHORTAGE (BAG)', 'shortage bag': 'SHORTAGE (BAG)', 'short bag': 'SHORTAGE (BAG)',
+  'shortage (rate)': 'SHORTAGE (RATE)', 'shortage rate': 'SHORTAGE (RATE)',
+  'shortage amount': 'SHORTAGE (AMOUNT)', 'shortage (amount)': 'SHORTAGE (AMOUNT)', 'shortage(amount': 'SHORTAGE (AMOUNT)', 'shortageamount': 'SHORTAGE (AMOUNT)',
+  // Net
+  'up toll': 'UP TOLL', 'toll up': 'UP TOLL', 'extra unloading ': 'EXTRA UNLOADING',
+  'down toll': 'DOWN TOLL', 'toll down': 'DOWN TOLL',
+  'extra unloading': 'EXTRA UNLOADING', 'unloading': 'EXTRA UNLOADING',
+  'dedicated': 'DEDICATED', 'dedicated ': 'DEDICATED',
+  '10w extra 8.5%': '10W EXTRA 8.5%', '10w extra 8.5': '10W EXTRA 8.5%', '10w extra': '10W EXTRA 8.5%',
+  '% of adv': '% OF ADV', 'percent of adv': '% OF ADV',
+  'net amount': 'NET AMOUNT',
+  'gross amount': 'GROSS AMOUNT',
+  'rafter': 'RAFTER',
+  'incentive tds': 'INCENTIVE TDS', 'incentive tds ': 'INCENTIVE TDS',
+  // Owner
+  'owner name': 'OWNER NAME', 'owner': 'OWNER NAME',
+  'duration': 'Duration',
+  'detention': 'Detention', 'detaintion': 'Detention',
+  'transporting coast': 'Transporting Coast', 'transporting cost': 'Transporting Coast', 'transport cost': 'Transporting Coast',
+};
+
+export const EXCEL_HEADER_MAP = {};
+Object.entries(RAW_EXCEL_HEADER_MAP).forEach(([k, v]) => {
+  EXCEL_HEADER_MAP[normalizeHeader(k)] = v;
+});
+
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+// Parse any common date string and return { month (1-12), year }
+function parseDateMY(str) {
+  if (!str) return null;
+  const s = String(str).trim();
+
+  // Excel Serial Date (e.g. 45352)
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    const excelDays = parseFloat(s);
+    const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));
+    return { month: date.getUTCMonth() + 1, year: date.getUTCFullYear() };
+  }
+
+  // dd-mm-yyyy or dd/mm/yyyy or d/m/yy
+  let m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (m) {
+    let year = parseInt(m[3], 10);
+    if (year < 100) year += 2000;
+    let m1 = parseInt(m[1], 10);
+    let m2 = parseInt(m[2], 10);
+    let month = m2;
+    if (m2 > 12) month = m1;
+    return { month, year };
+  }
+  // yyyy-mm-dd
+  m = s.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+  if (m) return { month: parseInt(m[2], 10), year: parseInt(m[1], 10) };
+  // dd-Mon-yyyy (e.g. 24-Apr-2026 or 24-Apr-26)
+  m = s.match(/^(\d{1,2})[\/-](\w+)[\/-](\d{2,4})$/);
+  if (m) {
+    const monthIdx = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(m[2].toLowerCase().slice(0, 3));
+    let year = parseInt(m[3], 10);
+    if (year < 100) year += 2000;
+    if (monthIdx >= 0) return { month: monthIdx + 1, year };
+  }
+  return null;
+}
+
+// Normalize any date string to dd-mm-yyyy with optional expectedMonth/expectedYear hint
+function normalizeDateStr(str, expectedMonth, expectedYear) {
+  if (!str) return str;
+  const s = String(str).trim();
+  // Already dd-mm-yyyy
+  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
+
+  // Excel Serial Date
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    const excelDays = parseFloat(s);
+    const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));
+    return `${String(date.getUTCDate()).padStart(2, '0')}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${date.getUTCFullYear()}`;
+  }
+
+  // dd/mm/yyyy or d/m/yy or mm/dd/yyyy
+  const slashDMY = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (slashDMY) {
+    let year = parseInt(slashDMY[3], 10);
+    if (year < 100) year += 2000;
+    let p1 = parseInt(slashDMY[1], 10);
+    let p2 = parseInt(slashDMY[2], 10);
+    
+    let d = p1, month = p2;
+    if (expectedMonth) {
+      if (p1 === expectedMonth && p2 !== expectedMonth) {
+        d = p2;
+        month = p1;
+      } else if (p2 === expectedMonth && p1 !== expectedMonth) {
+        d = p1;
+        month = p2;
+      } else if (p2 > 12) {
+        d = p2;
+        month = p1;
+      }
+    } else {
+      if (p2 > 12) {
+        d = p2;
+        month = p1;
+      }
+    }
+    return `${String(d).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+  }
+
+  // yyyy-mm-dd
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+
+  // dd-Mon-yyyy
+  const monMatch = s.match(/^(\d{1,2})[\/-](\w+)[\/-](\d{2,4})$/);
+  if (monMatch) {
+    const monthIdx = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(monMatch[2].toLowerCase().slice(0, 3));
+    if (monthIdx >= 0) {
+      let year = parseInt(monMatch[3], 10);
+      if (year < 100) year += 2000;
+      return `${monMatch[1].padStart(2, '0')}-${String(monthIdx + 1).padStart(2, '0')}-${year}`;
+    }
+  }
+
+  return s;
+}
+
+// ─── Import Validation Helper ──────────────────────────────────────────────────
+const validateImportData = (rows, existingEntries) => {
+  const errors = [];
+  const warnings = [];
+
+  const extractTruckNo = (val) => {
+    if (!val) return '';
+    const str = String(val).toUpperCase().trim();
+    const match = str.match(/([A-Z]{2})\s*[-_]?\s*(\d{1,2})\s*[-_]?\s*([A-Z]{0,2})\s*[-_]?\s*(\d{3,4})/);
+    if (match) return `${match[1]}${match[2]}${match[3]}${match[4]}`;
+    return str.replace(/[^A-Z0-9]/g, '');
+  };
+
+  const seenKeysInternal = new Map();
+
+  rows.forEach((row, idx) => {
+    const rowNumInFile = idx + 1;
+    const loadingDt = row['LOADING DT'];
+    const vehicleNum = row['VEHICLE NUMBER'];
+    const invoiceNo = row['INVOICE NO'] || '';
+
+    // Error checks
+    if (!loadingDt) {
+      errors.push(`Row ${rowNumInFile}: Missing Invoice Date (LOADING DT)`);
+    }
+    if (!vehicleNum) {
+      errors.push(`Row ${rowNumInFile}: Missing Vehicle Number`);
+    }
+
+    // Duplicate checks
+    if (loadingDt && vehicleNum) {
+      const cleanTruck = extractTruckNo(vehicleNum);
+      const key = `${cleanTruck}_${loadingDt}_${invoiceNo}`;
+
+      // 1. Internal duplicate check (within the uploaded file)
+      if (seenKeysInternal.has(key)) {
+        const firstSeenIdx = seenKeysInternal.get(key);
+        warnings.push(`Duplicate in file: Row ${rowNumInFile} has same vehicle (${vehicleNum}), date (${loadingDt}), and invoice (${invoiceNo}) as Row ${firstSeenIdx}`);
+      } else {
+        seenKeysInternal.set(key, rowNumInFile);
+      }
+
+      // 2. DB duplicate check (against currently loaded month entries)
+      if (existingEntries && existingEntries.length > 0) {
+        const isDbDuplicate = existingEntries.some(dbRow => {
+          const dbCleanTruck = extractTruckNo(dbRow['VEHICLE NUMBER']);
+          const dbInvoiceNo = dbRow['INVOICE NO'] || '';
+          return dbCleanTruck === cleanTruck && dbRow['LOADING DT'] === loadingDt && dbInvoiceNo === invoiceNo;
+        });
+        if (isDbDuplicate) {
+          warnings.push(`Database duplicate: Vehicle ${vehicleNum} on ${loadingDt} with invoice ${invoiceNo} already exists in the database`);
+        }
+      }
+    }
+  });
+
+  return { errors, warnings };
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function CementRegister({ onBack }) {
   const [entries, setEntries] = useState([]);
@@ -269,6 +583,31 @@ export default function CementRegister({ onBack }) {
   const [snack, setSnack] = useState(null);
   const [showIncentive, setShowIncentive] = useState(false);
 
+  const now = useMemo(() => new Date(), []);
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1); // 1-12
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [saveCompleted, setSaveCompleted] = useState(false);
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  const years = useMemo(() => Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i), [now]);
+
+  // ── Excel import wizard and preview state ──────────────────────────────────
+  const [unsavedImportRows, setUnsavedImportRows] = useState([]);
+  const [showExcelWizard, setShowExcelWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(1);        // 1=month/year, 2=upload+preview
+  const [wizardMonth, setWizardMonth] = useState(now.getMonth() + 1);
+  const [wizardYear, setWizardYear] = useState(now.getFullYear());
+  const [wizardPreview, setWizardPreview] = useState(null); // parsed result
+  const [wizardImporting, setWizardImporting] = useState(false);
+  const wizardFileRef = useRef(null);
+  const [validationResult, setValidationResult] = useState({ errors: [], warnings: [] });
+  const [acceptWarnings, setAcceptWarnings] = useState(false);
+
+  // Keep wizard month/year in sync with the top selection
+  useEffect(() => {
+    setWizardMonth(selectedMonth);
+    setWizardYear(selectedYear);
+  }, [selectedMonth, selectedYear]);
+
   const dirtyCount = Object.keys(localData).length;
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -277,8 +616,6 @@ export default function CementRegister({ onBack }) {
   const [isBillingMode, setIsBillingMode] = useState(false);
   const [bulkBillInput, setBulkBillInput] = useState({ billNo: '', billDate: '' });
   const [activeRowId, setActiveRowId] = useState(null);
-
-
 
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -309,17 +646,23 @@ export default function CementRegister({ onBack }) {
   const fetchData = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const res = await axios.get(`${API_URL}/cement-register`);
+      const res = await axios.get(`${API_URL}/cement-register`, {
+        params: {
+          month: selectedMonth,
+          year: selectedYear
+        }
+      });
       if (res.data.success) {
         setEntries(res.data.entries);
         setLocalData({});
+        setSaveCompleted(res.data.entries.length > 0);
       }
     } catch (e) {
       console.error('Fetch failed:', e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedMonth, selectedYear]);
 
   const [liveMsg, setLiveMsg] = useState(null);
 
@@ -327,8 +670,6 @@ export default function CementRegister({ onBack }) {
   const handleSocketEvent = useCallback(async (msg) => {
     if (msg && msg.action === 'delete' && msg.invoiceId) {
       // Instantly remove the row from local state — no round trip needed
-      setEntries(prev => prev.filter(r => r._invoiceId !== msg.invoiceId));
-      // Clear any pending drafts that belonged to the deleted invoice row
       setEntries(prev => {
         const deletedRow = prev.find(r => r._invoiceId === msg.invoiceId);
         if (deletedRow) {
@@ -337,27 +678,14 @@ export default function CementRegister({ onBack }) {
         return prev.filter(r => r._invoiceId !== msg.invoiceId);
       });
       setLiveMsg('🗑️ Entry removed — invoice was deleted');
-    } else if (msg && msg.action === 'upsert') {
-      // Pull in just the new/updated entry
-      try {
-        const res = await axios.get(`${API_URL}/cement-register`);
-        if (res.data.success) {
-          setEntries(res.data.entries);
-          setLiveMsg('⚡ Register updated from new slip data');
-        }
-      } catch (e) {
-        console.error('Real-time refresh failed:', e);
-      }
+      fetchData(true);
     } else {
-      // Generic bulk update
-      try {
-        const res = await axios.get(`${API_URL}/cement-register`);
-        if (res.data.success) setEntries(res.data.entries);
-      } catch (e) { /* silent */ }
+      // Generic bulk update or other actions
+      fetchData(true);
     }
     // Auto-hide live message
     setTimeout(() => setLiveMsg(null), 3500);
-  }, []);
+  }, [fetchData]);
 
   useEffect(() => {
     fetchData();
@@ -367,10 +695,17 @@ export default function CementRegister({ onBack }) {
 
   // ── Merged rows with calcs ─────────────────────────────────────────────────
   const computedRows = useMemo(() => {
-    let rows = entries.map(row => {
+    let dbRows = entries.map(row => {
       const merged = { ...row, ...(localData[row._id] || {}) };
       return applyCalcs(merged);
     });
+
+    let previewRows = unsavedImportRows.map(row => {
+      const merged = { ...row, ...(localData[row._id] || {}) };
+      return applyCalcs(merged);
+    });
+
+    let rows = [...dbRows, ...previewRows];
 
     if (isBillingMode) {
       // Show ONLY entries that are STAMPED but NOT yet BILLED
@@ -378,7 +713,7 @@ export default function CementRegister({ onBack }) {
     }
 
     return rows;
-  }, [entries, localData, isBillingMode]);
+  }, [entries, unsavedImportRows, localData, isBillingMode]);
 
   // ── Cell edit (local draft) ────────────────────────────────────────────────
   const handleCellEdit = useCallback((rowId, field, value) => {
@@ -394,20 +729,33 @@ export default function CementRegister({ onBack }) {
     try {
       const token = localStorage.getItem('token');
       const ids = [...selectedIds];
-      await axios.delete(`${API_URL}/cement-register/bulk-delete`, {
-        headers: { Authorization: `Bearer ${token}` },
-        data: { ids },
-      });
-      // Remove instantly from local state
-      setEntries(prev => prev.filter(r => !ids.includes(r._id)));
+
+      const dbIds = ids.filter(id => !id.startsWith('temp-'));
+      const tempIds = ids.filter(id => id.startsWith('temp-'));
+
+      if (dbIds.length > 0) {
+        await axios.delete(`${API_URL}/cement-register/bulk-delete`, {
+          headers: { Authorization: `Bearer ${token}` },
+          data: { ids: dbIds },
+        });
+        // Remove instantly from local database entries state
+        setEntries(prev => prev.filter(r => !dbIds.includes(r._id)));
+      }
+
+      if (tempIds.length > 0) {
+        // Remove instantly from preview rows state
+        setUnsavedImportRows(prev => prev.filter(r => !tempIds.includes(r._id)));
+      }
+
       setLocalData(prev => {
         const n = { ...prev };
         ids.forEach(id => delete n[id]);
         return n;
       });
+
       setSelectedIds(new Set());
       setConfirmDel(false);
-      setSnack({ severity: 'success', msg: `${ids.length} row(s) deleted from Cement Register.` });
+      setSnack({ severity: 'success', msg: `${ids.length} row(s) deleted.` });
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Delete failed: ' + (err.response?.data?.error || err.message) });
     } finally {
@@ -416,28 +764,84 @@ export default function CementRegister({ onBack }) {
   };
 
   // ── Bulk Save ──────────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    if (dirtyCount === 0) return;
+  const executeSave = async (isOverwrite = false) => {
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
-      const updates = Object.entries(localData).map(([id, changes]) => ({ id, changes }));
-      await axios.put(
-        `${API_URL}/cement-register/bulk-update`,
-        { updates },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setSnack({ severity: 'success', msg: `${updates.length} row(s) saved to database!` });
-      setEntries(prev => prev.map(row => {
-        const patch = localData[row._id];
-        return patch ? { ...row, ...patch } : row;
-      }));
+      
+      if (isOverwrite) {
+        // Delete existing entries for this period
+        await axios.delete(`${API_URL}/cement-register/by-period`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { month: selectedMonth, year: selectedYear }
+        });
+      } else {
+        // Perform normal DB updates if any (only when not overwriting the entire period)
+        const dbUpdates = [];
+        Object.entries(localData).forEach(([id, changes]) => {
+          if (!id.startsWith('temp-')) {
+            dbUpdates.push({ id, changes });
+          }
+        });
+        if (dbUpdates.length > 0) {
+          await axios.put(
+            `${API_URL}/cement-register/bulk-update`,
+            { updates: dbUpdates },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        }
+      }
+
+      // Prepare and POST new import entries if any
+      if (unsavedImportRows.length > 0) {
+        const tempEdits = {};
+        Object.entries(localData).forEach(([id, changes]) => {
+          if (id.startsWith('temp-')) {
+            tempEdits[id] = changes;
+          }
+        });
+
+        const entriesToInsert = unsavedImportRows.map(row => {
+          // Merge any local edits made on this preview row
+          const merged = { ...row, ...(tempEdits[row._id] || {}) };
+          // Strip temporary React metadata
+          const cleaned = { ...merged };
+          delete cleaned._id;
+          delete cleaned.isUnsavedImport;
+          return cleaned;
+        });
+
+        await axios.post(
+          `${API_URL}/cement-register/bulk`,
+          { entries: entriesToInsert },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        setUnsavedImportRows([]);
+      }
+
+      setSnack({ severity: 'success', msg: isOverwrite ? 'Data overwritten and saved successfully!' : 'Changes saved successfully to database!' });
       setLocalData({});
+      setConfirmOverwrite(false);
+      fetchData();
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Save failed: ' + (err.response?.data?.error || err.message) });
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = async () => {
+    if (dirtyCount === 0 && unsavedImportRows.length === 0) return;
+    
+    // Check if we are importing new records and database already has records for this period
+    if (unsavedImportRows.length > 0 && entries.length > 0) {
+      setConfirmOverwrite(true);
+      return;
+    }
+
+    // Otherwise, do a normal save
+    await executeSave(false);
   };
 
   // ── CSV Export ─────────────────────────────────────────────────────────────
@@ -518,16 +922,221 @@ export default function CementRegister({ onBack }) {
     }
   };
 
+  // ── Excel Import Wizard: parse file ────────────────────────────────────────
+  const handleWizardFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (wizardFileRef.current) wizardFileRef.current.value = '';
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: false });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        // Read as array of arrays to find the header row
+        const aoa = parseWorksheetToAOA(sheet);
+
+        if (aoa.length === 0) {
+          setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });
+          return;
+        }
+
+        let bestHeaderRowIdx = 0;
+        let maxMatches = 0;
+
+        // Scan first 15 rows to find the one that looks most like a header row
+        const searchLimit = Math.min(15, aoa.length);
+        for (let i = 0; i < searchLimit; i++) {
+          const row = aoa[i] || [];
+          let matches = 0;
+          row.forEach(cell => {
+            const val = normalizeHeader(cell);
+            if (val && EXCEL_HEADER_MAP[val]) matches++;
+          });
+          if (matches > maxMatches) {
+            maxMatches = matches;
+            bestHeaderRowIdx = i;
+          }
+        }
+
+        const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());
+        const dataRows = aoa.slice(bestHeaderRowIdx + 1);
+
+        const headerMapping = {};
+        const unmappedHeaders = [];
+        excelHeaders.forEach((h, colIdx) => {
+          if (!h) return; // skip empty headers
+          const key = EXCEL_HEADER_MAP[normalizeHeader(h)];
+          if (key) headerMapping[colIdx] = key;
+          else unmappedHeaders.push(h);
+        });
+
+        // Find a date column to filter by month/year
+        const dateColsPreference = [
+          'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'
+        ];
+        const mappedDateCol = Object.entries(headerMapping).find(([, v]) => dateColsPreference.includes(v))?.[0];
+
+        // Convert rows, normalise dates
+        let mappedRows = [];
+        const dateCols = new Set([
+          'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS', 'E-WAY BILL VALIDITY'
+        ]);
+
+        dataRows.forEach(rowArr => {
+          // skip empty rows
+          if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
+
+          const rowObj = {};
+          Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {
+            const colIdx = parseInt(colIdxStr, 10);
+            const rawVal = rowArr[colIdx];
+            let val = String(rawVal ?? '').trim();
+            if (dateCols.has(internalKey)) {
+              val = normalizeDateStr(val, wizardMonth, wizardYear);
+            }
+            if (val !== '') rowObj[internalKey] = val;
+          });
+          if (Object.keys(rowObj).length > 0) {
+            // A valid row must contain SL NO, LOADING DT, VEHICLE NUMBER, or INVOICE NO
+            if (rowObj['SL NO'] || rowObj['LOADING DT'] || rowObj['VEHICLE NUMBER'] || rowObj['INVOICE NO']) {
+              mappedRows.push(rowObj);
+            }
+          }
+        });
+
+        // Filter by selected month + year if a date column was found
+        let filteredRows = mappedRows;
+        let filterApplied = false;
+        if (mappedDateCol) {
+          const internalDateKey = headerMapping[mappedDateCol];
+          filteredRows = mappedRows.filter(row => {
+            const parsed = parseDateMY(row[internalDateKey]);
+            return parsed && parsed.month === wizardMonth && parsed.year === wizardYear;
+          });
+          filterApplied = true;
+        }
+
+        const validation = validateImportData(filteredRows, entries);
+        setValidationResult(validation);
+        setAcceptWarnings(false);
+
+        setWizardPreview({
+          sheetName,
+          totalInFile: dataRows.length, // Only count data rows, not headers/titles
+          filteredRows,
+          allRows: mappedRows,
+          headerMapping,
+          excelHeaders,
+          unmappedHeaders,
+          mappedCount: Object.keys(headerMapping).length,
+          filterApplied,
+          fileName: file.name,
+        });
+        setWizardStep(2);
+      } catch (err) {
+        console.error('Excel parse error:', err);
+        setSnack({ severity: 'error', msg: 'Failed to parse Excel: ' + err.message });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // ── Excel Import Wizard: confirm and preview in table ──────────────────────
+  const handleWizardImportConfirm = () => {
+    const rows = wizardPreview?.filteredRows;
+    if (!rows?.length) return;
+    
+    // Assign temporary IDs and mark as unsaved
+    const tempRows = rows.map((row, idx) => ({
+      ...row,
+      _id: `temp-${idx}-${Date.now()}`,
+      isUnsavedImport: true
+    }));
+
+    setUnsavedImportRows(prev => [...prev, ...tempRows]);
+    setSnack({ severity: 'info', msg: `Loaded ${rows.length} rows as preview. Click "Save Changes" to save to MongoDB.` });
+    setShowExcelWizard(false);
+    setWizardStep(1);
+    setWizardPreview(null);
+    setValidationResult({ errors: [], warnings: [] });
+    setAcceptWarnings(false);
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // Show Incentive Analysis sheet (passes all computed rows as source data)
   if (showIncentive) {
     return (
       <IncentiveAnalysis
         rows={computedRows}
+        initialMonth={selectedMonth - 1}
+        initialYear={selectedYear}
+        onPeriodChange={(y, m) => {
+          setSelectedYear(y);
+          setSelectedMonth(m);
+        }}
         onBack={() => setShowIncentive(false)}
       />
     );
   }
+
+  const getStatusChip = () => {
+    if (unsavedImportRows.length > 0) {
+      return (
+        <Chip
+          label="⚠️ Preview (Unsaved)"
+          size="small"
+          sx={{
+            fontWeight: 700,
+            bgcolor: '#fff7ed',
+            color: '#c2410c',
+            border: '1px solid #ffedd5',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            px: 1,
+            height: 24,
+            fontSize: '0.7rem',
+          }}
+        />
+      );
+    } else if (saveCompleted) {
+      return (
+        <Chip
+          label="✅ Saved successfully"
+          size="small"
+          sx={{
+            fontWeight: 700,
+            bgcolor: '#ecfdf5',
+            color: '#047857',
+            border: '1px solid #d1fae5',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            px: 1,
+            height: 24,
+            fontSize: '0.7rem',
+          }}
+        />
+      );
+    } else {
+      return (
+        <Chip
+          label="ℹ️ No data loaded"
+          size="small"
+          sx={{
+            fontWeight: 700,
+            bgcolor: '#f1f5f9',
+            color: '#475569',
+            border: '1px solid #e2e8f0',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            px: 1,
+            height: 24,
+            fontSize: '0.7rem',
+          }}
+        />
+      );
+    }
+  };
 
   if (loading) {
     return (
@@ -554,9 +1163,83 @@ export default function CementRegister({ onBack }) {
             <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
           </IconButton>
           <Box>
-            <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
-              Cement Register
-            </Typography>
+            <Box display="flex" alignItems="center" gap={1.5} flexWrap="wrap">
+              <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
+                Cement Register
+              </Typography>
+
+              {/* Month & Year Selectors */}
+              <Box display="flex" alignItems="center" gap={1}>
+                <Select
+                  value={selectedMonth}
+                  onChange={(e) => {
+                    setSelectedMonth(Number(e.target.value));
+                    setUnsavedImportRows([]); // Clear unsaved imports on period change
+                  }}
+                  size="small"
+                  sx={{
+                    height: 28,
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#0f172a',
+                    bgcolor: '#f8fafc',
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#e2e8f0',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#cbd5e1',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#7c3aed',
+                    },
+                    minWidth: 105,
+                  }}
+                >
+                  {MONTHS.map((mo, idx) => (
+                    <MenuItem key={mo} value={idx + 1} sx={{ fontSize: '11px', fontWeight: 600 }}>
+                      {mo}
+                    </MenuItem>
+                  ))}
+                </Select>
+
+                <Select
+                  value={selectedYear}
+                  onChange={(e) => {
+                    setSelectedYear(Number(e.target.value));
+                    setUnsavedImportRows([]); // Clear unsaved imports on period change
+                  }}
+                  size="small"
+                  sx={{
+                    height: 28,
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#0f172a',
+                    bgcolor: '#f8fafc',
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#e2e8f0',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#cbd5e1',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#7c3aed',
+                    },
+                    minWidth: 75,
+                  }}
+                >
+                  {years.map(yr => (
+                    <MenuItem key={yr} value={yr} sx={{ fontSize: '11px', fontWeight: 600 }}>
+                      {yr}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </Box>
+
+              {/* Status Chip */}
+              {getStatusChip()}
+            </Box>
             <Box display="flex" gap={1} mt={0.5} alignItems="center">
               {dirtyCount > 0 && (
                 <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' }} />
@@ -647,25 +1330,59 @@ export default function CementRegister({ onBack }) {
           <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }}/>} onClick={handleExport}
             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>Export XLS</Button>
           
-          <Button size="small" component="label" variant="outlined" startIcon={<UploadIcon sx={{ fontSize: '1rem' }}/>}
-            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
-            Import
-            <input type="file" accept=".csv" hidden onChange={handleImport} />
+          {saveCompleted && (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
+              onClick={() => { setShowExcelWizard(true); setWizardStep(1); setWizardPreview(null); setValidationResult({ errors: [], warnings: [] }); setAcceptWarnings(false); }}
+              sx={{
+                fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem',
+                textTransform: 'none', boxShadow: 'none',
+                background: 'linear-gradient(135deg,#7c3aed,#6d28d9)',
+                color: '#fff',
+                '&:hover': { background: 'linear-gradient(135deg,#6d28d9,#5b21b6)', boxShadow: '0 4px 14px rgba(124,58,237,0.35)' },
+              }}
+            >
+              Upload New
+            </Button>
+          )}
+
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
+            onClick={() => { setShowExcelWizard(true); setWizardStep(1); setWizardPreview(null); setValidationResult({ errors: [], warnings: [] }); setAcceptWarnings(false); }}
+            disabled={saveCompleted}
+            sx={{
+              fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem',
+              textTransform: 'none', boxShadow: 'none',
+              background: saveCompleted ? '#f1f5f9' : 'linear-gradient(135deg,#7c3aed,#6d28d9)',
+              color: saveCompleted ? '#94a3b8' : '#fff',
+              border: saveCompleted ? '1px solid #e2e8f0' : 'none',
+              '&:hover': { 
+                background: saveCompleted ? '#f1f5f9' : 'linear-gradient(135deg,#6d28d9,#5b21b6)', 
+                boxShadow: saveCompleted ? 'none' : '0 4px 14px rgba(124,58,237,0.35)' 
+              },
+              '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' },
+            }}
+          >
+            Import Excel
           </Button>
 
           <Button
             size="small" variant="contained"
             startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon sx={{ fontSize: '1.1rem' }} />}
-            onClick={handleSave} disabled={dirtyCount === 0 || saving}
+            onClick={handleSave} disabled={(dirtyCount === 0 && unsavedImportRows.length === 0) || saving}
             sx={{
               fontWeight: 700, borderRadius: '10px', px: 2.5, fontSize: '0.85rem', textTransform: 'none',
-              background: dirtyCount > 0 ? '#10b981' : '#f1f5f9',
-              color: dirtyCount > 0 ? '#fff' : '#94a3b8',
-              boxShadow: dirtyCount > 0 ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'none',
-              '&:hover': { background: dirtyCount > 0 ? '#059669' : '#f1f5f9' },
+              background: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#10b981' : '#f1f5f9',
+              color: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#fff' : '#94a3b8',
+              boxShadow: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'none',
+              '&:hover': { background: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#059669' : '#f1f5f9' },
               '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' },
             }}>
-            {saving ? 'Saving…' : `Save Changes${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+            {saving ? 'Saving…' : `Save Changes${(dirtyCount + unsavedImportRows.length) > 0 ? ` (${dirtyCount + unsavedImportRows.length})` : ''}`}
           </Button>
 
           <Tooltip title="Refresh Data">
@@ -756,8 +1473,10 @@ export default function CementRegister({ onBack }) {
                 <tr key={row._id} style={{
                   background: isSelected
                     ? 'rgba(124,58,237,0.08)'
-                    : hasDraft ? '#fffbeb'
-                      : ri % 2 === 0 ? '#fff' : '#f8fafc',
+                    : row.isUnsavedImport
+                      ? '#f3e8ff'
+                      : hasDraft ? '#fffbeb'
+                        : ri % 2 === 0 ? '#fff' : '#f8fafc',
                   outline: isSelected ? '2px solid rgba(124,58,237,0.4)' : 'none',
                 }}>
                   {/* Row checkbox */}
@@ -811,6 +1530,346 @@ export default function CementRegister({ onBack }) {
         </table>
       </Box>
 
+      {/* ══════════════════════════════════════════════════════════════════════
+           Excel Import Wizard Modal
+      ══════════════════════════════════════════════════════════════════════ */}
+      {showExcelWizard && (
+        <Box sx={{
+          position: 'fixed', inset: 0, zIndex: 10000,
+          background: 'rgba(15,23,42,0.7)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2,
+        }} onClick={() => !wizardImporting && (setShowExcelWizard(false), setWizardStep(1), setWizardPreview(null), setValidationResult({ errors: [], warnings: [] }), setAcceptWarnings(false))}>
+
+          <Box sx={{
+            bgcolor: '#fff', borderRadius: '20px',
+            maxWidth: 680, width: '100%',
+            boxShadow: '0 32px 100px rgba(0,0,0,0.4)',
+            overflow: 'hidden', display: 'flex', flexDirection: 'column',
+          }} onClick={e => e.stopPropagation()}>
+
+            {/* ── Header ── */}
+            <Box sx={{ background: 'linear-gradient(135deg,#4c1d95,#7c3aed,#6d28d9)', px: 3.5, pt: 3, pb: 2.5 }}>
+              <Box display="flex" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography variant="h6" fontWeight={800} color="#fff" sx={{ letterSpacing: '-0.4px' }}>
+                    📥 Import Excel to Cement Register
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>
+                    Step {wizardStep} of 2 — {wizardStep === 1 ? 'Select Period' : 'Preview & Confirm'}
+                  </Typography>
+                </Box>
+                {/* Step pills */}
+                <Box display="flex" gap={1}>
+                  {[1, 2].map(s => (
+                    <Box key={s} sx={{
+                      width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontWeight: 800, fontSize: '12px',
+                      bgcolor: wizardStep >= s ? '#fff' : 'rgba(255,255,255,0.2)',
+                      color: wizardStep >= s ? '#7c3aed' : 'rgba(255,255,255,0.5)',
+                    }}>{s}</Box>
+                  ))}
+                </Box>
+              </Box>
+            </Box>
+
+            {/* ── Step 1: Month + Year selector ── */}
+            {wizardStep === 1 && (
+              <Box sx={{ px: 3.5, py: 3 }}>
+                <Typography fontWeight={700} fontSize="14px" color="#0f172a" mb={0.5}>
+                  Which month &amp; year does this Excel sheet cover?
+                </Typography>
+                <Typography fontSize="12px" color="#64748b" mb={3}>
+                  Only rows matching this period will be imported into the register.
+                </Typography>
+
+                <Box display="flex" gap={2} mb={4}>
+                  {/* Month */}
+                  <Box flex={2}>
+                    <Typography fontSize="11px" fontWeight={700} color="#475569" mb={0.75} sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Month</Typography>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 0.75 }}>
+                      {MONTHS.map((mo, idx) => (
+                        <Box key={mo}
+                          onClick={() => setWizardMonth(idx + 1)}
+                          sx={{
+                            py: 0.9, textAlign: 'center', borderRadius: '10px', cursor: 'pointer',
+                            fontSize: '12px', fontWeight: wizardMonth === idx + 1 ? 800 : 500,
+                            border: `2px solid ${wizardMonth === idx + 1 ? '#7c3aed' : '#e2e8f0'}`,
+                            bgcolor: wizardMonth === idx + 1 ? '#ede9fe' : '#f8fafc',
+                            color: wizardMonth === idx + 1 ? '#5b21b6' : '#475569',
+                            transition: 'all 0.15s',
+                            '&:hover': { borderColor: '#c4b5fd', bgcolor: '#f5f3ff' },
+                          }}>{mo.slice(0, 3)}</Box>
+                      ))}
+                    </Box>
+                  </Box>
+
+                  {/* Year */}
+                  <Box flex={1}>
+                    <Typography fontSize="11px" fontWeight={700} color="#475569" mb={0.75} sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Year</Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                      {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(yr => (
+                        <Box key={yr}
+                          onClick={() => setWizardYear(yr)}
+                          sx={{
+                            py: 1, textAlign: 'center', borderRadius: '10px', cursor: 'pointer',
+                            fontSize: '13px', fontWeight: wizardYear === yr ? 800 : 500,
+                            border: `2px solid ${wizardYear === yr ? '#7c3aed' : '#e2e8f0'}`,
+                            bgcolor: wizardYear === yr ? '#ede9fe' : '#f8fafc',
+                            color: wizardYear === yr ? '#5b21b6' : '#475569',
+                            transition: 'all 0.15s',
+                            '&:hover': { borderColor: '#c4b5fd', bgcolor: '#f5f3ff' },
+                          }}>{yr}</Box>
+                      ))}
+                    </Box>
+                  </Box>
+                </Box>
+
+                {/* Selected summary */}
+                <Box sx={{ bgcolor: '#ede9fe', border: '1.5px solid #c4b5fd', borderRadius: '12px', px: 2.5, py: 1.5, mb: 3, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <span style={{ fontSize: '20px' }}>📅</span>
+                  <Box>
+                    <Typography fontSize="11px" color="#6d28d9" fontWeight={700}>Selected Period</Typography>
+                    <Typography fontSize="15px" fontWeight={800} color="#4c1d95">
+                      {MONTHS[wizardMonth - 1]} {wizardYear}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                {/* Next: pick file */}
+                <Box sx={{
+                  bgcolor: '#f8fafc', border: '2px dashed #c4b5fd', borderRadius: '14px', p: 3, textAlign: 'center', cursor: 'pointer',
+                  '&:hover': { bgcolor: '#f5f3ff', borderColor: '#7c3aed' }, transition: 'all 0.2s'
+                }}
+                  onClick={() => wizardFileRef.current?.click()}
+                >
+                  <Box sx={{ fontSize: '36px', mb: 1 }}>📊</Box>
+                  <Typography fontWeight={700} color="#5b21b6" fontSize="14px">Click to select your Excel file</Typography>
+                  <Typography fontSize="11px" color="#94a3b8" mt={0.5}>.xlsx or .xls files accepted</Typography>
+                  <input ref={wizardFileRef} type="file" accept=".xlsx,.xls" hidden onChange={handleWizardFileSelect} />
+                </Box>
+
+                <Box display="flex" justifyContent="flex-end" mt={2}>
+                  <Button variant="outlined" size="small" onClick={() => { setShowExcelWizard(false); setValidationResult({ errors: [], warnings: [] }); setAcceptWarnings(false); }}
+                    sx={{ fontWeight: 700, borderRadius: '10px', textTransform: 'none' }}>Cancel</Button>
+                </Box>
+              </Box>
+            )}
+
+            {/* ── Step 2: Preview ── */}
+            {wizardStep === 2 && wizardPreview && (
+              <Box sx={{ px: 3.5, py: 2.5, display: 'flex', flexDirection: 'column', gap: 2 }}>
+
+                {/* Validation Report Banner */}
+                <Box>
+                  {validationResult.errors.length > 0 ? (
+                    <Box sx={{
+                      bgcolor: '#fee2e2', border: '1.5px solid #fca5a5', borderRadius: '10px', p: 2,
+                      display: 'flex', flexDirection: 'column', gap: 1
+                    }}>
+                      <Typography fontSize="13px" fontWeight={800} color="#991b1b">
+                        ❌ Validation Failed ({validationResult.errors.length} Critical Errors)
+                      </Typography>
+                      <Box sx={{ maxHeight: 120, overflowY: 'auto', pl: 2 }}>
+                        {validationResult.errors.map((err, i) => (
+                          <Typography key={i} fontSize="11.5px" color="#b91c1c" sx={{ listStyleType: 'disc', display: 'list-item', mb: 0.5 }}>
+                            {err}
+                          </Typography>
+                        ))}
+                      </Box>
+                      <Typography fontSize="11px" color="#7f1d1d" sx={{ mt: 0.5 }}>
+                        Please correct the Excel file to fix these missing fields before importing.
+                      </Typography>
+                    </Box>
+                  ) : validationResult.warnings.length > 0 ? (
+                    <Box sx={{
+                      bgcolor: '#fef3c7', border: '1.5px solid #fcd34d', borderRadius: '10px', p: 2,
+                      display: 'flex', flexDirection: 'column', gap: 1
+                    }}>
+                      <Typography fontSize="13px" fontWeight={800} color="#92400e">
+                        ⚠️ Duplicate Warnings Found ({validationResult.warnings.length} Warnings)
+                      </Typography>
+                      <Box sx={{ maxHeight: 120, overflowY: 'auto', pl: 2 }}>
+                        {validationResult.warnings.map((warn, i) => (
+                          <Typography key={i} fontSize="11.5px" color="#b45309" sx={{ listStyleType: 'disc', display: 'list-item', mb: 0.5 }}>
+                            {warn}
+                          </Typography>
+                        ))}
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={1} sx={{ mt: 1 }}>
+                        <input
+                          type="checkbox"
+                          id="accept-warnings"
+                          checked={acceptWarnings}
+                          onChange={(e) => setAcceptWarnings(e.target.checked)}
+                          style={{ cursor: 'pointer', width: 16, height: 16 }}
+                        />
+                        <label htmlFor="accept-warnings" style={{ fontSize: '12px', fontWeight: 700, color: '#78350f', cursor: 'pointer' }}>
+                          I have reviewed these warnings and want to proceed with importing
+                        </label>
+                      </Box>
+                    </Box>
+                  ) : (
+                    <Box sx={{
+                      bgcolor: '#ecfdf5', border: '1.5px solid #a7f3d0', borderRadius: '10px', p: 1.5,
+                      display: 'flex', alignItems: 'center', gap: 1
+                    }}>
+                      <Typography fontSize="13px" fontWeight={800} color="#065f46">
+                        ✅ Validation Passed: No missing fields or duplicate entries found. Ready to import!
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Stats bar */}
+                <Box display="flex" gap={1.5} flexWrap="wrap">
+                  <Box sx={{ bgcolor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
+                    <Typography variant="h5" fontWeight={800} color="#16a34a">{wizardPreview.totalInFile}</Typography>
+                    <Typography fontSize="11px" color="#15803d" fontWeight={600}>Total in File</Typography>
+                  </Box>
+                  <Box sx={{ bgcolor: '#ede9fe', border: '1px solid #c4b5fd', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
+                    <Typography variant="h5" fontWeight={800} color="#7c3aed">{wizardPreview.filteredRows.length}</Typography>
+                    <Typography fontSize="11px" color="#6d28d9" fontWeight={600}>{MONTHS[wizardMonth - 1]} {wizardYear}</Typography>
+                  </Box>
+                  <Box sx={{ bgcolor: '#dbeafe', border: '1px solid #93c5fd', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
+                    <Typography variant="h5" fontWeight={800} color="#1d4ed8">{wizardPreview.mappedCount}</Typography>
+                    <Typography fontSize="11px" color="#1e40af" fontWeight={600}>Cols Mapped</Typography>
+                  </Box>
+                  {wizardPreview.unmappedHeaders.length > 0 && (
+                    <Box sx={{ bgcolor: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
+                      <Typography variant="h5" fontWeight={800} color="#d97706">{wizardPreview.unmappedHeaders.length}</Typography>
+                      <Typography fontSize="11px" color="#b45309" fontWeight={600}>Skipped Cols</Typography>
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Mapped columns */}
+                <Box>
+                  <Typography fontSize="11px" fontWeight={700} color="#475569" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.75 }}>Column Mapping</Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, maxHeight: 80, overflowY: 'auto' }}>
+                    {Object.entries(wizardPreview.headerMapping).map(([colIdxStr, internalKey]) => {
+                      const colIdx = parseInt(colIdxStr, 10);
+                      const excelH = wizardPreview.excelHeaders?.[colIdx] || colIdx;
+                      return (
+                        <Box key={colIdxStr} sx={{
+                          bgcolor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px',
+                          px: 1, py: 0.25, fontSize: '10.5px', fontWeight: 600,
+                          display: 'flex', alignItems: 'center', gap: 0.5,
+                        }}>
+                          <span style={{ color: '#94a3b8' }}>{excelH}</span>
+                          <span style={{ color: '#cbd5e1' }}>→</span>
+                          <span style={{ color: '#15803d' }}>{internalKey}</span>
+                        </Box>
+                      );
+                    })}
+                    {wizardPreview.unmappedHeaders.map(h => (
+                      <Box key={h} sx={{
+                        bgcolor: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '6px',
+                        px: 1, py: 0.25, fontSize: '10.5px', fontWeight: 600, color: '#92400e',
+                        textDecoration: 'line-through',
+                      }}>{h}</Box>
+                    ))}
+                  </Box>
+                </Box>
+
+                {/* Data preview table */}
+                <Box>
+                  <Typography fontSize="11px" fontWeight={700} color="#475569" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.75 }}>
+                    Data Preview — {wizardPreview.filteredRows.length} rows for {MONTHS[wizardMonth - 1]} {wizardYear}
+                  </Typography>
+                  {wizardPreview.filteredRows.length === 0 ? (
+                    <Box sx={{ bgcolor: '#fef3c7', border: '1.5px solid #fcd34d', borderRadius: '10px', p: 2.5, textAlign: 'center' }}>
+                      <Typography fontSize="13px" fontWeight={700} color="#d97706">⚠️ No rows found for {MONTHS[wizardMonth - 1]} {wizardYear}</Typography>
+                      <Typography fontSize="12px" color="#92400e" mt={0.5}>
+                        {wizardPreview.filterApplied
+                          ? 'The date column in your Excel does not contain entries for this period. Try a different month/year.'
+                          : 'No date column was recognised. All rows will be imported.'}
+                      </Typography>
+                      {wizardPreview.allRows.length > 0 && (
+                        <Button
+                          variant="contained" size="small"
+                          onClick={() => setWizardPreview(prev => ({ ...prev, filteredRows: prev.allRows, filterApplied: false }))}
+                          sx={{ mt: 2, fontWeight: 800, textTransform: 'none', bgcolor: '#d97706', '&:hover': { bgcolor: '#b45309' }, boxShadow: 'none' }}
+                        >
+                          Import All {wizardPreview.allRows.length} Rows Anyway
+                        </Button>
+                      )}
+                    </Box>
+                  ) : (
+                    <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden', maxHeight: 200, overflowY: 'auto', overflowX: 'auto' }}>
+                      <table style={{ borderCollapse: 'collapse', fontSize: '11px', width: '100%', fontFamily: 'Inter,system-ui,sans-serif' }}>
+                        <thead>
+                          <tr style={{ background: 'linear-gradient(135deg,#4c1d95,#6d28d9)', position: 'sticky', top: 0 }}>
+                            <th style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.6)', fontWeight: 700, textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', minWidth: 36 }}>#</th>
+                            {Object.keys(wizardPreview.headerMapping).slice(0, 10).map(excelH => (
+                              <th key={excelH} style={{ padding: '7px 10px', color: '#e9d5ff', fontWeight: 700, textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', whiteSpace: 'nowrap' }}>
+                                {wizardPreview.headerMapping[excelH]}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {wizardPreview.filteredRows.slice(0, 8).map((row, ri) => (
+                            <tr key={ri} style={{ background: ri % 2 === 0 ? '#fff' : '#f8fafc' }}>
+                              <td style={{ padding: '5px 10px', color: '#94a3b8', fontWeight: 600, textAlign: 'center', borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #f1f5f9' }}>{ri + 1}</td>
+                              {Object.keys(wizardPreview.headerMapping).slice(0, 10).map(excelH => {
+                                const k = wizardPreview.headerMapping[excelH];
+                                return (
+                                  <td key={excelH} style={{ padding: '5px 10px', borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', color: '#1e293b' }}>
+                                    {row[k] || <span style={{ color: '#cbd5e1' }}>—</span>}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {wizardPreview.filteredRows.length > 8 && (
+                        <Box sx={{ px: 2, py: 1, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+                          <Typography fontSize="11px" color="#64748b">+ {wizardPreview.filteredRows.length - 8} more rows…</Typography>
+                        </Box>
+                      )}
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Actions */}
+                <Box display="flex" gap={1.5} justifyContent="space-between" alignItems="center" pt={0.5}>
+                  <Button variant="text" size="small" onClick={() => { setWizardStep(1); setWizardPreview(null); setValidationResult({ errors: [], warnings: [] }); setAcceptWarnings(false); }}
+                    disabled={wizardImporting}
+                    sx={{ fontWeight: 700, borderRadius: '10px', textTransform: 'none', color: '#64748b' }}>
+                    ← Back
+                  </Button>
+                  <Box display="flex" gap={1.5}>
+                    <Button variant="outlined" size="small" onClick={() => { setShowExcelWizard(false); setWizardStep(1); setWizardPreview(null); setValidationResult({ errors: [], warnings: [] }); setAcceptWarnings(false); }}
+                      disabled={wizardImporting}
+                      sx={{ fontWeight: 700, borderRadius: '10px', textTransform: 'none' }}>Cancel</Button>
+                    <Button
+                      variant="contained" size="small"
+                      onClick={handleWizardImportConfirm}
+                      disabled={
+                        wizardImporting ||
+                        !wizardPreview.filteredRows.length ||
+                        validationResult.errors.length > 0 ||
+                        (validationResult.warnings.length > 0 && !acceptWarnings)
+                      }
+                      startIcon={wizardImporting ? <CircularProgress size={14} color="inherit" /> : <UploadIcon sx={{ fontSize: '1rem' }} />}
+                      sx={{
+                        fontWeight: 800, borderRadius: '10px', textTransform: 'none', px: 2.5,
+                        background: 'linear-gradient(135deg,#7c3aed,#6d28d9)', boxShadow: 'none',
+                        '&:hover': { background: 'linear-gradient(135deg,#6d28d9,#5b21b6)', boxShadow: '0 4px 14px rgba(124,58,237,0.35)' },
+                        '&:disabled': { background: '#e2e8f0', color: '#94a3b8' },
+                      }}
+                    >
+                      {wizardImporting ? 'Importing…' : `Import ${wizardPreview.filteredRows.length} Rows`}
+                    </Button>
+                  </Box>
+                </Box>
+              </Box>
+            )}
+          </Box>
+        </Box>
+      )}
+
       {/* ── Confirm delete dialog ──────────────────────────────────────────── */}
       {confirmDel && (
         <Box sx={{
@@ -837,6 +1896,43 @@ export default function CementRegister({ onBack }) {
                 onClick={handleBulkDelete} disabled={deleting}
                 sx={{ fontWeight: 800 }}>
                 {deleting ? 'Deleting…' : 'Yes, Delete'}
+              </Button>
+            </Box>
+          </Box>
+        </Box>
+      )}
+
+      {/* ── Confirm overwrite dialog ────────────────────────────────────────── */}
+      {confirmOverwrite && (
+        <Box sx={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setConfirmOverwrite(false)}>
+          <Box sx={{
+            bgcolor: '#fff', borderRadius: 3, p: 4, maxWidth: 460, width: '90%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <Typography variant="h6" fontWeight={800} color="warning.main" mb={1} display="flex" alignItems="center" gap={1}>
+              ⚠️ Overwrite Existing Data?
+            </Typography>
+            <Typography color="text.secondary" fontSize="13px" mb={3}>
+              There is already saved data for <strong>{MONTHS[selectedMonth - 1]} {selectedYear}</strong> in the database. 
+              Saving these changes will <strong>permanently delete all existing records</strong> for this period and insert the newly uploaded Excel entries.
+              This action cannot be undone. Do you want to proceed?
+            </Typography>
+            <Box display="flex" gap={1.5} justifyContent="flex-end">
+              <Button variant="outlined" size="small" onClick={() => setConfirmOverwrite(false)}
+                sx={{ fontWeight: 700 }}>Cancel</Button>
+              <Button variant="contained" size="small" color="warning"
+                startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
+                onClick={() => executeSave(true)} disabled={saving}
+                sx={{ 
+                  fontWeight: 800,
+                  bgcolor: '#d97706',
+                  '&:hover': { bgcolor: '#b45309' }
+                }}>
+                {saving ? 'Saving…' : 'Yes, Overwrite & Save'}
               </Button>
             </Box>
           </Box>

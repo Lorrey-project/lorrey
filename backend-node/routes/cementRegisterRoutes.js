@@ -55,6 +55,16 @@ router.get("/", async (req, res) => {
       if (req.query.to) filter["LOADING DATE"]["$lte"] = new Date(req.query.to);
     }
 
+    if (req.query.month && req.query.year) {
+      const monthStr = String(req.query.month).padStart(2, '0');
+      const yearStr = String(req.query.year);
+      const dateRegex = new RegExp(`^\\d{2}[-/]${monthStr}[-/]${yearStr}`);
+      filter["$or"] = [
+        { "LOADING DT": { $regex: dateRegex } },
+        { "LOADING DATE": { $regex: dateRegex } }
+      ];
+    }
+
     const entries = await col.find(filter).sort({ "SL NO": 1 }).toArray();
     res.json({ success: true, count: entries.length, entries });
   } catch (error) {
@@ -165,6 +175,82 @@ router.get("/next-batch-serial", auth, async (req, res) => {
   }
 });
 
+// ── GET /cement-register/incentive-state ────────────────────────────────────
+router.get("/incentive-state", auth, async (req, res) => {
+  try {
+    const year = parseInt(req.query.year);
+    const month = parseInt(req.query.month);
+    if (isNaN(year) || isNaN(month)) {
+      return res.status(400).json({ success: false, error: "Provide valid year and month query parameters." });
+    }
+    const db = mongoose.connection.useDb("cement_register");
+    const col = db.collection("incentive_states");
+    const state = await col.findOne({ year, month });
+    res.json({ success: true, state });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── POST /cement-register/incentive-state ───────────────────────────────────
+router.post("/incentive-state", auth, async (req, res) => {
+  try {
+    const { year, month, actuals, pdfUrl, excelName, excelData } = req.body;
+    if (year === undefined || month === undefined) {
+      return res.status(400).json({ success: false, error: "year and month are required." });
+    }
+    const db = mongoose.connection.useDb("cement_register");
+    const col = db.collection("incentive_states");
+    
+    const query = { year: parseInt(year), month: parseInt(month) };
+    const update = {
+      $set: {
+        actuals: actuals || {},
+        pdfUrl: pdfUrl || null,
+        excelName: excelName || null,
+        excelData: excelData || null,
+        updatedAt: new Date()
+      }
+    };
+    await col.updateOne(query, update, { upsert: true });
+    res.json({ success: true, message: "Incentive state saved successfully." });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── POST /cement-register/incentive-state/upload ─────────────────────────────
+router.post("/incentive-state/upload", auth, (req, res, next) => {
+  cementAttachUpload.single("file")(req, res, (err) => {
+    if (err) return res.status(400).json({ success: false, error: err.message });
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: "No file uploaded." });
+    res.json({ success: true, url: req.file.location });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── DELETE /cement-register/incentive-state ─────────────────────────────────
+router.delete("/incentive-state", auth, async (req, res) => {
+  try {
+    const year = parseInt(req.query.year);
+    const month = parseInt(req.query.month);
+    if (isNaN(year) || isNaN(month)) {
+      return res.status(400).json({ success: false, error: "Provide valid year and month query parameters." });
+    }
+    const db = mongoose.connection.useDb("cement_register");
+    const col = db.collection("incentive_states");
+    await col.deleteOne({ year, month });
+    res.json({ success: true, message: "Incentive state deleted successfully." });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const col = getCollection();
@@ -192,7 +278,7 @@ router.post("/", auth, cementValidationRules, validateCement, async (req, res) =
 
 // ── POST /cement-register/bulk ───────────────────────────────────────────────
 // Insert many entries at once. Body = { entries: [ ...array of objects... ] }
-router.post("/bulk", auth, adminOnly, async (req, res) => {
+router.post("/bulk", auth, async (req, res) => {
   try {
     const col = getCollection();
     const docs = req.body.entries || req.body;
@@ -233,6 +319,43 @@ router.put("/bulk-update", auth, async (req, res) => {
     io.emit('cementUpdates', { action: 'bulkUpdate' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── DELETE /cement-register/by-period ───────────────────────────────────────
+router.delete("/by-period", auth, async (req, res) => {
+  try {
+    const col = getCollection();
+    const { month, year } = req.query;
+    if (!month || !year) {
+      return res.status(400).json({ success: false, error: "Provide month and year." });
+    }
+    const monthStr = String(month).padStart(2, '0');
+    const yearStr = String(year);
+    const dateRegex = new RegExp(`^\\d{2}[-/]${monthStr}[-/]${yearStr}`);
+
+    const filter = {
+      $or: [
+        { "LOADING DT": { $regex: dateRegex } },
+        { "LOADING DATE": { $regex: dateRegex } }
+      ]
+    };
+
+    const result = await col.deleteMany(filter);
+
+    // Re-sequence remaining SL NOs to stay gapless after deletion
+    const remaining = await col.find({}).sort({ "SL NO": 1, "_auto_updated_at": 1 }).toArray();
+    const bulkOps = remaining.map((row, idx) => ({
+      updateOne: { filter: { _id: row._id }, update: { $set: { "SL NO": idx + 1 } } }
+    }));
+    if (bulkOps.length > 0) await col.bulkWrite(bulkOps);
+
+    const io = getIO();
+    io.emit("cementUpdates", { action: "bulkDeleteByPeriod", month, year });
+
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

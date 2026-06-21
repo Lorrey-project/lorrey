@@ -41,7 +41,8 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Async request logger — writes OUTSIDE backend-node/ so nodemon never watches it
 const _reqLogStream = require('fs').createWriteStream(
@@ -94,9 +95,9 @@ app.post("/system/portal-logout", auth, (req, res) => {
 app.get("/system/portal-status", (req, res) => {
   const now = Date.now();
   const timeoutMs = 2 * 60 * 1000; // 2 minutes threshold to count as offline
-  
-  res.json({ 
-    success: true, 
+
+  res.json({
+    success: true,
     statuses: [
       { id: 'office', name: 'Head', active: (now - activePortals.office) < timeoutMs },
       { id: 'site', name: 'Site', active: (now - activePortals.site) < timeoutMs },

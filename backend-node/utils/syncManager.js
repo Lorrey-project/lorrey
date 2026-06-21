@@ -23,7 +23,9 @@ function safe(val, fallback = "") {
   return (val !== null && val !== undefined) ? val : fallback;
 }
 function num(val, fallback = 0) {
-  const n = parseFloat(val);
+  if (val === undefined || val === null || val === '') return fallback;
+  const cleaned = String(val).replace(/,/g, '');
+  const n = parseFloat(cleaned);
   return isNaN(n) ? fallback : n;
 }
 function fmt2(n) {
@@ -412,8 +414,8 @@ async function pushToRegister(invoiceId, overrides) {
     const tdsAmount = fmt2(amount * tdsPercent / 100);
     const balance = fmt2(hsdLtr - fuelRequired);
     const pctAdv = amount > 0 ? fmt2(((advance + hsdAmount) / amount) * 100) : 0;
-    const dedicated = isATO ? fmt2(billingAmt * 0.095) : fmt2(partyRate * 0.085);
-    const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(partyRate * 0.085) : 0;
+    const dedicated = isATO ? fmt2(billingAmt * 0.095) : fmt2(partyRate * mt * 0.085);
+    const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(billingAmt * 0.085) : 0;
 
     // ── Compose final document ───────────────────────────────────────────
     const payload = {
