@@ -138,7 +138,24 @@ export const COLUMNS = [
   { key: 'FUEL REQUIRED', label: 'FUEL REQUIRED', width: 120, type: 'auto', group: 'hsd' },
   { key: 'HSD (LTR)', label: 'HSD (LTR)', width: 100, type: 'auto', group: 'hsd' },
   { key: 'EXTRA ALLOWED', label: 'EXTRA ALLOWED', width: 120, type: 'manual', group: 'hsd' },
-  { key: 'ACTUAL EXTRA', label: 'ACTUAL EXTRA', width: 110, type: 'calc', group: 'hsd', formula: r => fmt2(num(r['HSD (LTR)']) - num(r['FUEL REQUIRED']) - num(r['EXTRA ALLOWED'])) },
+  {
+    key: 'ACTUAL EXTRA',
+    label: 'ACTUAL EXTRA',
+    width: 110,
+    type: 'calc',
+    group: 'hsd',
+    formula: r => {
+      const hsd = num(r['HSD (LTR)']);
+      const fuel = num(r['FUEL REQUIRED']);
+      const extra = num(r['EXTRA ALLOWED']);
+      const val = hsd - fuel - extra;
+      const rounded = Math.round(val * 100) / 100;
+      if (rounded % 1 === 0) {
+        return rounded.toFixed(2);
+      }
+      return String(rounded);
+    }
+  },
   { key: 'HSD RATE', label: 'HSD RATE', width: 100, type: 'auto', group: 'hsd' },
   { key: 'HSD AMOUNT', label: 'HSD AMOUNT', width: 110, type: 'auto', group: 'hsd' },
   {
@@ -780,7 +797,20 @@ export default function CementRegister({ onBack }) {
         const dbUpdates = [];
         Object.entries(localData).forEach(([id, changes]) => {
           if (!id.startsWith('temp-')) {
-            dbUpdates.push({ id, changes });
+            const originalRow = entries.find(r => r._id === id);
+            if (originalRow) {
+              const merged = { ...originalRow, ...changes };
+              const calculated = applyCalcs(merged);
+              const changesWithCalcs = { ...changes };
+              COLUMNS.forEach(col => {
+                if (col.type === 'calc') {
+                  changesWithCalcs[col.key] = calculated[col.key];
+                }
+              });
+              dbUpdates.push({ id, changes: changesWithCalcs });
+            } else {
+              dbUpdates.push({ id, changes });
+            }
           }
         });
         if (dbUpdates.length > 0) {
@@ -804,8 +834,9 @@ export default function CementRegister({ onBack }) {
         const entriesToInsert = unsavedImportRows.map(row => {
           // Merge any local edits made on this preview row
           const merged = { ...row, ...(tempEdits[row._id] || {}) };
+          const calculated = applyCalcs(merged);
           // Strip temporary React metadata
-          const cleaned = { ...merged };
+          const cleaned = { ...calculated };
           delete cleaned._id;
           delete cleaned.isUnsavedImport;
           return cleaned;
