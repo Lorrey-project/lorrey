@@ -72,6 +72,20 @@ function parseLoadingDate(str) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Format a date string to DD.MM.YY display format (same as CementRegister's computedRows)
+function formatLoadingDate(dStr) {
+  if (!dStr) return '';
+  const clean = String(dStr).trim();
+  // Already in DD.MM.YY format
+  if (/^\d{2}\.\d{2}\.\d{2}$/.test(clean)) return clean;
+  const date = parseLoadingDate(clean);
+  if (!date || isNaN(date.getTime())) return dStr;
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = String(date.getFullYear()).slice(-2);
+  return `${day}.${month}.${year}`;
+}
+
 // Month names for display
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -1543,7 +1557,45 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
       .catch(console.error);
   }, []);
 
-  const data = useMemo(() => buildIncentiveData(rows, year, month, truckContacts), [rows, year, month, truckContacts]);
+  // ── Independent cement register fetch for selected month/year ────────────────
+  // This ensures IncentiveAnalysis always has fresh data for the selected period,
+  // regardless of what rows the parent has currently loaded.
+  const [fetchedRows, setFetchedRows] = useState(rows || []);
+  const [fetchingRows, setFetchingRows] = useState(false);
+  useEffect(() => {
+    if (year === undefined || month === undefined) return;
+    // month here is 0-indexed, but API expects 1-indexed
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    setFetchingRows(true);
+    axios.get(`${API_URL}/cement-register`, {
+      params: { month: month + 1, year }
+    })
+      .then(res => {
+        if (res.data?.success) {
+          // Format dates to DD.MM.YY to match the same format as computedRows
+          const entries = (res.data.entries || []).map(row => ({
+            ...row,
+            'LOADING DT': formatLoadingDate(row['LOADING DT'] || row['LOADING DATE'] || '')
+          }));
+          setFetchedRows(entries);
+        }
+      })
+      .catch(err => {
+        console.error('IncentiveAnalysis: failed to fetch cement register rows', err);
+        // Fall back to parent rows if fetch fails
+        setFetchedRows(rows || []);
+      })
+      .finally(() => setFetchingRows(false));
+  }, [year, month]);
+
+  // Sync fetchedRows with parent rows on first load
+  useEffect(() => {
+    if (rows && rows.length > 0 && fetchedRows.length === 0) {
+      setFetchedRows(rows);
+    }
+  }, [rows]);
+
+  const data = useMemo(() => buildIncentiveData(fetchedRows, year, month, truckContacts), [fetchedRows, year, month, truckContacts]);
 
   // Column totals for footer
   const totals = useMemo(() => data.reduce((acc, t) => {
@@ -1915,7 +1967,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
 
       {/* ── Main Table Area ──────────────────────────────────────────────── */}
       <Box sx={{ flex: 1, overflow: 'auto', p: 2, position: 'relative' }}>
-        {loadingState && (
+        {(loadingState || fetchingRows) && (
           <Box sx={{
             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
             bgcolor: 'rgba(255,255,255,0.7)', display: 'flex', flexDirection: 'column',
@@ -1923,7 +1975,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           }}>
             <CircularProgress sx={{ color: '#7c3aed' }} />
             <Typography variant="body2" fontWeight={700} color="text.secondary">
-              Loading Incentive State…
+              {fetchingRows ? 'Loading Cement Register Data…' : 'Loading Incentive State…'}
             </Typography>
           </Box>
         )}

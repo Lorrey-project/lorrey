@@ -1,0 +1,100 @@
+=== STEP 18 (Line 17): multi_replace_file_content ===
+Failed to json.loads chunks: Invalid control character at: line 1 column 1937 (char 1936)
+Chunks Count: unknown
+================================================================================
+
+=== STEP 22 (Line 21): replace_file_content ===
+StartLine: 540, EndLine: 540
+TargetContent:
+"        const workbook = XLSX.read(data, { type: 'uint8array', cellDates: true });"
+ReplacementContent:
+"        const workbook = XLSX.read(data, { type: 'array', cellDates: true });"
+================================================================================
+
+=== STEP 35 (Line 33): multi_replace_file_content ===
+Failed to json.loads chunks: Invalid control character at: line 1 column 1937 (char 1936)
+Chunks Count: unknown
+================================================================================
+
+=== STEP 49 (Line 51): replace_file_content ===
+StartLine: 634, EndLine: 709
+TargetContent:
+"  const handleWizardFileSelect = (e) => {\n    const file = e.target.files[0];\n    if (!file) return;\n    if (wizardFileRef.current) wizardFileRef.current.value = '';\n\n    const reader = new FileReader();\n    reader.onload = (evt) => {\n      try {\n        const data = new Uint8Array(evt.target.result);\n        const workbook = XLSX.read(data, { type: 'array', cellDates: false });\n        const sheetName = workbook.SheetNames[0];\n        const sheet = workbook.Sheets[sheetName];\n        const rawRows = XLSX.utils.sheet_to_json(sheet, { raw: false, defval: '', blankrows: false });\n\n        if (rawRows.length === 0) {\n          setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });\n          return;\n        }\n\n        // Build header mapping\n        const excelHeaders = Object.keys(rawRows[0]);\n        const headerMapping = {};\n        const unmappedHeaders = [];\n        excelHeaders.forEach(h => {\n          const key = EXCEL_HEADER_MAP[h.trim().toLowerCase()];\n          if (key) headerMapping[h] = key;\n          else unmappedHeaders.push(h);\n        });\n\n        // Find a date column to filter by month/year\n        const dateColsPreference = [\n          'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'\n        ];\n        const mappedDateCol = Object.entries(headerMapping).find(([, v]) => dateColsPreference.includes(v))?.[0];\n\n        // Convert rows, normalise dates, filter by selected month/year\n        let mappedRows = rawRows.map(raw => {\n          const row = {};\n          Object.entries(headerMapping).forEach(([excelH, internalKey]) => {\n            const val = normalizeDateStr(String(raw[excelH] ?? '').trim());\n            if (val !== '') row[internalKey] = val;\n          });\n          return row;\n        });\n\n        // Filter by selected month + year if a date column was found\n        let filteredRows = mappedRows;\n        let filterApplied = false;\n        if (mappedDateCol) {\n          const internalDateKey = headerMapping[mappedDate
+<truncated 853 bytes>
+ReplacementContent:
+"  const handleWizardFileSelect = (e) => {\n    const file = e.target.files[0];\n    if (!file) return;\n    if (wizardFileRef.current) wizardFileRef.current.value = '';\n\n    const reader = new FileReader();\n    reader.onload = (evt) => {\n      try {\n        const data = new Uint8Array(evt.target.result);\n        const workbook = XLSX.read(data, { type: 'array', cellDates: false });\n        const sheetName = workbook.SheetNames[0];\n        const sheet = workbook.Sheets[sheetName];\n        \n        // Read as array of arrays to find the header row\n        const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });\n\n        if (aoa.length === 0) {\n          setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });\n          return;\n        }\n\n        let bestHeaderRowIdx = 0;\n        let maxMatches = 0;\n        \n        // Scan first 15 rows to find the one that looks most like a header row\n        const searchLimit = Math.min(15, aoa.length);\n        for (let i = 0; i < searchLimit; i++) {\n          const row = aoa[i] || [];\n          let matches = 0;\n          row.forEach(cell => {\n             const val = String(cell).trim().toLowerCase();\n             if (EXCEL_HEADER_MAP[val]) matches++;\n          });\n          if (matches > maxMatches) {\n             maxMatches = matches;\n             bestHeaderRowIdx = i;\n          }\n        }\n\n        const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());\n        const dataRows = aoa.slice(bestHeaderRowIdx + 1);\n\n        const headerMapping = {};\n        const unmappedHeaders = [];\n        excelHeaders.forEach(h => {\n          if (!h) return; // skip empty headers\n          const key = EXCEL_HEADER_MAP[h.toLowerCase()];\n          if (key) headerMapping[h] = key;\n          else unmappedHeaders.push(h);\n        });\n\n        // Find a date column to filter by month/year\n        const dateColsPreference = [\n          'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'\n 
+<truncated 2021 bytes>
+================================================================================
+
+=== STEP 62 (Line 64): replace_file_content ===
+StartLine: 333, EndLine: 365
+TargetContent:
+"// Parse any common date string and return { month (1-12), year }\nfunction parseDateMY(str) {\n  if (!str) return null;\n  const s = String(str).trim();\n  // dd-mm-yyyy or dd/mm/yyyy\n  let m = s.match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{4})$/);\n  if (m) return { month: parseInt(m[2], 10), year: parseInt(m[3], 10) };\n  // yyyy-mm-dd\n  m = s.match(/^(\\d{4})[\\/-](\\d{2})[\\/-](\\d{2})$/);\n  if (m) return { month: parseInt(m[2], 10), year: parseInt(m[1], 10) };\n  // dd-Mon-yyyy (e.g. 24-Apr-2026)\n  m = s.match(/^(\\d{1,2})[\\/-](\\w+)[\\/-](\\d{4})$/);\n  if (m) {\n    const monthIdx = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].toLowerCase().slice(0,3));\n    if (monthIdx >= 0) return { month: monthIdx + 1, year: parseInt(m[3], 10) };\n  }\n  return null;\n}\n\n// Normalize any date string to dd-mm-yyyy\nfunction normalizeDateStr(str) {\n  if (!str) return str;\n  const s = String(str).trim();\n  // Already dd-mm-yyyy\n  if (/^\\d{2}-\\d{2}-\\d{4}$/.test(s)) return s;\n  // dd/mm/yyyy\n  const slashDMY = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);\n  if (slashDMY) return `${slashDMY[1].padStart(2,'0')}-${slashDMY[2].padStart(2,'0')}-${slashDMY[3]}`;\n  // yyyy-mm-dd\n  const iso = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;\n  return s;\n}"
+ReplacementContent:
+"// Parse any common date string and return { month (1-12), year }\nfunction parseDateMY(str) {\n  if (!str) return null;\n  const s = String(str).trim();\n  \n  // Excel Serial Date (e.g. 45352)\n  if (/^\\d{5}(\\.\\d+)?$/.test(s)) {\n     const excelDays = parseFloat(s);\n     const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));\n     return { month: date.getUTCMonth() + 1, year: date.getUTCFullYear() };\n  }\n\n  // dd-mm-yyyy or dd/mm/yyyy or d/m/yy\n  let m = s.match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{2,4})$/);\n  if (m) {\n    let year = parseInt(m[3], 10);\n    if (year < 100) year += 2000;\n    let m1 = parseInt(m[1], 10);\n    let m2 = parseInt(m[2], 10);\n    let month = m2;\n    if (m2 > 12) month = m1; \n    return { month, year };\n  }\n  // yyyy-mm-dd\n  m = s.match(/^(\\d{4})[\\/-](\\d{2})[\\/-](\\d{2})$/);\n  if (m) return { month: parseInt(m[2], 10), year: parseInt(m[1], 10) };\n  // dd-Mon-yyyy (e.g. 24-Apr-2026 or 24-Apr-26)\n  m = s.match(/^(\\d{1,2})[\\/-](\\w+)[\\/-](\\d{2,4})$/);\n  if (m) {\n    const monthIdx = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].toLowerCase().slice(0,3));\n    let year = parseInt(m[3], 10);\n    if (year < 100) year += 2000;\n    if (monthIdx >= 0) return { month: monthIdx + 1, year };\n  }\n  return null;\n}\n\n// Normalize any date string to dd-mm-yyyy\nfunction normalizeDateStr(str) {\n  if (!str) return str;\n  const s = String(str).trim();\n  // Already dd-mm-yyyy\n  if (/^\\d{2}-\\d{2}-\\d{4}$/.test(s)) return s;\n  \n  // Excel Serial Date\n  if (/^\\d{5}(\\.\\d+)?$/.test(s)) {\n     const excelDays = parseFloat(s);\n     const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));\n     return `${String(date.getUTCDate()).padStart(2,'0')}-${String(date.getUTCMonth()+1).padStart(2,'0')}-${date.getUTCFullYear()}`;\n  }\n\n  // dd/mm/yyyy or d/m/yy\n  const slashDMY = s.match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{2,4})$/);\n  if (slashDMY) {\n    let year = parseInt(slashDMY[3], 10);
+<truncated 885 bytes>
+================================================================================
+
+=== STEP 66 (Line 67): replace_file_content ===
+StartLine: 891, EndLine: 904
+TargetContent:
+"                  {wizardPreview.filteredRows.length === 0 ? (\n                    <Box sx={{ bgcolor: '#fef3c7', border: '1.5px solid #fcd34d', borderRadius: '10px', p: 2.5, textAlign: 'center' }}>\n                      <Typography fontSize=\"13px\" fontWeight={700} color=\"#d97706\">⚠️ No rows found for {MONTHS[wizardMonth-1]} {wizardYear}</Typography>\n                      <Typography fontSize=\"12px\" color=\"#92400e\" mt={0.5}>\n                        {wizardPreview.filterApplied\n                          ? 'The date column in your Excel does not contain entries for this period. Try a different month/year.'\n                          : 'No date column was recognised. All rows will be imported.'}\n                      </Typography>\n                    </Box>\n                  ) : ("
+ReplacementContent:
+"                  {wizardPreview.filteredRows.length === 0 ? (\n                    <Box sx={{ bgcolor: '#fef3c7', border: '1.5px solid #fcd34d', borderRadius: '10px', p: 2.5, textAlign: 'center' }}>\n                      <Typography fontSize=\"13px\" fontWeight={700} color=\"#d97706\">⚠️ No rows found for {MONTHS[wizardMonth-1]} {wizardYear}</Typography>\n                      <Typography fontSize=\"12px\" color=\"#92400e\" mt={0.5}>\n                        {wizardPreview.filterApplied\n                          ? 'The date column in your Excel does not contain entries for this period. Try a different month/year.'\n                          : 'No date column was recognised. All rows will be imported.'}\n                      </Typography>\n                      {wizardPreview.allRows.length > 0 && (\n                        <Button \n                          variant=\"contained\" size=\"small\"\n                          onClick={() => setWizardPreview(prev => ({ ...prev, filteredRows: prev.allRows, filterApplied: false }))}\n                          sx={{ mt: 2, fontWeight: 800, textTransform: 'none', bgcolor: '#d97706', '&:hover': { bgcolor: '#b45309' }, boxShadow: 'none' }}\n                        >\n                          Import All {wizardPreview.allRows.length} Rows Anyway\n                        </Button>\n                      )}\n                    </Box>\n                  ) : ("
+================================================================================
+
+=== STEP 89 (Line 90): replace_file_content ===
+StartLine: 1412, EndLine: 1416
+TargetContent:
+"      {/* ── Snackbar: manual save result ─────────────────────────────────── */}\n\n      <Snackbar open={!!snack} autoHideDuration={4500} onClose={() => setSnack(null)}\n        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>\n        {snack && ("
+ReplacementContent:
+"      {/* ── Snackbar: manual save result ─────────────────────────────────── */}\n\n      <Snackbar open={!!snack} autoHideDuration={4500} onClose={() => setSnack(null)}\n        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} sx={{ zIndex: 10001 }}>\n        {snack && ("
+================================================================================
+
+=== STEP 140 (Line 141): multi_replace_file_content ===
+Failed to json.loads chunks: Invalid control character at: line 1 column 1667 (char 1666)
+Chunks Count: unknown
+================================================================================
+
+=== STEP 173 (Line 173): multi_replace_file_content ===
+Failed to json.loads chunks: Invalid control character at: line 1 column 2047 (char 2046)
+Chunks Count: unknown
+================================================================================
+
+=== STEP 176 (Line 176): replace_file_content ===
+StartLine: 678, EndLine: 688
+TargetContent:
+"          row.forEach((cell, colIdx) => {\n            if (!cell) return;\n            const cleaned = String(cell).toLowerCase().trim();\n            if (EXCEL_HEADER_MAP[cleaned]) {\n              matches++;\n              tempMapping[colIdx] = EXCEL_HEADER_MAP[cleaned];\n            }\n          });"
+ReplacementContent:
+"          row.forEach((cell, colIdx) => {\n            if (!cell) return;\n            const cleaned = String(cell).toLowerCase().trim();\n            if (EXCEL_HEADER_MAP[cleaned]) {\n              const field = EXCEL_HEADER_MAP[cleaned];\n              const alreadyMapped = Object.values(tempMapping).includes(field);\n              \n              if (alreadyMapped) {\n                if (cleaned === 'unloading status' && !Object.values(tempMapping).includes('UNLOADING STATUS NOTE')) {\n                  tempMapping[colIdx] = 'UNLOADING STATUS NOTE';\n                  matches++;\n                }\n              } else {\n                matches++;\n                tempMapping[colIdx] = field;\n              }\n            }\n          });"
+================================================================================
+
+=== STEP 185 (Line 185): replace_file_content ===
+StartLine: 749, EndLine: 757
+TargetContent:
+"        const headerMapping = {};\n        const unmappedHeaders = [];\n        excelHeaders.forEach(h => {\n          if (!h) return; // skip empty headers\n          const key = EXCEL_HEADER_MAP[h.toLowerCase()];\n          if (key) headerMapping[h] = key;\n          else unmappedHeaders.push(h);\n        });"
+ReplacementContent:
+"        const headerMapping = {}; // key: colIdx, value: internal field key\n        const unmappedHeaders = [];\n        const mappedFields = new Set();\n        \n        excelHeaders.forEach((h, colIdx) => {\n          if (!h) return; // skip empty headers\n          const cleaned = String(h).trim().toLowerCase();\n          let key = EXCEL_HEADER_MAP[cleaned];\n          \n          if (key) {\n             // Prevent duplicate assignments\n             if (mappedFields.has(key)) {\n                // If it's unloading status again, it's the note\n                if (cleaned === 'unloading status' && !mappedFields.has('UNLOADING STATUS NOTE')) {\n                   key = 'UNLOADING STATUS NOTE';\n                } else if (cleaned === 'vehicle number') {\n                   return; // skip duplicate vehicle number\n                }\n             }\n             headerMapping[colIdx] = key;\n             mappedFields.add(key);\n          } else {\n             unmappedHeaders.push(h);\n          }\n        });"
+================================================================================
+
+=== STEP 194 (Line 194): replace_file_content ===
+StartLine: 787, EndLine: 796
+TargetContent:
+"          const rowObj = {};\n          Object.entries(headerMapping).forEach(([excelH, internalKey]) => {\n            const colIdx = excelHeaders.indexOf(excelH);\n            if (colIdx !== -1) {\n              const rawVal = rowArr[colIdx];\n              const val = normalizeDateStr(String(rawVal ?? '').trim());\n              if (val !== '') rowObj[internalKey] = val;\n            }\n          });\n          if (Object.keys(rowObj).length > 0) {"
+ReplacementContent:
+"          const rowObj = {};\n          Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {\n            const colIdx = parseInt(colIdxStr, 10);\n            const rawVal = rowArr[colIdx];\n            const val = normalizeDateStr(String(rawVal ?? '').trim());\n            if (val !== '') rowObj[internalKey] = val;\n          });\n          if (Object.keys(rowObj).length > 0) {"
+================================================================================
+
+=== STEP 330 (Line 325): multi_replace_file_content ===
+Failed to json.loads chunks: Invalid control character at: line 1 column 2049 (char 2048)
+Chunks Count: unknown
+================================================================================
+
+=== STEP 371 (Line 366): replace_file_content ===
+StartLine: 1216, EndLine: 1234
+TargetContent:
+"    />\n  );\n}\nalignItems: 'center',\n  padding: '4px 6px',\n    boxSizing: 'border-box'\n      }}\nonFocus = { e => {\n  e.currentTarget.style.boxShadow = 'inset 0 0 0 2px #3b82f6';\n  e.currentTarget.style.background = '#eff6ff';\n}}\nonBlurCapture = { e => {\n  e.currentTarget.style.boxShadow = '';\n  e.currentTarget.style.background = '';\n}}\n    />\n  );\n}"
+ReplacementContent:
+"    />\n  );\n}"
+================================================================================
+

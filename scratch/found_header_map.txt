@@ -1,0 +1,987 @@
+=== Line 17 ===
+Step: 18, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: multi_replace_file_content, Args Keys: ['Description', 'Instruction', 'ReplacementChunks', 'TargetFile', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 18 ===
+Step: 19, Source: MODEL, Type: CODE_ACTION
+Response Content:
+Created At: 2026-06-10T10:38:39Z
+Completed At: 2026-06-10T10:38:42Z
+The following changes were made by the multi_replace_file_content tool to: /Users/soumodeeproy/Desktop/lorrey-project-code 2/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -1,4 +1,5 @@
+ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
++import * as XLSX from 'xlsx';
+ import {
+   Box, Button, CircularProgress, Typography, IconButton,
+   Snackbar, Alert, Chip, Tooltip, Select, MenuItem,
+@@ -259,6 +259,68 @@
+   !c.hidden && arr.findIndex(x => x.key === c.key) === i
+ );
+ 
++// ─── Excel column alias map ────────────────────────────────────────────────────
++// Maps common Excel header names → internal COLUMNS key
++const EXCEL_HEADER_MAP = {
++  // Identification
++  'sl no': 'SL NO', 'sl': 'SL NO', 'serial no': 'SL NO',
++  'invoice date': 'LOADING DT', 'loading dt': 'LOADING DT', 'loading date': 'LOADING DT',
++  'receiving date': 'RECEIVING DATE', 'recv date': 'RECEIVING DATE',
++  'bill no': 'BILL NO', 'bill number': 'BILL NO',
++  'bill date': 'BILL DATE',
++  'by portal': 'By Portal', 'portal': 'By Portal',
++  'site': 'SITE',
++  'vehicle number': 'VEHICLE NUMBER', 'vehicle no': 'VEHICLE NUMBER', 'truck no': 'VEHICLE NUMBER',
++  'wheel': 'WHEEL',
++  'unloading status': 'UNLOADING STATUS', 'unloading date': 'UNLOADING STATUS',
++  'e-way bill no': 'E-WAY BILL NO', 'eway bill no': 'E-WAY BILL NO', 'eway bill': 'E-WAY BILL NO', 'e way bill no': 'E-WAY BILL NO',
++  'dn': 'DN', 'dn (driver)': 'DN', 'driver': 'DN',
++  'e-way bill validity': 'E-WAY BILL VALIDITY', 'eway validity': 'E-WAY BILL VALIDITY',
++  'gcn no': 'GCN NO', 'gcn': 'GCN NO',
++  'invoice no': 'INVOICE NO', 'invoice number': 'INVOICE NO',
++  'shipment no': 'SHIPMENT NO', 'shipment number': 'SHIPMENT NO',
++  'challan
+<truncated 15770 bytes>
+</Box>
++              {excelPreview.totalRows > 5 && (
++                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
++                  + {excelPreview.totalRows - 5} more rows…
++                </Typography>
++              )}
++            </Box>
++
++            {/* Action buttons */}
++            <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'flex-end', px: 3, py: 2.5 }}>
++              <Button
++                variant="outlined" size="small"
++                onClick={() => setExcelPreview(null)}
++                disabled={excelImporting}
++                sx={{ fontWeight: 700, borderRadius: '8px', textTransform: 'none' }}
++              >Cancel</Button>
++              <Button
++                variant="contained" size="small"
++                onClick={handleExcelImportConfirm}
++                disabled={excelImporting || excelPreview.mappedCount === 0}
++                startIcon={excelImporting ? <CircularProgress size={14} color="inherit" /> : <UploadIcon sx={{ fontSize: '1rem' }}/>}
++                sx={{
++                  fontWeight: 800, borderRadius: '8px', textTransform: 'none',
++                  background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
++                  boxShadow: 'none',
++                  '&:hover': { background: 'linear-gradient(135deg, #6d28d9, #5b21b6)' },
++                }}
++              >
++                {excelImporting ? 'Importing…' : `Import ${excelPreview.totalRows} Rows`}
++              </Button>
++            </Box>
++          </Box>
++        </Box>
++      )}
++
+       {/* ── Confirm delete dialog ──────────────────────────────────────────── */}
+       {confirmDel && (
+         <Box sx={{
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+================================================================================
+
+=== Line 19 ===
+Step: 20, Source: MODEL, Type: PLANNER_RESPONSE
+Response Content:
+The changes are applied. The `xlsx` package is already in dependencies so no install is needed. Here's a summary of what was added:
+
+---
+
+## ✅ Excel Upload Feature Added
+
+### What was implemented in [CementRegister.jsx](file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx)
+
+#### 🟣 New **"Upload Excel"** button in the top bar
+- Purple gradient button next to **Export XLS** and **Import CSV**
+- Accepts `.xlsx` and `.xls` files
+
+#### 🗺️ Smart Column Mapping (`EXCEL_HEADER_MAP`)
+- Maps **60+ common Excel header aliases** → internal register column keys
+- Case-insensitive matching (e.g. `"Invoice Date"`, `"invoice date"`, `"INVOICE DATE"` all work)
+- Handles common variations: `"Vehicle No"`, `"Truck No"` → `VEHICLE NUMBER`, etc.
+- Covers all column groups: Identification, Billing, Deductions, HSD/Fuel, Net, Owner
+
+#### 📋 Preview Dialog before importing
+Shows:
+- Sheet name being imported
+- **Rows Found** / **Columns Mapped** / **Unrecognized** stats
+- Green chips showing each `Excel Header → Internal Key` mapping
+- Yellow chips for unrecognized headers (they'll be skipped)
+- First 5 rows of data preview table
+
+#### ✅ Confirm Import
+- Calls the existing `/cement-register/bulk` API endpoint
+- Refreshes the table on success
+- Date formats auto-normalized (`24/04/2026`, `2026-04-24` → `24-04-2026`)
+================================================================================
+
+=== Line 33 ===
+Step: 35, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: multi_replace_file_content, Args Keys: ['Description', 'Instruction', 'ReplacementChunks', 'TargetFile', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 34 ===
+Step: 36, Source: MODEL, Type: CODE_ACTION
+Response Content:
+Created At: 2026-06-10T10:48:05Z
+Completed At: 2026-06-10T10:48:07Z
+The following changes were made by the multi_replace_file_content tool to: /Users/soumodeeproy/Desktop/lorrey-project-code 2/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -1,4 +1,5 @@
+ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
++import * as XLSX from 'xlsx';
+ import {
+   Box, Button, CircularProgress, Typography, IconButton,
+   Snackbar, Alert, Chip, Tooltip, Select, MenuItem,
+@@ -259,6 +259,109 @@
+   !c.hidden && arr.findIndex(x => x.key === c.key) === i
+ );
+ 
++// ─── Excel header alias map ────────────────────────────────────────────────────
++// Maps Excel column headers (lowercase) → internal COLUMNS key
++const EXCEL_HEADER_MAP = {
++  // Identification
++  'sl no': 'SL NO', 'sl': 'SL NO', 'serial no': 'SL NO', 's.no': 'SL NO',
++  'invoice date': 'LOADING DT', 'loading dt': 'LOADING DT', 'loading date': 'LOADING DT', 'date': 'LOADING DT',
++  'receiving date': 'RECEIVING DATE', 'recv date': 'RECEIVING DATE', 'received date': 'RECEIVING DATE',
++  'bill no': 'BILL NO', 'bill number': 'BILL NO', 'bill no.': 'BILL NO',
++  'bill date': 'BILL DATE',
++  'by portal': 'By Portal', 'portal': 'By Portal',
++  'site': 'SITE', 'site name': 'SITE',
++  'vehicle number': 'VEHICLE NUMBER', 'vehicle no': 'VEHICLE NUMBER', 'truck no': 'VEHICLE NUMBER',
++  'vehicle no.': 'VEHICLE NUMBER', 'veh no': 'VEHICLE NUMBER',
++  'wheel': 'WHEEL', 'wheels': 'WHEEL',
++  'unloading status': 'UNLOADING STATUS', 'unloading date': 'UNLOADING STATUS', 'unload date': 'UNLOADING STATUS',
++  'e-way bill no': 'E-WAY BILL NO', 'eway bill no': 'E-WAY BILL NO', 'eway bill': 'E-WAY BILL NO',
++  'e way bill no': 'E-WAY BILL NO', 'e-way bill no.': 'E-WAY BILL NO', 'ewb no': 'E-WAY BILL NO',
++  'dn': 'DN'
+<truncated 27332 bytes>
+ '#64748b' }}>
++                    ← Back
++                  </Button>
++                  <Box display="flex" gap={1.5}>
++                    <Button variant="outlined" size="small" onClick={() => { setShowExcelWizard(false); setWizardStep(1); setWizardPreview(null); }}
++                      disabled={wizardImporting}
++                      sx={{ fontWeight: 700, borderRadius: '10px', textTransform: 'none' }}>Cancel</Button>
++                    <Button
++                      variant="contained" size="small"
++                      onClick={handleWizardImportConfirm}
++                      disabled={wizardImporting || !wizardPreview.filteredRows.length}
++                      startIcon={wizardImporting ? <CircularProgress size={14} color="inherit" /> : <UploadIcon sx={{ fontSize: '1rem' }} />}
++                      sx={{
++                        fontWeight: 800, borderRadius: '10px', textTransform: 'none', px: 2.5,
++                        background: 'linear-gradient(135deg,#7c3aed,#6d28d9)', boxShadow: 'none',
++                        '&:hover': { background: 'linear-gradient(135deg,#6d28d9,#5b21b6)', boxShadow: '0 4px 14px rgba(124,58,237,0.35)' },
++                        '&:disabled': { background: '#e2e8f0', color: '#94a3b8' },
++                      }}
++                    >
++                      {wizardImporting ? 'Importing…' : `Import ${wizardPreview.filteredRows.length} Rows`}
++                    </Button>
++                  </Box>
++                </Box>
++              </Box>
++            )}
++          </Box>
++        </Box>
++      )}
++
+       {/* ── Confirm delete dialog ──────────────────────────────────────────── */}
+       {confirmDel && (
+         <Box sx={{
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+================================================================================
+
+=== Line 49 ===
+Step: 47, Source: MODEL, Type: VIEW_FILE
+Response Content:
+Created At: 2026-06-10T10:51:28Z
+Completed At: 2026-06-10T10:51:29Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1709
+Total Bytes: 83387
+Showing lines 634 to 734
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+634:   const handleWizardFileSelect = (e) => {
+635:     const file = e.target.files[0];
+636:     if (!file) return;
+637:     if (wizardFileRef.current) wizardFileRef.current.value = '';
+638: 
+639:     const reader = new FileReader();
+640:     reader.onload = (evt) => {
+641:       try {
+642:         const data = new Uint8Array(evt.target.result);
+643:         const workbook = XLSX.read(data, { type: 'array', cellDates: false });
+644:         const sheetName = workbook.SheetNames[0];
+645:         const sheet = workbook.Sheets[sheetName];
+646:         const rawRows = XLSX.utils.sheet_to_json(sheet, { raw: false, defval: '', blankrows: false });
+647: 
+648:         if (rawRows.length === 0) {
+649:           setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });
+650:           return;
+651:         }
+652: 
+653:         // Build header mapping
+654:         const excelHeaders = Object.keys(rawRows[0]);
+655:         const headerMapping = {};
+656:         const unmappedHeaders = [];
+657:         excelHeaders.forEach(h => {
+658:           const key = EXCEL_HEADER_MAP[h.trim().toLowerCase()];
+659:           if (key) headerMapping[h] = key;
+660:           else unmappedHeaders.push(h);
+661:         });
+662: 
+663:         // Find a date column to filter by month/year
+664:         const dateColsPreference = [
+665:           'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'
+666:         ];
+667:         const mappedDateCol = Object.entries(headerMapping).find(([, v]) => dateColsPreference.includes(v))?.[0];
+668: 
+6
+<truncated 872 bytes>
+d.month === wizardMonth && parsed.year === wizardYear;
+687:           });
+688:           filterApplied = true;
+689:         }
+690: 
+691:         setWizardPreview({
+692:           sheetName,
+693:           totalInFile: rawRows.length,
+694:           filteredRows,
+695:           allRows: mappedRows,
+696:           headerMapping,
+697:           unmappedHeaders,
+698:           mappedCount: Object.keys(headerMapping).length,
+699:           filterApplied,
+700:           fileName: file.name,
+701:         });
+702:         setWizardStep(2);
+703:       } catch (err) {
+704:         console.error('Excel parse error:', err);
+705:         setSnack({ severity: 'error', msg: 'Failed to parse Excel: ' + err.message });
+706:       }
+707:     };
+708:     reader.readAsArrayBuffer(file);
+709:   };
+710: 
+711:   // ── Excel Import Wizard: confirm + send to server ──────────────────────────
+712:   const handleWizardImportConfirm = async () => {
+713:     const rows = wizardPreview?.filteredRows;
+714:     if (!rows?.length) return;
+715:     setWizardImporting(true);
+716:     try {
+717:       const token = localStorage.getItem('token');
+718:       await axios.post(
+719:         `${API_URL}/cement-register/bulk`,
+720:         { entries: rows },
+721:         { headers: { Authorization: `Bearer ${token}` } }
+722:       );
+723:       setSnack({ severity: 'success', msg: `✅ ${rows.length} rows imported from Excel for ${MONTHS[wizardMonth-1]} ${wizardYear}!` });
+724:       setShowExcelWizard(false);
+725:       setWizardStep(1);
+726:       setWizardPreview(null);
+727:       fetchData();
+728:     } catch (err) {
+729:       setSnack({ severity: 'error', msg: 'Import failed: ' + (err.response?.data?.error || err.message) });
+730:     } finally {
+731:       setWizardImporting(false);
+732:     }
+733:   };
+734: 
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+================================================================================
+
+=== Line 51 ===
+Step: 49, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: replace_file_content, Args Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+Code Content:
+"  const handleWizardFileSelect = (e) => {\n    const file = e.target.files[0];\n    if (!file) return;\n    if (wizardFileRef.current) wizardFileRef.current.value = '';\n\n    const reader = new FileReader();\n    reader.onload = (evt) => {\n      try {\n        const data = new Uint8Array(evt.target.result);\n        const workbook = XLSX.read(data, { type: 'array', cellDates: false });\n        const sheetName = workbook.SheetNames[0];\n        const sheet = workbook.Sheets[sheetName];\n        \n        // Read as array of arrays to find the header row\n        const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });\n\n        if (aoa.length === 0) {\n          setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });\n          return;\n        }\n\n        let bestHeaderRowIdx = 0;\n        let maxMatches = 0;\n        \n        // Scan first 15 rows to find the one that looks most like a header row\n        const searchLimit = Math.min(15, aoa.length);\n        for (let i = 0; i < searchLimit; i++) {\n          const row = aoa[i] || [];\n          let matches = 0;\n          row.forEach(cell => {\n             const val = String(cell).trim().toLowerCase();\n             if (EXCEL_HEADER_MAP[val]) matches++;\n          });\n          if (matches > maxMatches) {\n             maxMatches = matches;\n             bestHeaderRowIdx = i;\n          }\n        }\n\n        const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());\n        const dataRows = aoa.slice(bestHeaderRowIdx + 1);\n\n        const headerMapping = {};\n        const unmappedHeaders = [];\n        excelHeaders.forEach(h => {\n          if (!h) return; // skip empty headers\n          const key = EXCEL_HEADER_MAP[h.toLowerCase()];\n          if (key) headerMapping[h] = key;\n          else unmappedHeaders.push(h);\n        });\n\n        // Find a date column to filter by month/year\n        const dateColsPreference = [\n          'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'\n 
+<truncated 2021 bytes>
+================================================================================
+
+=== Line 52 ===
+Step: 50, Source: MODEL, Type: CODE_ACTION
+Response Content:
+Created At: 2026-06-10T10:51:53Z
+Completed At: 2026-06-10T10:51:56Z
+The following changes were made by the replace_file_content tool to: /Users/soumodeeproy/Desktop/lorrey-project-code 2/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -643,9 +643,11 @@
+         const workbook = XLSX.read(data, { type: 'array', cellDates: false });
+         const sheetName = workbook.SheetNames[0];
+         const sheet = workbook.Sheets[sheetName];
+-        const rawRows = XLSX.utils.sheet_to_json(sheet, { raw: false, defval: '', blankrows: false });
+-
+-        if (rawRows.length === 0) {
++        
++        // Read as array of arrays to find the header row
++        const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
++
++        if (aoa.length === 0) {
+           setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });
+           return;
+         }
+@@ -652,9 +652,29 @@
+-        // Build header mapping
+-        const excelHeaders = Object.keys(rawRows[0]);
++        let bestHeaderRowIdx = 0;
++        let maxMatches = 0;
++        
++        // Scan first 15 rows to find the one that looks most like a header row
++        const searchLimit = Math.min(15, aoa.length);
++        for (let i = 0; i < searchLimit; i++) {
++          const row = aoa[i] || [];
++          let matches = 0;
++          row.forEach(cell => {
++             const val = String(cell).trim().toLowerCase();
++             if (EXCEL_HEADER_MAP[val]) matches++;
++          });
++          if (matches > maxMatches) {
++             maxMatches = matches;
++             bestHeaderRowIdx = i;
++          }
++        }
++
++        const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());
++        const dataRows = aoa.slice(bestHeaderRowIdx + 1);
++
+         const headerMapping = {};
+         const unmappedHeaders = [];
+         excelHeaders.forEach(h => {
+-          const key = EXCEL_HEADER_MAP[h.trim().toLowerCase()];
++          if (!h) return; // skip empty headers
++          const key = EXCEL_HEADER_MAP[h.toLowerCase()];
+           if (key) headerMapping[h] = key;
+           else unmappedHeaders.push(h);
+         });
+@@ -664,14 +664,24 @@
+         ];
+         const mappedDateCol = Object.entries(headerMapping).find(([, v]) => dateColsPreference.includes(v))?.[0];
+ 
+-        // Convert rows, normalise dates, filter by selected month/year
+-        let mappedRows = rawRows.map(raw => {
+-          const row = {};
++        // Convert rows, normalise dates
++        let mappedRows = [];
++        dataRows.forEach(rowArr => {
++          // skip empty rows
++          if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
++          
++          const rowObj = {};
+           Object.entries(headerMapping).forEach(([excelH, internalKey]) => {
+-            const val = normalizeDateStr(String(raw[excelH] ?? '').trim());
+-            if (val !== '') row[internalKey] = val;
+-          });
+-          return row;
++            const colIdx = excelHeaders.indexOf(excelH);
++            if (colIdx !== -1) {
++              const rawVal = rowArr[colIdx];
++              const val = normalizeDateStr(String(rawVal ?? '').trim());
++              if (val !== '') rowObj[internalKey] = val;
++            }
++          });
++          if (Object.keys(rowObj).length > 0) {
++             mappedRows.push(rowObj);
++          }
+         });
+ 
+         // Filter by selected month + year if a date column was found
+@@ -687,7 +687,7 @@
+ 
+         setWizardPreview({
+           sheetName,
+-          totalInFile: rawRows.length,
++          totalInFile: dataRows.length, // Only count data rows, not headers/titles
+           filteredRows,
+           allRows: mappedRows,
+           headerMapping,
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+================================================================================
+
+=== Line 59 ===
+Step: 57, Source: MODEL, Type: VIEW_FILE
+Response Content:
+Created At: 2026-06-10T10:56:03Z
+Completed At: 2026-06-10T10:56:03Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1741
+Total Bytes: 84523
+Showing lines 200 to 285
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+200:       + num(r['EXTRA UNLOADING'])
+201:       + num(r.DEDICATED)
+202:       + num(r['10W EXTRA 8.5%'])
+203:     )
+204:   },
+205: 
+206:   // ── Group 6: Owner / Duration ──────────────────────────────────────────────
+207:   { key: 'OWNER NAME', label: 'OWNER NAME', width: 160, type: 'auto', group: 'owner' },
+208:   {
+209:     key: 'Duration', label: 'DURATION (Days)', width: 110, type: 'calc', group: 'owner',
+210:     formula: r => {
+211:       const loadStr = r['LOADING DT'];
+212:       const unlStr = r['UNLOADING STATUS'];
+213:       if (!loadStr || !unlStr) return '';
+214:       const load = new Date(loadStr);
+215:       const unl = new Date(unlStr);
+216:       if (isNaN(load) || isNaN(unl)) return '';
+217:       return Math.max(1, Math.round((unl - load) / (1000 * 60 * 60 * 24)) + 1);
+218:     }
+219:   },
+220:   {
+221:     key: 'Detention', label: 'DETENTION', width: 110, type: 'calc', group: 'owner',
+222:     formula: r => {
+223:       const d = num(r['Duration']);
+224:       return d > 0 ? 'D ' + (d - 1) : '';
+225:     }
+226:   },
+227:   { key: 'Transporting Coast', label: 'TRANSPORTING COAST', width: 160, type: 'manual', group: 'owner' },
+228: ];
+229: 
+230: // ─── Internal fields not shown ────────────────────────────────────────────────
+231: const HIDDEN_KEYS = new Set(['_id', '__v', '_invoiceId', '_tds_percent', '
+<truncated 1428 bytes>
+3: 
+264: // ─── Excel header alias map ────────────────────────────────────────────────────
+265: // Maps Excel column headers (lowercase) → internal COLUMNS key
+266: const EXCEL_HEADER_MAP = {
+267:   // Identification
+268:   'sl no': 'SL NO', 'sl': 'SL NO', 'serial no': 'SL NO', 's.no': 'SL NO',
+269:   'invoice date': 'LOADING DT', 'loading dt': 'LOADING DT', 'loading date': 'LOADING DT', 'date': 'LOADING DT',
+270:   'receiving date': 'RECEIVING DATE', 'recv date': 'RECEIVING DATE', 'received date': 'RECEIVING DATE',
+271:   'bill no': 'BILL NO', 'bill number': 'BILL NO', 'bill no.': 'BILL NO',
+272:   'bill date': 'BILL DATE',
+273:   'by portal': 'By Portal', 'portal': 'By Portal',
+274:   'site': 'SITE', 'site name': 'SITE',
+275:   'vehicle number': 'VEHICLE NUMBER', 'vehicle no': 'VEHICLE NUMBER', 'truck no': 'VEHICLE NUMBER',
+276:   'vehicle no.': 'VEHICLE NUMBER', 'veh no': 'VEHICLE NUMBER',
+277:   'wheel': 'WHEEL', 'wheels': 'WHEEL',
+278:   'unloading status': 'UNLOADING STATUS', 'unloading date': 'UNLOADING STATUS', 'unload date': 'UNLOADING STATUS',
+279:   'e-way bill no': 'E-WAY BILL NO', 'eway bill no': 'E-WAY BILL NO', 'eway bill': 'E-WAY BILL NO',
+280:   'e way bill no': 'E-WAY BILL NO', 'e-way bill no.': 'E-WAY BILL NO', 'ewb no': 'E-WAY BILL NO',
+281:   'dn': 'DN', 'dn (driver)': 'DN', 'driver': 'DN', 'driver name': 'DN',
+282:   'e-way bill validity': 'E-WAY BILL VALIDITY', 'eway validity': 'E-WAY BILL VALIDITY', 'ewb validity': 'E-WAY BILL VALIDITY',
+283:   'gcn no': 'GCN NO', 'gcn': 'GCN NO', 'gcn no.': 'GCN NO',
+284:   'invoice no': 'INVOICE NO', 'invoice number': 'INVOICE NO', 'invoice no.': 'INVOICE NO',
+285:   'shipment no': 'SHIPMENT NO', 'shipment number': 'SHIPMENT NO', 'shipment no.': 'SHIPMENT NO',
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+================================================================================
+
+=== Line 62 ===
+Step: 60, Source: MODEL, Type: VIEW_FILE
+================================================================================
+
+=== Line 67 ===
+Step: 66, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: replace_file_content, Args Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 68 ===
+Step: 67, Source: MODEL, Type: CODE_ACTION
+================================================================================
+
+=== Line 130 ===
+Step: 129, Source: MODEL, Type: VIEW_FILE
+================================================================================
+
+=== Line 133 ===
+Step: 132, Source: MODEL, Type: GREP_SEARCH
+================================================================================
+
+=== Line 147 ===
+Step: 146, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: view_file, Args Keys: ['AbsolutePath', 'EndLine', 'StartLine', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 150 ===
+Step: 150, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: view_file, Args Keys: ['AbsolutePath', 'EndLine', 'StartLine', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 151 ===
+Step: 151, Source: MODEL, Type: VIEW_FILE
+Response Content:
+Created At: 2026-06-10T11:07:51Z
+Completed At: 2026-06-10T11:07:51Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1835
+Total Bytes: 88558
+Showing lines 200 to 280
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+200:       + num(r['EXTRA UNLOADING'])
+201:       + num(r.DEDICATED)
+202:       + num(r['10W EXTRA 8.5%'])
+203:     )
+204:   },
+205: 
+206:   // ── Group 6: Owner / Duration ──────────────────────────────────────────────
+207:   { key: 'OWNER NAME', label: 'OWNER NAME', width: 160, type: 'auto', group: 'owner' },
+208:   {
+209:     key: 'Duration', label: 'DURATION (Days)', width: 110, type: 'calc', group: 'owner',
+210:     formula: r => {
+211:       const loadStr = r['LOADING DT'];
+212:       const unlStr = r['UNLOADING STATUS'];
+213:       if (!loadStr || !unlStr) return '';
+214:       const load = new Date(loadStr);
+215:       const unl = new Date(unlStr);
+216:       if (isNaN(load) || isNaN(unl)) return '';
+217:       return Math.max(1, Math.round((unl - load) / (1000 * 60 * 60 * 24)) + 1);
+218:     }
+219:   },
+220:   {
+221:     key: 'Detention', label: 'DETENTION', width: 110, type: 'calc', group: 'owner',
+222:     formula: r => {
+223:       const d = num(r['Duration']);
+224:       return d > 0 ? 'D ' + (d - 1) : '';
+225:     }
+226:   },
+227:   { key: 'Transporting Coast', label: 'TRANSPORTING COAST', width: 160, type: 'manual', group: 'owner' },
+228: ];
+229: 
+230: // ─── Internal fields not shown ────────────────────────────────────────────────
+231: const HIDDEN_KEYS = new Set(['_id', '__v', '_invoiceId', '_tds_percent', '
+<truncated 956 bytes>
+ '#c4b5fd' },
+252:   billing: { bg: '#dbeafe', border: '#93c5fd' },
+253:   deductions: { bg: '#fef3c7', border: '#fcd34d' },
+254:   hsd: { bg: '#d1fae5', border: '#6ee7b7' },
+255:   net: { bg: '#fce7f3', border: '#f9a8d4' },
+256:   owner: { bg: '#f0fdf4', border: '#86efac' },
+257: };
+258: 
+259: // Deduplicate columns (WHEEL was listed twice)
+260: const VISIBLE_COLS = COLUMNS.filter((c, i, arr) =>
+261:   !c.hidden && arr.findIndex(x => x.key === c.key) === i
+262: );
+263: 
+264: // ─── Excel header alias map ────────────────────────────────────────────────────
+265: // Maps Excel column headers (lowercase) → internal COLUMNS key
+266: const EXCEL_HEADER_MAP = {
+267:   // Identification
+268:   'sl no': 'SL NO', 'sl': 'SL NO', 'serial no': 'SL NO', 's.no': 'SL NO',
+269:   'invoice date': 'LOADING DT', 'loading dt': 'LOADING DT', 'loading date': 'LOADING DT', 'date': 'LOADING DT',
+270:   'receiving date': 'RECEIVING DATE', 'recv date': 'RECEIVING DATE', 'received date': 'RECEIVING DATE',
+271:   'bill no': 'BILL NO', 'bill number': 'BILL NO', 'bill no.': 'BILL NO',
+272:   'bill date': 'BILL DATE',
+273:   'by portal': 'By Portal', 'portal': 'By Portal',
+274:   'site': 'SITE', 'site name': 'SITE',
+275:   'vehicle number': 'VEHICLE NUMBER', 'vehicle no': 'VEHICLE NUMBER', 'truck no': 'VEHICLE NUMBER',
+276:   'vehicle no.': 'VEHICLE NUMBER', 'veh no': 'VEHICLE NUMBER',
+277:   'wheel': 'WHEEL', 'wheels': 'WHEEL',
+278:   'unloading status': 'UNLOADING STATUS', 'unloading date': 'UNLOADING STATUS', 'unload date': 'UNLOADING STATUS',
+279:   'e-way bill no': 'E-WAY BILL NO', 'eway bill no': 'E-WAY BILL NO', 'eway bill': 'E-WAY BILL NO',
+280:   'e way bill no': 'E-WAY BILL NO', 'e-way bill no.': 'E-WAY BILL NO', 'ewb no': 'E-WAY BILL NO',
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+================================================================================
+
+=== Line 156 ===
+Step: 156, Source: MODEL, Type: VIEW_FILE
+================================================================================
+
+=== Line 158 ===
+Step: 158, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: run_command, Args Keys: ['CommandLine', 'Cwd', 'WaitMsBeforeAsync', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 164 ===
+Step: 164, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: view_file, Args Keys: ['AbsolutePath', 'EndLine', 'StartLine', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 167 ===
+Step: 167, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: view_file, Args Keys: ['AbsolutePath', 'EndLine', 'StartLine', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 168 ===
+Step: 168, Source: MODEL, Type: VIEW_FILE
+================================================================================
+
+=== Line 170 ===
+Step: 170, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: view_file, Args Keys: ['AbsolutePath', 'EndLine', 'StartLine', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 173 ===
+Step: 173, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: multi_replace_file_content, Args Keys: ['Description', 'Instruction', 'ReplacementChunks', 'TargetFile', 'toolAction', 'toolSummary']
+================================================================================
+
+=== Line 176 ===
+Step: 176, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: replace_file_content, Args Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+Code Content:
+"          row.forEach((cell, colIdx) => {\n            if (!cell) return;\n            const cleaned = String(cell).toLowerCase().trim();\n            if (EXCEL_HEADER_MAP[cleaned]) {\n              const field = EXCEL_HEADER_MAP[cleaned];\n              const alreadyMapped = Object.values(tempMapping).includes(field);\n              \n              if (alreadyMapped) {\n                if (cleaned === 'unloading status' && !Object.values(tempMapping).includes('UNLOADING STATUS NOTE')) {\n                  tempMapping[colIdx] = 'UNLOADING STATUS NOTE';\n                  matches++;\n                }\n              } else {\n                matches++;\n                tempMapping[colIdx] = field;\n              }\n            }\n          });"
+================================================================================
+
+=== Line 183 ===
+Step: 183, Source: MODEL, Type: VIEW_FILE
+Response Content:
+Created At: 2026-06-10T11:11:24Z
+Completed At: 2026-06-10T11:11:24Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1851
+Total Bytes: 89496
+Showing lines 720 to 760
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+720:         // Read as array of arrays to find the header row
+721:         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+722: 
+723:         if (aoa.length === 0) {
+724:           setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });
+725:           return;
+726:         }
+727: 
+728:         let bestHeaderRowIdx = 0;
+729:         let maxMatches = 0;
+730:         
+731:         // Scan first 15 rows to find the one that looks most like a header row
+732:         const searchLimit = Math.min(15, aoa.length);
+733:         for (let i = 0; i < searchLimit; i++) {
+734:           const row = aoa[i] || [];
+735:           let matches = 0;
+736:           row.forEach(cell => {
+737:              const val = String(cell).trim().toLowerCase();
+738:              if (EXCEL_HEADER_MAP[val]) matches++;
+739:           });
+740:           if (matches > maxMatches) {
+741:              maxMatches = matches;
+742:              bestHeaderRowIdx = i;
+743:           }
+744:         }
+745: 
+746:         const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());
+747:         const dataRows = aoa.slice(bestHeaderRowIdx + 1);
+748: 
+749:         const headerMapping = {};
+750:         const unmappedHeaders = [];
+751:         excelHeaders.forEach(h => {
+752:           if (!h) return; // skip empty headers
+753:           const key = EXCEL_HEADER_MAP[h.toLowerCase()];
+754:           if (key) headerMapping[h] = key;
+755:           else unmappedHeaders.push(h);
+756:         });
+757: 
+758:         // Find a date column to filter by month/year
+759:         const dateColsPreference = [
+760:           'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+================================================================================
+
+=== Line 185 ===
+Step: 185, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: replace_file_content, Args Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+Code Content:
+"        const headerMapping = {}; // key: colIdx, value: internal field key\n        const unmappedHeaders = [];\n        const mappedFields = new Set();\n        \n        excelHeaders.forEach((h, colIdx) => {\n          if (!h) return; // skip empty headers\n          const cleaned = String(h).trim().toLowerCase();\n          let key = EXCEL_HEADER_MAP[cleaned];\n          \n          if (key) {\n             // Prevent duplicate assignments\n             if (mappedFields.has(key)) {\n                // If it's unloading status again, it's the note\n                if (cleaned === 'unloading status' && !mappedFields.has('UNLOADING STATUS NOTE')) {\n                   key = 'UNLOADING STATUS NOTE';\n                } else if (cleaned === 'vehicle number') {\n                   return; // skip duplicate vehicle number\n                }\n             }\n             headerMapping[colIdx] = key;\n             mappedFields.add(key);\n          } else {\n             unmappedHeaders.push(h);\n          }\n        });"
+================================================================================
+
+=== Line 186 ===
+Step: 186, Source: MODEL, Type: CODE_ACTION
+Response Content:
+Created At: 2026-06-10T11:11:36Z
+Completed At: 2026-06-10T11:11:38Z
+The following changes were made by the replace_file_content tool to: /Users/soumodeeproy/Desktop/lorrey-project-code 2/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.
+[diff_block_start]
+@@ -746,13 +746,30 @@
+         const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());
+         const dataRows = aoa.slice(bestHeaderRowIdx + 1);
+ 
+-        const headerMapping = {};
++        const headerMapping = {}; // key: colIdx, value: internal field key
+         const unmappedHeaders = [];
+-        excelHeaders.forEach(h => {
++        const mappedFields = new Set();
++        
++        excelHeaders.forEach((h, colIdx) => {
+           if (!h) return; // skip empty headers
+-          const key = EXCEL_HEADER_MAP[h.toLowerCase()];
+-          if (key) headerMapping[h] = key;
+-          else unmappedHeaders.push(h);
++          const cleaned = String(h).trim().toLowerCase();
++          let key = EXCEL_HEADER_MAP[cleaned];
++          
++          if (key) {
++             // Prevent duplicate assignments
++             if (mappedFields.has(key)) {
++                // If it's unloading status again, it's the note
++                if (cleaned === 'unloading status' && !mappedFields.has('UNLOADING STATUS NOTE')) {
++                   key = 'UNLOADING STATUS NOTE';
++                } else if (cleaned === 'vehicle number') {
++                   return; // skip duplicate vehicle number
++                }
++             }
++             headerMapping[colIdx] = key;
++             mappedFields.add(key);
++          } else {
++             unmappedHeaders.push(h);
++          }
+         });
+ 
+         // Find a date column to filter by month/year
+[diff_block_end]
+
+Please note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.
+================================================================================
+
+=== Line 192 ===
+Step: 192, Source: MODEL, Type: VIEW_FILE
+================================================================================
+
+=== Line 213 ===
+Step: 218, Source: MODEL, Type: GREP_SEARCH
+================================================================================
+
+=== Line 320 ===
+Step: 325, Source: MODEL, Type: VIEW_FILE
+================================================================================
+
+=== Line 324 ===
+Step: 329, Source: MODEL, Type: VIEW_FILE
+Response Content:
+Created At: 2026-06-10T11:50:39Z
+Completed At: 2026-06-10T11:50:40Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1866
+Total Bytes: 90141
+Showing lines 715 to 815
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+715:         const data = new Uint8Array(evt.target.result);
+716:         const workbook = XLSX.read(data, { type: 'array', cellDates: false });
+717:         const sheetName = workbook.SheetNames[0];
+718:         const sheet = workbook.Sheets[sheetName];
+719:         
+720:         // Read as array of arrays to find the header row
+721:         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+722: 
+723:         if (aoa.length === 0) {
+724:           setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });
+725:           return;
+726:         }
+727: 
+728:         let bestHeaderRowIdx = 0;
+729:         let maxMatches = 0;
+730:         
+731:         // Scan first 15 rows to find the one that looks most like a header row
+732:         const searchLimit = Math.min(15, aoa.length);
+733:         for (let i = 0; i < searchLimit; i++) {
+734:           const row = aoa[i] || [];
+735:           let matches = 0;
+736:           row.forEach(cell => {
+737:              const val = String(cell).trim().toLowerCase();
+738:              if (EXCEL_HEADER_MAP[val]) matches++;
+739:           });
+740:           if (matches > maxMatches) {
+741:              maxMatches = matches;
+742:              bestHeaderRowIdx = i;
+743:           }
+744:         }
+745: 
+746:         const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());
+747:         const dataRows = aoa.slice(bestHeaderRowIdx + 1);
+748: 
+749:         const headerMapping = {}; // key: colIdx, value: internal field key
+750:         const un
+<truncated 1038 bytes>
+:         // Find a date column to filter by month/year
+776:         const dateColsPreference = [
+777:           'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'
+778:         ];
+779:         const mappedDateCol = Object.entries(headerMapping).find(([, v]) => dateColsPreference.includes(v))?.[0];
+780: 
+781:         // Convert rows, normalise dates
+782:         let mappedRows = [];
+783:         dataRows.forEach(rowArr => {
+784:           // skip empty rows
+785:           if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
+786:           
+787:           const rowObj = {};
+788:           Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {
+789:             const colIdx = parseInt(colIdxStr, 10);
+790:             const rawVal = rowArr[colIdx];
+791:             const val = normalizeDateStr(String(rawVal ?? '').trim());
+792:             if (val !== '') rowObj[internalKey] = val;
+793:           });
+794:           if (Object.keys(rowObj).length > 0) {
+795:              mappedRows.push(rowObj);
+796:           }
+797:         });
+798: 
+799:         // Filter by selected month + year if a date column was found
+800:         let filteredRows = mappedRows;
+801:         let filterApplied = false;
+802:         if (mappedDateCol) {
+803:           const internalDateKey = headerMapping[mappedDateCol];
+804:           filteredRows = mappedRows.filter(row => {
+805:             const parsed = parseDateMY(row[internalDateKey]);
+806:             return parsed && parsed.month === wizardMonth && parsed.year === wizardYear;
+807:           });
+808:           filterApplied = true;
+809:         }
+810: 
+811:         setWizardPreview({
+812:           sheetName,
+813:           totalInFile: dataRows.length, // Only count data rows, not headers/titles
+814:           filteredRows,
+815:           allRows: mappedRows,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+================================================================================
+
+=== Line 427 ===
+Step: 432, Source: MODEL, Type: RUN_COMMAND
+Response Content:
+Created At: 2026-06-10T12:04:48Z
+Completed At: 2026-06-10T12:04:58Z
+
+				The command completed successfully.
+				Output:
+				<truncated 29 lines>
+{"step_index":173,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-06-10T11:10:08Z","thinking":"**Prioritizing Tool Specificity**\n\nI'm focusing intently on tool specificity. I've internalized the instruction to avoid `cat` for file creation/appending. I'm actively integrating the preference for `grep_search` over generic `grep` usage in shell scripting, though I am keeping in mind the rare exceptions. I'm ensuring I don't use the `DO NOT` command; I understand its intention.\n\n\n**Refining Tool Usage**\n\nI'm now refining my approach to tool selection based on the specific tasks at hand. I've internalized the use of `ls`, `cat`, `grep`, and `sed` for their respective purposes. The crucial instruction to consider related tools before making calls is front of mind. I'm focusing on listing potential tools, I'm going to use `multi_replace_file_content` to make several updates to the `CementRegister.jsx` file. I'll include `UNLOADING STATUS NOTE`, `AMOUNT`, `BALANCE`, `RAFTER` and `INCENTIVE TDS`.\n\n\n**Adding Column Definition**\n\nI'm now incorporating changes to the column definitions within the `CementRegister.jsx` file. I'm adding `UNLOADING STATUS NOTE`, and `AMOUNT` columns.\n\n\n**Updating Column Definitions**\n\nI'm expanding the column definitions within the `CementRegister.jsx` file. I've now added `'BALANCE'` to the existing list of columns. Furthermore, I've incorporated `'RAFTER'` and `'INCENTIVE TDS'` columns into the file. I'm making sure to define them correctly.\n\n\n**Mapping Excel Headers**\n\nI'm now completely updating the `EXCEL_HEADER_MAP`. I'm meticulously mapping various Excel column headers, including aliases, to their corresponding internal keys for better data consistency and processing within the system. I'm focusing on ensuring accuracy and comprehensive coverage for common variations of header names to improve 
+<truncated 2465 bytes>
+nNOTE', width: 150, type: 'manual', group: 'id' },\\n  { key: 'E-WAY BILL NO', label: 'E-WAY BILL NO.', width: 170, type: 'auto', group: 'id' },\",\"StartLine\":42,\"TargetContent\":\"  { key: 'WHEEL', label: 'WHEEL', width: 80, type: 'auto', group: 'id' },\\n  { key: 'UNLOADING STATUS', label: 'UNLOADING STATUS', width: 150, type: 'manual', group: 'id', isDate: true },\\n  { key: 'E-WAY BILL NO', label: 'E-WAY BILL NO.', width: 170, type: 'auto', group: 'id' },\"},{\"AllowMultiple\":false,\"EndLine\":110,\"ReplacementContent\":\"  {\\n    key: 'BILLING ER VAR', label: 'BILLING ER\\\\n(Variable %)', width: 130, type: 'calc', group: 'billing',\\n    hint: 'Billing Amount × (1 - variable commission). Shows 0 for standard 95% owners.',\\n    formula: r => {\\n      const comm = r._freight_commission;\\n      if (comm === undefined || comm === null || Number(comm) === 0.05) return 0;\\n      return fmt2(num(r['Billing Amount']) * (1 - Number(comm)));\\n    }\\n  },\\n  { key: 'AMOUNT', label: 'AMOUNT', width: 100, type: 'manual', group: 'billing' },\\n  { key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.05) },\\n  {\",\"StartLine\":100,\"TargetContent\":\"  {\\n    key: 'BILLING ER VAR', label: 'BILLING ER\\\\n(Variable %)', width: 130, type: 'calc', group: 'billing',\\n    hint: 'Billing Amount × (1 - variable commission). Shows 0 for standard 95% owners.',\\n    formula: r => {\\n      const comm = r._freight_commission;\\n      if (comm === undefined || comm === null || Number(comm) === 0.05) return 0;\\n      return fmt2(num(r['Billing Amount']) * (1 - Number(comm)));\\n    }\\n  },\\n  { key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing', formula: r =>\n<truncated 12389 bytes>","TargetFile":"\"/Users/soumodeeproy/Desktop/lorrey-project-code 2/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx\"","toolAction":"\"Fixing Excel Header Mappings\"","toolSummary":"\"Fix Excel mapping aliases\""}}]}
+
+
+================================================================================
+
+=== Line 451 ===
+Step: 457, Source: MODEL, Type: RUN_COMMAND
+Response Content:
+Created At: 2026-06-10T12:06:35Z
+Completed At: 2026-06-10T12:06:39Z
+
+				The command completed successfully.
+				Output:
+				Step 18 (line 17): multi_replace_file_content
+  Keys: ['Description', 'Instruction', 'ReplacementChunks', 'TargetFile', 'toolAction', 'toolSummary']
+  ReplacementChunks type: <class 'str'>, length: 1960
+Step 22 (line 21): replace_file_content
+  Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+  Length: 79, Preview: "        const workbook = XLSX.read(data, { type: 'array', cellDates: true });"
+Step 35 (line 33): multi_replace_file_content
+  Keys: ['Description', 'Instruction', 'ReplacementChunks', 'TargetFile', 'toolAction', 'toolSummary']
+  ReplacementChunks type: <class 'str'>, length: 1960
+Step 49 (line 51): replace_file_content
+  Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+  Length: 2071, Preview: "  const handleWizardFileSelect = (e) => {\n    const file = e.target.files[0];\n    if (!file) return;\n    if (wizardFileRef.current) wizardFileRef.current.value = '';\n\n    const reader = new File
+Step 62 (line 64): replace_file_content
+  Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+  Length: 2070, Preview: "// Parse any common date string and return { month (1-12), year }\nfunction parseDateMY(str) {\n  if (!str) return null;\n  const s = String(str).trim();\n  \n  // Excel Serial Date (e.g. 45352)\n  i
+Step 66 (line 67): replace_file_content
+  Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+  Length: 1424, Preview: "                  {wizardPreview.filteredRows.length === 0 ? (\n                    <Box sx={{ bgcolor: '#fef3c7', border: '1.5p
+<truncated 674 bytes>
+unks', 'TargetFile', 'toolAction', 'toolSummary']
+  ReplacementChunks type: <class 'str'>, length: 1689
+Step 173 (line 173): multi_replace_file_content
+  Keys: ['Description', 'Instruction', 'ReplacementChunks', 'TargetFile', 'toolAction', 'toolSummary']
+  ReplacementChunks type: <class 'str'>, length: 2070
+Step 176 (line 176): replace_file_content
+  Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+  Length: 754, Preview: "          row.forEach((cell, colIdx) => {\n            if (!cell) return;\n            const cleaned = String(cell).toLowerCase().trim();\n            if (EXCEL_HEADER_MAP[cleaned]) {\n              
+Step 185 (line 185): replace_file_content
+  Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+  Length: 1031, Preview: "        const headerMapping = {}; // key: colIdx, value: internal field key\n        const unmappedHeaders = [];\n        const mappedFields = new Set();\n        \n        excelHeaders.forEach((h, c
+Step 194 (line 194): replace_file_content
+  Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+  Length: 400, Preview: "          const rowObj = {};\n          Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {\n            const colIdx = parseInt(colIdxStr, 10);\n            const rawVal = rowArr[c
+Step 330 (line 325): multi_replace_file_content
+  Keys: ['Description', 'Instruction', 'ReplacementChunks', 'TargetFile', 'toolAction', 'toolSummary']
+  ReplacementChunks type: <class 'str'>, length: 2072
+Step 371 (line 366): replace_file_content
+  Keys: ['AllowMultiple', 'Description', 'EndLine', 'Instruction', 'ReplacementContent', 'StartLine', 'TargetContent', 'TargetFile', 'toolAction', 'toolSummary']
+  Length: 17, Preview: "    />\n  );\n}"
+
+
+================================================================================
+
+=== Line 461 ===
+Step: 467, Source: MODEL, Type: VIEW_FILE
+================================================================================
+
+=== Line 516 ===
+Step: 522, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: write_to_file, Args Keys: ['CodeContent', 'Description', 'IsArtifact', 'Overwrite', 'TargetFile', 'toolAction', 'toolSummary']
+Code Content:
+"import os\nimport re\n\npb_path = \"/Users/soumodeeproy/.gemini/antigravity-ide/conversations/c860525f-8090-4d4c-9dc3-92e855250c39.pb\"\nout_dir = \"/Users/soumodeeproy/Desktop/lorrey-project-code 2/scratch\"\n\nif not os.path.exists(pb_path):\n    print(\"PB file not found\")\n    exit(1)\n\nwith open(pb_path, \"rb\") as f:\n    data = f.read()\n\nprint(f\"Read {len(data)} bytes from protobuf\")\n\n# We want to search for parts of the code. Let's search for \"EXCEL_HEADER_MAP\" which is in our file\n# and find surrounding text.\n# Let's search for all ASCII text sequences of length > 200 that contain javascript/react code keywords.\n# Regex to find sequences of printable characters and common whitespace (tabs, newlines, spaces)\n# of length at least 500.\npattern = re.compile(rb'[ -~\\r\\n\\t]{500,}')\nmatches = pattern.findall(data)\n\nprint(f\"Found {len(matches)} large text segments\")\n\n# Let's filter segments containing \"EXCEL_HEADER_MAP\" or \"CementRegister\" or \"normalizeDateStr\"\nextracted = []\nfor idx, m in enumerate(matches):\n    text = m.decode('utf-8', errors='ignore')\n    if \"EXCEL_HEADER_MAP\" in text or \"normalizeDateStr\" in text or \"handleWizardFileSelect\" in text:\n        extracted.append((idx, len(text), text))\n\nprint(f\"Filtered to {len(extracted)} segments matching keywords\")\n\nfor i, (idx, length, text) in enumerate(extracted):\n    out_file = os.path.join(out_dir, f\"segment_{idx}_{length}.txt\")\n    with open(out_file, \"w\", encoding=\"utf-8\") as out:\n        out.write(text)\n    print(f\"Saved segment {idx} (length {length}) to {out_file}\")\n    \n    # Print preview of the segment\n    print(f\"  Preview: {text[:200].replace(chr(10), ' ')} ...\")\n"
+================================================================================
+
+=== Line 520 ===
+Step: 526, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: write_to_file, Args Keys: ['CodeContent', 'Description', 'IsArtifact', 'Overwrite', 'TargetFile', 'toolAction', 'toolSummary']
+Code Content:
+"import os\n\npb_path = \"/Users/soumodeeproy/.gemini/antigravity-ide/conversations/c860525f-8090-4d4c-9dc3-92e855250c39.pb\"\n\nif not os.path.exists(pb_path):\n    print(\"PB file not found\")\n    exit(1)\n\nwith open(pb_path, \"rb\") as f:\n    data = f.read()\n\nkeyword = b\"EXCEL_HEADER_MAP\"\nidx = 0\nfound_indices = []\nwhile True:\n    idx = data.find(keyword, idx)\n    if idx == -1:\n        break\n    found_indices.append(idx)\n    idx += len(keyword)\n\nprint(f\"Found {len(found_indices)} occurrences of {keyword} at indices: {found_indices}\")\n\n# Print a small neighborhood around the first occurrence\nif found_indices:\n    first = found_indices[0]\n    start = max(0, first - 200)\n    end = min(len(data), first + 800)\n    chunk = data[start:end]\n    print(f\"Neighborhood around first occurrence:\")\n    print(chunk)\n"
+Response Content:
+I will write a Python script to search for the substring "EXCEL_HEADER_MAP" directly in the binary file to verify if it's there.
+================================================================================
+
+=== Line 523 ===
+Step: 529, Source: MODEL, Type: RUN_COMMAND
+Response Content:
+Created At: 2026-06-10T12:10:45Z
+Completed At: 2026-06-10T12:10:50Z
+
+				The command completed successfully.
+				Output:
+				Found 0 occurrences of b'EXCEL_HEADER_MAP' at indices: []
+
+
+================================================================================
+
+=== Line 540 ===
+Step: 546, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: run_command, Args Keys: ['CommandLine', 'Cwd', 'WaitMsBeforeAsync', 'toolAction', 'toolSummary']
+Response Content:
+I will search the git history across all commits and branches for the text `EXCEL_HEADER_MAP` to see if the Excel mapping table was committed.
+================================================================================
+
+=== Line 542 ===
+Step: 548, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: grep_search, Args Keys: ['CaseInsensitive', 'IsRegex', 'MatchPerLine', 'Query', 'SearchPath', 'toolAction', 'toolSummary']
+Response Content:
+I will search the workspace for `EXCEL_HEADER_MAP` to see if it's defined in any file on disk.
+================================================================================
+
+=== Line 543 ===
+Step: 549, Source: MODEL, Type: GREP_SEARCH
+Response Content:
+Created At: 2026-06-10T12:12:11Z
+Completed At: 2026-06-10T12:12:11Z
+{"File":"/Users/soumodeeproy/Desktop/lorrey-project-code 2/scratch/all_cement_register_edits.txt","LineNumber":22,"LineContent":"\"  const handleWizardFileSelect = (e) =\u003e {\\n    const file = e.target.files[0];\\n    if (!file) return;\\n    if (wizardFileRef.current) wizardFileRef.current.value = '';\\n\\n    const reader = new FileReader();\\n    reader.onload = (evt) =\u003e {\\n      try {\\n        const data = new Uint8Array(evt.target.result);\\n        const workbook = XLSX.read(data, { type: 'array', cellDates: false });\\n        const sheetName = workbook.SheetNames[0];\\n        const sheet = workbook.Sheets[sheetName];\\n        const rawRows = XLSX.utils.sheet_to_json(sheet, { raw: false, defval: '', blankrows: false });\\n\\n        if (rawRows.length === 0) {\\n          setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });\\n          return;\\n        }\\n\\n        // Build header mapping\\n        const excelHeaders = Object.keys(rawRows[0]);\\n        const headerMapping = {};\\n        const unmappedHeaders = [];\\n        excelHeaders.forEach(h =\u003e {\\n          const key = EXCEL_HEADER_MAP[h.trim().toLowerCase()];\\n          if (key) headerMapping[h] = key;\\n          else unmappedHeaders.push(h);\\n        });\\n\\n        // Find a date column to filter by month/year\\n        const dateColsPreference = [\\n          'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'\\n        ];\\n        const mappedDateCol = Object.entries(headerMapping).find(([, v]) =\u003e dateColsPreference.includes(v))?.[0];\\n\\n        // Convert rows, normalise dates, filter by selected month/year\\n        let mappedRows = rawRows.map(raw =\u003e {\\n          const row = {};\\n          Object.entries(headerMapping).forEach(([excelH, internalKey]) =\u003e {\\n            const val = normalizeDateStr(String(raw[excelH] ?? '').trim());\\n            if (val !== '') row[internalKey] = val;\\n          });\\n   
+<truncated 19684 bytes>
+ing = {}; // key: colIdx, value: internal field key\\n        const unmappedHeaders = [];\\n        const mappedFields = new Set();\\n        \\n        excelHeaders.forEach((h, colIdx) =\u003e {\\n          if (!h) return; // skip empty headers\\n          const cleaned = String(h).trim().toLowerCase();\\n          let key = EXCEL_HEADER_MAP[cleaned];\\n          \\n          if (key) {\\n             // Prevent duplicate assignments\\n             if (mappedFields.has(key)) {\\n                // If it's unloading status again, it's the note\\n                if (cleaned === 'unloading status' \u0026\u0026 !mappedFields.has('UNLOADING STATUS NOTE')) {\\n                   key = 'UNLOADING STATUS NOTE';\\n                } else if (cleaned === 'vehicle number') {\\n                   return; // skip duplicate vehicle number\\n                }\\n             }\\n             headerMapping[colIdx] = key;\\n             mappedFields.add(key);\\n          } else {\\n             unmappedHeaders.push(h);\\n          }\\n        });\""}
+{"File":"/Users/soumodeeproy/Desktop/lorrey-project-code 2/scratch/check_pb.py","LineNumber":12,"LineContent":"keyword = b\"EXCEL_HEADER_MAP\""}
+{"File":"/Users/soumodeeproy/Desktop/lorrey-project-code 2/scratch/extract_from_pb.py","LineNumber":16,"LineContent":"# We want to search for parts of the code. Let's search for \"EXCEL_HEADER_MAP\" which is in our file"}
+{"File":"/Users/soumodeeproy/Desktop/lorrey-project-code 2/scratch/extract_from_pb.py","LineNumber":26,"LineContent":"# Let's filter segments containing \"EXCEL_HEADER_MAP\" or \"CementRegister\" or \"normalizeDateStr\""}
+{"File":"/Users/soumodeeproy/Desktop/lorrey-project-code 2/scratch/extract_from_pb.py","LineNumber":30,"LineContent":"    if \"EXCEL_HEADER_MAP\" in text or \"normalizeDateStr\" in text or \"handleWizardFileSelect\" in text:"}
+{"File":"/Users/soumodeeproy/Desktop/lorrey-project-code 2/scratch/extracted_wizard_code.txt","LineNumber":169,"LineContent":"738:              if (EXCEL_HEADER_MAP[val]) matches++;"}
+================================================================================
+
+=== Line 546 ===
+Step: 552, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: run_command, Args Keys: ['CommandLine', 'Cwd', 'WaitMsBeforeAsync', 'toolAction', 'toolSummary']
+Response Content:
+I will search for `EXCEL_HEADER_MAP` directly in `CementRegister.jsx` using `grep`.
+================================================================================
+
+=== Line 570 ===
+Step: 576, Source: MODEL, Type: PLANNER_RESPONSE
+Tool Call: write_to_file, Args Keys: ['CodeContent', 'Description', 'IsArtifact', 'Overwrite', 'TargetFile', 'toolAction', 'toolSummary']
+Code Content:
+"import json\nimport os\n\ntranscript_path = \"/Users/soumodeeproy/.gemini/antigravity-ide/brain/c860525f-8090-4d4c-9dc3-92e855250c39/.system_generated/logs/transcript.jsonl\"\nout_path = \"/Users/soumodeeproy/Desktop/lorrey-project-code 2/scratch/found_header_map.txt\"\n\nif not os.path.exists(transcript_path):\n    print(\"Transcript not found\")\n    exit(1)\n\nwith open(transcript_path, \"r\", encoding=\"utf-8\") as f, open(out_path, \"w\", encoding=\"utf-8\") as out:\n    for idx, line in enumerate(f):\n        # We search raw text first\n        if \"EXCEL_HEADER_MAP\" in line or \"const MONTHS = [\" in line or \"wizardMonth\" in line or \"wizardPreview\" in line:\n            out.write(f\"=== Line {idx} ===\\n\")\n            try:\n                data = json.loads(line, strict=False)\n                step_idx = data.get(\"step_index\")\n                source = data.get(\"source\")\n                type_ = data.get(\"type\")\n                out.write(f\"Step: {step_idx}, Source: {source}, Type: {type_}\\n\")\n                \n                # Check tool calls\n                tool_calls = data.get(\"tool_calls\", [])\n                for tc in tool_calls:\n                    name = tc.get(\"name\")\n                    args = tc.get(\"args\") or {}\n                    if isinstance(args, str):\n                        try:\n                            args = json.loads(args, strict=False)\n                        except:\n                            pass\n                    if isinstance(args, dict):\n                        out.write(f\"Tool Call: {name}, Args Keys: {list(args.keys())}\\n\")\n                        # Try to print some fields if they contain mapping\n                        content = args.get(\"ReplacementContent\") or args.get(\"CodeContent\") or \"\"\n                        if content and \"EXCEL_HEADER_MAP\" in content:\n                            out.write(f\"Code Content:\\n{content}\\n\")\n                \n                # Check response content\n                content =
+<truncated 640 bytes>
+Response Content:
+I will write a Python script to search the logs (`transcript.jsonl`) for definitions of `EXCEL_HEADER_MAP` and see if there are any other untruncated segments of the Excel Wizard implementation.
+================================================================================
+

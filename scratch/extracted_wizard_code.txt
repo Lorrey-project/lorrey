@@ -1,0 +1,382 @@
+=== STEP 324 (Line 319) ===
+Source: MODEL, Type: PLANNER_RESPONSE
+Content:
+None
+========================================
+
+=== STEP 325 (Line 320) ===
+Source: MODEL, Type: VIEW_FILE
+Content:
+Created At: 2026-06-10T11:50:34Z
+Completed At: 2026-06-10T11:50:34Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1866
+Total Bytes: 90141
+Showing lines 333 to 375
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+333:   'dedicated': 'DEDICATED',
+334:   '10w extra 8.5%': '10W EXTRA 8.5%',
+335:   'rafter': 'RAFTER',
+336:   'incentive tds': 'INCENTIVE TDS',
+337:   'gross amount': 'GROSS AMOUNT',
+338:   // Owner
+339:   'owner name': 'OWNER NAME', 'owner': 'OWNER NAME',
+340:   'detaintion': 'Detention',
+341:   'transporting coast': 'Transporting Coast', 'transporting cost': 'Transporting Coast', 'transport cost': 'Transporting Coast',
+342: };
+343: 
+344: const MONTHS = [
+345:   'January','February','March','April','May','June',
+346:   'July','August','September','October','November','December'
+347: ];
+348: 
+349: // Parse any common date string and return { month (1-12), year }
+350: function parseDateMY(str) {
+351:   if (!str) return null;
+352:   const s = String(str).trim();
+353:   
+354:   // Excel Serial Date (e.g. 45352)
+355:   if (/^\d{5}(\.\d+)?$/.test(s)) {
+356:      const excelDays = parseFloat(s);
+357:      const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));
+358:      return { month: date.getUTCMonth() + 1, year: date.getUTCFullYear() };
+359:   }
+360: 
+361:   // dd-mm-yyyy or dd/mm/yyyy or d/m/yy
+362:   let m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+363:   if (m) {
+364:     let year = parseInt(m[3], 10);
+365:     if (year < 100) year += 2000;
+366:     let m1 = parseInt(m[1], 10);
+367:     let m2 = parseInt(m[2], 10);
+368:     let month = m2;
+369:     if (m2 > 12) month = m1; 
+370:     return { month, year };
+371:   }
+372:   // yyyy-mm-dd
+373:   m = s.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+374:   if (m) return { month: parseInt(m[2], 10), year: parseInt(m[1], 10) };
+375:   // dd-Mon-yyyy (e.g. 24-Apr-2026 or 24-Apr-26)
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+========================================
+
+=== STEP 326 (Line 321) ===
+Source: MODEL, Type: PLANNER_RESPONSE
+Content:
+None
+========================================
+
+=== STEP 327 (Line 322) ===
+Source: MODEL, Type: VIEW_FILE
+Content:
+Created At: 2026-06-10T11:50:36Z
+Completed At: 2026-06-10T11:50:37Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1866
+Total Bytes: 90141
+Showing lines 510 to 555
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+510: 
+511:   // ── Smart socket handler ───────────────────────────────────────────────────
+512:   const handleSocketEvent = useCallback(async (msg) => {
+513:     if (msg && msg.action === 'delete' && msg.invoiceId) {
+514:       // Instantly remove the row from local state — no round trip needed
+515:       setEntries(prev => prev.filter(r => r._invoiceId !== msg.invoiceId));
+516:       // Clear any pending drafts that belonged to the deleted invoice row
+517:       setEntries(prev => {
+518:         const deletedRow = prev.find(r => r._invoiceId === msg.invoiceId);
+519:         if (deletedRow) {
+520:           setLocalData(d => { const n = { ...d }; delete n[deletedRow._id]; return n; });
+521:         }
+522:         return prev.filter(r => r._invoiceId !== msg.invoiceId);
+523:       });
+524:       setLiveMsg('🗑️ Entry removed — invoice was deleted');
+525:     } else if (msg && msg.action === 'upsert') {
+526:       // Pull in just the new/updated entry
+527:       try {
+528:         const res = await axios.get(`${API_URL}/cement-register`);
+529:         if (res.data.success) {
+530:           setEntries(res.data.entries);
+531:           setLiveMsg('⚡ Register updated from new slip data');
+532:         }
+533:       } catch (e) {
+534:         console.error('Real-time refresh failed:', e);
+535:       }
+536:     } else {
+537:       // Generic bulk update
+538:       try {
+539:         const res = await axios.get(`${API_URL}/cement-register`);
+540:         if (res.data.success) setEntries(res.data.entries);
+541:       } catch (e) { /* silent */ }
+542:     }
+543:     // Auto-hide live message
+544:     setTimeout(() => setLiveMsg(null), 3500);
+545:   }, []);
+546: 
+547:   useEffect(() => {
+548:     fetchData();
+549:     socket.on('cementUpdates', handleSocketEvent);
+550:     return () => socket.off('cementUpdates', handleSocketEvent);
+551:   }, [fetchData, handleSocketEvent]);
+552: 
+553:   // ── Merged rows with calcs ─────────────────────────────────────────────────
+554:   const computedRows = useMemo(() => {
+555:     let rows = entries.map(row => {
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+========================================
+
+=== STEP 328 (Line 323) ===
+Source: MODEL, Type: PLANNER_RESPONSE
+Content:
+None
+========================================
+
+=== STEP 329 (Line 324) ===
+Source: MODEL, Type: VIEW_FILE
+Content:
+Created At: 2026-06-10T11:50:39Z
+Completed At: 2026-06-10T11:50:40Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1866
+Total Bytes: 90141
+Showing lines 715 to 815
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+715:         const data = new Uint8Array(evt.target.result);
+716:         const workbook = XLSX.read(data, { type: 'array', cellDates: false });
+717:         const sheetName = workbook.SheetNames[0];
+718:         const sheet = workbook.Sheets[sheetName];
+719:         
+720:         // Read as array of arrays to find the header row
+721:         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+722: 
+723:         if (aoa.length === 0) {
+724:           setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });
+725:           return;
+726:         }
+727: 
+728:         let bestHeaderRowIdx = 0;
+729:         let maxMatches = 0;
+730:         
+731:         // Scan first 15 rows to find the one that looks most like a header row
+732:         const searchLimit = Math.min(15, aoa.length);
+733:         for (let i = 0; i < searchLimit; i++) {
+734:           const row = aoa[i] || [];
+735:           let matches = 0;
+736:           row.forEach(cell => {
+737:              const val = String(cell).trim().toLowerCase();
+738:              if (EXCEL_HEADER_MAP[val]) matches++;
+739:           });
+740:           if (matches > maxMatches) {
+741:              maxMatches = matches;
+742:              bestHeaderRowIdx = i;
+743:           }
+744:         }
+745: 
+746:         const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());
+747:         const dataRows = aoa.slice(bestHeaderRowIdx + 1);
+748: 
+749:         const headerMapping = {}; // key: colIdx, value: internal field key
+750:         const un
+<truncated 1038 bytes>
+:         // Find a date column to filter by month/year
+776:         const dateColsPreference = [
+777:           'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'
+778:         ];
+779:         const mappedDateCol = Object.entries(headerMapping).find(([, v]) => dateColsPreference.includes(v))?.[0];
+780: 
+781:         // Convert rows, normalise dates
+782:         let mappedRows = [];
+783:         dataRows.forEach(rowArr => {
+784:           // skip empty rows
+785:           if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
+786:           
+787:           const rowObj = {};
+788:           Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {
+789:             const colIdx = parseInt(colIdxStr, 10);
+790:             const rawVal = rowArr[colIdx];
+791:             const val = normalizeDateStr(String(rawVal ?? '').trim());
+792:             if (val !== '') rowObj[internalKey] = val;
+793:           });
+794:           if (Object.keys(rowObj).length > 0) {
+795:              mappedRows.push(rowObj);
+796:           }
+797:         });
+798: 
+799:         // Filter by selected month + year if a date column was found
+800:         let filteredRows = mappedRows;
+801:         let filterApplied = false;
+802:         if (mappedDateCol) {
+803:           const internalDateKey = headerMapping[mappedDateCol];
+804:           filteredRows = mappedRows.filter(row => {
+805:             const parsed = parseDateMY(row[internalDateKey]);
+806:             return parsed && parsed.month === wizardMonth && parsed.year === wizardYear;
+807:           });
+808:           filterApplied = true;
+809:         }
+810: 
+811:         setWizardPreview({
+812:           sheetName,
+813:           totalInFile: dataRows.length, // Only count data rows, not headers/titles
+814:           filteredRows,
+815:           allRows: mappedRows,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+========================================
+
+=== STEP 330 (Line 325) ===
+Source: MODEL, Type: PLANNER_RESPONSE
+Content:
+None
+========================================
+
+=== STEP 375 (Line 370) ===
+Source: MODEL, Type: PLANNER_RESPONSE
+Content:
+None
+========================================
+
+=== STEP 376 (Line 371) ===
+Source: MODEL, Type: VIEW_FILE
+Content:
+Created At: 2026-06-10T12:01:02Z
+Completed At: 2026-06-10T12:01:03Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1234
+Total Bytes: 55763
+Showing lines 770 to 810
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+770:                       type="checkbox"
+771:                       checked={isSelected}
+772:                       disabled={isBillingMode && !isSelected && selectedIds.size >= 8}
+773:                       onChange={() => toggleSelect(row._id)}
+774:                       style={{ cursor: isBillingMode && !isSelected && selectedIds.size >= 8 ? 'not-allowed' : 'pointer', width: 13, height: 13, accentColor: '#7c3aed' }}
+775:                     />
+776:                   </td>
+777:                   {VISIBLE_COLS.map((col) => {
+778:                     const rawVal = row[col.key];
+779:                     const localVal = localData[row._id]?.[col.key];
+780:                     const displayVal = localVal !== undefined
+781:                       ? localVal
+782:                       : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
+783:                     const isDirty = localVal !== undefined;
+784:                     const gc = GROUP_COLORS[col.group] || GROUP_COLORS.id;
+785: 
+786:                     return (
+787:                       <CellRenderer
+788:                         key={col.key}
+789:                         col={col}
+790:                         value={displayVal}
+791:                         isDirty={isDirty}
+792:                         rowIndex={ri}
+793:                         row={row}
+794:                         onChange={(val) => handleCellEdit(row._id, col.key, val)}
+795:                         onAttachSaved={(field, url) => {
+796:                           const billNo = row['BILL NO'];
+797:                           setEntries(prev => prev.map(r => {
+798:                             if (field === 'BILL_PDF_URL' && billNo && r['BILL NO'] === billNo) {
+799:                               return { ...r, [field]: url };
+800:                             }
+801:                             return r._id === row._id ? { ...r, [field]: url } : r;
+802:                           }));
+803:                         }}
+804:                       />
+805:                     );
+806:                   })}
+807:                 </tr>
+808:               );
+809:             })}
+810:           </tbody>
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+========================================
+
+=== STEP 377 (Line 372) ===
+Source: MODEL, Type: PLANNER_RESPONSE
+Content:
+None
+========================================
+
+=== STEP 378 (Line 373) ===
+Source: MODEL, Type: VIEW_FILE
+Content:
+Created At: 2026-06-10T12:01:10Z
+Completed At: 2026-06-10T12:01:10Z
+File Path: `file:///Users/soumodeeproy/Desktop/lorrey-project-code%202/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx`
+Total Lines: 1234
+Total Bytes: 55763
+Showing lines 630 to 710
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+630:                 textTransform: 'none',
+631:                 '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' },
+632:               }}>
+633:               Run Batch Billing
+634:             </Button>
+635:           )}
+636: 
+637:           <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
+638: 
+639:           {selectedIds.size > 0 && !isBillingMode && (
+640:             <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }} />}
+641:               onClick={() => setConfirmDel(true)}
+642:               sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', boxShadow: 'none' }}>
+643:               Delete Selected
+644:             </Button>
+645:           )}
+646: 
+647:           <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
+648:             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>Export XLS</Button>
+649: 
+650:           <Button size="small" component="label" variant="outlined" startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
+651:             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+652:             Im
+<truncated 1374 bytes>
+on sx={{ fontSize: '1.1rem', color: '#475569' }} />
+674:             </IconButton>
+675:           </Tooltip>
+676:         </Box>
+677:       </Box>
+678: 
+679:       {/* ── Group header row ─────────────────────────────────────────────── */}
+680:       <Box sx={{ overflow: 'auto', flex: 1 }}>
+681:         <table style={{
+682:           borderCollapse: 'collapse', minWidth: '100%',
+683:           tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
+684:         }}>
+685:           {/* Col widths */}
+686:           <colgroup>
+687:             <col style={{ width: 40, minWidth: 40 }} />{/* checkbox */}
+688:             {VISIBLE_COLS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
+689:           </colgroup>
+690: 
+691:           <thead>
+692:             {/* Column headers */}
+693:             <tr>
+694:               {/* Select-all checkbox */}
+695:               <th style={{
+696:                 position: 'sticky', top: 0, zIndex: 3, width: 40, minWidth: 40,
+697:                 background: 'linear-gradient(135deg,#1e293b,#0f172a)',
+698:                 textAlign: 'center', padding: '7px 4px',
+699:                 borderRight: '1px solid rgba(255,255,255,0.12)',
+700:                 borderBottom: '2px solid rgba(255,255,255,0.2)',
+701:               }}>
+702:                 <input
+703:                   type="checkbox"
+704:                   checked={allSelected}
+705:                   ref={el => { if (el) el.indeterminate = someSelected; }}
+706:                   onChange={toggleSelectAll}
+707:                   style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#7c3aed' }}
+708:                 />
+709:               </th>
+710:               {VISIBLE_COLS.map((col) => {
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+
+========================================
+
+=== STEP 379 (Line 374) ===
+Source: MODEL, Type: PLANNER_RESPONSE
+Content:
+None
+========================================
+

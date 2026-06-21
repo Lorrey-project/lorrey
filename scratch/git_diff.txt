@@ -1,0 +1,682 @@
+diff --git a/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx b/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx
+index dfb70b7..6c35f90 100644
+--- a/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx
++++ b/frontend/review-dashboard/UI2/src/pages/CementRegister.jsx
+@@ -1,4 +1,5 @@
+ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
++import * as XLSX from 'xlsx';
+ import {
+   Box, Button, CircularProgress, Typography, IconButton,
+   Snackbar, Alert, Chip, Tooltip, Select, MenuItem,
+@@ -260,6 +261,156 @@ const VISIBLE_COLS = COLUMNS.filter((c, i, arr) =>
+   !c.hidden && arr.findIndex(x => x.key === c.key) === i
+ );
+ 
++// ─── Excel header alias map ────────────────────────────────────────────────────
++// Maps Excel column headers (lowercase) → internal COLUMNS key
++const EXCEL_HEADER_MAP = {
++  // Identification
++  'sl no': 'SL NO', 'sl': 'SL NO', 'serial no': 'SL NO', 's.no': 'SL NO',
++  'invoice date': 'LOADING DT', 'loading dt': 'LOADING DT', 'loading date': 'LOADING DT', 'date': 'LOADING DT',
++  'receiving date': 'RECEIVING DATE', 'recv date': 'RECEIVING DATE', 'received date': 'RECEIVING DATE',
++  'bill no': 'BILL NO', 'bill number': 'BILL NO', 'bill no.': 'BILL NO',
++  'bill date': 'BILL DATE',
++  'by portal': 'By Portal', 'portal': 'By Portal',
++  'site': 'SITE', 'site name': 'SITE',
++  'vehicle number': 'VEHICLE NUMBER', 'vehicle no': 'VEHICLE NUMBER', 'truck no': 'VEHICLE NUMBER',
++  'vehicle no.': 'VEHICLE NUMBER', 'veh no': 'VEHICLE NUMBER',
++  'wheel': 'WHEEL', 'wheels': 'WHEEL',
++  'unloading status': 'UNLOADING STATUS', 'unloading date': 'UNLOADING STATUS', 'unload date': 'UNLOADING STATUS',
++  'e-way bill no': 'E-WAY BILL NO', 'eway bill no': 'E-WAY BILL NO', 'eway bill': 'E-WAY BILL NO',
++  'e way bill no': 'E-WAY BILL NO', 'e-way bill no.': 'E-WAY BILL NO', 'ewb no': 'E-WAY BILL NO',
++  'dn': 'DN', 'dn (driver)': 'DN', 'driver': 'DN', 'driver name': 'DN',
++  'e-way bill validity': 'E-WAY BILL VALIDITY', 'eway validity': 'E-WAY BILL VALIDITY', 'ewb validity': 'E-WAY BILL VALIDITY',
++  'gcn no': 'GCN NO', 'gcn': 'GCN NO', 'gcn no.': 'GCN NO',
++  'invoice no': 'INVOICE NO', 'invoice number': 'INVOICE NO', 'invoice no.': 'INVOICE NO',
++  'shipment no': 'SHIPMENT NO', 'shipment number': 'SHIPMENT NO', 'shipment no.': 'SHIPMENT NO',
++  'challan status': 'CHALLAN STATUS', 'challan': 'CHALLAN STATUS',
++  'bill type': 'Bill Type',
++  // Billing
++  'destination': 'DESTINATION', 'dest': 'DESTINATION',
++  'party name': 'PARTY NAME', 'party': 'PARTY NAME', 'consignee': 'PARTY NAME',
++  'billing': 'BILLING', 'freight': 'BILLING', 'rate': 'BILLING',
++  'mt': 'MT', 'metric ton': 'MT', 'tonnes': 'MT', 'qty': 'MT', 'quantity': 'MT', 'wt': 'MT',
++  'advance': 'ADVANCE', 'loading advance': 'ADVANCE', 'adv': 'ADVANCE',
++  'site cash': 'Site Cash', 'site cash advance': 'Site Cash',
++  'office cash': 'OFFICE CASH', 'office cash advance': 'OFFICE CASH',
++  'bank tf': 'Bank TF', 'bank transfer': 'Bank TF', 'advance (bank tf)': 'Bank TF', 'neft': 'Bank TF',
++  // Deductions
++  'others deduction': 'Others deduction', 'other deduction': 'Others deduction', 'deduction': 'Others deduction',
++  'other': 'Other',
++  'gps monitoring charge': 'GPS Monitoring Charge', 'gps charge': 'GPS Monitoring Charge', 'gps': 'GPS Monitoring Charge',
++  'gps device': 'GPS DEVICE',
++  'rfid tag': 'RFID TAG', 'rfid': 'RFID TAG',
++  'rfid reassurance': 'RFID REASSURANCE',
++  'fastag': 'FASTAG', 'fas tag': 'FASTAG',
++  // HSD / Fuel
++  'pump name': 'PUMP NAME', 'pump': 'PUMP NAME',
++  'hsd slip no': 'HSD SLIP NO', 'hsd slip': 'HSD SLIP NO',
++  'hsd bill no': 'HSD BILL NO',
++  'km as per rate chart': 'KM AS PER RATE CHART', 'km': 'KM AS PER RATE CHART', 'distance': 'KM AS PER RATE CHART',
++  'fuel required': 'FUEL REQUIRED',
++  'hsd (ltr)': 'HSD (LTR)', 'hsd ltr': 'HSD (LTR)', 'hsd litre': 'HSD (LTR)', 'hsd': 'HSD (LTR)', 'diesel': 'HSD (LTR)',
++  'extra allowed': 'EXTRA ALLOWED',
++  'hsd rate': 'HSD RATE', 'diesel rate': 'HSD RATE',
++  'hsd amount': 'HSD AMOUNT', 'diesel amount': 'HSD AMOUNT',
++  'travelling exp': 'TRAVELLING EXP', 'travel exp': 'TRAVELLING EXP', 'travelling': 'TRAVELLING EXP',
++  'shortage (bag)': 'SHORTAGE (BAG)', 'shortage bag': 'SHORTAGE (BAG)', 'short bag': 'SHORTAGE (BAG)',
++  'shortage (rate)': 'SHORTAGE (RATE)', 'shortage rate': 'SHORTAGE (RATE)',
++  // Net
++  'up toll': 'UP TOLL', 'toll up': 'UP TOLL',
++  'down toll': 'DOWN TOLL', 'toll down': 'DOWN TOLL',
++  'extra unloading': 'EXTRA UNLOADING', 'unloading': 'EXTRA UNLOADING',
++  'dedicated': 'DEDICATED',
++  // Owner
++  'owner name': 'OWNER NAME', 'owner': 'OWNER NAME',
++  'transporting coast': 'Transporting Coast', 'transporting cost': 'Transporting Coast', 'transport cost': 'Transporting Coast',
++};
++
++const MONTHS = [
++  'January', 'February', 'March', 'April', 'May', 'June',
++  'July', 'August', 'September', 'October', 'November', 'December'
++];
++
++// Parse any common date string and return { month (1-12), year }
++function parseDateMY(str) {
++  if (!str) return null;
++  const s = String(str).trim();
++
++  // Excel Serial Date (e.g. 45352)
++  if (/^\d{5}(\.\d+)?$/.test(s)) {
++    const excelDays = parseFloat(s);
++    const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));
++    return { month: date.getUTCMonth() + 1, year: date.getUTCFullYear() };
++  }
++
++  // dd-mm-yyyy or dd/mm/yyyy or d/m/yy
++  let m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
++  if (m) {
++    let year = parseInt(m[3], 10);
++    if (year < 100) year += 2000;
++    let m1 = parseInt(m[1], 10);
++    let m2 = parseInt(m[2], 10);
++    let month = m2;
++    if (m2 > 12) month = m1;
++    return { month, year };
++  }
++  // yyyy-mm-dd
++  m = s.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
++  if (m) return { month: parseInt(m[2], 10), year: parseInt(m[1], 10) };
++  // dd-Mon-yyyy (e.g. 24-Apr-2026 or 24-Apr-26)
++  m = s.match(/^(\d{1,2})[\/-](\w+)[\/-](\d{2,4})$/);
++  if (m) {
++    const monthIdx = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(m[2].toLowerCase().slice(0, 3));
++    let year = parseInt(m[3], 10);
++    if (year < 100) year += 2000;
++    if (monthIdx >= 0) return { month: monthIdx + 1, year };
++  }
++  return null;
++}
++
++// Normalize any date string to dd-mm-yyyy
++function normalizeDateStr(str) {
++  if (!str) return str;
++  const s = String(str).trim();
++  // Already dd-mm-yyyy
++  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
++
++  // Excel Serial Date
++  if (/^\d{5}(\.\d+)?$/.test(s)) {
++    const excelDays = parseFloat(s);
++    const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));
++    return `${String(date.getUTCDate()).padStart(2, '0')}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${date.getUTCFullYear()}`;
++  }
++
++  // dd/mm/yyyy or d/m/yy
++  const slashDMY = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
++  if (slashDMY) {
++    let year = parseInt(slashDMY[3], 10);
++    if (year < 100) year += 2000;
++    let m1 = parseInt(slashDMY[1], 10);
++    let m2 = parseInt(slashDMY[2], 10);
++    let d = m1, m = m2;
++    if (m2 > 12) { d = m2; m = m1; }
++    return `${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}-${year}`;
++  }
++
++  // yyyy-mm-dd
++  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
++  if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
++
++  // dd-Mon-yyyy
++  const monMatch = s.match(/^(\d{1,2})[\/-](\w+)[\/-](\d{2,4})$/);
++  if (monMatch) {
++    const monthIdx = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(monMatch[2].toLowerCase().slice(0, 3));
++    if (monthIdx >= 0) {
++      let year = parseInt(monMatch[3], 10);
++      if (year < 100) year += 2000;
++      return `${monMatch[1].padStart(2, '0')}-${String(monthIdx + 1).padStart(2, '0')}-${year}`;
++    }
++  }
++
++  return s;
++}
++
+ // ─── Main Component ───────────────────────────────────────────────────────────
+ export default function CementRegister({ onBack }) {
+   const [entries, setEntries] = useState([]);
+@@ -278,6 +429,14 @@ export default function CementRegister({ onBack }) {
+   const [bulkBillInput, setBulkBillInput] = useState({ billNo: '', billDate: '' });
+   const [activeRowId, setActiveRowId] = useState(null);
+ 
++  // ── Excel import wizard state ──────────────────────────────────────────────
++  const [showExcelWizard, setShowExcelWizard] = useState(false);
++  const [wizardStep, setWizardStep] = useState(1);        // 1=month/year, 2=upload+preview
++  const [wizardMonth, setWizardMonth] = useState(new Date().getMonth() + 1);
++  const [wizardYear, setWizardYear] = useState(new Date().getFullYear());
++  const [wizardPreview, setWizardPreview] = useState(null); // parsed result
++  const [wizardImporting, setWizardImporting] = useState(false);
++  const wizardFileRef = useRef(null);
+ 
+ 
+   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
+@@ -469,7 +628,7 @@ export default function CementRegister({ onBack }) {
+           const row = computedRows.find(r => r._id === id);
+           const rawSite = String(row?.['SITE'] || '').trim().toUpperCase();
+           const prefix = rawSite === 'NVL' ? 'DAC/' : 'NVCL/';
+-          
++
+           const formattedBillDate = billDate ? (() => {
+             const [y, m, d] = billDate.split('-');
+             return `${d}/${m}/${y}`;
+@@ -518,6 +677,140 @@ export default function CementRegister({ onBack }) {
+     }
+   };
+ 
++  // ── Excel Import Wizard: parse file ────────────────────────────────────────
++  const handleWizardFileSelect = (e) => {
++    const file = e.target.files[0];
++    if (!file) return;
++    if (wizardFileRef.current) wizardFileRef.current.value = '';
++
++    const reader = new FileReader();
++    reader.onload = (evt) => {
++      try {
++        const data = new Uint8Array(evt.target.result);
++        const workbook = XLSX.read(data, { type: 'array', cellDates: false });
++        const sheetName = workbook.SheetNames[0];
++        const sheet = workbook.Sheets[sheetName];
++
++        // Read as array of arrays to find the header row
++        const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
++
++        if (aoa.length === 0) {
++          setSnack({ severity: 'warning', msg: 'Excel sheet is empty.' });
++          return;
++        }
++
++        let bestHeaderRowIdx = 0;
++        let maxMatches = 0;
++
++        // Scan first 15 rows to find the one that looks most like a header row
++        const searchLimit = Math.min(15, aoa.length);
++        for (let i = 0; i < searchLimit; i++) {
++          const row = aoa[i] || [];
++          let matches = 0;
++          row.forEach(cell => {
++            const val = String(cell).trim().toLowerCase();
++            if (EXCEL_HEADER_MAP[val]) matches++;
++          });
++          if (matches > maxMatches) {
++            maxMatches = matches;
++            bestHeaderRowIdx = i;
++          }
++        }
++
++        const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());
++        const dataRows = aoa.slice(bestHeaderRowIdx + 1);
++
++        const headerMapping = {};
++        const unmappedHeaders = [];
++        excelHeaders.forEach(h => {
++          if (!h) return; // skip empty headers
++          const key = EXCEL_HEADER_MAP[h.toLowerCase()];
++          if (key) headerMapping[h] = key;
++          else unmappedHeaders.push(h);
++        });
++
++        // Find a date column to filter by month/year
++        const dateColsPreference = [
++          'LOADING DT', 'BILL DATE', 'RECEIVING DATE', 'UNLOADING STATUS'
++        ];
++        const mappedDateCol = Object.entries(headerMapping).find(([, v]) => dateColsPreference.includes(v))?.[0];
++
++        // Convert rows, normalise dates
++        let mappedRows = [];
++        dataRows.forEach(rowArr => {
++          // skip empty rows
++          if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
++
++          const rowObj = {};
++          Object.entries(headerMapping).forEach(([excelH, internalKey]) => {
++            const colIdx = excelHeaders.indexOf(excelH);
++            if (colIdx !== -1) {
++              const rawVal = rowArr[colIdx];
++              const val = normalizeDateStr(String(rawVal ?? '').trim());
++              if (val !== '') rowObj[internalKey] = val;
++            }
++          });
++          if (Object.keys(rowObj).length > 0) {
++            mappedRows.push(rowObj);
++          }
++        });
++
++        // Filter by selected month + year if a date column was found
++        let filteredRows = mappedRows;
++        let filterApplied = false;
++        if (mappedDateCol) {
++          const internalDateKey = headerMapping[mappedDateCol];
++          filteredRows = mappedRows.filter(row => {
++            const parsed = parseDateMY(row[internalDateKey]);
++            return parsed && parsed.month === wizardMonth && parsed.year === wizardYear;
++          });
++          filterApplied = true;
++        }
++
++        setWizardPreview({
++          sheetName,
++          totalInFile: dataRows.length, // Only count data rows, not headers/titles
++          filteredRows,
++          allRows: mappedRows,
++          headerMapping,
++          unmappedHeaders,
++          mappedCount: Object.keys(headerMapping).length,
++          filterApplied,
++          fileName: file.name,
++        });
++        setWizardStep(2);
++      } catch (err) {
++        console.error('Excel parse error:', err);
++        setSnack({ severity: 'error', msg: 'Failed to parse Excel: ' + err.message });
++      }
++    };
++    reader.readAsArrayBuffer(file);
++  };
++
++  // ── Excel Import Wizard: confirm + send to server ──────────────────────────
++  const handleWizardImportConfirm = async () => {
++    const rows = wizardPreview?.filteredRows;
++    if (!rows?.length) return;
++    setWizardImporting(true);
++    try {
++      const token = localStorage.getItem('token');
++      await axios.post(
++        `${API_URL}/cement-register/bulk`,
++        { entries: rows },
++        { headers: { Authorization: `Bearer ${token}` } }
++      );
++      setSnack({ severity: 'success', msg: `✅ ${rows.length} rows imported from Excel for ${MONTHS[wizardMonth - 1]} ${wizardYear}!` });
++      setShowExcelWizard(false);
++      setWizardStep(1);
++      setWizardPreview(null);
++      fetchData();
++    } catch (err) {
++      setSnack({ severity: 'error', msg: 'Import failed: ' + (err.response?.data?.error || err.message) });
++    } finally {
++      setWizardImporting(false);
++    }
++  };
++
+   // ─────────────────────────────────────────────────────────────────────────
+   // Show Incentive Analysis sheet (passes all computed rows as source data)
+   if (showIncentive) {
+@@ -599,9 +892,9 @@ export default function CementRegister({ onBack }) {
+           </Button>
+ 
+           {isBillingMode ? (
+-            <Box sx={{ 
+-              display: 'flex', alignItems: 'center', gap: 1.5, 
+-              bgcolor: '#f8fafc', px: 2, py: 0.75, borderRadius: '12px', border: '1px solid #e2e8f0' 
++            <Box sx={{
++              display: 'flex', alignItems: 'center', gap: 1.5,
++              bgcolor: '#f8fafc', px: 2, py: 0.75, borderRadius: '12px', border: '1px solid #e2e8f0'
+             }}>
+               <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#475569', letterSpacing: '0.5px' }}>BILLING STAGE (AUTO BILL NO)</Typography>
+               <input
+@@ -615,7 +908,7 @@ export default function CementRegister({ onBack }) {
+                 sx={{ fontWeight: 700, fontSize: '0.75rem', px: 2, borderRadius: '8px', bgcolor: '#0f172a', '&:hover': { bgcolor: '#1e293b' }, boxShadow: 'none' }}>
+                 Apply ({selectedIds.size})
+               </Button>
+-              <Button size="small" sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b', minWidth: 0, px: 1, textTransform: 'none' }} 
++              <Button size="small" sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b', minWidth: 0, px: 1, textTransform: 'none' }}
+                 onClick={() => setIsBillingMode(false)}>Exit</Button>
+             </Box>
+           ) : (
+@@ -637,19 +930,36 @@ export default function CementRegister({ onBack }) {
+           <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
+ 
+           {selectedIds.size > 0 && !isBillingMode && (
+-            <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }}/>}
++            <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }} />}
+               onClick={() => setConfirmDel(true)}
+               sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', boxShadow: 'none' }}>
+               Delete Selected
+             </Button>
+           )}
+ 
+-          <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }}/>} onClick={handleExport}
++          <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
+             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>Export XLS</Button>
+-          
+-          <Button size="small" component="label" variant="outlined" startIcon={<UploadIcon sx={{ fontSize: '1rem' }}/>}
++
++          {/* ── Excel Upload Wizard Button ── */}
++          <Button
++            size="small"
++            variant="contained"
++            startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
++            onClick={() => { setShowExcelWizard(true); setWizardStep(1); setWizardPreview(null); }}
++            sx={{
++              fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem',
++              textTransform: 'none', boxShadow: 'none',
++              background: 'linear-gradient(135deg,#7c3aed,#6d28d9)',
++              color: '#fff',
++              '&:hover': { background: 'linear-gradient(135deg,#6d28d9,#5b21b6)', boxShadow: '0 4px 14px rgba(124,58,237,0.35)' },
++            }}
++          >
++            Import Excel
++          </Button>
++
++          <Button size="small" component="label" variant="outlined" startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
+             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+-            Import
++            Import CSV
+             <input type="file" accept=".csv" hidden onChange={handleImport} />
+           </Button>
+ 
+@@ -811,6 +1121,276 @@ export default function CementRegister({ onBack }) {
+         </table>
+       </Box>
+ 
++      {/* ══════════════════════════════════════════════════════════════════════
++           Excel Import Wizard Modal
++      ══════════════════════════════════════════════════════════════════════ */}
++      {showExcelWizard && (
++        <Box sx={{
++          position: 'fixed', inset: 0, zIndex: 10000,
++          background: 'rgba(15,23,42,0.7)', backdropFilter: 'blur(8px)',
++          display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2,
++        }} onClick={() => !wizardImporting && (setShowExcelWizard(false), setWizardStep(1), setWizardPreview(null))}>
++
++          <Box sx={{
++            bgcolor: '#fff', borderRadius: '20px',
++            maxWidth: 680, width: '100%',
++            boxShadow: '0 32px 100px rgba(0,0,0,0.4)',
++            overflow: 'hidden', display: 'flex', flexDirection: 'column',
++          }} onClick={e => e.stopPropagation()}>
++
++            {/* ── Header ── */}
++            <Box sx={{ background: 'linear-gradient(135deg,#4c1d95,#7c3aed,#6d28d9)', px: 3.5, pt: 3, pb: 2.5 }}>
++              <Box display="flex" alignItems="center" justifyContent="space-between">
++                <Box>
++                  <Typography variant="h6" fontWeight={800} color="#fff" sx={{ letterSpacing: '-0.4px' }}>
++                    📥 Import Excel to Cement Register
++                  </Typography>
++                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>
++                    Step {wizardStep} of 2 — {wizardStep === 1 ? 'Select Period' : 'Preview & Confirm'}
++                  </Typography>
++                </Box>
++                {/* Step pills */}
++                <Box display="flex" gap={1}>
++                  {[1, 2].map(s => (
++                    <Box key={s} sx={{
++                      width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
++                      fontWeight: 800, fontSize: '12px',
++                      bgcolor: wizardStep >= s ? '#fff' : 'rgba(255,255,255,0.2)',
++                      color: wizardStep >= s ? '#7c3aed' : 'rgba(255,255,255,0.5)',
++                    }}>{s}</Box>
++                  ))}
++                </Box>
++              </Box>
++            </Box>
++
++            {/* ── Step 1: Month + Year selector ── */}
++            {wizardStep === 1 && (
++              <Box sx={{ px: 3.5, py: 3 }}>
++                <Typography fontWeight={700} fontSize="14px" color="#0f172a" mb={0.5}>
++                  Which month &amp; year does this Excel sheet cover?
++                </Typography>
++                <Typography fontSize="12px" color="#64748b" mb={3}>
++                  Only rows matching this period will be imported into the register.
++                </Typography>
++
++                <Box display="flex" gap={2} mb={4}>
++                  {/* Month */}
++                  <Box flex={2}>
++                    <Typography fontSize="11px" fontWeight={700} color="#475569" mb={0.75} sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Month</Typography>
++                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 0.75 }}>
++                      {MONTHS.map((mo, idx) => (
++                        <Box key={mo}
++                          onClick={() => setWizardMonth(idx + 1)}
++                          sx={{
++                            py: 0.9, textAlign: 'center', borderRadius: '10px', cursor: 'pointer',
++                            fontSize: '12px', fontWeight: wizardMonth === idx + 1 ? 800 : 500,
++                            border: `2px solid ${wizardMonth === idx + 1 ? '#7c3aed' : '#e2e8f0'}`,
++                            bgcolor: wizardMonth === idx + 1 ? '#ede9fe' : '#f8fafc',
++                            color: wizardMonth === idx + 1 ? '#5b21b6' : '#475569',
++                            transition: 'all 0.15s',
++                            '&:hover': { borderColor: '#c4b5fd', bgcolor: '#f5f3ff' },
++                          }}>{mo.slice(0, 3)}</Box>
++                      ))}
++                    </Box>
++                  </Box>
++
++                  {/* Year */}
++                  <Box flex={1}>
++                    <Typography fontSize="11px" fontWeight={700} color="#475569" mb={0.75} sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Year</Typography>
++                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
++                      {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(yr => (
++                        <Box key={yr}
++                          onClick={() => setWizardYear(yr)}
++                          sx={{
++                            py: 1, textAlign: 'center', borderRadius: '10px', cursor: 'pointer',
++                            fontSize: '13px', fontWeight: wizardYear === yr ? 800 : 500,
++                            border: `2px solid ${wizardYear === yr ? '#7c3aed' : '#e2e8f0'}`,
++                            bgcolor: wizardYear === yr ? '#ede9fe' : '#f8fafc',
++                            color: wizardYear === yr ? '#5b21b6' : '#475569',
++                            transition: 'all 0.15s',
++                            '&:hover': { borderColor: '#c4b5fd', bgcolor: '#f5f3ff' },
++                          }}>{yr}</Box>
++                      ))}
++                    </Box>
++                  </Box>
++                </Box>
++
++                {/* Selected summary */}
++                <Box sx={{ bgcolor: '#ede9fe', border: '1.5px solid #c4b5fd', borderRadius: '12px', px: 2.5, py: 1.5, mb: 3, display: 'flex', alignItems: 'center', gap: 1.5 }}>
++                  <span style={{ fontSize: '20px' }}>📅</span>
++                  <Box>
++                    <Typography fontSize="11px" color="#6d28d9" fontWeight={700}>Selected Period</Typography>
++                    <Typography fontSize="15px" fontWeight={800} color="#4c1d95">
++                      {MONTHS[wizardMonth - 1]} {wizardYear}
++                    </Typography>
++                  </Box>
++                </Box>
++
++                {/* Next: pick file */}
++                <Box sx={{
++                  bgcolor: '#f8fafc', border: '2px dashed #c4b5fd', borderRadius: '14px', p: 3, textAlign: 'center', cursor: 'pointer',
++                  '&:hover': { bgcolor: '#f5f3ff', borderColor: '#7c3aed' }, transition: 'all 0.2s'
++                }}
++                  onClick={() => wizardFileRef.current?.click()}
++                >
++                  <Box sx={{ fontSize: '36px', mb: 1 }}>📊</Box>
++                  <Typography fontWeight={700} color="#5b21b6" fontSize="14px">Click to select your Excel file</Typography>
++                  <Typography fontSize="11px" color="#94a3b8" mt={0.5}>.xlsx or .xls files accepted</Typography>
++                  <input ref={wizardFileRef} type="file" accept=".xlsx,.xls" hidden onChange={handleWizardFileSelect} />
++                </Box>
++
++                <Box display="flex" justifyContent="flex-end" mt={2}>
++                  <Button variant="outlined" size="small" onClick={() => setShowExcelWizard(false)}
++                    sx={{ fontWeight: 700, borderRadius: '10px', textTransform: 'none' }}>Cancel</Button>
++                </Box>
++              </Box>
++            )}
++
++            {/* ── Step 2: Preview ── */}
++            {wizardStep === 2 && wizardPreview && (
++              <Box sx={{ px: 3.5, py: 2.5, display: 'flex', flexDirection: 'column', gap: 2 }}>
++
++                {/* Stats bar */}
++                <Box display="flex" gap={1.5} flexWrap="wrap">
++                  <Box sx={{ bgcolor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
++                    <Typography variant="h5" fontWeight={800} color="#16a34a">{wizardPreview.totalInFile}</Typography>
++                    <Typography fontSize="11px" color="#15803d" fontWeight={600}>Total in File</Typography>
++                  </Box>
++                  <Box sx={{ bgcolor: '#ede9fe', border: '1px solid #c4b5fd', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
++                    <Typography variant="h5" fontWeight={800} color="#7c3aed">{wizardPreview.filteredRows.length}</Typography>
++                    <Typography fontSize="11px" color="#6d28d9" fontWeight={600}>{MONTHS[wizardMonth - 1]} {wizardYear}</Typography>
++                  </Box>
++                  <Box sx={{ bgcolor: '#dbeafe', border: '1px solid #93c5fd', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
++                    <Typography variant="h5" fontWeight={800} color="#1d4ed8">{wizardPreview.mappedCount}</Typography>
++                    <Typography fontSize="11px" color="#1e40af" fontWeight={600}>Cols Mapped</Typography>
++                  </Box>
++                  {wizardPreview.unmappedHeaders.length > 0 && (
++                    <Box sx={{ bgcolor: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
++                      <Typography variant="h5" fontWeight={800} color="#d97706">{wizardPreview.unmappedHeaders.length}</Typography>
++                      <Typography fontSize="11px" color="#b45309" fontWeight={600}>Skipped Cols</Typography>
++                    </Box>
++                  )}
++                </Box>
++
++                {/* Mapped columns */}
++                <Box>
++                  <Typography fontSize="11px" fontWeight={700} color="#475569" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.75 }}>Column Mapping</Typography>
++                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, maxHeight: 80, overflowY: 'auto' }}>
++                    {Object.entries(wizardPreview.headerMapping).map(([excelH, internalKey]) => (
++                      <Box key={excelH} sx={{
++                        bgcolor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px',
++                        px: 1, py: 0.25, fontSize: '10.5px', fontWeight: 600,
++                        display: 'flex', alignItems: 'center', gap: 0.5,
++                      }}>
++                        <span style={{ color: '#94a3b8' }}>{excelH}</span>
++                        <span style={{ color: '#cbd5e1' }}>→</span>
++                        <span style={{ color: '#15803d' }}>{internalKey}</span>
++                      </Box>
++                    ))}
++                    {wizardPreview.unmappedHeaders.map(h => (
++                      <Box key={h} sx={{
++                        bgcolor: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '6px',
++                        px: 1, py: 0.25, fontSize: '10.5px', fontWeight: 600, color: '#92400e',
++                        textDecoration: 'line-through',
++                      }}>{h}</Box>
++                    ))}
++                  </Box>
++                </Box>
++
++                {/* Data preview table */}
++                <Box>
++                  <Typography fontSize="11px" fontWeight={700} color="#475569" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.75 }}>
++                    Data Preview — {wizardPreview.filteredRows.length} rows for {MONTHS[wizardMonth - 1]} {wizardYear}
++                  </Typography>
++                  {wizardPreview.filteredRows.length === 0 ? (
++                    <Box sx={{ bgcolor: '#fef3c7', border: '1.5px solid #fcd34d', borderRadius: '10px', p: 2.5, textAlign: 'center' }}>
++                      <Typography fontSize="13px" fontWeight={700} color="#d97706">⚠️ No rows found for {MONTHS[wizardMonth - 1]} {wizardYear}</Typography>
++                      <Typography fontSize="12px" color="#92400e" mt={0.5}>
++                        {wizardPreview.filterApplied
++                          ? 'The date column in your Excel does not contain entries for this period. Try a different month/year.'
++                          : 'No date column was recognised. All rows will be imported.'}
++                      </Typography>
++                      {wizardPreview.allRows.length > 0 && (
++                        <Button
++                          variant="contained" size="small"
++                          onClick={() => setWizardPreview(prev => ({ ...prev, filteredRows: prev.allRows, filterApplied: false }))}
++                          sx={{ mt: 2, fontWeight: 800, textTransform: 'none', bgcolor: '#d97706', '&:hover': { bgcolor: '#b45309' }, boxShadow: 'none' }}
++                        >
++                          Import All {wizardPreview.allRows.length} Rows Anyway
++                        </Button>
++                      )}
++                    </Box>
++                  ) : (
++                    <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden', maxHeight: 200, overflowY: 'auto', overflowX: 'auto' }}>
++                      <table style={{ borderCollapse: 'collapse', fontSize: '11px', width: '100%', fontFamily: 'Inter,system-ui,sans-serif' }}>
++                        <thead>
++                          <tr style={{ background: 'linear-gradient(135deg,#4c1d95,#6d28d9)', position: 'sticky', top: 0 }}>
++                            <th style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.6)', fontWeight: 700, textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', minWidth: 36 }}>#</th>
++                            {Object.keys(wizardPreview.headerMapping).slice(0, 10).map(excelH => (
++                              <th key={excelH} style={{ padding: '7px 10px', color: '#e9d5ff', fontWeight: 700, textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', whiteSpace: 'nowrap' }}>
++                                {wizardPreview.headerMapping[excelH]}
++                              </th>
++                            ))}
++                          </tr>
++                        </thead>
++                        <tbody>
++                          {wizardPreview.filteredRows.slice(0, 8).map((row, ri) => (
++                            <tr key={ri} style={{ background: ri % 2 === 0 ? '#fff' : '#f8fafc' }}>
++                              <td style={{ padding: '5px 10px', color: '#94a3b8', fontWeight: 600, textAlign: 'center', borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #f1f5f9' }}>{ri + 1}</td>
++                              {Object.keys(wizardPreview.headerMapping).slice(0, 10).map(excelH => {
++                                const k = wizardPreview.headerMapping[excelH];
++                                return (
++                                  <td key={excelH} style={{ padding: '5px 10px', borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', color: '#1e293b' }}>
++                                    {row[k] || <span style={{ color: '#cbd5e1' }}>—</span>}
++                                  </td>
++                                );
++                              })}
++                            </tr>
++                          ))}
++                        </tbody>
++                      </table>
++                      {wizardPreview.filteredRows.length > 8 && (
++                        <Box sx={{ px: 2, py: 1, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
++                          <Typography fontSize="11px" color="#64748b">+ {wizardPreview.filteredRows.length - 8} more rows…</Typography>
++                        </Box>
++                      )}
++                    </Box>
++                  )}
++                </Box>
++
++                {/* Actions */}
++                <Box display="flex" gap={1.5} justifyContent="space-between" alignItems="center" pt={0.5}>
++                  <Button variant="text" size="small" onClick={() => { setWizardStep(1); setWizardPreview(null); }}
++                    disabled={wizardImporting}
++                    sx={{ fontWeight: 700, borderRadius: '10px', textTransform: 'none', color: '#64748b' }}>
++                    ← Back
++                  </Button>
++                  <Box display="flex" gap={1.5}>
++                    <Button variant="outlined" size="small" onClick={() => { setShowExcelWizard(false); setWizardStep(1); setWizardPreview(null); }}
++                      disabled={wizardImporting}
++                      sx={{ fontWeight: 700, borderRadius: '10px', textTransform: 'none' }}>Cancel</Button>
++                    <Button
++                      variant="contained" size="small"
++                      onClick={handleWizardImportConfirm}
++                      disabled={wizardImporting || !wizardPreview.filteredRows.length}
++                      startIcon={wizardImporting ? <CircularProgress size={14} color="inherit" /> : <UploadIcon sx={{ fontSize: '1rem' }} />}
++                      sx={{
++                        fontWeight: 800, borderRadius: '10px', textTransform: 'none', px: 2.5,
++                        background: 'linear-gradient(135deg,#7c3aed,#6d28d9)', boxShadow: 'none',
++                        '&:hover': { background: 'linear-gradient(135deg,#6d28d9,#5b21b6)', boxShadow: '0 4px 14px rgba(124,58,237,0.35)' },
++                        '&:disabled': { background: '#e2e8f0', color: '#94a3b8' },
++                      }}
++                    >
++                      {wizardImporting ? 'Importing…' : `Import ${wizardPreview.filteredRows.length} Rows`}
++                    </Button>
++                  </Box>
++                </Box>
++              </Box>
++            )}
++          </Box>
++        </Box>
++      )}
++
+       {/* ── Confirm delete dialog ──────────────────────────────────────────── */}
+       {confirmDel && (
+         <Box sx={{
+@@ -846,7 +1426,7 @@ export default function CementRegister({ onBack }) {
+       {/* ── Snackbar: manual save result ─────────────────────────────────── */}
+ 
+       <Snackbar open={!!snack} autoHideDuration={4500} onClose={() => setSnack(null)}
+-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
++        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} sx={{ zIndex: 10001 }}>
+         {snack && (
+           <Alert severity={snack.severity} onClose={() => setSnack(null)} variant="filled" sx={{ fontWeight: 600 }}>
+             {snack.msg}
