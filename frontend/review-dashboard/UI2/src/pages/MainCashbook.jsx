@@ -6,10 +6,12 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
+import UploadIcon from '@mui/icons-material/Upload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import * as XLSX from 'xlsx';
 import { exportToCsv } from '../utils/exportCsv';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -131,6 +133,22 @@ const GROUP_COLORS = {
 };
 
 const OPENING_KEYS = ['P_OPENING', 'S_OPENING', 'O_OPENING'];
+
+const CASHBOOK_HEADER_MAP = {
+  'date': 'DATE',
+  'opening balance': 'P_OPENING', 'opening': 'P_OPENING', 'opening balance ': 'P_OPENING',
+  'loan recv': 'P_LOAN_RECV', 'loan recv ': 'P_LOAN_RECV',
+  'loan pay': 'P_LOAN_PAY', 'loan pay ': 'P_LOAN_PAY',
+  'cash withdraw': 'P_WITHDRAW', 'withdraw': 'P_WITHDRAW', 'cash withdraw ': 'P_WITHDRAW',
+  'site cash given from dac': 'P_GIVEN_DAC', 'given dac': 'P_GIVEN_DAC', 'site cash given from dac ': 'P_GIVEN_DAC',
+  'cash given to office': 'P_GIVEN_OFFICE', 'given office': 'P_GIVEN_OFFICE', 'cash given to office ': 'P_GIVEN_OFFICE',
+  'others': 'P_OTHERS', 'others ': 'P_OTHERS',
+  'site opening': 'S_OPENING', 'site opening ': 'S_OPENING',
+  'transferred from office': 'S_TRANS_OFFICE', 'transferred from office ': 'S_TRANS_OFFICE',
+  'transferred to office cash': 'S_TRANS_TO_OFFICE', 'transferred to office cash ': 'S_TRANS_TO_OFFICE',
+  'office cash opening': 'O_OPENING', 'office cash opening ': 'O_OPENING',
+  'remarks': 'REMARKS', 'remarks ': 'REMARKS'
+};
 
 export default function MainCashbook({ onBack }) {
   const now = new Date();
@@ -333,6 +351,138 @@ export default function MainCashbook({ onBack }) {
     }
   }, []);
 
+  const handleExcelUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const dataBytes = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(dataBytes, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        
+        // Convert to array of arrays
+        const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+        if (aoa.length === 0) {
+          setSnack({ severity: 'error', msg: 'Uploaded Excel sheet is empty' });
+          return;
+        }
+
+        // Find header row (must contain Date / Opening / Closing / remarks etc.)
+        let headerRowIdx = 0;
+        let maxMatches = 0;
+        for (let i = 0; i < Math.min(15, aoa.length); i++) {
+          const row = aoa[i] || [];
+          let matches = 0;
+          row.forEach(cell => {
+            const clean = String(cell || '').trim().toLowerCase();
+            if (CASHBOOK_HEADER_MAP[clean] || Object.values(CASHBOOK_HEADER_MAP).includes(clean.toUpperCase())) {
+              matches++;
+            }
+          });
+          if (matches > maxMatches) {
+            maxMatches = matches;
+            headerRowIdx = i;
+          }
+        }
+
+        const headers = aoa[headerRowIdx].map(h => String(h || '').trim());
+        const dataRows = aoa.slice(headerRowIdx + 1);
+
+        const headerMapping = {};
+        headers.forEach((h, colIdx) => {
+          if (!h) return;
+          const norm = h.toLowerCase().replace(/[\s\-_]+/g, ' ').trim();
+          const key = CASHBOOK_HEADER_MAP[norm];
+          if (key) {
+            headerMapping[colIdx] = key;
+          } else {
+            // Check direct match
+            const directKey = Object.values(CASHBOOK_HEADER_MAP).find(k => k === h.toUpperCase());
+            if (directKey) headerMapping[colIdx] = directKey;
+          }
+        });
+
+        // Map data rows
+        const newEntries = [];
+        
+        const fyStartYear = parseInt(String(selYear).split('-')[0], 10);
+        const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
+
+        dataRows.forEach((rowArr, rowIdx) => {
+          if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
+
+          const rowObj = { month: selMonth, year: calendarYear };
+          Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {
+            const colIdx = parseInt(colIdxStr, 10);
+            const val = String(rowArr[colIdx] ?? '').trim();
+            if (val !== '') {
+              rowObj[internalKey] = val;
+            }
+          });
+
+          // A valid row must contain at least a Date or an Opening Balance
+          if (rowObj['DATE'] || rowObj['P_OPENING'] || rowObj['S_OPENING'] || rowObj['O_OPENING']) {
+            rowObj._id = `temp-import-${rowIdx}-${Date.now()}`;
+            newEntries.push(rowObj);
+          }
+        });
+
+        if (newEntries.length === 0) {
+          setSnack({ severity: 'warning', msg: 'No valid cashbook rows found for the selected month.' });
+          return;
+        }
+
+        const nextLocalData = { ...localData };
+        let matchedCount = 0;
+        let unmatchedCount = 0;
+
+        const normalizeDate = (dStr) => {
+          if (!dStr) return '';
+          const parts = String(dStr).trim().split(/[-\/]/);
+          if (parts.length === 3) {
+            return `${parseInt(parts[0], 10)}-${parseInt(parts[1], 10)}-${parts[2]}`;
+          }
+          return dStr;
+        };
+
+        newEntries.forEach(impRow => {
+          const impDateNorm = normalizeDate(impRow.DATE);
+          const matchedDbRow = entries.find(dbRow => normalizeDate(dbRow.DATE) === impDateNorm);
+
+          if (matchedDbRow) {
+            const changes = {};
+            Object.entries(impRow).forEach(([key, val]) => {
+              if (key !== '_id' && key !== 'month' && key !== 'year') {
+                changes[key] = val;
+              }
+            });
+            nextLocalData[matchedDbRow._id] = {
+              ...(nextLocalData[matchedDbRow._id] || {}),
+              ...changes
+            };
+            matchedCount++;
+          } else {
+            unmatchedCount++;
+          }
+        });
+
+        setLocalData(nextLocalData);
+        setSnack({
+          severity: 'success',
+          msg: `Successfully imported cashbook data! Matched ${matchedCount} rows by date.${unmatchedCount > 0 ? ` Ignored ${unmatchedCount} rows with no matching calendar date.` : ''}`
+        });
+
+      } catch (err) {
+        console.error('Excel parse failed:', err);
+        setSnack({ severity: 'error', msg: 'Failed to parse Excel file: ' + err.message });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   const handleAddRow = async () => {
     try {
       const today = new Date().toLocaleDateString('en-IN').replace(/\//g, '-');
@@ -469,6 +619,21 @@ export default function MainCashbook({ onBack }) {
               Delete ({selectedIds.size})
             </Button>
           )}
+          <Button
+            size="small"
+            variant="outlined"
+            component="label"
+            startIcon={<UploadIcon sx={{ fontSize: '1.1rem' }} />}
+            sx={{ fontWeight: 700, borderRadius: 2 }}
+          >
+            Import Excel
+            <input
+              type="file"
+              accept=".xls,.xlsx"
+              hidden
+              onChange={handleExcelUpload}
+            />
+          </Button>
           <Button size="small" variant="outlined" onClick={handleAddRow} sx={{ fontWeight: 700, borderRadius: 2 }}>
             + Add Row
           </Button>
