@@ -43,20 +43,31 @@ function extractTruckNo(val) {
 // LOADING DT from the server is stored as "DD-MM-YYYY" (e.g. "13-04-2026")
 function parseLoadingDate(str) {
   if (!str) return null;
-  // Try DD-MM-YYYY or DD/MM/YYYY
-  const parts = String(str).split(/[-\/]/);
+  const clean = String(str).trim();
+  const parts = clean.split(/[-\/\.]/);
   if (parts.length === 3) {
-    const [a, b, c] = parts.map(Number);
-    // If first part is a valid day (1-31) and second is a valid month (1-12)
-    if (a >= 1 && a <= 31 && b >= 1 && b <= 12 && c > 100) {
-      return new Date(c, b - 1, a); // year, month(0-indexed), day
+    const a = parseInt(parts[0], 10);
+    const b = parseInt(parts[1], 10);
+    const c = parseInt(parts[2], 10);
+    
+    // Check if it's YYYY-MM-DD
+    if (a > 1000 && b >= 1 && b <= 12 && c >= 1 && c <= 31) {
+      const date = new Date(a, b - 1, c);
+      if (!isNaN(date.getTime())) return date;
     }
-    // Try YYYY-MM-DD (ISO without time)
-    if (a > 100 && b >= 1 && b <= 12 && c >= 1 && c <= 31) {
-      return new Date(a, b - 1, c);
+    
+    // Check if it's DD-MM-YYYY or DD-MM-YY
+    const day = a;
+    const month = b - 1;
+    let year = c;
+    if (parts[2].length === 2) {
+      year += (year >= 70 ? 1900 : 2000);
+    }
+    if (day >= 1 && day <= 31 && month >= 0 && month <= 11) {
+      const date = new Date(year, month, day);
+      if (!isNaN(date.getTime())) return date;
     }
   }
-  // Fallback: let JS try
   const d = new Date(str);
   return isNaN(d.getTime()) ? null : d;
 }
