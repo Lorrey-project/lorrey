@@ -258,8 +258,6 @@ function fmt2(n) { return Math.round(num(n) * 100) / 100; }
 
 function parseToDate(dStr) {
   if (!dStr) return new Date(0);
-  let d = new Date(dStr);
-  if (!isNaN(d.getTime())) return d;
   const clean = String(dStr).trim();
   const parts = clean.split(/[-\/\.]/);
   if (parts.length === 3) {
@@ -272,6 +270,8 @@ function parseToDate(dStr) {
     const date = new Date(year, month, day);
     if (!isNaN(date.getTime())) return date;
   }
+  let d = new Date(dStr);
+  if (!isNaN(d.getTime())) return d;
   return new Date(0);
 }
 

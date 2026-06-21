@@ -9,11 +9,8 @@ const adminOnly = require("../middleware/adminOnly");
 const { cementValidationRules, validateCement } = require("../middleware/validateCement");
 const cementAttachUpload = require("../middleware/cementAttachUpload");
 
-// Chronological Date Parsing and Formatting Helpers
 const parseToDate = (dStr) => {
   if (!dStr) return new Date(0);
-  let d = new Date(dStr);
-  if (!isNaN(d.getTime())) return d;
   const clean = String(dStr).trim();
   const parts = clean.split(/[-\/\.]/);
   if (parts.length === 3) {
@@ -26,8 +23,11 @@ const parseToDate = (dStr) => {
     const date = new Date(year, month, day);
     if (!isNaN(date.getTime())) return date;
   }
+  let d = new Date(dStr);
+  if (!isNaN(d.getTime())) return d;
   return new Date(0);
 };
+
 
 const formatDateToDDMMYY = (dStr) => {
   if (!dStr) return '';
