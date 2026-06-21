@@ -182,8 +182,8 @@ export default function PartyPaymentDetails({ onBack }) {
           return 0;
         };
 
-        // ③ Gross Freight — actual DB key is 'BILLING ER 95%'
-        a['GROSS FREIGHT']       += getF('BILLING ER 95%', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT');
+        // ③ Gross Freight — actual DB keys include 'BILLING ER 95%', 'BILLING ER VAR', and 'AMOUNT'
+        a['GROSS FREIGHT']       += getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT');
 
         // ④ Loading Advance
         a['LOADING ADVANCE']     += getF('ADVANCE');
@@ -194,22 +194,23 @@ export default function PartyPaymentDetails({ onBack }) {
         // ⑥ TDS — stored as _tds_percent (percentage) or TDS@1% (absolute)
         const tdsAbs  = getF('TDS@1%', 'TDS 1%', 'TDS');
         const tdsPct  = getF('_tds_percent');
-        const grFr    = getF('BILLING ER 95%', 'BILLING @ 95% (PARTY PAYABLE)', 'AMOUNT');
+        const grFr    = getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'AMOUNT');
         a['TDS'] += tdsAbs !== 0 ? tdsAbs : (tdsPct > 0 ? grFr * (tdsPct / 100) : grFr * 0.01);
 
         // ⑦ Travelling Expense
         a['TRAVELLING EXP']      += getF('TRAVELLING EXP', 'TRAVELLING  EXP', 'TRAVEL EXP');
 
-        // ⑧ Damage Recovery (price per bag * total bags)
+        // ⑧ Damage Recovery (check direct amount or price per bag * total bags)
+        const shortageAmt  = getF('SHORTAGE (AMOUNT)', 'SHORTAGE AMOUNT');
         const shortageBags = getF('SHORTAGE (BAG)', 'SHORTAGE BAG');
         const shortageRate = getF('SHORTAGE (RATE)', 'SHORTAGE RATE');
-        a['DAMAGE RECOVERY']     += (shortageBags * shortageRate);
+        a['DAMAGE RECOVERY']     += shortageAmt || (shortageBags * shortageRate);
 
-        // ⑨ Cash/Bank TF/Others — note actual key is 'Site Cash' (mixed case)
-        a['CASH_BANK_OTHERS']    += getF('BANK TF', 'BANK TF ') + getF('Site Cash', 'SITE CASH', 'SITE_CASH');
+        // ⑨ Cash/Bank TF/Others — note actual keys include 'Site Cash', 'OFFICE CASH', 'Bank TF'
+        a['CASH_BANK_OTHERS']    += getF('BANK TF', 'BANK TF ', 'Bank TF') + getF('Site Cash', 'SITE CASH', 'SITE_CASH') + getF('OFFICE CASH', 'Office Cash', 'OFFICE_CASH');
 
-        // ⑩ Other Deduction
-        a['OTHER DEDUCTION']     += getF('OTHERS DEDUCTION', 'OTHERS  DEDUCTION', 'OTHER DEDUCTION', 'OTHERS');
+        // ⑩ Other Deduction — check manual entry keys
+        a['OTHER DEDUCTION']     += getF('OTHERS DEDUCTION', 'OTHERS  DEDUCTION', 'OTHER DEDUCTION', 'OTHERS', 'Others deduction', 'Other');
 
         // ⑪ GPS Trip Charge
         a['GPS TRIP CHARGE']     += getF('GPS Monitoring Charge', 'GPS MONITORING CHARGE', 'GPS MONITORING  CHARGE', 'GPS TRIP CHARGE');
