@@ -8,6 +8,10 @@ const fyRowSchema = new mongoose.Schema({
   editedMonth: { type: String },
   editedSite: { type: String },
   editedAmount: { type: Number },
+  debitReason: { type: String, default: 'None' },
+  damageMonth: { type: String },
+  damageVehicle: { type: String },
+  damageTrip: { type: Object },
   hidden: { type: Boolean, default: false }
 }, { timestamps: true });
 

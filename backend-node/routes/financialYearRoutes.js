@@ -3,7 +3,9 @@ const mongoose = require('mongoose');
 const router = express.Router();
 const FinancialYearPayment = require('../models/FinancialYearPayment');
 const FinancialYearRow = require('../models/FinancialYearRow');
+const BillRegisterDocument = require('../models/BillRegisterDocument');
 const paymentProofUpload = require('../middleware/paymentProofUpload');
+const billPdfUpload = require('../middleware/billPdfUpload');
 
 function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
@@ -107,12 +109,16 @@ router.get('/data', async (req, res) => {
       if (ov.hidden) return null; // soft-deleted
       return {
         ...r,
-        billType:              ov.billType              ?? 'FREIGHT',
-        invoiceDate:           ov.editedInvoiceDate     ?? r.invoiceDate,
-        displayInvoiceNumber:  ov.editedInvoiceNumber   ?? r.invoiceNumber,
-        month:                 ov.editedMonth           ?? r.month,
-        site:                  normalizeSite(ov.editedSite ?? r.site),
-        amount:                ov.editedAmount          ?? r.amount,
+        billType: ov.billType ?? 'FREIGHT',
+        invoiceDate: ov.editedInvoiceDate ?? r.invoiceDate,
+        displayInvoiceNumber: ov.editedInvoiceNumber ?? r.invoiceNumber,
+        month: ov.editedMonth ?? r.month,
+        site: normalizeSite(ov.editedSite ?? r.site),
+        amount: ov.editedAmount ?? r.amount,
+        debitReason: ov.debitReason ?? 'None',
+        damageMonth: ov.damageMonth,
+        damageVehicle: ov.damageVehicle,
+        damageTrip: ov.damageTrip
       };
     }).filter(Boolean);
 
@@ -180,7 +186,11 @@ router.post('/upload-proof', paymentProofUpload.single('proof'), async (req, res
 
 router.post('/save-row', async (req, res) => {
   try {
-    const { billNo, billType, editedInvoiceDate, editedInvoiceNumber, editedMonth, editedSite, editedAmount } = req.body;
+    const { 
+      billNo, billType, editedInvoiceDate, editedInvoiceNumber, editedMonth, 
+      editedSite, editedAmount, debitReason, damageYear, damageMonth, 
+      damageVehicles, damageTrips, damageVehicleAmounts 
+    } = req.body;
     let updateObj = {};
     if (billType !== undefined) updateObj.billType = billType;
     if (editedInvoiceDate !== undefined) updateObj.editedInvoiceDate = editedInvoiceDate;
@@ -188,15 +198,225 @@ router.post('/save-row', async (req, res) => {
     if (editedMonth !== undefined) updateObj.editedMonth = editedMonth;
     if (editedSite !== undefined) updateObj.editedSite = editedSite;
     if (editedAmount !== undefined) updateObj.editedAmount = parseFloat(editedAmount) || 0;
+    if (debitReason !== undefined) updateObj.debitReason = debitReason;
+    if (damageYear !== undefined) updateObj.damageYear = damageYear;
+    if (damageMonth !== undefined) updateObj.damageMonth = damageMonth;
+    if (damageVehicles !== undefined) updateObj.damageVehicles = damageVehicles;
+    if (damageTrips !== undefined) updateObj.damageTrips = damageTrips;
+    if (damageVehicleAmounts !== undefined) updateObj.damageVehicleAmounts = damageVehicleAmounts;
 
     await FinancialYearRow.findOneAndUpdate(
       { billNo },
       { $set: updateObj },
       { upsert: true, returnDocument: 'after' }
     );
+
+    // --- Cement Register Deductions Override Logic ---
+    if (debitReason && damageVehicles && damageTrips && damageVehicleAmounts) {
+      const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
+      
+      for (const vehicle of damageVehicles) {
+        const amountStr = damageVehicleAmounts[vehicle];
+        const manualAmt = parseFloat(String(amountStr).replace(/,/g, '')) || 0;
+        
+        const vTrips = damageTrips.filter(t => t.vehicle === vehicle);
+        if (vTrips.length === 0) continue;
+        
+        const conditions = vTrips.map(t => ({
+          $or: [ { 'VEHICLE NUMBER': t.vehicle }, { 'VEHICLE NO': t.vehicle } ],
+          "TRIP NUMBER": parseInt(t.tripNumber)
+        }));
+        
+        const dbTrips = await cementCol.find({ $or: conditions }).toArray();
+        if (dbTrips.length === 0) continue;
+        
+        let projectedCol = '';
+        if (debitReason === 'Damage / Shortage') projectedCol = 'SHORTAGE AMOUNT';
+        else if (debitReason === 'GPS Trip Charges') projectedCol = 'GPS MONITORING CHARGE';
+        else if (debitReason === 'GPS Deviation Charges') projectedCol = 'GPS MONITORING CHARGE';
+        else if (debitReason === 'Device Installation Charges') projectedCol = 'GPS DEVICE';
+        else if (debitReason === 'RFID Deduction / Charges' || debitReason === 'Substance') projectedCol = 'OTHERS DEDUCTION';
+        
+        if (!projectedCol) continue;
+        
+        let projectedSum = 0;
+        for (const tr of dbTrips) {
+          projectedSum += (parseFloat(String(tr[projectedCol] || '0').replace(/,/g, '')) || 0);
+        }
+        
+        if (manualAmt > projectedSum) {
+          const splitAmt = manualAmt / dbTrips.length;
+          
+          for (const tr of dbTrips) {
+            const overridePath = `deductionsOverride.${debitReason}`;
+            const projVal = parseFloat(String(tr[projectedCol] || '0').replace(/,/g, '')) || 0;
+            const updateDoc = {
+              $set: {
+                [overridePath]: {
+                  projected: projVal,
+                  actual: splitAmt,
+                  billRegisterRef: billNo,
+                  timestamp: new Date()
+                }
+              }
+            };
+            await cementCol.updateOne({ _id: tr._id }, updateDoc);
+          }
+        }
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.get('/documents', async (req, res) => {
+  try {
+    const docs = await BillRegisterDocument.find({}).sort({ createdAt: -1 });
+    res.json(docs);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch documents' });
+  }
+});
+
+router.post('/upload-document', billPdfUpload.single('pdf'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const newDoc = new BillRegisterDocument({
+      fileUrl: req.file.location,
+      fileName: req.file.originalname
+    });
+    await newDoc.save();
+    
+    res.json({ message: "Document uploaded successfully", doc: newDoc });
+  } catch (err) {
+    console.error('[FYDetails] /upload-document error:', err);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
+router.delete('/delete-document/:id', async (req, res) => {
+  try {
+    await BillRegisterDocument.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Document deleted successfully' });
+  } catch (err) {
+    console.error('[FYDetails] /delete-document error:', err);
+    res.status(500).json({ error: 'Delete failed' });
+  }
+});
+
+router.get('/vehicles', async (req, res) => {
+  try {
+    const { month, fy } = req.query; // Expecting number 1-12
+    if (!month) return res.status(400).json({ error: 'Month is required' });
+    
+    let yearRegexPart = '';
+    if (fy) {
+      const parts = fy.split('-');
+      if (parts.length === 2) {
+        let startY = parseInt(parts[0]);
+        let endY = parseInt(parts[1]);
+        if (startY < 100) startY += 2000;
+        if (endY < 100) endY += 2000;
+        const m = parseInt(month);
+        const calendarYear = (m >= 4) ? startY : endY;
+        const yrStr = String(calendarYear);
+        const yr2 = yrStr.slice(-2);
+        yearRegexPart = `(${yrStr}|${yr2})`;
+      }
+    }
+    
+    const monthStr = String(month).padStart(2, '0');
+    const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.]${yearRegexPart}`);
+    const match = {
+      $or: [
+        { "LOADING DT": dateRegex },
+        { "LOADING DATE": dateRegex },
+        { "BILL DATE": dateRegex }
+      ]
+    };
+    
+    const vehicles = await getCementCol().distinct('VEHICLE NUMBER', match);
+    const v2 = await getCementCol().distinct('VEHICLE NO', match);
+    const allV = [...new Set([...vehicles, ...v2])].filter(Boolean);
+    res.json(allV);
+  } catch (err) {
+    console.error('[FYDetails] /vehicles error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.get('/trips', async (req, res) => {
+  try {
+    const { month, vehicle, fy } = req.query;
+    if (!month || !vehicle) return res.status(400).json({ error: 'Month and vehicle are required' });
+    
+    const vehiclesArray = vehicle.split(',');
+    
+    let yearRegexPart = '';
+    if (fy) {
+      const parts = fy.split('-');
+      if (parts.length === 2) {
+        let startY = parseInt(parts[0]);
+        let endY = parseInt(parts[1]);
+        if (startY < 100) startY += 2000;
+        if (endY < 100) endY += 2000;
+        const m = parseInt(month);
+        const calendarYear = (m >= 4) ? startY : endY;
+        const yrStr = String(calendarYear);
+        const yr2 = yrStr.slice(-2);
+        yearRegexPart = `(${yrStr}|${yr2})`;
+      }
+    }
+    
+    const monthStr = String(month).padStart(2, '0');
+    const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.]${yearRegexPart}`);
+    const match = { 
+      $or: [ { 'VEHICLE NUMBER': { $in: vehiclesArray } }, { 'VEHICLE NO': { $in: vehiclesArray } } ],
+      $and: [
+        {
+          $or: [
+            { "LOADING DT": dateRegex },
+            { "LOADING DATE": dateRegex },
+            { "BILL DATE": dateRegex }
+          ]
+        }
+      ]
+    };
+    
+    const trips = await getCementCol().find(match).toArray();
+    
+    const parseCustomDate = (dStr) => {
+      if (!dStr) return 0;
+      const parts = dStr.split(/[-/\\.]/);
+      if (parts.length >= 3) {
+        const [day, month, year] = parts;
+        let y = parseInt(year);
+        if (y < 100) y += 2000;
+        return new Date(y, parseInt(month)-1, parseInt(day)).getTime();
+      }
+      return 0;
+    };
+    
+    const formatted = trips.map(t => ({
+      invoiceNo: t['INVOICE NO'] || t['BILL NO'] || 'Unknown',
+      tripDate: t['LOADING DT'] || t['LOADING DATE'] || t['BILL DATE'] || 'Unknown',
+      plant: t['PLANT'] || t['FROM'] || 'Unknown',
+      destination: t['DESTINATION'] || t['TO'] || 'Unknown',
+      vehicle: vehicle
+    }));
+    
+    formatted.sort((a, b) => parseCustomDate(a.tripDate) - parseCustomDate(b.tripDate));
+    
+    const finalFormatted = formatted.map((t, idx) => ({ ...t, tripNumber: idx + 1 }));
+    res.json(finalFormatted);
+  } catch (err) {
+    console.error('[FYDetails] /trips error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

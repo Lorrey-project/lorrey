@@ -9,6 +9,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
+import UploadIcon from '@mui/icons-material/Upload';
 import AddIcon from '@mui/icons-material/Add';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import axios from 'axios';
@@ -18,8 +19,12 @@ import { exportToCsv } from '../utils/exportCsv';
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || '/';
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const currentYear = new Date().getFullYear();
+const YEARS = Array.from({length: 10}, (_, i) => String(currentYear - 5 + i));
+
 // Columns configuration
-export const COLUMNS = [
+const COLUMNS = [
   { key: 'Transaction Date', label: 'TRANSACTION\nDATE', width: 140, isDate: true },
   { key: 'Ledger Name', label: 'LEDGER\nNAME', width: 180 },
   { key: 'Names', label: 'NAMES', width: 160 },
@@ -63,6 +68,99 @@ const NAMES_OPTIONS = [
 const AUTO_COLS = new Set(['Transaction Date', 'Remarks', 'Reference No', 'Cheque No', 'Withdraw', 'Deposit', 'Closing Balance']);
 const MANUAL_COLS = new Set(['Ledger Name', 'Names', 'Particulars']);
 
+
+const RAW_EXCEL_HEADER_MAP = {
+  // Transaction Date
+  'transaction date': 'Transaction Date', 'date': 'Transaction Date', 'txn date': 'Transaction Date', 'value date': 'Transaction Date', 'tran date': 'Transaction Date', 'trans date': 'Transaction Date', 'booking date': 'Transaction Date', 'narration date': 'Transaction Date', 'tx date': 'Transaction Date', 'transactiondate': 'Transaction Date', 'txndate': 'Transaction Date',
+
+  // Ledger Name & Names
+  'ledger name': 'Ledger Name', 'ledger': 'Ledger Name', 'ledgername': 'Ledger Name',
+  'names': 'Names', 'name': 'Names',
+
+  // Particulars & Remarks
+  'particulars': 'Particulars', 'particular': 'Particulars',
+  'remarks': 'Remarks', 'remark': 'Remarks', 'narration': 'Remarks', 'description': 'Remarks', 'transaction details': 'Remarks', 'details': 'Remarks', 'tran particular': 'Remarks', 'transaction narration': 'Remarks', 'transaction description': 'Remarks', 'chq/ref particulars': 'Remarks', 'transaction remarks': 'Remarks',
+
+  // Reference No & Cheque No
+  'reference no': 'Reference No', 'ref no': 'Reference No', 'ref. no.': 'Reference No', 'ref. no': 'Reference No', 'reference number': 'Reference No', 'transaction id': 'Reference No', 'tran id': 'Reference No', 'trans id': 'Reference No', 'utr no': 'Reference No', 'utr number': 'Reference No', 'transaction reference': 'Reference No', 'instrument id': 'Reference No', 'chq / ref no': 'Reference No', 'chq/ref no': 'Reference No', 'referenceno': 'Reference No', 'refno': 'Reference No',
+  'cheque no': 'Cheque No', 'chq no': 'Cheque No', 'chequeno': 'Cheque No', 'chqno': 'Cheque No',
+
+  // Withdraw & Deposit
+  'withdraw': 'Withdraw', 'withdrawal': 'Withdraw', 'dr': 'Withdraw', 'debit': 'Withdraw', 'withdrawals': 'Withdraw', 'dr amount': 'Withdraw', 'debit amount': 'Withdraw',
+  'deposit': 'Deposit', 'cr': 'Deposit', 'credit': 'Deposit', 'deposits': 'Deposit', 'cr amount': 'Deposit', 'credit amount': 'Deposit',
+
+  // Closing Balance
+  'closing balance': 'Closing Balance', 'balance': 'Closing Balance', 'avail bal': 'Closing Balance', 'available balance': 'Closing Balance', 'running balance': 'Closing Balance', 'bal': 'Closing Balance', 'closingbalance': 'Closing Balance'
+};
+
+const normalizeHeader = h => String(h).trim().toLowerCase();
+const EXCEL_HEADER_MAP = {};
+Object.entries(RAW_EXCEL_HEADER_MAP).forEach(([k, v]) => {
+  EXCEL_HEADER_MAP[normalizeHeader(k)] = v;
+});
+
+function parseWorksheetToAOA(ws) {
+  try {
+    const rangeStr = ws['!ref'];
+    if (!rangeStr) return [];
+    const range = window.XLSX ? window.XLSX.utils.decode_range(rangeStr) : {s:{r:0,c:0}, e:{r:50000, c:20}};
+    const aoa = [];
+    for (let R = range.s.r; R <= Math.min(range.e.r, 50000); ++R) {
+      const row = [];
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cellAddress = { c: C, r: R };
+        const cellRef = window.XLSX ? window.XLSX.utils.encode_cell(cellAddress) : `${String.fromCharCode(65+C)}${R+1}`;
+        const cell = ws[cellRef];
+        if (!cell) {
+          row.push('');
+        } else if (cell.w !== undefined) {
+          row.push(cell.w);
+        } else if (cell.v !== undefined) {
+          row.push(cell.v);
+        } else {
+          row.push('');
+        }
+      }
+      aoa.push(row);
+    }
+    return aoa;
+  } catch (e) {
+    console.warn("Manual range parse failed, falling back", e);
+    return window.XLSX ? window.XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) : [];
+  }
+}
+
+function formatExcelDate(rawDate) {
+  if (!rawDate) return '';
+  if (!isNaN(rawDate)) {
+    const excelEpoch = new Date(1899, 11, 30);
+    const dateObj = new Date(excelEpoch.getTime() + rawDate * 86400000);
+    if (!isNaN(dateObj.getTime())) {
+      const yyyy = dateObj.getFullYear();
+      const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const dd = String(dateObj.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+  }
+  const parts = String(rawDate).trim().split(/[-/\.]/);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+    } else if (parts[2].length === 4) {
+      return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    }
+  }
+  const parsed = new Date(rawDate);
+  if (!isNaN(parsed.getTime())) {
+    const yyyy = parsed.getFullYear();
+    const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+    const dd = String(parsed.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return String(rawDate);
+}
+
+
 export default function AccountDetails({ onBack }) {
   const [entries, setEntries] = useState([]);
   const [localData, setLocalData] = useState({});
@@ -81,6 +179,15 @@ export default function AccountDetails({ onBack }) {
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
   const [rowUploading, setRowUploading] = useState(null); // Track per-row upload state
+  const [displayMonth, setDisplayMonth] = useState(MONTHS[new Date().getMonth()]);
+  const [displayYear, setDisplayYear] = useState(String(new Date().getFullYear()));
+  const [showExcelWizard, setShowExcelWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(0);
+  const [wizardMonth, setWizardMonth] = useState(MONTHS[new Date().getMonth()]);
+  const [wizardYear, setWizardYear] = useState(String(new Date().getFullYear()));
+  const [wizardPreview, setWizardPreview] = useState(null);
+  const [unsavedImportRows, setUnsavedImportRows] = useState([]);
+  const wizardFileRef = useRef(null);
 
   const dirtyCount = Object.keys(localData).length;
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
@@ -110,10 +217,12 @@ export default function AccountDetails({ onBack }) {
       if (!silent) setLoading(true);
       const token = localStorage.getItem('token');
       const res = await axios.get(`${API_URL}/account-details`, {
+        params: { month: displayMonth, year: displayYear },
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data.success) {
         setEntries(res.data.entries);
+      setUnsavedImportRows([]);
         setLocalData({});
       }
     } catch (e) {
@@ -122,7 +231,7 @@ export default function AccountDetails({ onBack }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [displayMonth, displayYear]);
 
   const fetchUploadedDates = useCallback(async () => {
     try {
@@ -138,7 +247,7 @@ export default function AccountDetails({ onBack }) {
   useEffect(() => {
     fetchData();
     fetchUploadedDates();
-  }, [fetchData, fetchUploadedDates]);
+  }, [fetchData, fetchUploadedDates, displayMonth, displayYear]);
 
   const computedRows = useMemo(() =>
     entries.map(row => ({ ...row, ...(localData[row._id] || {}) })),
@@ -147,7 +256,7 @@ export default function AccountDetails({ onBack }) {
   const filteredRows = useMemo(() => {
     const parseDateStr = (dStr) => {
       if (!dStr) return null;
-      const parts = String(dStr).split(/[-\/]/);
+      const parts = String(dStr).split(/[-/]/);
       if (parts.length !== 3) return null;
       if (parts[0].length === 4) {
         return new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2])).getTime();
@@ -156,7 +265,11 @@ export default function AccountDetails({ onBack }) {
       }
     };
 
-    let result = [...computedRows];
+    const finalArr = [
+      ...unsavedImportRows.map(row => ({...row, ...(localData[row._id] || {})})),
+      ...computedRows
+    ];
+    let result = [...finalArr];
     if (filterFrom || filterTo) {
       const fromTime = filterFrom ? new Date(filterFrom).getTime() : 0;
       const toTime = filterTo ? new Date(filterTo).getTime() : Infinity;
@@ -182,7 +295,7 @@ export default function AccountDetails({ onBack }) {
     });
 
     return result;
-  }, [computedRows, filterFrom, filterTo]);
+  }, [computedRows, filterFrom, filterTo, unsavedImportRows, localData]);
 
   const isFiltered = !!(filterFrom || filterTo);
 
@@ -198,7 +311,9 @@ export default function AccountDetails({ onBack }) {
       ...prev, 
       [newId]: { 
         isNewRow: true,
-        'Transaction Date': today 
+        'Transaction Date': today,
+        selectedMonth: displayMonth,
+        selectedYear: displayYear 
       } 
     }));
   };
@@ -240,13 +355,34 @@ export default function AccountDetails({ onBack }) {
   };
 
   const handleSave = async () => {
-    if (dirtyCount === 0) return;
+    if (dirtyCount === 0 && unsavedImportRows.length === 0) return;
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
       const updates = [];
       
       // Validation: Ensure all modified rows have a Transaction Date
+      for (const row of unsavedImportRows) {
+        const rowEdits = localData[row._id] || {};
+        const mergedRow = { ...row, ...rowEdits };
+        
+        if (!mergedRow['Transaction Date']) {
+          setSnack({ severity: 'error', msg: 'Error: Transaction Date is required for all imported rows.' });
+          setSaving(false);
+          return;
+        }
+
+        updates.push({
+          id: null,
+          isNewRow: true,
+          changes: {
+            ...mergedRow,
+            selectedMonth: mergedRow.selectedMonth || wizardMonth || displayMonth,
+            selectedYear: mergedRow.selectedYear || wizardYear || displayYear
+          }
+        });
+      }
+
       for (const [id, changes] of Object.entries(localData)) {
         const originalEntry = entries.find(e => e._id === id);
         const transactionDate = changes['Transaction Date'] ?? originalEntry?.['Transaction Date'] ?? originalEntry?.transactionDate ?? '';
@@ -361,6 +497,141 @@ export default function AccountDetails({ onBack }) {
     }
   };
 
+  
+  const handleWizardFileSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const XLSX = await import('xlsx');
+      window.XLSX = XLSX; // Expose for our helper
+      
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        let aoa = parseWorksheetToAOA(worksheet);
+        if (!aoa || aoa.length === 0) {
+          aoa = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        }
+        
+        if (!aoa || aoa.length === 0) {
+          setSnack({ severity: 'error', msg: 'The selected Excel sheet appears to be empty.' });
+          return;
+        }
+
+        const searchLimit = Math.min(aoa.length, 50);
+        let bestHeaderRowIdx = 0;
+        let maxMatches = 0;
+
+        for (let i = 0; i < searchLimit; i++) {
+          const row = aoa[i];
+          if (!row) continue;
+          let matches = 0;
+          row.forEach(cell => {
+            if (cell && EXCEL_HEADER_MAP[normalizeHeader(cell)]) {
+              matches++;
+            }
+          });
+          if (matches > maxMatches) {
+            maxMatches = matches;
+            bestHeaderRowIdx = i;
+          }
+        }
+
+        if (maxMatches === 0) {
+          setSnack({ severity: 'error', msg: 'Could not find any matching columns (e.g. Transaction Date, Remarks, Withdraw, etc) in the first 50 rows.' });
+          return;
+        }
+
+        const excelHeaders = aoa[bestHeaderRowIdx].map(h => String(h).trim());
+        const dataRows = aoa.slice(bestHeaderRowIdx + 1);
+
+        const headerMapping = {};
+        const unmappedHeaders = [];
+        excelHeaders.forEach((h, colIdx) => {
+          if (!h) return;
+          const key = EXCEL_HEADER_MAP[normalizeHeader(h)];
+          if (key) {
+            headerMapping[colIdx] = key;
+          } else {
+            const rawKey = h.trim().toUpperCase();
+            headerMapping[colIdx] = rawKey;
+            unmappedHeaders.push(rawKey);
+          }
+        });
+
+        let mappedRows = [];
+        dataRows.forEach(rowArr => {
+          if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
+
+          const rowObj = {};
+          Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {
+            const colIdx = parseInt(colIdxStr, 10);
+            const rawVal = rowArr[colIdx];
+            let val = String(rawVal ?? '').trim();
+            if (val !== '') {
+              if (internalKey === 'Transaction Date') {
+                val = formatExcelDate(val);
+              }
+              rowObj[internalKey] = val;
+            }
+          });
+          
+          if (Object.keys(rowObj).length > 0) {
+            if (!rowObj['Transaction Date']) return; // Skip rows without Transaction Date
+            
+            const d = new Date(rowObj['Transaction Date']);
+            if (!isNaN(d.getTime())) {
+              const parsedMonth = MONTHS[d.getMonth()];
+              const parsedYear = String(d.getFullYear());
+              if (parsedMonth !== wizardMonth || parsedYear !== wizardYear) {
+                return; // Skip dates outside selected month/year
+              }
+            }
+            rowObj.selectedMonth = wizardMonth;
+            rowObj.selectedYear = wizardYear;
+            mappedRows.push(rowObj);
+          }
+        });
+
+        setWizardPreview({
+          fileName: file.name,
+          totalRows: dataRows.length,
+          mappedCols: headerMapping,
+          unmappedHeaders,
+          dataRows: mappedRows
+        });
+        setWizardStep(2);
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      setSnack({ severity: 'error', msg: 'Failed to read Excel file: ' + err.message });
+    }
+  };
+
+  const handleWizardImportConfirm = () => {
+    const rows = wizardPreview?.dataRows || [];
+    if (rows.length === 0) return;
+    const tempRows = rows.map((row, idx) => ({
+      ...row,
+      _id: `temp-${idx}-${Date.now()}`,
+      isUnsavedImport: true,
+      selectedMonth: wizardMonth,
+      selectedYear: wizardYear
+    }));
+    setUnsavedImportRows(prev => [...tempRows, ...prev]);
+    setShowExcelWizard(false);
+    setWizardPreview(null);
+    setWizardStep(0);
+    if (wizardFileRef.current) wizardFileRef.current.value = null;
+    setSnack({ severity: 'success', msg: `${tempRows.length} rows imported into UI. Click Save to persist.` });
+  };
+
+
   const handleRowRemittanceUpload = async (rowId, e) => {
     const file = e.target.files[0];
     e.target.value = '';
@@ -425,6 +696,20 @@ export default function AccountDetails({ onBack }) {
         )}
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Autocomplete
+            options={MONTHS}
+            value={displayMonth}
+            onChange={(e, v) => v && setDisplayMonth(v)}
+            renderInput={(params) => <TextField {...params} label="Month" size="small" sx={{ width: 140, bgcolor: 'rgba(255,255,255,0.08)' }} />}
+            disableClearable
+          />
+          <Autocomplete
+            options={YEARS}
+            value={displayYear}
+            onChange={(e, v) => v && setDisplayYear(v)}
+            renderInput={(params) => <TextField {...params} label="Year" size="small" sx={{ width: 100, bgcolor: 'rgba(255,255,255,0.08)' }} />}
+            disableClearable
+          />
           <Button
             size="small" variant="contained"
             startIcon={uploading ? <CircularProgress size={13} color="inherit" /> : <AccountBalanceIcon />}
@@ -445,19 +730,27 @@ export default function AccountDetails({ onBack }) {
               <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          <Button size="small" variant="contained" startIcon={<UploadIcon />} onClick={() => setShowExcelWizard(true)} sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' }, fontWeight: 700, px: 2, borderRadius: 2 }}>
+            Import Excel
+          </Button>
           <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>XLS</Button>
+          <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={handleAddRow}
+            sx={{ fontWeight: 800, borderRadius: 2, px: 2, fontSize: '12px', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' } }}>
+            Add Row
+          </Button>
           <Button
             size="small" variant="contained"
             startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
-            onClick={handleSave} disabled={dirtyCount === 0 || saving}
+            onClick={handleSave} disabled={(dirtyCount === 0 && unsavedImportRows.length === 0) || saving}
             sx={{
               fontWeight: 800, borderRadius: 2, px: 2.5, fontSize: '12px',
-              bgcolor: dirtyCount > 0 ? '#1d4ed8' : '#cbd5e1',
-              boxShadow: dirtyCount > 0 ? '0 4px 12px rgba(29,78,216,0.35)' : 'none',
-              '&:disabled': { bgcolor: '#cbd5e1', color: '#94a3b8' },
+              bgcolor: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#16a34a' : '#cbd5e1',
+              boxShadow: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '0 4px 12px rgba(22,163,74,0.35)' : 'none',
+              filter: (dirtyCount === 0 && unsavedImportRows.length === 0 && !saving) ? 'grayscale(100%) opacity(0.7)' : 'none',
+              '&:disabled': { bgcolor: '#cbd5e1', color: '#64748b' },
             }}>
-            {saving ? 'Saving…' : `Save${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+            {saving ? 'Saving…' : `Save${(dirtyCount > 0 || unsavedImportRows.length > 0) ? ` (${dirtyCount + unsavedImportRows.length})` : ''}`}
           </Button>
         </Box>
       </Box>
@@ -864,6 +1157,126 @@ export default function AccountDetails({ onBack }) {
       <Snackbar open={!!snack} autoHideDuration={4000} onClose={() => setSnack(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         {snack && <Alert severity={snack.severity} variant="filled">{snack.msg}</Alert>}
       </Snackbar>
+
+      {/* Excel Import Wizard Dialog */}
+      <Dialog open={showExcelWizard} onClose={() => { setShowExcelWizard(false); setWizardStep(0); }} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ pb: 1, borderBottom: '1px solid #e2e8f0' }}>Excel Import Wizard</DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          {wizardStep === 0 && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, py: 2 }}>
+              <Typography variant="body1" sx={{ color: '#475569' }}>
+                Please select the Month and Year that this Excel file belongs to.
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Autocomplete
+                  options={MONTHS}
+                  value={wizardMonth}
+                  onChange={(e,v) => setWizardMonth(v)}
+                  renderInput={(params) => <TextField {...params} label="Month" size="small" sx={{ width: 200 }} />}
+                  disableClearable
+                />
+                <Autocomplete
+                  options={YEARS}
+                  value={wizardYear}
+                  onChange={(e,v) => setWizardYear(v)}
+                  renderInput={(params) => <TextField {...params} label="Year" size="small" sx={{ width: 150 }} />}
+                  disableClearable
+                />
+              </Box>
+            </Box>
+          )}
+
+          {wizardStep === 1 && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4, gap: 2, border: '2px dashed #cbd5e1', borderRadius: '8px', mt: 2 }}>
+              <UploadIcon sx={{ fontSize: 40, color: '#94a3b8' }} />
+              <Typography variant="body1" sx={{ color: '#475569', fontWeight: 500 }}>
+                Upload Account Details Excel for {wizardMonth} {wizardYear}
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#64748b' }}>
+                Any rows with dates outside {wizardMonth} {wizardYear} will be skipped.
+              </Typography>
+              <Button variant="contained" component="label">
+                Select File
+                <input type="file" hidden accept=".xlsx,.xls,.csv" ref={wizardFileRef} onChange={handleWizardFileSelect} />
+              </Button>
+            </Box>
+          )}
+
+          {wizardStep === 2 && wizardPreview && (
+            <Box>
+              <Typography variant="h6" fontWeight={800} color="#0f172a" mb={1}>
+                Preview Import: {wizardPreview.fileName}
+              </Typography>
+              
+              <Box sx={{ bgcolor: '#fff', borderRadius: 2, border: '1px solid #e2e8f0', p: 2, mb: 3 }}>
+                <Typography variant="body2" color="#475569" mb={1}>
+                  Total rows found: <strong>{wizardPreview.totalRows}</strong>
+                </Typography>
+                <Typography variant="body2" color="#475569" mb={1}>
+                  Valid rows to import: <strong>{wizardPreview.dataRows.length}</strong>
+                </Typography>
+                <Typography variant="body2" color="#16a34a">
+                  Columns mapped: <strong>{Object.keys(wizardPreview.mappedCols).length}</strong> / {COLUMNS.length}
+                </Typography>
+                
+                {wizardPreview.unmappedHeaders.length > 0 && (
+                  <Box mt={2} p={1.5} bgcolor="#fef2f2" border="1px solid #fecaca" borderRadius={1}>
+                    <Typography variant="caption" fontWeight={700} color="#dc2626" display="block" mb={0.5}>
+                      Unmapped Columns (Will be passed exactly as-is):
+                    </Typography>
+                    <Typography variant="caption" color="#991b1b">
+                      {wizardPreview.unmappedHeaders.join(', ')}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+
+              <Box display="flex" gap={2} justifyContent="flex-end">
+                <Button onClick={() => setWizardStep(1)} sx={{ color: '#64748b', fontWeight: 700 }}>
+                  Back
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleWizardImportConfirm}
+                  sx={{
+                    bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' },
+                    px: 3, fontWeight: 800, boxShadow: '0 4px 14px rgba(16,185,129,0.3)', textTransform: 'none'
+                  }}
+                >
+                  Load into View
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {wizardStep === 0 && (
+            <Box display="flex" gap={2} justifyContent="flex-end" mt={3} borderTop="1px solid #e2e8f0" pt={2}>
+              <Button onClick={() => setShowExcelWizard(false)} sx={{ color: '#64748b', fontWeight: 700 }}>
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={() => setWizardStep(1)}
+                sx={{
+                  bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' },
+                  px: 3, fontWeight: 800, textTransform: 'none'
+                }}
+              >
+                Next
+              </Button>
+            </Box>
+          )}
+
+          {wizardStep === 1 && (
+            <Box display="flex" gap={2} justifyContent="flex-end" mt={3} borderTop="1px solid #e2e8f0" pt={2}>
+              <Button onClick={() => setWizardStep(0)} sx={{ color: '#64748b', fontWeight: 700 }}>
+                Back
+              </Button>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </Box>
   );
 }

@@ -119,6 +119,18 @@ router.get("/", async (req, res) => {
       entry["SL NO"] = String(index + 1);
       if (entry["LOADING DT"]) entry["LOADING DT"] = formatDateToDDMMYY(entry["LOADING DT"]);
       if (entry["LOADING DATE"]) entry["LOADING DATE"] = formatDateToDDMMYY(entry["LOADING DATE"]);
+      
+      // Apply deductions override from Bill Register
+      if (entry.deductionsOverride) {
+        for (const [reason, override] of Object.entries(entry.deductionsOverride)) {
+          if (override.actual > override.projected) {
+            if (reason === 'Damage / Shortage') entry['SHORTAGE AMOUNT'] = override.actual;
+            else if (reason === 'GPS Trip Charges' || reason === 'GPS Deviation Charges') entry['GPS MONITORING CHARGE'] = override.actual;
+            else if (reason === 'Device Installation Charges') entry['GPS DEVICE'] = override.actual;
+            else if (reason === 'RFID Deduction / Charges' || reason === 'Substance') entry['OTHERS DEDUCTION'] = override.actual;
+          }
+        }
+      }
       return entry;
     });
 

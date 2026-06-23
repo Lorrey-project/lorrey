@@ -489,10 +489,14 @@ async function pushToRegister(invoiceId, overrides) {
       clean["VERIFICATION STATUS"] = "Verified";
     }
 
-    // PAYMENT STATUS and PAYMENT PROOF URL: never overwrite from auto-sync
+    // PAYMENT STATUS, PAYMENT PROOF URL, PAYMENT DATE, PAYMENT REF: never overwrite from auto-sync
+    // These are managed exclusively by paymentMapper.js when Account Details deposits are saved.
     if (existing) {
       if (existing["PAYMENT STATUS"]) clean["PAYMENT STATUS"] = existing["PAYMENT STATUS"];
       if (existing["PAYMENT PROOF URL"]) clean["PAYMENT PROOF URL"] = existing["PAYMENT PROOF URL"];
+      if (existing["PAYMENT DATE"]) clean["PAYMENT DATE"] = existing["PAYMENT DATE"];
+      if (existing["PAYMENT REF"]) clean["PAYMENT REF"] = existing["PAYMENT REF"];
+      if (existing["DIFFERENCE"] !== undefined) clean["DIFFERENCE"] = existing["DIFFERENCE"];
 
       // Preserve manually edited OFFICE CASH only if there's no auto-fetched value
       if (existing["OFFICE CASH"] !== undefined && officeCash === 0) {

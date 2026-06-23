@@ -27,7 +27,7 @@ const MONTH_NAMES = [
 function num(val, fallback = 0) { const n = parseFloat(val); return isNaN(n) ? fallback : n; }
 function fmt2(n) { return Math.round(num(n) * 100) / 100; }
 
-export const COLUMNS = [
+const COLUMNS = [
   // Global
   { key: 'DATE', label: 'Date', width: 120, type: 'manual', group: 'global' },
 

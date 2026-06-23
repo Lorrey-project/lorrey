@@ -5,6 +5,7 @@ const AccountDetail = require('../models/AccountDetail');
 const { getIO } = require('../socket');
 const { parseBankStatement } = require('../utils/parseBankStatement');
 const remittanceUpload = require('../middleware/remittanceUpload');
+const { allocatePaymentToBills, detectPaymentRow } = require('../utils/paymentMapper');
 
 // In-memory multer for bank statement uploads (max 10MB)
 const statementUpload = multer({
@@ -34,7 +35,9 @@ const keyMap = {
   'Deposit': 'deposit',
   'Closing Balance': 'closingBalance',
   'remittanceFileUrl': 'remittanceFileUrl',
-  'remittanceFileName': 'remittanceFileName'
+  'remittanceFileName': 'remittanceFileName',
+  'selectedMonth': 'selectedMonth',
+  'selectedYear': 'selectedYear'
 };
 const reverseMap = Object.fromEntries(Object.entries(keyMap).map(([k, v]) => [v, k]));
 
@@ -49,7 +52,13 @@ function docToFrontend(doc) {
 // GET all
 router.get('/', async (req, res) => {
   try {
-    const docs = await AccountDetail.find().sort({ transactionDate: -1, createdAt: -1 });
+    const { month, year } = req.query;
+    const query = {};
+    if (month && year) {
+      query.selectedMonth = month;
+      query.selectedYear = year;
+    }
+    const docs = await AccountDetail.find(query).sort({ transactionDate: -1, createdAt: -1 });
     res.json({ success: true, entries: docs.map(docToFrontend) });
   } catch (error) {
     console.error('Fetch Account Details Error:', error);
@@ -84,7 +93,54 @@ router.put('/bulk-update', async (req, res) => {
       console.warn('Socket notify failed:', socketErr.message);
     }
 
-    res.json({ success: true });
+    // ── Auto-map payments to Bill Register ──────────────────────────────────
+    // After saving, check each updated/created row for NVCL/NVL deposits
+    // and allocate payments to matching bills automatically.
+    const paymentResults = [];
+    try {
+      // Re-fetch the freshly saved docs so we have the correct field values
+      const allDocs = await AccountDetail.find().lean();
+      const docMap = {};
+      allDocs.forEach(d => { docMap[d._id.toString()] = d; });
+
+      for (const item of updates) {
+        // Build the merged row to check for payment
+        let merged = {};
+        if (item.isNewRow) {
+          // New row — changes IS the full row
+          merged = { ...item.changes };
+        } else if (item.id) {
+          const saved = docMap[item.id];
+          if (saved) {
+            // Map DB fields back to frontend keys for the detector
+            merged = {
+              'Transaction Date': saved.transactionDate || '',
+              'Ledger Name': saved.ledgerName || '',
+              'Names': saved.names || '',
+              'Particulars': saved.particulars || '',
+              'Remarks': saved.remarks || '',
+              'Reference No': saved.referenceNo || '',
+              'Cheque No': saved.chequeNo || '',
+              'Withdraw': saved.withdraw || '',
+              'Deposit': saved.deposit || '',
+              'Closing Balance': saved.closingBalance || '',
+            };
+          }
+        }
+
+        if (detectPaymentRow(merged)) {
+          const result = await allocatePaymentToBills(merged);
+          if (result.allocated.length > 0 || result.errors.length > 0) {
+            paymentResults.push(result);
+          }
+        }
+      }
+    } catch (mapErr) {
+      console.error('[accountDetailRoutes] Payment mapping error:', mapErr.message);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    res.json({ success: true, paymentResults });
   } catch (error) {
     console.error('Bulk Update Error:', error);
     res.status(500).json({ success: false, error: error.message });

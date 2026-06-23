@@ -29,7 +29,7 @@ const socket = io('/', { autoConnect: true });
 // 'calc'   = computed from other fields (shown, not directly edited)
 // 'dropdown' = select from fixed options
 
-export const COLUMNS = [
+const COLUMNS = [
   // ── Group 1: Identification ────────────────────────────────────────────────
   { key: 'SL NO', label: 'SL NO', width: 60, type: 'auto', group: 'id', sticky: true },
   { key: 'LOADING DT', label: 'INVOICE DATE', width: 120, type: 'auto', group: 'id' },
@@ -242,6 +242,44 @@ export const COLUMNS = [
     }
   },
   { key: 'Transporting Coast', label: 'TRANSPORTING COAST', width: 160, type: 'manual', group: 'owner' },
+  {
+    key: 'PAYMENT STATUS',
+    label: 'PAYMENT\nSTATUS',
+    width: 110,
+    type: 'auto',
+    group: 'payment',
+    hint: 'Auto-filled when Account Details deposit is mapped to this bill'
+  },
+  {
+    key: 'PAYMENT DATE',
+    label: 'PAYMENT\nDATE',
+    width: 120,
+    type: 'auto',
+    group: 'payment',
+    hint: 'Transaction date of the mapped payment'
+  },
+  {
+    key: 'PAYMENT REF',
+    label: 'PAYMENT\nREF',
+    width: 150,
+    type: 'auto',
+    group: 'payment',
+    hint: 'Reference No / Cheque No from Account Details'
+  },
+  {
+    key: 'DIFFERENCE',
+    label: 'DIFFERENCE',
+    width: 110,
+    type: 'calc',
+    group: 'payment',
+    hint: 'Payment Received (Bank TF) - Bill Amount',
+    formula: r => {
+      const bankTf = num(r['Bank TF']);
+      const billAmt = num(r['GROSS AMOUNT']) || num(r['NET AMOUNT']);
+      if (!bankTf && !billAmt) return '';
+      return (bankTf - billAmt).toFixed(2);
+    }
+  },
 ];
 
 // ─── Internal fields not shown ────────────────────────────────────────────────
@@ -279,10 +317,10 @@ function formatDateToDDMMYY(dStr) {
   if (!dStr) return '';
   const clean = String(dStr).trim();
   if (/^\d{2}\.\d{2}\.\d{2}$/.test(clean)) return clean;
-  
+
   const date = parseToDate(clean);
   if (isNaN(date.getTime()) || date.getTime() === 0) return dStr;
-  
+
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = String(date.getFullYear()).slice(-2);
@@ -309,6 +347,7 @@ const GROUP_COLORS = {
   hsd: { bg: '#d1fae5', border: '#6ee7b7' },
   net: { bg: '#fce7f3', border: '#f9a8d4' },
   owner: { bg: '#f0fdf4', border: '#86efac' },
+  payment: { bg: '#f0f9ff', border: '#7dd3fc' },
 };
 
 // Deduplicate columns (WHEEL was listed twice)
@@ -373,7 +412,7 @@ export function parseWorksheetToAOA(ws) {
     }
   }
 
-  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }).map(row => 
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }).map(row =>
     (row || []).map(cell => (cell !== undefined && cell !== null ? String(cell).trim() : ''))
   );
 }
@@ -525,7 +564,7 @@ function normalizeDateStr(str, expectedMonth, expectedYear) {
     if (year < 100) year += 2000;
     let p1 = parseInt(slashDMY[1], 10);
     let p2 = parseInt(slashDMY[2], 10);
-    
+
     let d = p1, month = p2;
     if (expectedMonth) {
       if (p1 === expectedMonth && p2 !== expectedMonth) {
@@ -835,7 +874,7 @@ export default function CementRegister({ onBack }) {
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
-      
+
       if (isOverwrite) {
         // Delete existing entries for this period
         await axios.delete(`${API_URL}/cement-register/by-period`, {
@@ -851,7 +890,7 @@ export default function CementRegister({ onBack }) {
             if (originalRow) {
               const compRow = computedRows.find(cr => cr._id === id);
               const finalSlNo = compRow ? compRow['SL NO'] : (originalRow['SL NO'] || '');
-              
+
               const merged = { ...originalRow, ...changes };
               const calculated = applyCalcs(merged);
               const changesWithCalcs = { ...changes, 'SL NO': finalSlNo };
@@ -920,7 +959,7 @@ export default function CementRegister({ onBack }) {
 
   const handleSave = async () => {
     if (dirtyCount === 0 && unsavedImportRows.length === 0) return;
-    
+
     // Check if we are importing new records and database already has records for this period
     if (unsavedImportRows.length > 0 && entries.length > 0) {
       setConfirmOverwrite(true);
@@ -960,7 +999,7 @@ export default function CementRegister({ onBack }) {
           const row = computedRows.find(r => r._id === id);
           const rawSite = String(row?.['SITE'] || '').trim().toUpperCase();
           const prefix = rawSite === 'NVL' ? 'DAC/' : 'NVCL/';
-          
+
           const formattedBillDate = billDate ? (() => {
             const [y, m, d] = billDate.split('-');
             return `${d}/${m}/${y}`;
@@ -1136,7 +1175,7 @@ export default function CementRegister({ onBack }) {
   const handleWizardImportConfirm = () => {
     const rows = wizardPreview?.filteredRows;
     if (!rows?.length) return;
-    
+
     // Assign temporary IDs and mark as unsaved
     const tempRows = rows.map((row, idx) => ({
       ...row,
@@ -1369,9 +1408,9 @@ export default function CementRegister({ onBack }) {
           </Button>
 
           {isBillingMode ? (
-            <Box sx={{ 
-              display: 'flex', alignItems: 'center', gap: 1.5, 
-              bgcolor: '#f8fafc', px: 2, py: 0.75, borderRadius: '12px', border: '1px solid #e2e8f0' 
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 1.5,
+              bgcolor: '#f8fafc', px: 2, py: 0.75, borderRadius: '12px', border: '1px solid #e2e8f0'
             }}>
               <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#475569', letterSpacing: '0.5px' }}>BILLING STAGE (AUTO BILL NO)</Typography>
               <input
@@ -1385,7 +1424,7 @@ export default function CementRegister({ onBack }) {
                 sx={{ fontWeight: 700, fontSize: '0.75rem', px: 2, borderRadius: '8px', bgcolor: '#0f172a', '&:hover': { bgcolor: '#1e293b' }, boxShadow: 'none' }}>
                 Apply ({selectedIds.size})
               </Button>
-              <Button size="small" sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b', minWidth: 0, px: 1, textTransform: 'none' }} 
+              <Button size="small" sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b', minWidth: 0, px: 1, textTransform: 'none' }}
                 onClick={() => setIsBillingMode(false)}>Exit</Button>
             </Box>
           ) : (
@@ -1407,16 +1446,16 @@ export default function CementRegister({ onBack }) {
           <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
 
           {selectedIds.size > 0 && !isBillingMode && (
-            <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }}/>}
+            <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }} />}
               onClick={() => setConfirmDel(true)}
               sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', boxShadow: 'none' }}>
               Delete Selected
             </Button>
           )}
 
-          <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }}/>} onClick={handleExport}
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>Export XLS</Button>
-          
+
           {saveCompleted && (
             <Button
               size="small"
@@ -1447,9 +1486,9 @@ export default function CementRegister({ onBack }) {
               background: saveCompleted ? '#f1f5f9' : 'linear-gradient(135deg,#7c3aed,#6d28d9)',
               color: saveCompleted ? '#94a3b8' : '#fff',
               border: saveCompleted ? '1px solid #e2e8f0' : 'none',
-              '&:hover': { 
-                background: saveCompleted ? '#f1f5f9' : 'linear-gradient(135deg,#6d28d9,#5b21b6)', 
-                boxShadow: saveCompleted ? 'none' : '0 4px 14px rgba(124,58,237,0.35)' 
+              '&:hover': {
+                background: saveCompleted ? '#f1f5f9' : 'linear-gradient(135deg,#6d28d9,#5b21b6)',
+                boxShadow: saveCompleted ? 'none' : '0 4px 14px rgba(124,58,237,0.35)'
               },
               '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' },
             }}
@@ -2004,7 +2043,7 @@ export default function CementRegister({ onBack }) {
               ⚠️ Overwrite Existing Data?
             </Typography>
             <Typography color="text.secondary" fontSize="13px" mb={3}>
-              There is already saved data for <strong>{MONTHS[selectedMonth - 1]} {selectedYear}</strong> in the database. 
+              There is already saved data for <strong>{MONTHS[selectedMonth - 1]} {selectedYear}</strong> in the database.
               Saving these changes will <strong>permanently delete all existing records</strong> for this period and insert the newly uploaded Excel entries.
               This action cannot be undone. Do you want to proceed?
             </Typography>
@@ -2014,7 +2053,7 @@ export default function CementRegister({ onBack }) {
               <Button variant="contained" size="small" color="warning"
                 startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
                 onClick={() => executeSave(true)} disabled={saving}
-                sx={{ 
+                sx={{
                   fontWeight: 800,
                   bgcolor: '#d97706',
                   '&:hover': { bgcolor: '#b45309' }
@@ -2127,7 +2166,42 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
         ...cellStyle, background: bg,
         color: col.type === 'calc' ? '#065f46' : '#1e293b',
         fontWeight: col.type === 'calc' ? 600 : 400, cursor: 'default',
-      }}>{value || ''}</td>
+      }}>
+        {/* ── PAYMENT STATUS: render as a colored chip ── */}
+        {col.key === 'PAYMENT STATUS' && value ? (
+          <span style={{
+            display: 'inline-block',
+            padding: '2px 8px',
+            borderRadius: '999px',
+            fontSize: '10px',
+            fontWeight: 800,
+            letterSpacing: '0.03em',
+            background:
+              value === 'Paid' ? '#dcfce7'
+                : value === 'Partial' ? '#fef9c3'
+                  : '#f1f5f9',
+            color:
+              value === 'Paid' ? '#15803d'
+                : value === 'Partial' ? '#92400e'
+                  : '#64748b',
+            border: `1px solid ${value === 'Paid' ? '#86efac'
+                : value === 'Partial' ? '#fde68a'
+                  : '#e2e8f0'
+              }`,
+          }}>
+            {value === 'Paid' ? '✓ Paid'
+              : value === 'Partial' ? '⚡ Partial'
+                : value}
+          </span>
+        ) : col.key === 'DIFFERENCE' && value ? (
+          <span style={{
+            color: parseFloat(value) > 0 ? '#15803d' : parseFloat(value) < 0 ? '#dc2626' : '#64748b',
+            fontWeight: parseFloat(value) !== 0 ? 800 : 400
+          }}>
+            {parseFloat(value) > 0 ? `+${value}` : value}
+          </span>
+        ) : value || ''}
+      </td>
     );
   }
 
