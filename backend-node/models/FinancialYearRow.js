@@ -9,9 +9,15 @@ const fyRowSchema = new mongoose.Schema({
   editedSite: { type: String },
   editedAmount: { type: Number },
   debitReason: { type: String, default: 'None' },
-  damageMonth: { type: String },
+  // Legacy singular fields (kept for backward compat)
   damageVehicle: { type: String },
   damageTrip: { type: Object },
+  // New plural fields used by the Damage/Shortage modal
+  damageYear: { type: String },
+  damageMonth: { type: String },
+  damageVehicles: { type: [String], default: [] },
+  damageTrips: { type: mongoose.Schema.Types.Mixed, default: [] },
+  damageVehicleAmounts: { type: mongoose.Schema.Types.Mixed, default: {} },
   hidden: { type: Boolean, default: false }
 }, { timestamps: true });
 

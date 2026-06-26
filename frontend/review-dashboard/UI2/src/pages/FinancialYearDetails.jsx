@@ -76,6 +76,7 @@ export default function FinancialYearDetails({ onBack }) {
   const [damageTrips, setDamageTrips] = useState([]);
   const [damageSelectedTrips, setDamageSelectedTrips] = useState([]);
   const [damageVehicleAmounts, setDamageVehicleAmounts] = useState({});
+  const [damageManualRemarks, setDamageManualRemarks] = useState('');
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ id: '', paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: '' });
@@ -87,12 +88,13 @@ export default function FinancialYearDetails({ onBack }) {
   const [dirtyGroups, setDirtyGroups] = useState(new Set());
   const [page, setPage] = useState(0);
   const [siteFilter, setSiteFilter] = useState('All'); // 'All' | 'NVCL' | 'NVL'
+  const [selYear, setSelYear] = useState('2025-2026');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [dataRes, docsRes] = await Promise.all([
-        axios.get(`${API_URL}/fy-details/data`),
+        axios.get(`${API_URL}/fy-details/data`, { params: { fy: selYear } }),
         axios.get(`${API_URL}/fy-details/documents`)
       ]);
       setRows(dataRes.data.rows || []);
@@ -105,7 +107,7 @@ export default function FinancialYearDetails({ onBack }) {
     } catch {
       setSnack({ severity: 'error', msg: 'Failed to load details' });
     } finally { setLoading(false); }
-  }, []);
+  }, [selYear]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -117,6 +119,7 @@ export default function FinancialYearDetails({ onBack }) {
     setDamageTrips([]);
     setDamageSelectedTrips([]);
     setDamageVehicleAmounts({});
+    setDamageManualRemarks('');
   };
 
   const fetchDamageVehicles = async (monthName) => {
@@ -143,14 +146,14 @@ export default function FinancialYearDetails({ onBack }) {
       updated = [...damageSelectedVehicles, vehicle];
     }
     setDamageSelectedVehicles(updated);
-    
+
     if (updated.length === 0) {
       setDamageTrips([]);
       setDamageSelectedTrips([]);
       setDamageVehicleAmounts({});
       return;
     }
-    
+
     try {
       const monthIdx = MONTHS.indexOf(damageMonth) + 1;
       const vehicleQuery = updated.join(',');
@@ -170,65 +173,113 @@ export default function FinancialYearDetails({ onBack }) {
     });
   };
 
-  const handleDamageSubmit = () => {
+  const handleDamageSubmit = async () => {
     if (!damageTarget || damageSelectedTrips.length === 0) return;
     const inv = damageTarget.invoiceNumber;
     const gid = damageTarget.groupId;
-    
+
     const targetAmt = Math.abs(num(damageTarget.debitAmount));
-    const allocatedAmt = damageSelectedVehicles.reduce((sum, v) => sum + num(damageVehicleAmounts[v] || 0), 0);
-    if (allocatedAmt !== targetAmt) {
+    // Sum amounts keyed by invoiceNo (one per trip-row)
+    const allocatedAmt = damageSelectedTrips.reduce((sum, t) => sum + num(damageVehicleAmounts[t.invoiceNo] || 0), 0);
+    // Only enforce amount match when a non-zero debit amount exists
+    if (targetAmt > 0 && allocatedAmt !== targetAmt) {
       setSnack({ severity: 'error', msg: `Total allocated (₹${allocatedAmt}) must match Debit Amount (₹${targetAmt})` });
       return;
     }
-    
-    // Auto-populate group remarks
+
+    // Auto-populate group remarks – one line per trip-row (vehicle + trip + amount)
     let suffix = damageTarget.reason;
     if (suffix === 'Damage / Shortage') suffix = 'Damage/Shortage';
     else if (suffix === 'RFID Deduction / Charges') suffix = 'RFID Deduction';
-    
+
     const suffixStr = suffix ? `-${suffix}` : '';
     const monthCap = damageMonth.charAt(0).toUpperCase() + damageMonth.slice(1).toLowerCase();
-    
+
     const sortedSelectedTrips = [...damageSelectedTrips].sort((a, b) => {
       if (a.vehicle !== b.vehicle) return a.vehicle.localeCompare(b.vehicle);
       return a.tripNumber - b.tripNumber;
     });
 
-    const groupedTrips = {};
-    sortedSelectedTrips.forEach(t => {
-      if (!groupedTrips[t.vehicle]) groupedTrips[t.vehicle] = [];
-      groupedTrips[t.vehicle].push(`Trip No. ${t.tripNumber} (${t.tripDate})`);
-    });
-
-    const newRemarks = Object.keys(groupedTrips).map(v => {
-      const tripsStr = groupedTrips[v].join(', ');
-      const amt = damageVehicleAmounts[v] || 0;
-      return `${monthCap}-${v}-${tripsStr}${suffixStr}-₹${amt}`;
+    // One remark line per trip-row: Month-Vehicle-Trip N (date)-Reason-₹amount
+    const newRemarks = sortedSelectedTrips.map(t => {
+      const amt = damageVehicleAmounts[t.invoiceNo] || 0;
+      return `${monthCap}-${t.vehicle}-Trip No. ${t.tripNumber} (${t.tripDate})${suffixStr}-₹${amt}`;
     }).join('\n');
 
+    // Build the combined remarks:
+    // Auto-generated trip lines come first, then the user's manual remarks (if any)
+    const combinedRemarks = damageManualRemarks.trim()
+      ? `${newRemarks}\n---\n${damageManualRemarks.trim()}`
+      : newRemarks;
+
+    // Build the updated payment record
+    const existingPayment = payments.find(p => p.id === gid);
+    const updatedPayment = existingPayment
+      ? { ...existingPayment, remarks: combinedRemarks }
+      : { id: gid, billNos: [inv], paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: combinedRemarks, tdsProvision: '' };
+
+    // Update local state immediately for snappy UI
     setPayments(prev => {
       const idx = prev.findIndex(p => p.id === gid);
       if (idx !== -1) {
         const np = [...prev];
-        np[idx] = { ...np[idx], remarks: newRemarks };
+        np[idx] = updatedPayment;
         return np;
       }
-      return [...prev, { id: gid, billNos: [inv], paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: newRemarks, tdsProvision: '' }];
+      return [...prev, updatedPayment];
     });
-    setDirtyGroups(prev => new Set(prev).add(gid));
 
-    // Update row with metadata
-    setRows(prev => prev.map(r => r.invoiceNumber === inv ? {
-      ...r,
-      damageYear,
-      damageMonth,
-      damageVehicles: damageSelectedVehicles,
-      damageTrips: sortedSelectedTrips
-    } : r));
-    setDirtyRows(new Set(dirtyRows).add(inv));
+    // Update row with damage metadata in local state
+    const updatedRow = { damageYear, damageMonth, damageVehicles: damageSelectedVehicles, damageTrips: sortedSelectedTrips, damageVehicleAmounts };
+    setRows(prev => prev.map(r => r.invoiceNumber === inv ? { ...r, ...updatedRow } : r));
 
     setDamageModalOpen(false);
+
+    // ── Immediately persist to MongoDB ──────────────────────────────────
+    setLoading(true);
+    try {
+      // 1. Save the row with damage metadata
+      const rowData = rows.find(x => x.invoiceNumber === inv) || {};
+      await axios.post(`${API_URL}/fy-details/save-row`, {
+        billNo: inv,
+        billType: rowData.billType,
+        editedInvoiceDate: rowData.invoiceDate,
+        editedInvoiceNumber: rowData.displayInvoiceNumber || rowData.invoiceNumber,
+        editedMonth: rowData.month,
+        editedSite: rowData.site,
+        editedAmount: rowData.amount,
+        debitReason: damageTarget.reason,
+        damageYear,
+        damageMonth,
+        damageVehicles: damageSelectedVehicles,
+        damageTrips: sortedSelectedTrips,
+        damageVehicleAmounts
+      });
+
+      // 2. Save the payment group with combined remarks (auto + manual)
+      await axios.post(`${API_URL}/fy-details/save-group`, {
+        id: updatedPayment.id,
+        billNos: updatedPayment.billNos,
+        paymentAmount: num(updatedPayment.paymentAmount),
+        paymentDate: updatedPayment.paymentDate || '',
+        referenceNo: updatedPayment.referenceNo || '',
+        debitAmount: num(updatedPayment.debitAmount),
+        remarks: combinedRemarks,
+        tdsProvision: num(updatedPayment.tdsProvision)
+      });
+
+      setSnack({ severity: 'success', msg: 'Damage details saved! Remarks updated and Cement Register synchronized.' });
+      // Refresh to get latest data including cement register updates
+      await fetchData();
+    } catch (err) {
+      console.error('[DamageSubmit] Save error:', err);
+      setSnack({ severity: 'error', msg: 'Save failed: ' + (err.response?.data?.error || err.message) });
+      // Mark dirty so user can retry via header Save button
+      setDirtyGroups(prev => new Set(prev).add(gid));
+      setDirtyRows(prev => new Set(prev).add(inv));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Compute calculated fields
@@ -306,13 +357,18 @@ export default function FinancialYearDetails({ onBack }) {
       'RFID Deduction / Charges',
       'Substance'
     ];
-    
+
     if (field === 'debitReason' && WORKFLOW_REASONS.includes(value)) {
       const r = rows.find(x => x.invoiceNumber === invoiceNumber);
       const computedR = computedRows.find(x => x.invoiceNumber === invoiceNumber);
       if (r && computedR) {
         setDamageTarget({ invoiceNumber: invoiceNumber, groupId: computedR.groupId, reason: value, debitAmount: computedR.groupData?.debitAmount });
         setDamageModalOpen(true);
+        // Pre-load any existing manual remarks from the payment record
+        // Strip out the auto-generated trip lines (everything before the '---' separator)
+        const existingRemarks = computedR.groupData?.remarks || '';
+        const sepIdx = existingRemarks.indexOf('\n---\n');
+        setDamageManualRemarks(sepIdx !== -1 ? existingRemarks.slice(sepIdx + 5) : '');
       }
     }
 
@@ -434,26 +490,50 @@ export default function FinancialYearDetails({ onBack }) {
   };
 
   const saveAllChanges = async () => {
+    if (dirtyRows.size === 0 && dirtyGroups.size === 0) return;
     setLoading(true);
     try {
       const rowP = Array.from(dirtyRows).map(inv => {
         const r = rows.find(x => x.invoiceNumber === inv); if (!r) return Promise.resolve();
-        return axios.post(`${API_URL}/fy-details/save-row`, { 
-          billNo: inv, editedInvoiceDate: r.invoiceDate, editedInvoiceNumber: r.displayInvoiceNumber, 
-          editedMonth: r.month, editedSite: r.site, editedAmount: r.amount, billType: r.billType, 
-          debitReason: r.debitReason, damageYear: r.damageYear, damageMonth: r.damageMonth, 
-          damageVehicles: r.damageVehicles, damageTrips: r.damageTrips, damageVehicleAmounts: r.damageVehicleAmounts 
+        return axios.post(`${API_URL}/fy-details/save-row`, {
+          billNo: inv,
+          editedInvoiceDate: r.invoiceDate,
+          editedInvoiceNumber: r.displayInvoiceNumber || r.invoiceNumber,
+          editedMonth: r.month,
+          editedSite: r.site,
+          editedAmount: r.amount,
+          billType: r.billType,
+          debitReason: r.debitReason,
+          damageYear: r.damageYear,
+          damageMonth: r.damageMonth,
+          damageVehicles: r.damageVehicles || [],
+          damageTrips: r.damageTrips || [],
+          damageVehicleAmounts: r.damageVehicleAmounts || {}
         });
       });
       const payP = Array.from(dirtyGroups).map(gid => {
         const p = payments.find(x => x.id === gid); if (!p) return Promise.resolve();
-        return axios.post(`${API_URL}/fy-details/save-group`, p);
+        return axios.post(`${API_URL}/fy-details/save-group`, {
+          id: p.id,
+          billNos: p.billNos,
+          paymentAmount: num(p.paymentAmount),
+          paymentDate: p.paymentDate || '',
+          referenceNo: p.referenceNo || '',
+          debitAmount: num(p.debitAmount),
+          remarks: p.remarks || '',
+          tdsProvision: num(p.tdsProvision)
+        });
       });
       await Promise.all([...rowP, ...payP]);
-      setSnack({ severity: 'success', msg: 'All changes saved!' });
-      setDirtyRows(new Set()); setDirtyGroups(new Set());
-    } catch { setSnack({ severity: 'error', msg: 'Failed to save some changes.' }); }
-    finally { setLoading(false); }
+      setSnack({ severity: 'success', msg: 'All changes saved successfully!' });
+      setDirtyRows(new Set());
+      setDirtyGroups(new Set());
+      // Refresh to confirm persisted data
+      await fetchData();
+    } catch (err) {
+      console.error('[saveAllChanges] error:', err);
+      setSnack({ severity: 'error', msg: 'Failed to save: ' + (err.response?.data?.error || err.message) });
+    } finally { setLoading(false); }
   };
 
   const handleDeleteRows = async () => {
@@ -686,7 +766,25 @@ export default function FinancialYearDetails({ onBack }) {
           <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
             Bill Register
           </Typography>
-          <Typography variant="caption" sx={{ color: '#64748b' }}>{FY_LABEL}</Typography>
+          <Typography variant="caption" sx={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            FY
+            <select
+              value={selYear}
+              onChange={e => setSelYear(e.target.value)}
+              style={{
+                border: 'none', outline: 'none', background: '#f1f5f9',
+                fontWeight: 700, color: '#4f46e5', cursor: 'pointer',
+                fontFamily: 'Inter, sans-serif', fontSize: '12px',
+                padding: '2px 6px', borderRadius: '4px', marginLeft: '4px'
+              }}
+            >
+              <option value="2024-2025">2024-25</option>
+              <option value="2025-2026">2025-26</option>
+              <option value="2026-2027">2026-27</option>
+              <option value="2027-2028">2027-28</option>
+              <option value="2028-2029">2028-29</option>
+            </select>
+          </Typography>
         </Box>
 
         {/* ── Site Filter Tabs ── */}
@@ -711,14 +809,34 @@ export default function FinancialYearDetails({ onBack }) {
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
           <Typography variant="caption" color="text.secondary">{filteredRows.length} records</Typography>
-          
+
           <Button variant="outlined" color="primary" size="small" onClick={() => setDocModalOpen(true)} sx={{ fontWeight: 'bold' }}>
             Upload PDF {pageDocuments.length > 0 && `(${pageDocuments.length})`}
           </Button>
 
-          <Button variant="contained" color="success" startIcon={<SaveIcon />} onClick={saveAllChanges}
-            disabled={dirtyRows.size === 0 && dirtyGroups.size === 0} sx={{ fontWeight: 'bold' }}>
-            Save Details
+          <Button 
+            variant="contained" 
+            startIcon={loading ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />} 
+            onClick={saveAllChanges}
+            disabled={(dirtyRows.size === 0 && dirtyGroups.size === 0) || loading} 
+            sx={{ 
+              fontWeight: 800, 
+              borderRadius: 2,
+              px: 2.5,
+              background: (dirtyRows.size > 0 || dirtyGroups.size > 0)
+                ? 'linear-gradient(135deg,#10b981,#059669)'
+                : '#cbd5e1',
+              opacity: (dirtyRows.size === 0 && dirtyGroups.size === 0) ? 0.5 : 1,
+              filter: (dirtyRows.size === 0 && dirtyGroups.size === 0) ? 'blur(0.5px)' : 'none',
+              transition: 'all 0.2s ease-in-out',
+              '&:hover': {
+                background: (dirtyRows.size > 0 || dirtyGroups.size > 0)
+                  ? 'linear-gradient(135deg,#059669,#047857)'
+                  : '#cbd5e1'
+              }
+            }}
+          >
+            {loading ? 'Saving...' : `Save Details${(dirtyRows.size + dirtyGroups.size) > 0 ? ` (${dirtyRows.size + dirtyGroups.size})` : ''}`}
           </Button>
           <IconButton onClick={fetchData}><RefreshIcon /></IconButton>
           <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}>XLS</Button>
@@ -849,7 +967,7 @@ export default function FinancialYearDetails({ onBack }) {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={damageModalOpen} onClose={() => setDamageModalOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={damageModalOpen} onClose={() => setDamageModalOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle sx={{ fontWeight: 'bold' }}>{damageTarget?.reason || 'Damage / Shortage'} Details</DialogTitle>
         <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Box>
@@ -877,8 +995,8 @@ export default function FinancialYearDetails({ onBack }) {
                 <Typography variant="body2" color="text.secondary" textAlign="center">No vehicles found.</Typography>
               ) : (
                 damageVehicles.map((v) => (
-                  <Box 
-                    key={v} 
+                  <Box
+                    key={v}
                     onClick={() => toggleDamageVehicle(v)}
                     sx={{ p: 1, mb: 0.5, borderRadius: 1, cursor: 'pointer', bgcolor: damageSelectedVehicles.includes(v) ? '#e0e7ff' : '#fff', '&:hover': { bgcolor: '#f1f5f9' }, display: 'flex', alignItems: 'center', gap: 1 }}
                   >
@@ -891,73 +1009,342 @@ export default function FinancialYearDetails({ onBack }) {
           </Box>
           <Box>
             <Typography variant="body2" fontWeight={600} mb={1}>4. Select Trip(s)</Typography>
-            <Box sx={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+            <Box sx={{ maxHeight: 340, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: '#fafafa' }}>
               {damageTrips.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
                   {damageSelectedVehicles.length > 0 ? 'No trips found for selected vehicle(s).' : 'Select at least one vehicle to see trips.'}
                 </Typography>
-              ) : (
-                damageTrips.map((t, idx) => {
-                  const isSelected = !!damageSelectedTrips.find(st => st.invoiceNo === t.invoiceNo && st.tripDate === t.tripDate);
+              ) : (() => {
+                // ── Build date-sorted grouping ───────────────────────────────
+                const parseDate = (dStr) => {
+                  if (!dStr) return 0;
+                  const p = dStr.split(/[-/.]/);
+                  if (p.length >= 3) { let y = parseInt(p[2]); if (y < 100) y += 2000; return new Date(y, parseInt(p[1]) - 1, parseInt(p[0])).getTime(); }
+                  return 0;
+                };
+                const fmtDate = (dStr) => {
+                  try {
+                    const p = dStr.split(/[-/.]/);
+                    if (p.length === 3) {
+                      const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                      let y = parseInt(p[2]); if (y < 100) y += 2000;
+                      return `${p[0]} ${M[parseInt(p[1]) - 1]} ${y}`;
+                    }
+                  } catch(_) {}
+                  return dStr;
+                };
+
+                // Group by date
+                const tripsByDate = {};
+                [...damageTrips]
+                  .sort((a, b) => parseDate(a.tripDate) - parseDate(b.tripDate))
+                  .forEach(t => {
+                    const k = t.tripDate || 'Unknown';
+                    if (!tripsByDate[k]) tripsByDate[k] = [];
+                    tripsByDate[k].push(t);
+                  });
+
+                const isSel = (t) => !!damageSelectedTrips.find(s => s.invoiceNo === t.invoiceNo && s.vehicle === t.vehicle);
+
+                const toggleGroup = (trips) => {
+                  const allSel = trips.every(t => isSel(t));
+                  if (allSel) {
+                    setDamageSelectedTrips(prev => prev.filter(s => !trips.find(t => t.invoiceNo === s.invoiceNo && t.vehicle === s.vehicle)));
+                  } else {
+                    const missing = trips.filter(t => !isSel(t));
+                    setDamageSelectedTrips(prev => [...prev, ...missing]);
+                  }
+                };
+
+                const dateEntries = Object.entries(tripsByDate);
+
+                return dateEntries.map(([dateStr, tripsForDate], groupIdx) => {
+                  const allSel = tripsForDate.every(t => isSel(t));
+                  const someSel = tripsForDate.some(t => isSel(t));
+                  // Sequential trip-occasion number (1st date = Trip 1, etc.)
+                  const tripOccasion = groupIdx + 1;
+
                   return (
-                    <Box 
-                      key={idx} 
-                      onClick={() => toggleDamageTrip(t)}
-                      sx={{ p: 1.5, borderBottom: '1px solid #e2e8f0', cursor: 'pointer', bgcolor: isSelected ? '#e0e7ff' : '#fff', '&:hover': { bgcolor: '#f1f5f9' }, display: 'flex', alignItems: 'center', gap: 1.5 }}
-                    >
-                      <input type="checkbox" checked={isSelected} readOnly style={{ cursor: 'pointer' }} />
-                      <Box>
-                        <Typography variant="body2" fontWeight={600}>{t.vehicle} - Trip {t.tripNumber} ({t.tripDate})</Typography>
-                        <Typography variant="caption" color="text.secondary">Invoice: {t.invoiceNo} | {t.plant} → {t.destination}</Typography>
+                    <Box key={dateStr} sx={{ borderBottom: groupIdx < dateEntries.length - 1 ? '2px solid #e2e8f0' : 'none' }}>
+                      {/* ── Date + Trip Occasion Header ─── */}
+                      <Box
+                        sx={{
+                          display: 'flex', alignItems: 'center', gap: 1.5,
+                          px: 2, py: 1.25,
+                          bgcolor: allSel ? '#e0e7ff' : someSel ? '#f0f4ff' : '#f1f5f9',
+                          cursor: 'pointer', '&:hover': { bgcolor: '#e4e8fd' },
+                          borderBottom: '1px solid #e2e8f0', userSelect: 'none'
+                        }}
+                        onClick={() => toggleGroup(tripsForDate)}
+                      >
+                        <input
+                          type="checkbox" checked={allSel} readOnly
+                          ref={el => { if (el) el.indeterminate = !allSel && someSel; }}
+                          style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#4f46e5' }}
+                        />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+                          <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#3730a3' }}>
+                            📅 {fmtDate(dateStr)}
+                          </Typography>
+                          <Box sx={{
+                            px: 1, py: 0.25, borderRadius: '999px',
+                            bgcolor: allSel ? '#4f46e5' : '#6366f140',
+                            color: allSel ? '#fff' : '#4f46e5',
+                            fontSize: 10, fontWeight: 700, lineHeight: 1.6,
+                            letterSpacing: 0.5
+                          }}>
+                            Trip {tripOccasion}
+                          </Box>
+                        </Box>
+                        <Typography sx={{ fontSize: 10, color: '#6b7280', fontWeight: 500 }}>
+                          {tripsForDate.length} vehicle{tripsForDate.length !== 1 ? 's' : ''}
+                          {someSel ? ` · ${tripsForDate.filter(t => isSel(t)).length} selected` : ''}
+                        </Typography>
                       </Box>
+
+                      {/* ── Vehicle rows table ─── */}
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc' }}>
+                            <th style={{ width: 30, padding: '4px 8px', borderBottom: '1px solid #e2e8f0' }}></th>
+                            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Vehicle No.</th>
+                            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Trip #</th>
+                            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Invoice No.</th>
+                            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Destination</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tripsForDate.map((t, ri) => {
+                            const selected = isSel(t);
+                            return (
+                              <tr
+                                key={`${t.vehicle}-${t.invoiceNo}`}
+                                onClick={() => {
+                                  if (selected) setDamageSelectedTrips(prev => prev.filter(s => !(s.invoiceNo === t.invoiceNo && s.vehicle === t.vehicle)));
+                                  else setDamageSelectedTrips(prev => [...prev, t]);
+                                }}
+                                style={{ background: selected ? '#eef2ff' : ri % 2 === 0 ? '#fff' : '#fafafa', cursor: 'pointer' }}
+                                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#f0f4ff'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = selected ? '#eef2ff' : ri % 2 === 0 ? '#fff' : '#fafafa'; }}
+                              >
+                                <td style={{ padding: '5px 8px', textAlign: 'center', borderBottom: '1px solid #f1f5f9' }}>
+                                  <input type="checkbox" checked={selected} readOnly style={{ cursor: 'pointer', accentColor: '#4f46e5' }} />
+                                </td>
+                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, color: '#1e293b', whiteSpace: 'nowrap' }}>
+                                  {t.vehicle}
+                                </td>
+                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                  <span style={{ background: '#e0e7ff', color: '#3730a3', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>
+                                    #{t.tripNumber}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#4f46e5', fontFamily: 'monospace', fontSize: 10.5, fontWeight: 500 }}>
+                                  {t.invoiceNo}
+                                </td>
+                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#334155', fontWeight: 600, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <span style={{ color: '#94a3b8', fontWeight: 400 }}>{t.plant} </span>
+                                  <span style={{ color: '#cbd5e1' }}>→ </span>
+                                  {t.destination}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </Box>
                   );
-                })
-              )}
+                });
+              })()}
             </Box>
+            {/* Summary bar */}
+            {damageTrips.length > 0 && (
+              <Box sx={{ mt: 0.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="caption" color="text.secondary">
+                  {damageSelectedTrips.length} of {damageTrips.length} trip-rows selected
+                </Typography>
+                {damageSelectedTrips.length > 0 && (
+                  <Typography variant="caption" sx={{ color: '#4f46e5', cursor: 'pointer', fontWeight: 600, '&:hover': { textDecoration: 'underline' } }} onClick={() => setDamageSelectedTrips([])}>
+                    Clear all
+                  </Typography>
+                )}
+              </Box>
+            )}
           </Box>
           {damageSelectedTrips.length > 0 && (
             <Box>
-              <Typography variant="body2" fontWeight={600} mb={1}>
-                5. Allocate Amount (Total Debit Amount: ₹{Math.abs(num(damageTarget?.debitAmount || 0))})
-              </Typography>
-              <Box sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 2 }}>
-                {damageSelectedVehicles.map(v => (
-                  <Box key={v} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                    <Typography variant="body2" sx={{ width: 150 }}>{v}</Typography>
-                    <TextField 
-                      size="small" 
-                      placeholder="₹ Amount" 
-                      value={damageVehicleAmounts[v] || ''} 
-                      onChange={(e) => setDamageVehicleAmounts({...damageVehicleAmounts, [v]: e.target.value})} 
-                    />
-                  </Box>
-                ))}
-                <Box mt={2}>
-                  {(() => {
-                    const targetAmt = Math.abs(num(damageTarget?.debitAmount || 0));
-                    const allocatedAmt = damageSelectedVehicles.reduce((sum, v) => sum + num(damageVehicleAmounts[v] || 0), 0);
-                    if (allocatedAmt !== targetAmt) {
-                      return <Typography variant="caption" color="error">Total allocated (₹{allocatedAmt}) must equal Debit Amount (₹{targetAmt}).</Typography>;
-                    }
-                    return <Typography variant="caption" color="success.main">Amount perfectly allocated. ✓</Typography>;
-                  })()}
-                </Box>
+              <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2" fontWeight={600}>
+                  5. Allocate Amount
+                  <Typography component="span" variant="caption" color="text.secondary" fontWeight={400} sx={{ ml: 1 }}>
+                    Total Debit: ₹{Math.abs(num(damageTarget?.debitAmount || 0))}
+                  </Typography>
+                </Typography>
+                {(() => {
+                  const target = Math.abs(num(damageTarget?.debitAmount || 0));
+                  const alloc = damageSelectedTrips.reduce((s, t) => s + num(damageVehicleAmounts[t.invoiceNo] || 0), 0);
+                  if (target === 0) return null;
+                  const remaining = target - alloc;
+                  return (
+                    <Typography variant="caption" sx={{ fontWeight: 600, color: remaining === 0 ? '#16a34a' : remaining > 0 ? '#d97706' : '#dc2626', fontFamily: 'monospace' }}>
+                      {remaining === 0 ? '✓ Fully allocated' : remaining > 0 ? `₹${remaining} remaining` : `₹${Math.abs(remaining)} over-allocated`}
+                    </Typography>
+                  );
+                })()}
               </Box>
+
+              {/* Per-trip-row amount table */}
+              <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '30%' }}>Vehicle No.</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '30%' }}>Trip Details</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '40%' }}>Allocate Amount (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...damageSelectedTrips]
+                      .sort((a, b) => a.vehicle.localeCompare(b.vehicle) || a.tripNumber - b.tripNumber)
+                      .map((t, idx) => (
+                        <tr key={`${t.invoiceNo}-${idx}`} style={{ background: idx % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                          <td style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, color: '#1e293b' }}>
+                            {t.vehicle}
+                          </td>
+                          <td style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'center' }}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.25 }}>
+                              <span style={{ background: '#e0e7ff', color: '#3730a3', borderRadius: 4, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>
+                                Trip #{t.tripNumber}
+                              </span>
+                              <span style={{ fontSize: 9.5, color: '#94a3b8', fontFamily: 'monospace' }}>{t.tripDate}</span>
+                            </Box>
+                          </td>
+                          <td style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              value={damageVehicleAmounts[t.invoiceNo] || ''}
+                              onChange={e => setDamageVehicleAmounts(prev => ({ ...prev, [t.invoiceNo]: e.target.value }))}
+                              style={{
+                                width: 110, padding: '4px 8px', fontSize: 12, textAlign: 'right',
+                                border: '1.5px solid #e2e8f0', borderRadius: 6, outline: 'none',
+                                fontFamily: 'monospace', fontWeight: 600, color: '#1e293b',
+                                background: damageVehicleAmounts[t.invoiceNo] ? '#f0f9ff' : '#fff',
+                              }}
+                              onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.15)'; }}
+                              onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; }}
+                            />
+                          </td>
+                        </tr>
+                    ))}
+                  </tbody>
+                  {/* Totals row */}
+                  <tfoot>
+                    <tr style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0' }}>
+                      <td colSpan={2} style={{ padding: '6px 10px', fontWeight: 700, color: '#475569', fontSize: 11 }}>Total Allocated</td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 800, fontFamily: 'monospace', fontSize: 13 }}>
+                        {(() => {
+                          const target = Math.abs(num(damageTarget?.debitAmount || 0));
+                          const alloc = damageSelectedTrips.reduce((s, t) => s + num(damageVehicleAmounts[t.invoiceNo] || 0), 0);
+                          return (
+                            <span style={{ color: alloc === target ? '#16a34a' : alloc > target ? '#dc2626' : '#d97706' }}>
+                              ₹{alloc}
+                              {target > 0 && <span style={{ fontSize: 10, fontWeight: 400, color: '#94a3b8', marginLeft: 4 }}>/ ₹{target}</span>}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </Box>
+            </Box>
+          )}
+
+          {/* ── Remarks field – always visible once trips are selected ── */}
+          {damageSelectedTrips.length > 0 && (
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 0.75 }}>
+                <Typography variant="body2" fontWeight={600}>
+                  6. Remarks <Typography component="span" variant="caption" color="text.secondary" fontWeight={400}>(optional)</Typography>
+                </Typography>
+                <Typography variant="caption" sx={{ color: damageManualRemarks.length > 450 ? '#ef4444' : '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>
+                  {damageManualRemarks.length}/500
+                </Typography>
+              </Box>
+              <Box sx={{ position: 'relative' }}>
+                <textarea
+                  value={damageManualRemarks}
+                  onChange={(e) => {
+                    if (e.target.value.length <= 500) setDamageManualRemarks(e.target.value);
+                  }}
+                  placeholder="Enter any additional notes, observations, or context about this deduction…"
+                  maxLength={500}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    fontSize: 13,
+                    fontFamily: 'Inter, system-ui, sans-serif',
+                    lineHeight: 1.6,
+                    color: '#1e293b',
+                    background: '#fff',
+                    border: '1.5px solid #e2e8f0',
+                    borderRadius: 8,
+                    outline: 'none',
+                    resize: 'vertical',
+                    minHeight: 80,
+                    maxHeight: 200,
+                    boxSizing: 'border-box',
+                    transition: 'border-color 0.15s, box-shadow 0.15s',
+                    boxShadow: 'none',
+                  }}
+                  onFocus={e => {
+                    e.target.style.borderColor = '#6366f1';
+                    e.target.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.12)';
+                  }}
+                  onBlur={e => {
+                    e.target.style.borderColor = '#e2e8f0';
+                    e.target.style.boxShadow = 'none';
+                  }}
+                />
+                {damageManualRemarks && (
+                  <button
+                    onClick={() => setDamageManualRemarks('')}
+                    style={{
+                      position: 'absolute', top: 8, right: 8,
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: '#94a3b8', fontSize: 14, lineHeight: 1, padding: '2px 4px',
+                      borderRadius: 4,
+                    }}
+                    title="Clear remarks"
+                  >
+                    ✕
+                  </button>
+                )}
+              </Box>
+              {damageManualRemarks.trim() && (
+                <Typography variant="caption" sx={{ color: '#6b7280', mt: 0.5, display: 'block' }}>
+                  This note will be appended to the auto-generated remarks when saved.
+                </Typography>
+              )}
             </Box>
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDamageModalOpen(false)}>Cancel</Button>
-          <Button 
-            variant="contained" 
-            onClick={handleDamageSubmit} 
+          <Button
+            variant="contained"
+            onClick={handleDamageSubmit}
             disabled={
-              damageSelectedTrips.length === 0 || 
-              damageSelectedVehicles.reduce((sum, v) => sum + num(damageVehicleAmounts[v] || 0), 0) !== Math.abs(num(damageTarget?.debitAmount || 0))
+              loading ||
+              damageSelectedTrips.length === 0 ||
+              // Only enforce amount match when a non-zero debit amount is set
+              (Math.abs(num(damageTarget?.debitAmount || 0)) > 0 &&
+                damageSelectedTrips.reduce((s, t) => s + num(damageVehicleAmounts[t.invoiceNo] || 0), 0) !== Math.abs(num(damageTarget?.debitAmount || 0)))
             }
           >
-            Save Details
+            {loading ? 'Saving…' : 'Save Details'}
           </Button>
         </DialogActions>
       </Dialog>

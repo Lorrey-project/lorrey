@@ -123,7 +123,7 @@ router.get("/", async (req, res) => {
       // Apply deductions override from Bill Register
       if (entry.deductionsOverride) {
         for (const [reason, override] of Object.entries(entry.deductionsOverride)) {
-          if (override.actual > override.projected) {
+          if (override.actual !== undefined && override.actual !== null) {
             if (reason === 'Damage / Shortage') entry['SHORTAGE AMOUNT'] = override.actual;
             else if (reason === 'GPS Trip Charges' || reason === 'GPS Deviation Charges') entry['GPS MONITORING CHARGE'] = override.actual;
             else if (reason === 'Device Installation Charges') entry['GPS DEVICE'] = override.actual;

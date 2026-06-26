@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
-  Snackbar, Alert, Chip, Tooltip, Select, MenuItem, FormControl, InputLabel
+  Snackbar, Alert, Chip, Tooltip, Select, MenuItem, FormControl, InputLabel,
+  Dialog, DialogTitle, DialogContent, DialogActions, Checkbox, ListItemText, OutlinedInput
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -26,6 +27,15 @@ const MONTH_NAMES = [
 // Helpers
 function num(val, fallback = 0) { const n = parseFloat(val); return isNaN(n) ? fallback : n; }
 function fmt2(n) { return Math.round(num(n) * 100) / 100; }
+
+const normalizeDate = (dStr) => {
+  if (!dStr) return '';
+  const parts = String(dStr).trim().split(/[-\/]/);
+  if (parts.length === 3) {
+    return `${parseInt(parts[0], 10)}-${parseInt(parts[1], 10)}-${parts[2]}`;
+  }
+  return dStr;
+};
 
 const COLUMNS = [
   // Global
@@ -137,15 +147,16 @@ const OPENING_KEYS = ['P_OPENING', 'S_OPENING', 'O_OPENING'];
 const CASHBOOK_HEADER_MAP = {
   'date': 'DATE',
   'opening balance': 'P_OPENING', 'opening': 'P_OPENING', 'opening balance ': 'P_OPENING',
+  'cash source': 'P_SOURCE', 'cash source ': 'P_SOURCE',
   'loan recv': 'P_LOAN_RECV', 'loan recv ': 'P_LOAN_RECV',
   'loan pay': 'P_LOAN_PAY', 'loan pay ': 'P_LOAN_PAY',
-  'cash withdraw': 'P_WITHDRAW', 'withdraw': 'P_WITHDRAW', 'cash withdraw ': 'P_WITHDRAW',
+  'cash withdraw': 'P_WITHDRAW', 'withdraw': 'P_WITHDRAW', 'cash withdraw ': 'P_WITHDRAW', 'cash with draw': 'P_WITHDRAW', 'cash with draw ': 'P_WITHDRAW',
   'site cash given from dac': 'P_GIVEN_DAC', 'given dac': 'P_GIVEN_DAC', 'site cash given from dac ': 'P_GIVEN_DAC',
   'cash given to office': 'P_GIVEN_OFFICE', 'given office': 'P_GIVEN_OFFICE', 'cash given to office ': 'P_GIVEN_OFFICE',
   'others': 'P_OTHERS', 'others ': 'P_OTHERS',
   'site opening': 'S_OPENING', 'site opening ': 'S_OPENING',
-  'transferred from office': 'S_TRANS_OFFICE', 'transferred from office ': 'S_TRANS_OFFICE',
-  'transferred to office cash': 'S_TRANS_TO_OFFICE', 'transferred to office cash ': 'S_TRANS_TO_OFFICE',
+  'transferred from office': 'S_TRANS_OFFICE', 'transferred from office ': 'S_TRANS_OFFICE', 'transfered from office': 'S_TRANS_OFFICE', 'transfered from office cash': 'S_TRANS_OFFICE', 'transferred from office cash': 'S_TRANS_OFFICE',
+  'transferred to office cash': 'S_TRANS_TO_OFFICE', 'transferred to office cash ': 'S_TRANS_TO_OFFICE', 'transfered to office cash': 'S_TRANS_TO_OFFICE',
   'office cash opening': 'O_OPENING', 'office cash opening ': 'O_OPENING',
   'remarks': 'REMARKS', 'remarks ': 'REMARKS'
 };
@@ -170,6 +181,14 @@ export default function MainCashbook({ onBack }) {
   const dirtyCount = Object.keys(localData).length;
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
+
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importYear, setImportYear] = useState(selYear);
+  const [importMonths, setImportMonths] = useState([]);
+  const [importFile, setImportFile] = useState(null);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importedEntries, setImportedEntries] = useState([]);
 
   // Year options
   const yearOptions = [];
@@ -282,7 +301,19 @@ export default function MainCashbook({ onBack }) {
   // NOTE: S_OPENING on the first row is intentionally kept manual (not auto-filled)
   // P_OPENING and O_OPENING on first row still auto-carry from previous month if not typed.
   const computedRows = useMemo(() => {
-    const rawList = entries.map(row => ({ ...row, ...(localData[row._id] || {}) }));
+    const importMap = {};
+    importedEntries.forEach(row => {
+      if (row.DATE) {
+        importMap[normalizeDate(row.DATE)] = row;
+      }
+    });
+
+    const rawList = entries.map(row => {
+      const normDate = normalizeDate(row.DATE);
+      const importedRow = importMap[normDate] || {};
+      const localRow = localData[row._id] || {};
+      return { ...row, ...importedRow, ...localRow };
+    });
     const result = [];
     for (let i = 0; i < rawList.length; i++) {
       const r = { ...rawList[i] };
@@ -303,7 +334,7 @@ export default function MainCashbook({ onBack }) {
       result.push(applyCalcs(r));
     }
     return result;
-  }, [entries, localData, prevClosing]);
+  }, [entries, localData, importedEntries, prevClosing]);
 
   // Monthly column totals for summary row
   const monthSums = useMemo(() => {
@@ -351,136 +382,185 @@ export default function MainCashbook({ onBack }) {
     }
   }, []);
 
-  const handleExcelUpload = (e) => {
+  const handleImportFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
+    setImportFile(file);
+    
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
         const dataBytes = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(dataBytes, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        
-        // Convert to array of arrays
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
-        if (aoa.length === 0) {
-          setSnack({ severity: 'error', msg: 'Uploaded Excel sheet is empty' });
-          return;
-        }
-
-        // Find header row (must contain Date / Opening / Closing / remarks etc.)
+        
         let headerRowIdx = 0;
         let maxMatches = 0;
         for (let i = 0; i < Math.min(15, aoa.length); i++) {
-          const row = aoa[i] || [];
           let matches = 0;
-          row.forEach(cell => {
+          (aoa[i] || []).forEach(cell => {
             const clean = String(cell || '').trim().toLowerCase();
-            if (CASHBOOK_HEADER_MAP[clean] || Object.values(CASHBOOK_HEADER_MAP).includes(clean.toUpperCase())) {
-              matches++;
-            }
+            if (CASHBOOK_HEADER_MAP[clean] || Object.values(CASHBOOK_HEADER_MAP).includes(clean.toUpperCase())) matches++;
           });
-          if (matches > maxMatches) {
-            maxMatches = matches;
-            headerRowIdx = i;
-          }
+          if (matches > maxMatches) { maxMatches = matches; headerRowIdx = i; }
         }
 
         const headers = aoa[headerRowIdx].map(h => String(h || '').trim());
-        const dataRows = aoa.slice(headerRowIdx + 1);
-
         const headerMapping = {};
         headers.forEach((h, colIdx) => {
-          if (!h) return;
-          const norm = h.toLowerCase().replace(/[\s\-_]+/g, ' ').trim();
-          const key = CASHBOOK_HEADER_MAP[norm];
-          if (key) {
-            headerMapping[colIdx] = key;
-          } else {
-            // Check direct match
-            const directKey = Object.values(CASHBOOK_HEADER_MAP).find(k => k === h.toUpperCase());
-            if (directKey) headerMapping[colIdx] = directKey;
-          }
-        });
-
-        // Map data rows
-        const newEntries = [];
-        
-        const fyStartYear = parseInt(String(selYear).split('-')[0], 10);
-        const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
-
-        dataRows.forEach((rowArr, rowIdx) => {
-          if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
-
-          const rowObj = { month: selMonth, year: calendarYear };
-          Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {
-            const colIdx = parseInt(colIdxStr, 10);
-            const val = String(rowArr[colIdx] ?? '').trim();
-            if (val !== '') {
-              rowObj[internalKey] = val;
+          let finalHeader = h;
+          if (!finalHeader) {
+            // Fallback: look up in rows above the selected header row to see if a label exists for this column
+            for (let rIdx = headerRowIdx - 1; rIdx >= 0; rIdx--) {
+              const val = String(aoa[rIdx]?.[colIdx] || '').trim();
+              if (val) {
+                finalHeader = val;
+                break;
+              }
             }
-          });
-
-          // A valid row must contain at least a Date or an Opening Balance
-          if (rowObj['DATE'] || rowObj['P_OPENING'] || rowObj['S_OPENING'] || rowObj['O_OPENING']) {
-            rowObj._id = `temp-import-${rowIdx}-${Date.now()}`;
-            newEntries.push(rowObj);
           }
+          if (!finalHeader) return;
+          const norm = finalHeader.toLowerCase().replace(/[\s\-_]+/g, ' ').trim();
+          const key = CASHBOOK_HEADER_MAP[norm] || Object.values(CASHBOOK_HEADER_MAP).find(k => k === finalHeader.toUpperCase());
+          if (key) headerMapping[colIdx] = key;
         });
 
-        if (newEntries.length === 0) {
-          setSnack({ severity: 'warning', msg: 'No valid cashbook rows found for the selected month.' });
-          return;
+        // Auto-detect date format: find Date column index
+        let dateColIdx = -1;
+        Object.entries(headerMapping).forEach(([colIdxStr, key]) => {
+          if (key === 'DATE') dateColIdx = parseInt(colIdxStr, 10);
+        });
+
+        let formatDetected = 'DMY';
+        if (dateColIdx !== -1) {
+          for (let i = headerRowIdx + 1; i < aoa.length; i++) {
+            const rowArr = aoa[i];
+            if (!rowArr) continue;
+            const rawVal = String(rowArr[dateColIdx] ?? '').trim();
+            if (rawVal && !/^\d{4,5}$/.test(rawVal)) {
+              const parts = rawVal.split(/[-\/ \.]/);
+              if (parts.length >= 2) {
+                const p0 = parseInt(parts[0], 10);
+                const p1 = parseInt(parts[1], 10);
+                if (!isNaN(p0) && !isNaN(p1)) {
+                  if (p0 > 12 && p1 <= 12) {
+                    formatDetected = 'DMY';
+                    break;
+                  }
+                  if (p1 > 12 && p0 <= 12) {
+                    formatDetected = 'MDY';
+                    break;
+                  }
+                }
+              }
+            }
+          }
         }
 
-        const nextLocalData = { ...localData };
-        let matchedCount = 0;
-        let unmatchedCount = 0;
-
-        const normalizeDate = (dStr) => {
-          if (!dStr) return '';
-          const parts = String(dStr).trim().split(/[-\/]/);
-          if (parts.length === 3) {
-            return `${parseInt(parts[0], 10)}-${parseInt(parts[1], 10)}-${parts[2]}`;
+        const newEntries = [];
+        let ignoredCount = 0;
+        
+        const fyStartYear = parseInt(String(importYear).split('-')[0], 10);
+        const targetMonths = (importMonths || []).map(Number);
+        
+        aoa.slice(headerRowIdx + 1).forEach((rowArr) => {
+          if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
+          
+          const rowObj = {};
+          Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {
+             const val = String(rowArr[parseInt(colIdxStr, 10)] ?? '').trim();
+             if (val !== '') rowObj[internalKey] = val;
+          });
+          
+          if (rowObj['P_SOURCE'] !== undefined) {
+             const pSource = String(rowObj['P_SOURCE'] || '').trim();
+             if (pSource.startsWith('DAC-RS-')) {
+                rowObj['P_LOAN_PAY'] = pSource;
+                rowObj['P_LOAN_RECV'] = '';
+             } else {
+                rowObj['P_LOAN_RECV'] = pSource;
+                rowObj['P_LOAN_PAY'] = '';
+             }
+             delete rowObj['P_SOURCE'];
           }
-          return dStr;
-        };
+          
+          if (rowObj['DATE']) {
+             let dateStr = String(rowObj['DATE']).trim();
+             let day = null, month = null, year = null;
+             
+             if (/^\d{4,5}$/.test(dateStr)) {
+                 // Serial date
+                 let serial = parseInt(dateStr, 10);
+                 let dateObj = new Date(Math.round((serial - 25569)*86400*1000));
+                 day = dateObj.getUTCDate();
+                 month = dateObj.getUTCMonth() + 1;
+                 year = dateObj.getUTCFullYear();
+             } else {
+                 const parts = dateStr.split(/[-\/ \.]/);
+                 if (parts.length >= 3) {
+                     let p0 = parts[0].trim(), p1 = parts[1].trim(), p2 = parts[2].trim();
+                     if (p0.length === 4) {
+                         year = parseInt(p0, 10);
+                         month = parseInt(p1, 10);
+                         day = parseInt(p2, 10);
+                     } else {
+                         const monthMap = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+                         let mVal = null;
+                         if (isNaN(parseInt(p1)) && monthMap[p1.toLowerCase().substring(0,3)]) {
+                             mVal = monthMap[p1.toLowerCase().substring(0,3)];
+                         }
+                         
+                         let v0 = parseInt(p0, 10);
+                         let v1 = mVal !== null ? mVal : parseInt(p1, 10);
+                         let y = parseInt(p2, 10);
+                         if (y < 100) y += 2000;
+                         year = y;
+                         
+                         if (formatDetected === 'MDY') {
+                             month = v0;
+                             day = v1;
+                         } else { // DMY
+                             month = v1;
+                             day = v0;
+                         }
+                     }
+                 }
+             }
 
-        newEntries.forEach(impRow => {
-          const impDateNorm = normalizeDate(impRow.DATE);
-          const matchedDbRow = entries.find(dbRow => normalizeDate(dbRow.DATE) === impDateNorm);
-
-          if (matchedDbRow) {
-            const changes = {};
-            Object.entries(impRow).forEach(([key, val]) => {
-              if (key !== '_id' && key !== 'month' && key !== 'year') {
-                changes[key] = val;
-              }
-            });
-            nextLocalData[matchedDbRow._id] = {
-              ...(nextLocalData[matchedDbRow._id] || {}),
-              ...changes
-            };
-            matchedCount++;
+             if (day !== null && month !== null && year !== null && !isNaN(day) && !isNaN(month) && !isNaN(year)) {
+                rowObj['DATE'] = `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+                const expectedCalendarYear = month >= 4 ? fyStartYear : fyStartYear + 1;
+                if (targetMonths.includes(Number(month)) && Number(year) === expectedCalendarYear) {
+                   rowObj.month = Number(month);
+                   rowObj.year = Number(year);
+                   newEntries.push(rowObj);
+                } else {
+                   ignoredCount++;
+                }
+             } else {
+                ignoredCount++; // Invalid date format
+             }
           } else {
-            unmatchedCount++;
+             ignoredCount++; // Missing date
           }
         });
-
-        setLocalData(nextLocalData);
-        setSnack({
-          severity: 'success',
-          msg: `Successfully imported cashbook data! Matched ${matchedCount} rows by date.${unmatchedCount > 0 ? ` Ignored ${unmatchedCount} rows with no matching calendar date.` : ''}`
-        });
-
+        
+        setImportPreview({ entries: newEntries, validCount: newEntries.length, ignoredCount });
       } catch (err) {
-        console.error('Excel parse failed:', err);
-        setSnack({ severity: 'error', msg: 'Failed to parse Excel file: ' + err.message });
+        setSnack({ severity: 'error', msg: 'Failed to parse Excel: ' + err.message });
       }
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const handleImportSubmit = () => {
+    if (!importPreview || importPreview.validCount === 0) return;
+    setImportedEntries(importPreview.entries);
+    setSnack({ severity: 'success', msg: `Successfully imported ${importPreview.validCount} rows to preview! Click the Save button next to XLS on the toolbar to save permanently.` });
+    setImportModalOpen(false);
+    setImportFile(null);
+    setImportPreview(null);
   };
 
   const handleAddRow = async () => {
@@ -521,21 +601,32 @@ export default function MainCashbook({ onBack }) {
   };
 
   const handleSave = async () => {
-    if (dirtyCount === 0) return;
+    if (dirtyCount === 0 && importedEntries.length === 0) return;
     setSaving(true);
     try {
-      // 1. Save row-level changes
-      const updates = Object.entries(localData).map(([id, changes]) => ({ id, changes }));
-      await axios.put(`${API_URL}/main-cashbook/bulk-update`, { updates }, {
-        headers: { Authorization: `Bearer ${token()}` }
-      });
-      setEntries(prev => prev.map(row => {
-        const patch = localData[row._id];
-        return patch ? { ...row, ...patch } : row;
-      }));
-      setLocalData({});
+      let savedCount = 0;
+      let importedCount = 0;
 
-      // 2. Upsert monthly summary (computed from latest computedRows)
+      // 1. Save imported Excel entries if any
+      if (importedEntries.length > 0) {
+        const res = await axios.post(`${API_URL}/main-cashbook/bulk-import`, { entries: importedEntries }, {
+          headers: { Authorization: `Bearer ${token()}` }
+        });
+        if (res.data.success) {
+          importedCount = (res.data.insertedCount || 0) + (res.data.updatedCount || 0);
+        }
+      }
+
+      // 2. Save row-level changes if any
+      if (dirtyCount > 0) {
+        const updates = Object.entries(localData).map(([id, changes]) => ({ id, changes }));
+        await axios.put(`${API_URL}/main-cashbook/bulk-update`, { updates }, {
+          headers: { Authorization: `Bearer ${token()}` }
+        });
+        savedCount = updates.length;
+      }
+
+      // 3. Upsert monthly summary (computed from latest computedRows)
       const fyStartYear = parseInt(String(selYear).split('-')[0], 10);
       const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
       const summaryPayload = {
@@ -547,10 +638,26 @@ export default function MainCashbook({ onBack }) {
         headers: { Authorization: `Bearer ${token()}` }
       });
 
-      setSnack({ severity: 'success', msg: `${updates.length} row(s) + monthly summary saved!` });
+      // Show success message
+      let msg = '';
+      if (importedCount > 0 && savedCount > 0) {
+        msg = `Successfully saved ${importedCount} imported rows and ${savedCount} edited rows!`;
+      } else if (importedCount > 0) {
+        msg = `Successfully saved ${importedCount} imported rows to database!`;
+      } else {
+        msg = `${savedCount} row(s) + monthly summary saved!`;
+      }
+      setSnack({ severity: 'success', msg });
+
+      // Clear states
+      setImportedEntries([]);
+      setLocalData({});
+      fetchData(selMonth, selYear);
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Save failed: ' + (err.response?.data?.error || err.message) });
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleExport = () => {
@@ -622,17 +729,17 @@ export default function MainCashbook({ onBack }) {
           <Button
             size="small"
             variant="outlined"
-            component="label"
+            onClick={() => {
+              setImportYear(selYear);
+              setImportMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+              setImportFile(null);
+              setImportPreview(null);
+              setImportModalOpen(true);
+            }}
             startIcon={<UploadIcon sx={{ fontSize: '1.1rem' }} />}
             sx={{ fontWeight: 700, borderRadius: 2 }}
           >
             Import Excel
-            <input
-              type="file"
-              accept=".xls,.xlsx"
-              hidden
-              onChange={handleExcelUpload}
-            />
           </Button>
           <Button size="small" variant="outlined" onClick={handleAddRow} sx={{ fontWeight: 700, borderRadius: 2 }}>
             + Add Row
@@ -646,12 +753,18 @@ export default function MainCashbook({ onBack }) {
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>XLS</Button>
           <Button size="small" variant="contained"
             startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
-            onClick={handleSave} disabled={dirtyCount === 0 || saving}
+            onClick={handleSave} 
+            disabled={(dirtyCount === 0 && importedEntries.length === 0) || saving}
             sx={{
               fontWeight: 800, borderRadius: 2, px: 2.5,
-              background: dirtyCount > 0 ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#cbd5e1'
+              background: importedEntries.length > 0 
+                ? 'linear-gradient(135deg, #22c55e, #16a34a)' 
+                : (dirtyCount > 0 ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#cbd5e1'),
+              opacity: (dirtyCount === 0 && importedEntries.length === 0) ? 0.5 : 1,
+              filter: (dirtyCount === 0 && importedEntries.length === 0) ? 'blur(0.5px)' : 'none',
+              transition: 'all 0.2s ease-in-out'
             }}>
-            {saving ? 'Saving...' : `Save${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+            {saving ? 'Saving...' : `Save${(dirtyCount + importedEntries.length) > 0 ? ` (${dirtyCount + importedEntries.length})` : ''}`}
           </Button>
         </Box>
       </Box>
@@ -872,6 +985,68 @@ export default function MainCashbook({ onBack }) {
           </tbody>
         </table>
       </Box>
+
+      {/* ── Import Modal ── */}
+      <Dialog open={importModalOpen} onClose={() => !importing && setImportModalOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+          Import Excel (Multi-Month)
+        </DialogTitle>
+        <DialogContent sx={{ py: 3, display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+          <FormControl fullWidth size="small">
+            <InputLabel>Financial Year</InputLabel>
+            <Select value={importYear} label="Financial Year" onChange={e => {
+              setImportYear(e.target.value);
+              setImportPreview(null); // Reset preview on criteria change
+              setImportFile(null);
+            }}>
+              {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl fullWidth size="small">
+            <InputLabel>Select Months</InputLabel>
+            <Select
+              multiple
+              value={importMonths}
+              onChange={e => {
+                setImportMonths(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value);
+                setImportPreview(null); // Reset preview
+                setImportFile(null);
+              }}
+              input={<OutlinedInput label="Select Months" />}
+              renderValue={(selected) => selected.map(s => MONTH_NAMES[s - 1]).join(', ')}
+            >
+              {MONTH_NAMES.map((name, i) => (
+                <MenuItem key={i + 1} value={i + 1}>
+                  <Checkbox checked={importMonths.indexOf(i + 1) > -1} />
+                  <ListItemText primary={name} />
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          <Button variant="outlined" component="label" sx={{ py: 3, borderStyle: 'dashed' }}>
+            {importFile ? importFile.name : 'Click to Select Excel File'}
+            <input type="file" accept=".xls,.xlsx" hidden onChange={handleImportFileChange} />
+          </Button>
+
+          {importPreview && (
+            <Alert severity={importPreview.validCount > 0 ? "success" : "warning"}>
+              {importPreview.validCount} rows successfully matched the selected Financial Year and Months.
+              {importPreview.ignoredCount > 0 && ` (${importPreview.ignoredCount} rows ignored; e.g. monthly summary rows or invalid dates).`}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, borderTop: '1px solid #e2e8f0' }}>
+          <Button onClick={() => setImportModalOpen(false)}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleImportSubmit} 
+            disabled={!importPreview || importPreview.validCount === 0}
+          >
+            Import
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Confirm Delete Dialog ── */}
       {confirmDel && (

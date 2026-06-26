@@ -282,6 +282,61 @@ router.post("/bulk", auth, adminOnly, async (req, res) => {
   }
 });
 
+// ── POST /main-cashbook/bulk-import ──────────────────────────────────────
+// Used for Excel Multi-Month Import
+router.post("/bulk-import", auth, async (req, res) => {
+  try {
+    const col = getCollection();
+    const { entries } = req.body;
+    if (!entries || !Array.isArray(entries)) {
+      return res.status(400).json({ success: false, error: "Invalid entries payload" });
+    }
+
+    let insertedCount = 0;
+    let updatedCount = 0;
+
+    for (const entry of entries) {
+      const { DATE, month, year, _id, _created_at, ...changes } = entry;
+      // Normalise date for lookup
+      const normDate = (() => {
+        const parts = String(DATE || '').trim().split(/[-\/]/);
+        if (parts.length === 3) return `${parseInt(parts[0], 10)}-${parseInt(parts[1], 10)}-${parts[2]}`;
+        return DATE;
+      })();
+
+      const filter = { DATE: normDate };
+      const updateDoc = {
+        $set: {
+          month,
+          year,
+          ...changes
+        },
+        $setOnInsert: {
+          _created_at: new Date()
+        }
+      };
+
+      const result = await col.updateOne(filter, updateDoc, { upsert: true });
+      if (result.upsertedCount > 0) insertedCount++;
+      else if (result.modifiedCount > 0) updatedCount++;
+    }
+
+    // Assign SL NO for any newly inserted docs (naive re-sequence)
+    const remaining = await col.find({}).sort({ "SL NO": 1, "_created_at": 1 }).toArray();
+    const bulkOps = remaining.map((row, idx) => ({
+      updateOne: { filter: { _id: row._id }, update: { $set: { "SL NO": idx + 1 } } }
+    }));
+    if (bulkOps.length > 0) await col.bulkWrite(bulkOps);
+
+    const io = getIO();
+    io.emit('mainCashbookUpdates', { action: 'bulkImport' });
+
+    res.json({ success: true, insertedCount, updatedCount });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── PUT /main-cashbook/bulk-update ───────────────────────────────────────
 router.put("/bulk-update", auth, async (req, res) => {
   try {
