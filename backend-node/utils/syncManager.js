@@ -181,7 +181,10 @@ async function pushToRegister(invoiceId, overrides) {
     // Apply overrides on top so caller-forced values are always present
     const invoice = Object.assign({}, invoiceRaw, overrides);
 
-    const hvd = invoice.human_verified_data || invoice.ai_data || {};
+    let hvd = invoice.human_verified_data || {};
+    if (Object.keys(hvd).length === 0 && invoice.ai_data) {
+      hvd = invoice.ai_data.invoice_data || invoice.ai_data || {};
+    }
     const slip = invoice.lorry_hire_slip_data || {};
     const gcn = invoice.gcn_data || {};
 
@@ -536,6 +539,7 @@ async function pushToInvoice(cementRowId, modifications) {
     if ("VEHICLE NUMBER" in modifications) {
       invUpdate["human_verified_data.supply_details.vehicle_number"] = modifications["VEHICLE NUMBER"];
       invUpdate["ai_data.supply_details.vehicle_number"] = modifications["VEHICLE NUMBER"];
+      invUpdate["ai_data.invoice_data.supply_details.vehicle_number"] = modifications["VEHICLE NUMBER"];
     }
     if (Object.keys(invUpdate).length > 0) {
       await Invoice.findByIdAndUpdate(row._invoiceId, { $set: invUpdate });
