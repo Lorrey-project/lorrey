@@ -388,12 +388,25 @@ async function pushToRegister(invoiceId, overrides) {
       "LOADING DT": vDateStr
     });
 
-    let finalGcnNo = safe(gcn.gcn_no);
-    if (!finalGcnNo || finalGcnNo.includes('-')) {
-      finalGcnNo = await getOrAssignGcnNo(col, invoiceId, loadingDate);
+    const isValidGcn = (val) => {
+      if (!val) return false;
+      const v = String(val).trim().toLowerCase();
+      return v !== "" && v !== "null" && v !== "undefined" && !v.includes("?");
+    };
 
-      // Crucial Step: Save the auto-generated GCN natively back to the central Invoice doc
-      // so the frontend can fetch it and generate the PDF with the correct sequence number!
+    let finalGcnNo = "";
+    if (isValidGcn(gcn.gcn_no)) {
+      finalGcnNo = String(gcn.gcn_no).trim();
+    } else if (isValidGcn(supplyDetails.lorrey_receipt_number)) {
+      finalGcnNo = String(supplyDetails.lorrey_receipt_number).trim();
+    }
+
+    if (!finalGcnNo) {
+      finalGcnNo = await getOrAssignGcnNo(col, invoiceId, loadingDate);
+    }
+
+    // Always keep central Invoice doc and cement register GCN number in sync
+    if (finalGcnNo && (!gcn.gcn_no || gcn.gcn_no !== finalGcnNo)) {
       await Invoice.findByIdAndUpdate(invoiceId, {
         $set: { "gcn_data.gcn_no": finalGcnNo }
       });
