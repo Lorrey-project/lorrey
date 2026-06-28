@@ -113,7 +113,8 @@ const COLUMNS = [
       const comm = r._freight_commission;
       const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
       const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
-      return fmt2(base * num(r._tds_percent) / 100);
+      const tdsPct = (r._tds_percent !== undefined && r._tds_percent !== null && r._tds_percent !== '') ? num(r._tds_percent) : 1;
+      return fmt2(base * tdsPct / 100);
     }
   },
   { key: 'ADVANCE', label: 'LOADING ADVANCE', width: 110, type: 'auto', group: 'billing' },
