@@ -75,12 +75,14 @@ router.get('/data', async (req, res) => {
 
     // ── Run all 3 DB reads in PARALLEL ─────────────────────────────
     const CEMENT_PROJECTION = {
-      'GCN NO': 1, 'BILL NO': 1, 'INVOICE NO': 1, 'BILLING': 1,
+      'GCN NO': 1, 'BILL NO': 1, 'INVOICE NO': 1, 'INVOICE NO.': 1, 'BILLING': 1,
       'LOADING DT': 1, 'LOADING DATE': 1,
       'BILL DATE': 1,
       'SITE': 1,
       'BILLING ER 95%': 1, 'BILLING @ 95% (PARTY PAYABLE)': 1,
       'AMOUNT': 1, 'Billing Amount': 1,
+      'VEHICLE NUMBER': 1, 'VEHICLE NO': 1,
+      'PARTY NAME': 1,
       _id: 0
     };
 
@@ -139,7 +141,16 @@ router.get('/data', async (req, res) => {
           const yy = String(dObj.getFullYear()).slice(-2);
           monthStr = `${MONTH_NAMES[m]} '${yy}`;
         }
-        aggregated[finalInvNo] = { invoiceDate: invDate, invoiceNumber: finalInvNo, month: monthStr, site: rawSite, amount: 0 };
+        aggregated[finalInvNo] = {
+          invoiceDate: invDate,
+          invoiceNumber: finalInvNo,
+          month: monthStr,
+          site: rawSite,
+          amount: 0,
+          invoiceNos: new Set(),
+          vehicleNumbers: new Set(),
+          partyNames: new Set()
+        };
       }
 
       const amt =
@@ -148,6 +159,15 @@ router.get('/data', async (req, res) => {
         parseFloat(row['BILLING ER 95%']) ||
         parseFloat(row['AMOUNT']) || 0;
       aggregated[finalInvNo].amount += amt;
+
+      const singleInvNo = row['INVOICE NO'] || row['INVOICE NO.'] || '';
+      if (singleInvNo) aggregated[finalInvNo].invoiceNos.add(String(singleInvNo).trim());
+
+      const singleVeh = row['VEHICLE NUMBER'] || row['VEHICLE NO'] || '';
+      if (singleVeh) aggregated[finalInvNo].vehicleNumbers.add(String(singleVeh).trim());
+
+      const singleParty = row['PARTY NAME'] || '';
+      if (singleParty) aggregated[finalInvNo].partyNames.add(String(singleParty).trim());
     }
 
     // ── Merge overrides and manual rows ──────────────────────────
@@ -163,7 +183,7 @@ router.get('/data', async (req, res) => {
       processedBillNos.add(invNo);
       const ov = rowMap[invNo] || {};
       if (ov.hidden) continue; // soft-deleted
-      
+
       finalRows.push({
         ...r,
         billType: ov.billType ?? 'FREIGHT',
@@ -183,7 +203,11 @@ router.get('/data', async (req, res) => {
         damageVehicle: ov.damageVehicle,
         damageTrip: ov.damageTrip,
         isManual: false,
-        slNo: ov.slNo
+        slNo: ov.slNo,
+        // Convert sets to arrays
+        invoiceNos: Array.from(r.invoiceNos).filter(Boolean),
+        vehicleNumbers: Array.from(r.vehicleNumbers).filter(Boolean),
+        partyNames: Array.from(r.partyNames).filter(Boolean)
       });
     }
 
@@ -225,7 +249,10 @@ router.get('/data', async (req, res) => {
         damageVehicle: ov.damageVehicle,
         damageTrip: ov.damageTrip,
         isManual: true,
-        slNo: ov.slNo
+        slNo: ov.slNo,
+        invoiceNos: [],
+        vehicleNumbers: [],
+        partyNames: []
       });
     }
 

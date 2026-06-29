@@ -43,6 +43,21 @@ const MONTH_NAMES_FULL = [
   "July", "August", "September", "October", "November", "December"
 ];
 
+const MONTHS_LIST = [
+  { value: 1, label: 'January' },
+  { value: 2, label: 'February' },
+  { value: 3, label: 'March' },
+  { value: 4, label: 'April' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'June' },
+  { value: 7, label: 'July' },
+  { value: 8, label: 'August' },
+  { value: 9, label: 'September' },
+  { value: 10, label: 'October' },
+  { value: 11, label: 'November' },
+  { value: 12, label: 'December' }
+];
+
 const getMonthIndexFromDate = (dateStr) => {
   if (!dateStr) return 99;
   const parts = String(dateStr).split('-');
@@ -113,6 +128,10 @@ export default function FinancialYearDetails({ onBack }) {
   const [page, setPage] = useState(0);
   const [siteFilter, setSiteFilter] = useState('All'); // 'All' | 'NVCL' | 'NVL'
   const [selYear, setSelYear] = useState('2025-2026');
+
+  // Payment Status Dashboard States
+  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [dashboardM, setDashboardM] = useState(new Date().getMonth() + 1); // Defaults to current calendar month
 
   const handleAddRow = () => {
     if (selectedIds.length !== 1) {
@@ -417,6 +436,71 @@ export default function FinancialYearDetails({ onBack }) {
     }
     return map;
   }, [filteredRows]);
+
+  // Payment Status Dashboard Filtered Rows
+  const dashboardRows = useMemo(() => {
+    return computedRows.filter(r => getMonthIndexFromDate(r.invoiceDate) === dashboardM);
+  }, [computedRows, dashboardM]);
+
+  // Payment Status Dashboard Details Calculation
+  const dashboardDetails = useMemo(() => {
+    return dashboardRows.map(r => {
+      const gid = r.groupId;
+      const gd = r.groupData || {};
+
+      // Filter all rows in the group to get total group receivable
+      const groupRows = computedRows.filter(cr => cr.groupId === gid);
+      const groupTotalRecv = groupRows.reduce((s, x) => s + (x.receivable || 0), 0);
+
+      const paymentAmt = parseFloat(gd.paymentAmount) || 0;
+      const debitAmt = parseFloat(gd.debitAmount) || 0;
+      const tdsProv = parseFloat(gd.tdsProvision) || 0;
+
+      // Group is fully paid if total payment + debit + tds >= group total receivable
+      const isPaid = paymentAmt > 0 && (paymentAmt + debitAmt + tdsProv >= groupTotalRecv - 1);
+
+      let individualAmountPaid = 0;
+      let individualOutstanding = r.receivable || 0;
+      let status = 'Pending';
+
+      if (isPaid) {
+        individualAmountPaid = r.receivable || 0;
+        individualOutstanding = 0;
+        status = 'Paid';
+      } else if (paymentAmt > 0 || debitAmt > 0 || tdsProv > 0) {
+        // Proportional allocation for partial payments
+        const ratio = groupTotalRecv > 0 ? ((paymentAmt + debitAmt + tdsProv) / groupTotalRecv) : 0;
+        individualAmountPaid = (r.receivable || 0) * ratio;
+        individualOutstanding = Math.max(0, (r.receivable || 0) - individualAmountPaid);
+        if (individualOutstanding < 1) {
+          individualOutstanding = 0;
+          status = 'Paid';
+        }
+      }
+
+      return {
+        billNo: r.displayInvoiceNumber || r.invoiceNumber,
+        invoiceNo: r.invoiceNos && r.invoiceNos.length > 0 ? r.invoiceNos.join(', ') : '—',
+        invoiceDate: r.invoiceDate,
+        partyName: r.partyNames && r.partyNames.length > 0 ? r.partyNames.join(', ') : '—',
+        vehicleNo: r.vehicleNumbers && r.vehicleNumbers.length > 0 ? r.vehicleNumbers.join(', ') : '—',
+        billAmount: r.receivable || 0,
+        amountPaid: individualAmountPaid,
+        outstanding: individualOutstanding,
+        status: status
+      };
+    });
+  }, [dashboardRows, computedRows]);
+
+  // Payment Status Dashboard Summary Stats
+  const dashboardStats = useMemo(() => {
+    let totalBills = dashboardDetails.length;
+    let paidCount = dashboardDetails.filter(d => d.status === 'Paid').length;
+    let pendingCount = totalBills - paidCount;
+    let totalOutstanding = dashboardDetails.reduce((s, d) => s + d.outstanding, 0);
+
+    return { totalBills, paidCount, pendingCount, totalOutstanding };
+  }, [dashboardDetails]);
 
   // Pagination
   const totalPages = Math.ceil(filteredRows.length / PAGE_SIZE);
@@ -949,6 +1033,25 @@ export default function FinancialYearDetails({ onBack }) {
 
           <Button variant="outlined" color="primary" size="small" onClick={handleAddRow} sx={{ fontWeight: 'bold', borderRadius: 2, px: 2 }}>
             + Add Row
+          </Button>
+
+          <Button
+            variant="contained"
+            size="small"
+            onClick={() => setDashboardOpen(true)}
+            sx={{
+              fontWeight: 800,
+              borderRadius: 2,
+              px: 2,
+              background: 'linear-gradient(135deg, #4f46e5, #4338ca)',
+              color: '#ffffff',
+              boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.2)',
+              '&:hover': {
+                background: 'linear-gradient(135deg, #4338ca, #3730a3)'
+              }
+            }}
+          >
+            💳 Payment Status Dashboard
           </Button>
 
           <Button variant="outlined" color="primary" size="small" onClick={() => setDocModalOpen(true)} sx={{ fontWeight: 'bold' }}>
@@ -1486,6 +1589,211 @@ export default function FinancialYearDetails({ onBack }) {
             }
           >
             {loading ? 'Saving…' : 'Save Details'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Payment Status Dashboard Modal ── */}
+      <Dialog
+        open={dashboardOpen}
+        onClose={() => setDashboardOpen(false)}
+        maxWidth="xl"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: '24px',
+            bgcolor: '#ffffff',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            maxHeight: '90vh',
+            fontFamily: 'Inter, sans-serif',
+          }
+        }}
+      >
+        <DialogTitle sx={{ p: 3, borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#fafafa' }}>
+          <Box display="flex" alignItems="center" gap={1.5}>
+            <span style={{ fontSize: '24px' }}>💳</span>
+            <Typography variant="h6" fontWeight={800} color="#0f172a">
+              Payment Status Dashboard
+            </Typography>
+          </Box>
+          <Box display="flex" alignItems="center" gap={2}>
+            {/* Year Selector */}
+            <select
+              value={selYear}
+              onChange={(e) => setSelYear(e.target.value)}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '12px',
+                border: '1px solid #cbd5e1',
+                fontSize: '13px',
+                fontWeight: 700,
+                color: '#334155',
+                outline: 'none',
+                cursor: 'pointer',
+                background: '#fff'
+              }}
+            >
+              <option value="2024-2025">FY 2024–25</option>
+              <option value="2025-2026">FY 2025–26</option>
+              <option value="2026-2027">FY 2026–27</option>
+              <option value="2027-2028">FY 2027–28</option>
+            </select>
+
+            {/* Month Selector */}
+            <select
+              value={dashboardM}
+              onChange={(e) => setDashboardM(Number(e.target.value))}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '12px',
+                border: '1px solid #cbd5e1',
+                fontSize: '13px',
+                fontWeight: 700,
+                color: '#334155',
+                outline: 'none',
+                cursor: 'pointer',
+                background: '#fff'
+              }}
+            >
+              {MONTHS_LIST.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+
+            <IconButton onClick={() => setDashboardOpen(false)} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+              ✕
+            </IconButton>
+          </Box>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {/* Summary Cards */}
+          <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap={3}>
+            {/* Card 1: Total Bills */}
+            <Box sx={{
+              p: 3, borderRadius: '16px', bgcolor: '#f8fafc', border: '1px solid #f1f5f9',
+              boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: 0.5
+            }}>
+              <Typography variant="caption" fontWeight={700} color="#64748b" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bills</Typography>
+              <Typography variant="h4" fontWeight={900} color="#0f172a">{dashboardStats.totalBills}</Typography>
+            </Box>
+
+            {/* Card 2: Paid Bills */}
+            <Box sx={{
+              p: 3, borderRadius: '16px', bgcolor: '#f0fdf4', border: '1px solid #dcfce7',
+              boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: 0.5
+            }}>
+              <Typography variant="caption" fontWeight={700} color="#166534" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Paid Bills</Typography>
+              <Typography variant="h4" fontWeight={900} color="#15803d">{dashboardStats.paidCount}</Typography>
+            </Box>
+
+            {/* Card 3: Pending Bills */}
+            <Box sx={{
+              p: 3, borderRadius: '16px', bgcolor: '#fef2f2', border: '1px solid #fee2e2',
+              boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: 0.5
+            }}>
+              <Typography variant="caption" fontWeight={700} color="#991b1b" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Bills</Typography>
+              <Typography variant="h4" fontWeight={900} color="#b91c1c">{dashboardStats.pendingCount}</Typography>
+            </Box>
+
+            {/* Card 4: Outstanding Amount */}
+            <Box sx={{
+              p: 3, borderRadius: '16px', bgcolor: '#fffbeb', border: '1px solid #fef3c7',
+              boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: 0.5
+            }}>
+              <Typography variant="caption" fontWeight={700} color="#92400e" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Outstanding Amount</Typography>
+              <Typography variant="h4" fontWeight={900} color="#d97706">
+                ₹{dashboardStats.totalOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* List Table Container */}
+          <Box sx={{
+            border: '1px solid #e2e8f0', borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)'
+          }}>
+            <Box sx={{ maxHeight: '480px', overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontFamily: 'Inter, sans-serif' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 10 }}>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', background: '#f8fafc' }}>Bill Number</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', background: '#f8fafc' }}>Invoice Number</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', background: '#f8fafc' }}>Invoice Date</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', background: '#f8fafc' }}>Party Name</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', background: '#f8fafc' }}>Vehicle Number</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', textAlign: 'right', background: '#f8fafc' }}>Bill Amount</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', textAlign: 'right', background: '#f8fafc' }}>Amount Paid</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', textAlign: 'right', background: '#f8fafc' }}>Outstanding</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', textAlign: 'center', background: '#f8fafc' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dashboardDetails.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ padding: '40px 16px', textAlign: 'center', color: '#94a3b8', fontWeight: 600 }}>
+                        No bills found for the selected Month and Financial Year.
+                      </td>
+                    </tr>
+                  ) : (
+                    dashboardDetails.map((b, idx) => (
+                      <tr
+                        key={idx}
+                        style={{
+                          borderBottom: '1px solid #f1f5f9',
+                          background: idx % 2 === 0 ? '#ffffff' : '#fafafa',
+                          transition: 'background 0.15s',
+                        }}
+                      >
+                        <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{b.billNo}</td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.invoiceNo}>{b.invoiceNo}</td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                          {b.invoiceDate ? (() => {
+                            const p = b.invoiceDate.split('-');
+                            return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : b.invoiceDate;
+                          })() : '—'}
+                        </td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155' }}>{b.partyName}</td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontFamily: 'monospace' }}>{b.vehicleNo}</td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#0f172a', textAlign: 'right' }}>₹{b.billAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#15803d', textAlign: 'right' }}>₹{b.amountPaid.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: b.outstanding > 0 ? '#b91c1c' : '#475569', textAlign: 'right' }}>
+                          ₹{b.outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                          {b.status === 'Paid' ? (
+                            <Chip
+                              label="Paid"
+                              size="small"
+                              sx={{
+                                height: 22, fontSize: '10px', fontWeight: 800,
+                                bgcolor: '#dcfce7', color: '#166534',
+                                border: '1px solid #bbf7d0', px: 1
+                              }}
+                            />
+                          ) : (
+                            <Chip
+                              label="Pending"
+                              size="small"
+                              sx={{
+                                height: 22, fontSize: '10px', fontWeight: 800,
+                                bgcolor: '#fee2e2', color: '#991b1b',
+                                border: '1px solid #fecaca', px: 1
+                              }}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 4, py: 2.5, borderTop: '1px solid #f1f5f9', bgcolor: '#fafafa' }}>
+          <Button onClick={() => setDashboardOpen(false)} variant="contained" sx={{ bgcolor: '#0f172a', '&:hover': { bgcolor: '#1e293b' }, fontWeight: 700, px: 3, borderRadius: 2 }}>
+            Close Dashboard
           </Button>
         </DialogActions>
       </Dialog>
