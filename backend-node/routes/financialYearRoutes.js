@@ -176,7 +176,8 @@ router.get('/data', async (req, res) => {
         // Legacy singular fields for backward compat
         damageVehicle: ov.damageVehicle,
         damageTrip: ov.damageTrip,
-        isManual: false
+        isManual: false,
+        slNo: ov.slNo
       });
     }
 
@@ -217,9 +218,28 @@ router.get('/data', async (req, res) => {
         damageVehicleAmounts: ov.damageVehicleAmounts || {},
         damageVehicle: ov.damageVehicle,
         damageTrip: ov.damageTrip,
-        isManual: true
+        isManual: true,
+        slNo: ov.slNo
       });
     }
+
+    // 3. Sort finalRows by default order first (month name, then date)
+    finalRows.sort((a, b) => {
+      const mA = getMonthIndexFromDate(a.invoiceDate);
+      const mB = getMonthIndexFromDate(b.invoiceDate);
+      if (mA !== mB) return mA - mB;
+      return (a.invoiceDate || '').localeCompare(b.invoiceDate || '') || (a.invoiceNumber || '').localeCompare(b.invoiceNumber || '');
+    });
+
+    // 4. Assign default slNo to rows without one, and respect stored slNo
+    for (let i = 0; i < finalRows.length; i++) {
+      if (finalRows[i].slNo === undefined || finalRows[i].slNo === null) {
+        finalRows[i].slNo = i + 1;
+      }
+    }
+
+    // 5. Final sort by slNo
+    finalRows.sort((a, b) => a.slNo - b.slNo);
 
     res.json({ rows: finalRows, payments: filteredPayments });
   } catch (err) {
@@ -288,7 +308,7 @@ router.post('/save-row', async (req, res) => {
     const {
       billNo, billType, editedInvoiceDate, editedInvoiceNumber, editedMonth,
       editedSite, editedAmount, debitReason, damageYear, damageMonth,
-      damageVehicles, damageTrips, damageVehicleAmounts
+      damageVehicles, damageTrips, damageVehicleAmounts, slNo
     } = req.body;
     let updateObj = {};
     if (billType !== undefined) updateObj.billType = billType;
@@ -303,6 +323,7 @@ router.post('/save-row', async (req, res) => {
     if (damageVehicles !== undefined) updateObj.damageVehicles = damageVehicles;
     if (damageTrips !== undefined) updateObj.damageTrips = damageTrips;
     if (damageVehicleAmounts !== undefined) updateObj.damageVehicleAmounts = damageVehicleAmounts;
+    if (slNo !== undefined) updateObj.slNo = parseFloat(slNo) || 0;
 
     await FinancialYearRow.findOneAndUpdate(
       { billNo },

@@ -18,6 +18,7 @@ const fyRowSchema = new mongoose.Schema({
   damageVehicles: { type: [String], default: [] },
   damageTrips: { type: mongoose.Schema.Types.Mixed, default: [] },
   damageVehicleAmounts: { type: mongoose.Schema.Types.Mixed, default: {} },
+  slNo: { type: Number },
   hidden: { type: Boolean, default: false }
 }, { timestamps: true });
 

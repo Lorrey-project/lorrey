@@ -115,13 +115,32 @@ export default function FinancialYearDetails({ onBack }) {
   const [selYear, setSelYear] = useState('2025-2026');
 
   const handleAddRow = () => {
+    if (selectedIds.length !== 1) {
+      setSnack({ severity: 'warning', msg: 'Please select exactly one row using the checkbox first to insert a new row below it.' });
+      return;
+    }
+
+    const selId = selectedIds[0];
+    const selIdx = rows.findIndex(x => x.invoiceNumber === selId);
+    if (selIdx === -1) return;
+
+    const selRow = rows[selIdx];
+
+    // Find the next row in computed/filtered order to calculate the fractional slNo
+    const sortedIdx = computedRows.findIndex(x => x.invoiceNumber === selId);
+    let newSlNo = (selRow.slNo || 0) + 1;
+    if (sortedIdx !== -1 && sortedIdx < computedRows.length - 1) {
+      const nextRow = computedRows[sortedIdx + 1];
+      newSlNo = ((selRow.slNo || 0) + (nextRow.slNo || 0)) / 2;
+    }
+
     const tempId = `TEMP-${Date.now()}`;
     const newRow = {
       invoiceNumber: tempId,
       displayInvoiceNumber: '',
-      invoiceDate: new Date().toISOString().split('T')[0],
-      month: `${MONTHS[new Date().getMonth()]}-${new Date().getFullYear()}`,
-      site: 'NVCL',
+      invoiceDate: selRow.invoiceDate || new Date().toISOString().split('T')[0],
+      month: selRow.month || `${MONTHS[new Date().getMonth()]}-${new Date().getFullYear()}`,
+      site: selRow.site || 'NVCL',
       billType: 'FREIGHT',
       amount: 0,
       cgst: 0,
@@ -130,12 +149,17 @@ export default function FinancialYearDetails({ onBack }) {
       tds: 0,
       receivable: 0,
       debitReason: 'None',
-      isNewRow: true
+      isNewRow: true,
+      slNo: newSlNo
     };
-    setRows(prev => [newRow, ...prev]);
+
+    // Insert locally immediately after selected index in the rows array
+    const newRows = [...rows];
+    newRows.splice(selIdx + 1, 0, newRow);
+    setRows(newRows);
+
     setDirtyRows(prev => new Set(prev).add(tempId));
-    setPage(0);
-    setSnack({ severity: 'success', msg: 'New blank row added. Please enter the details and click Save Details.' });
+    setSnack({ severity: 'success', msg: 'New blank row inserted below selection. Click Save Details to persist.' });
   };
 
   const fetchData = useCallback(async () => {
@@ -578,7 +602,8 @@ export default function FinancialYearDetails({ onBack }) {
           damageMonth: r.damageMonth,
           damageVehicles: r.damageVehicles || [],
           damageTrips: r.damageTrips || [],
-          damageVehicleAmounts: r.damageVehicleAmounts || {}
+          damageVehicleAmounts: r.damageVehicleAmounts || {},
+          slNo: r.slNo
         });
       });
       const payP = Array.from(dirtyGroups).map(gid => {
