@@ -10,19 +10,18 @@ const billPdfUpload = require('../middleware/billPdfUpload');
 function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
 }
-
 function parseDate(val) {
   if (!val) return null;
   if (val instanceof Date) return isNaN(val) ? null : val;
 
   const str = String(val).trim();
 
-  // ── Detect DD-MM-YYYY (Indian format) — MUST check first ──
-  const ddmmyyyy = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  // ── Detect DD-MM-YYYY or DD/MM/YYYY (Indian format) — MUST check first ──
+  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (ddmmyyyy) {
     const d = parseInt(ddmmyyyy[1]), m = parseInt(ddmmyyyy[2]), y = parseInt(ddmmyyyy[3]);
     if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
-      return new Date(y, m - 1, d);
+      return new Date(y, m - 1, d); // local time
     }
   }
 
@@ -32,6 +31,7 @@ function parseDate(val) {
 
   return null;
 }
+
 
 function getMonthIndexFromDate(dateStr) {
   const d = parseDate(dateStr);

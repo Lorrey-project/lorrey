@@ -18,9 +18,8 @@ function parseDate(val) {
 
   const str = String(val).trim();
 
-  // ── Detect DD-MM-YYYY (Indian format stored by fmtDate) — MUST check first ──
-  // new Date("05-04-2026") → Invalid Date in Node.js, so we handle it manually
-  const ddmmyyyy = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  // ── Detect DD-MM-YYYY or DD/MM/YYYY (Indian format) — MUST check first ──
+  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (ddmmyyyy) {
     const d = parseInt(ddmmyyyy[1]), m = parseInt(ddmmyyyy[2]), y = parseInt(ddmmyyyy[3]);
     if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
@@ -28,13 +27,12 @@ function parseDate(val) {
     }
   }
 
-  // ── Try ISO / standard JS parsing (handles "2026-04-05T18:30:00.000Z" etc.) ──
+  // ── Try ISO / standard JS parsing ──
   const iso = new Date(str);
   if (!isNaN(iso.getTime())) return iso;
 
   return null;
 }
-
 
 function getDateParts(val) {
   const d = parseDate(val);
@@ -94,23 +92,38 @@ router.get("/cement-data", auth, async (req, res) => {
 
     let query = { "PUMP NAME": pumpName };
     if (pumpName.toUpperCase().match(/^SAS-?\d*$/)) {
-      // For pump admin: show only unverified rows with no pump name yet (their queue to claim)
       if (req.user && req.user.role === 'PETROL PUMP') {
+        // Petrol Pump admin is locked to their own pumpName (e.g. "SAS-1")
         query = { 
-          $or: [{ "PUMP NAME": "SAS" }, { "PUMP NAME": "" }, { "PUMP NAME": null }], 
-          "VERIFICATION STATUS": { $ne: "Verified" } 
-        };
-      } else {
-        // For Office/Site admin: show ALL SAS rows regardless of exact suffix (SAS, SAS-1, SAS-2)
-        // and also unassigned rows. This prevents verified rows from disappearing when
-        // PUMP NAME is stamped from "SAS" → "SAS-1" on verification.
-        query = {
           $or: [
-            { "PUMP NAME": { $regex: /^SAS(-\d+)?$/i } },  // matches SAS, SAS-1, SAS-2 etc.
+            { "PUMP NAME": pumpName },
+            { "PUMP NAME": "SAS" },
             { "PUMP NAME": "" },
             { "PUMP NAME": null }
           ]
         };
+      } else {
+        // For Office/Site admin:
+        if (pumpName.toUpperCase() === 'SAS') {
+          // If they select the generic "SAS", show all SAS variations + unassigned
+          query = {
+            $or: [
+              { "PUMP NAME": { $regex: /^SAS(-\d+)?$/i } },
+              { "PUMP NAME": "" },
+              { "PUMP NAME": null }
+            ]
+          };
+        } else {
+          // If they select a specific pump like "SAS-1", show only that pump's verified rows + unassigned
+          query = {
+            $or: [
+              { "PUMP NAME": pumpName },
+              { "PUMP NAME": "SAS" },
+              { "PUMP NAME": "" },
+              { "PUMP NAME": null }
+            ]
+          };
+        }
       }
     }
 
