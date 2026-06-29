@@ -356,6 +356,23 @@ const VISIBLE_COLS = COLUMNS.filter((c, i, arr) =>
   !c.hidden && arr.findIndex(x => x.key === c.key) === i
 );
 
+const NUMERIC_KEYS = new Set([
+  'MT', 'Billing Amount', 'BILLING ER 95%', 'BILLING ER VAR', 'PROFIT', 'TDS@1%',
+  'ADVANCE', 'Site Cash', 'OFFICE CASH', 'Bank TF', 'Others deduction', 'Other',
+  'GPS Monitoring Charge', 'GPS DEVICE', 'RFID TAG', 'RFID REASSURANCE', 'FASTAG',
+  'FUEL REQUIRED', 'HSD (LTR)', 'ACTUAL EXTRA', 'HSD AMOUNT', 'TRAVELLING EXP',
+  'SHORTAGE (BAG)', 'SHORTAGE (AMOUNT)', 'NET AMOUNT', 'UP TOLL', 'DOWN TOLL',
+  'EXTRA UNLOADING', 'DEDICATED', '10W EXTRA 8.5%', 'GROSS AMOUNT', 'AMOUNT'
+]);
+
+function formatTotalValue(key, value) {
+  if (value === 0) return '';
+  if (key === 'MT' || key === 'FUEL REQUIRED' || key === 'HSD (LTR)' || key === 'SHORTAGE (BAG)' || key === 'ACTUAL EXTRA') {
+    return String(Math.round(value * 100) / 100);
+  }
+  return value.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+}
+
 // ─── Excel header alias map ────────────────────────────────────────────────────
 
 export const normalizeHeader = (str) => {
@@ -821,6 +838,18 @@ export default function CementRegister({ onBack }) {
       'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
     }));
   }, [entries, unsavedImportRows, localData, isBillingMode]);
+
+  const monthlyTotals = useMemo(() => {
+    const totals = {};
+    NUMERIC_KEYS.forEach(key => {
+      let sum = 0;
+      computedRows.forEach(row => {
+        sum += num(row[key]);
+      });
+      totals[key] = sum;
+    });
+    return totals;
+  }, [computedRows]);
 
   // ── Cell edit (local draft) ────────────────────────────────────────────────
   const handleCellEdit = useCallback((rowId, field, value) => {
@@ -1653,6 +1682,49 @@ export default function CementRegister({ onBack }) {
                 </tr>
               );
             })}
+            {computedRows.length > 0 && (
+              <tr style={{
+                background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+                fontWeight: 900,
+                borderTop: '2px double #cbd5e1',
+                borderBottom: '2px solid #cbd5e1',
+                position: 'sticky',
+                bottom: 0,
+                zIndex: 10,
+                boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
+              }}>
+                <td style={{
+                  border: '1px solid #cbd5e1', padding: '10px 6px', textAlign: 'center',
+                  color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px'
+                }}>
+                  Σ
+                </td>
+                {VISIBLE_COLS.map((col, idx) => {
+                  const isFirst = idx === 0;
+                  const isNumeric = NUMERIC_KEYS.has(col.key);
+                  const val = isNumeric ? monthlyTotals[col.key] : '';
+                  const display = isFirst
+                    ? `TOTAL (${MONTHS[selectedMonth - 1] || ''})`
+                    : isNumeric
+                      ? formatTotalValue(col.key, val)
+                      : '';
+                  
+                  return (
+                    <td key={`total-${col.key}`} style={{
+                      border: '1px solid #cbd5e1',
+                      padding: '10px 8px',
+                      fontSize: '11px',
+                      color: isFirst ? '#0f172a' : '#1e293b',
+                      textAlign: isNumeric ? 'right' : 'left',
+                      fontWeight: 900,
+                      background: isNumeric ? 'rgba(124,58,237,0.04)' : 'transparent',
+                    }}>
+                      {display}
+                    </td>
+                  );
+                })}
+              </tr>
+            )}
           </tbody>
         </table>
       </Box>
