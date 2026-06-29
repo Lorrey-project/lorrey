@@ -38,6 +38,30 @@ const YEARS = [
 ];
 const BILL_TYPES = ['FREIGHT', 'EXTRA FREIGHT', 'TOLL', 'UNLOADING', 'CREDIT NOTE'];
 
+const MONTH_NAMES_FULL = [
+  "", "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
+const getMonthIndexFromDate = (dateStr) => {
+  if (!dateStr) return 99;
+  const parts = String(dateStr).split('-');
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      const m = parseInt(parts[1], 10);
+      if (!isNaN(m) && m >= 1 && m <= 12) return m;
+    } else if (parts[2].length === 4) {
+      const m = parseInt(parts[1], 10);
+      if (!isNaN(m) && m >= 1 && m <= 12) return m;
+    }
+  }
+  try {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) return d.getMonth() + 1;
+  } catch (_) {}
+  return 99;
+};
+
 const DEBIT_REASONS = [
   'None',
   'Damage / Shortage',
@@ -340,7 +364,12 @@ export default function FinancialYearDetails({ onBack }) {
         groupId: paymentObj?.id || `AUTO-${r.invoiceNumber}`,
         groupData: paymentObj || { id: `AUTO-${r.invoiceNumber}`, billNos: [r.invoiceNumber], paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: '', paymentProofUrl: '' }
       };
-    }).sort((a, b) => (a.invoiceDate || '').localeCompare(b.invoiceDate || '') || (a.invoiceNumber || '').localeCompare(b.invoiceNumber || ''));
+    }).sort((a, b) => {
+      const mA = getMonthIndexFromDate(a.invoiceDate);
+      const mB = getMonthIndexFromDate(b.invoiceDate);
+      if (mA !== mB) return mA - mB;
+      return (a.invoiceDate || '').localeCompare(b.invoiceDate || '') || (a.invoiceNumber || '').localeCompare(b.invoiceNumber || '');
+    });
   }, [rows, payments]);
 
   // Site filter helpers
@@ -651,10 +680,33 @@ export default function FinancialYearDetails({ onBack }) {
       handleRowEdit(r.invoiceNumber, 'month', `${newM}-${newY}`);
     };
 
+    const curMonthIndex = getMonthIndexFromDate(r.invoiceDate);
+    const prevMonthIndex = ri > 0 ? getMonthIndexFromDate(visibleRows[ri - 1].invoiceDate) : null;
+    const showHeader = (ri === 0) || (curMonthIndex !== prevMonthIndex);
+    const monthName = MONTH_NAMES_FULL[curMonthIndex] || "Other / Date Unspecified";
+
     return (
-      <tr key={ri}>
-        {/* Sl No */}
-        <td style={td({ textAlign: 'center', color: '#64748b', fontWeight: 600 })}>{page * PAGE_SIZE + ri + 1}</td>
+      <React.Fragment key={ri}>
+        {showHeader && (
+          <tr key={`month-header-${curMonthIndex}-${ri}`}>
+            <td colSpan={21} style={{
+              background: 'linear-gradient(90deg, #3730a3, #4338ca)',
+              color: '#ffffff',
+              padding: '10px 16px',
+              fontSize: '13px',
+              fontWeight: 800,
+              fontFamily: 'Inter, sans-serif',
+              textAlign: 'left',
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase'
+            }}>
+              📅 {monthName}
+            </td>
+          </tr>
+        )}
+        <tr>
+          {/* Sl No */}
+          <td style={td({ textAlign: 'center', color: '#64748b', fontWeight: 600 })}>{page * PAGE_SIZE + ri + 1}</td>
 
         {/* Select */}
         <td style={td({ textAlign: 'center' })}>
@@ -801,6 +853,7 @@ export default function FinancialYearDetails({ onBack }) {
           </td>
         )}
       </tr>
+      </React.Fragment>
     );
   };
 
