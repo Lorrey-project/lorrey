@@ -33,6 +33,12 @@ function parseDate(val) {
   return null;
 }
 
+function getMonthIndexFromDate(dateStr) {
+  const d = parseDate(dateStr);
+  if (d) return d.getMonth() + 1;
+  return 99;
+}
+
 
 const MONTH_NAMES = [
   'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
