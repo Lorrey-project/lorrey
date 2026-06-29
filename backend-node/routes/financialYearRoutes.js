@@ -75,7 +75,7 @@ router.get('/data', async (req, res) => {
 
     // ── Run all 3 DB reads in PARALLEL ─────────────────────────────
     const CEMENT_PROJECTION = {
-      'GCN NO': 1, 'BILL NO': 1, 'INVOICE NO': 1, 'INVOICE NO.': 1, 'BILLING': 1,
+      'GCN NO': 1, 'BILL NO': 1, 'INVOICE NO': 1, 'BILLING': 1,
       'LOADING DT': 1, 'LOADING DATE': 1,
       'BILL DATE': 1,
       'SITE': 1,
