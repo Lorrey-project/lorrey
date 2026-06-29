@@ -90,6 +90,30 @@ export default function FinancialYearDetails({ onBack }) {
   const [siteFilter, setSiteFilter] = useState('All'); // 'All' | 'NVCL' | 'NVL'
   const [selYear, setSelYear] = useState('2025-2026');
 
+  const handleAddRow = () => {
+    const tempId = `TEMP-${Date.now()}`;
+    const newRow = {
+      invoiceNumber: tempId,
+      displayInvoiceNumber: '',
+      invoiceDate: new Date().toISOString().split('T')[0],
+      month: `${MONTHS[new Date().getMonth()]}-${new Date().getFullYear()}`,
+      site: 'NVCL',
+      billType: 'FREIGHT',
+      amount: 0,
+      cgst: 0,
+      sgst: 0,
+      totalAmount: 0,
+      tds: 0,
+      receivable: 0,
+      debitReason: 'None',
+      isNewRow: true
+    };
+    setRows(prev => [newRow, ...prev]);
+    setDirtyRows(prev => new Set(prev).add(tempId));
+    setPage(0);
+    setSnack({ severity: 'success', msg: 'New blank row added. Please enter the details and click Save Details.' });
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -376,6 +400,17 @@ export default function FinancialYearDetails({ onBack }) {
       if (r.invoiceNumber !== invoiceNumber) return r;
       const updated = { ...r, [field]: value };
 
+      // If this is a new row and we are editing the invoice number, update the primary key invoiceNumber as well
+      if (r.isNewRow && field === 'displayInvoiceNumber') {
+        updated.invoiceNumber = value;
+        setDirtyRows(prevDirty => {
+          const ns = new Set(prevDirty);
+          ns.delete(invoiceNumber);
+          ns.add(value);
+          return ns;
+        });
+      }
+
       // Auto-update Invoice Number prefix based on Site selection
       if (field === 'site') {
         let inv = updated.displayInvoiceNumber || updated.invoiceNumber || '';
@@ -387,7 +422,13 @@ export default function FinancialYearDetails({ onBack }) {
       }
       return updated;
     }));
-    setDirtyRows(prev => new Set(prev).add(invoiceNumber));
+
+    setDirtyRows(prev => {
+      const rowToDirty = (rows.find(x => x.invoiceNumber === invoiceNumber)?.isNewRow && field === 'displayInvoiceNumber')
+        ? value
+        : invoiceNumber;
+      return new Set(prev).add(rowToDirty);
+    });
   }, [rows, computedRows]);
 
   const handleInlineEdit = useCallback((groupId, field, value, cellGroupData) => {
@@ -621,8 +662,13 @@ export default function FinancialYearDetails({ onBack }) {
         </td>
 
         {/* Invoice Date */}
-        <td style={td({ textAlign: 'center', fontWeight: 600, color: '#1e293b' })}>
-          {r.invoiceDate || ''}
+        <td style={td({ textAlign: 'center' })}>
+          <input
+            type="date"
+            value={r.invoiceDate ? r.invoiceDate.split('T')[0] : ''}
+            onChange={e => handleRowEdit(r.invoiceNumber, 'invoiceDate', e.target.value)}
+            style={{ ...iStyle, width: 110, textAlign: 'center', fontWeight: 600 }}
+          />
         </td>
 
         {/* Invoice Number */}
@@ -645,8 +691,15 @@ export default function FinancialYearDetails({ onBack }) {
         </td>
 
         {/* Site */}
-        <td style={td({ textAlign: 'center', fontWeight: 600, color: '#334155' })}>
-          {r.site || ''}
+        <td style={td({ textAlign: 'center' })}>
+          <select
+            value={r.site || 'NVCL'}
+            onChange={e => handleRowEdit(r.invoiceNumber, 'site', e.target.value)}
+            style={{ ...selStyle, fontWeight: 600, textAlign: 'center' }}
+          >
+            <option value="NVCL">NVCL</option>
+            <option value="NVL">NVL</option>
+          </select>
         </td>
 
         {/* Bill Type */}
@@ -657,8 +710,14 @@ export default function FinancialYearDetails({ onBack }) {
         </td>
 
         {/* Amount */}
-        <td style={td({ textAlign: 'right', fontWeight: 600, color: '#334155' })}>
-          {r.amount || 0}
+        <td style={td({ textAlign: 'right' })}>
+          <input
+            type="number"
+            value={r.amount || ''}
+            onChange={e => handleRowEdit(r.invoiceNumber, 'amount', e.target.value)}
+            style={{ ...iStyle, textAlign: 'right', fontWeight: 600 }}
+            placeholder="0"
+          />
         </td>
 
         {/* CGST */}
@@ -809,6 +868,10 @@ export default function FinancialYearDetails({ onBack }) {
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
           <Typography variant="caption" color="text.secondary">{filteredRows.length} records</Typography>
+
+          <Button variant="outlined" color="primary" size="small" onClick={handleAddRow} sx={{ fontWeight: 'bold', borderRadius: 2, px: 2 }}>
+            + Add Row
+          </Button>
 
           <Button variant="outlined" color="primary" size="small" onClick={() => setDocModalOpen(true)} sx={{ fontWeight: 'bold' }}>
             Upload PDF {pageDocuments.length > 0 && `(${pageDocuments.length})`}

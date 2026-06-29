@@ -143,14 +143,21 @@ router.get('/data', async (req, res) => {
       aggregated[finalInvNo].amount += amt;
     }
 
-    // ── Merge overrides (O(1) map lookup) ──────────────────────────
+    // ── Merge overrides and manual rows ──────────────────────────
     const rowMap = {};
     for (const r of rowOverrides) rowMap[r.billNo] = r;
 
-    const finalRows = Object.values(aggregated).map(r => {
-      const ov = rowMap[r.invoiceNumber] || {};
-      if (ov.hidden) return null; // soft-deleted
-      return {
+    const finalRows = [];
+    const processedBillNos = new Set();
+
+    // 1. Process all aggregated rows from cement register
+    for (const r of Object.values(aggregated)) {
+      const invNo = r.invoiceNumber;
+      processedBillNos.add(invNo);
+      const ov = rowMap[invNo] || {};
+      if (ov.hidden) continue; // soft-deleted
+      
+      finalRows.push({
         ...r,
         billType: ov.billType ?? 'FREIGHT',
         invoiceDate: ov.editedInvoiceDate ?? r.invoiceDate,
@@ -167,9 +174,51 @@ router.get('/data', async (req, res) => {
         damageVehicleAmounts: ov.damageVehicleAmounts || {},
         // Legacy singular fields for backward compat
         damageVehicle: ov.damageVehicle,
-        damageTrip: ov.damageTrip
-      };
-    }).filter(Boolean);
+        damageTrip: ov.damageTrip,
+        isManual: false
+      });
+    }
+
+    // 2. Process all manual rows that exist only in rowOverrides
+    for (const ov of rowOverrides) {
+      if (processedBillNos.has(ov.billNo)) continue;
+      if (ov.hidden) continue; // soft-deleted
+
+      // Filter manual rows by financial year if a filter is active
+      if (shortCode) {
+        let matchYear = false;
+        const invDate = ov.editedInvoiceDate || '';
+        const dObj = parseDate(invDate);
+        if (dObj) {
+          const y = dObj.getFullYear();
+          const m = dObj.getMonth() + 1;
+          if (m >= 4 && y === startYear) matchYear = true;
+          if (m <= 3 && y === startYear + 1) matchYear = true;
+        } else if (ov.billNo.includes(shortCode)) {
+          matchYear = true;
+        }
+        if (!matchYear) continue; // Skip if it doesn't match the selected financial year
+      }
+
+      finalRows.push({
+        invoiceDate: ov.editedInvoiceDate || '',
+        invoiceNumber: ov.billNo,
+        displayInvoiceNumber: ov.editedInvoiceNumber || ov.billNo,
+        month: ov.editedMonth || '',
+        site: normalizeSite(ov.editedSite || ''),
+        amount: ov.editedAmount || 0,
+        billType: ov.billType ?? 'FREIGHT',
+        debitReason: ov.debitReason ?? 'None',
+        damageYear: ov.damageYear,
+        damageMonth: ov.damageMonth,
+        damageVehicles: ov.damageVehicles || [],
+        damageTrips: ov.damageTrips || [],
+        damageVehicleAmounts: ov.damageVehicleAmounts || {},
+        damageVehicle: ov.damageVehicle,
+        damageTrip: ov.damageTrip,
+        isManual: true
+      });
+    }
 
     res.json({ rows: finalRows, payments: filteredPayments });
   } catch (err) {
