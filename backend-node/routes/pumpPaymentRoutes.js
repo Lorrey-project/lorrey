@@ -142,6 +142,20 @@ router.get("/cement-data", auth, async (req, res) => {
         && parts.day >= startDay && parts.day <= endDay;
     });
 
+    // Sort chronologically by Loading Date in ascending order
+    entries.sort((a, b) => {
+      const dateValA = a["LOADING DT"] || a["LOADING DATE"];
+      const dateValB = b["LOADING DT"] || b["LOADING DATE"];
+      const parseA = parseDate(dateValA);
+      const parseB = parseDate(dateValB);
+      const tA = parseA ? parseA.getTime() : 0;
+      const tB = parseB ? parseB.getTime() : 0;
+      if (tA !== tB) return tA - tB;
+      const slA = parseInt(a["SL NO"]) || 0;
+      const slB = parseInt(b["SL NO"]) || 0;
+      return slA - slB;
+    });
+
     res.json({ success: true, count: entries.length, entries });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
