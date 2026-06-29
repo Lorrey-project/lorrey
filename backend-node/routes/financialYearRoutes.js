@@ -71,6 +71,7 @@ router.get('/data', async (req, res) => {
     const CEMENT_PROJECTION = {
       'GCN NO': 1, 'BILL NO': 1, 'INVOICE NO': 1, 'BILLING': 1,
       'LOADING DT': 1, 'LOADING DATE': 1,
+      'BILL DATE': 1,
       'SITE': 1,
       'BILLING ER 95%': 1, 'BILLING @ 95% (PARTY PAYABLE)': 1,
       'AMOUNT': 1, 'Billing Amount': 1,
