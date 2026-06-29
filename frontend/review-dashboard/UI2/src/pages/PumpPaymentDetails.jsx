@@ -1131,6 +1131,8 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                   </td>
                   {/* VERIFICATION STATUS col — empty */}
                   <td style={{ border: '1px solid #94a3b8', borderTop: '2px solid #0891b2' }} />
+                  {/* VERIFICATION CODE col — empty */}
+                  <td style={{ border: '1px solid #94a3b8', borderTop: '2px solid #0891b2' }} />
                   {/* HSD RATE col — empty */}
                   <td style={{ border: '1px solid #94a3b8', borderTop: '2px solid #0891b2' }} />
                   {/* HSD AMOUNT col — ₹ total, aligned to column */}
@@ -1224,6 +1226,8 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                       )}
                     </Box>
                   </td>
+                  {/* PAYMENT PROOF col — empty */}
+                  <td style={{ border: '1px solid #94a3b8', borderTop: '2px solid #0891b2' }} />
                 </tr>
               </tfoot>
             )}
