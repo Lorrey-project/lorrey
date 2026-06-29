@@ -1684,18 +1684,16 @@ export default function CementRegister({ onBack }) {
             })}
             {computedRows.length > 0 && (
               <tr style={{
-                background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
                 fontWeight: 900,
                 borderTop: '2px double #cbd5e1',
                 borderBottom: '2px solid #cbd5e1',
-                position: 'sticky',
-                bottom: 0,
-                zIndex: 10,
-                boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
               }}>
                 <td style={{
                   border: '1px solid #cbd5e1', padding: '10px 6px', textAlign: 'center',
-                  color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px'
+                  color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px',
+                  position: 'sticky', bottom: 0, zIndex: 10,
+                  background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+                  boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
                 }}>
                   Σ
                 </td>
@@ -1717,7 +1715,11 @@ export default function CementRegister({ onBack }) {
                       color: isFirst ? '#0f172a' : '#1e293b',
                       textAlign: isNumeric ? 'right' : 'left',
                       fontWeight: 900,
-                      background: isNumeric ? 'rgba(124,58,237,0.04)' : 'transparent',
+                      position: 'sticky', bottom: 0, zIndex: 10,
+                      background: isNumeric 
+                        ? 'linear-gradient(180deg, #f5f3ff 0%, #ede9fe 100%)' // purple tint for numeric total cells
+                        : 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+                      boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
                     }}>
                       {display}
                     </td>
