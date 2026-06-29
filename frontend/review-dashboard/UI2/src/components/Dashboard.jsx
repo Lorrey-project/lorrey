@@ -40,7 +40,7 @@ const _dashSocket = io('/', { autoConnect: true });
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport }) => {
     const { user, logout } = useAuth();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -1054,6 +1054,63 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                         }}
                                     >
                                         Open Spreadsheet
+                                    </Button>
+                                </Box>
+                            </CardContent>
+                        </Card>
+
+                        {/* ── Daily Summary Report Block ───────────────────────── */}
+                        <Card sx={{
+                            height: '100%',
+                            borderRadius: '20px',
+                            background: 'linear-gradient(135deg, #701a75 0%, #86198f 100%)',
+                            color: '#fff',
+                            boxShadow: '0 16px 40px rgba(134,25,143,0.3)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            overflow: 'hidden',
+                            position: 'relative',
+                            cursor: 'pointer',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            '&:hover': { transform: 'scale(1.02)', boxShadow: '0 24px 48px rgba(134,25,143,0.4)' }
+                        }} onClick={onOpenDailySummaryReport}>
+                            <Box sx={{
+                                position: 'absolute', top: -20, right: -20,
+                                width: 100, height: 100, borderRadius: '50%',
+                                bgcolor: 'rgba(255,255,255,0.06)',
+                            }} />
+                            <CardContent sx={{ p: 2.5 }}>
+                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
+                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
+                                        <AssignmentIcon sx={{ fontSize: 20 }} />
+                                    </Box>
+                                    <Box>
+                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
+                                            DAILY SUMMARY REPORT
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                                            Daily Operations Metrics & Sheets
+                                        </Typography>
+                                    </Box>
+                                </Box>
+
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    <Button
+                                        fullWidth
+                                        variant="contained"
+                                        startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
+                                        onClick={(e) => { e.stopPropagation(); onOpenDailySummaryReport(); }}
+                                        sx={{
+                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
+                                            bgcolor: 'rgba(255,255,255,0.2)',
+                                            color: '#fff',
+                                            boxShadow: 'none',
+                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+                                            transition: 'all 0.2s',
+                                            justifyContent: 'flex-start',
+                                            border: '1px solid rgba(255,255,255,0.2)',
+                                        }}
+                                    >
+                                        Open Report
                                     </Button>
                                 </Box>
                             </CardContent>

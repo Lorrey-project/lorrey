@@ -23,6 +23,7 @@ import PartyPaymentDetails from './pages/PartyPaymentDetails';
 import FinancialYearDetails from './pages/FinancialYearDetails';
 import AccountDetails from './pages/AccountDetails';
 import AccountApprovalsPage from './pages/AccountApprovalsPage';
+import DailySummaryReport from './pages/DailySummaryReport';
 
 const theme = createTheme({
   palette: {
@@ -228,6 +229,10 @@ function AppContent() {
     return <FuelRateSettings onBack={() => setCurrentView('dashboard')} />;
   }
 
+  if (currentView === 'dailySummary') {
+    return <DailySummaryReport onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'dashboard') {
     if (isMobile) {
       if (user.role === 'PETROL PUMP') {
@@ -288,6 +293,7 @@ function AppContent() {
         onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}
         onOpenAccountDetails={() => setCurrentView('accountDetails')}
         onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
+        onOpenDailySummaryReport={() => setCurrentView('dailySummary')}
       />
     );
   }
