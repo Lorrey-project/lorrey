@@ -12,11 +12,14 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
+
+const parseNum = (val) => parseFloat(String(val || 0).replace(/,/g, '')) || 0;
 
 export default function DailySummaryReport({ onBack }) {
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -63,65 +66,37 @@ export default function DailySummaryReport({ onBack }) {
         { Metric: "Total Cement Trips", Value: metrics.cementTrips },
         { Metric: "Total Cash Receipts", Value: `₹${metrics.cashIn.toLocaleString()}` },
         { Metric: "Total Cash Payments", Value: `₹${metrics.cashOut.toLocaleString()}` },
-        { Metric: "Net Cash Balance Flow", Value: `₹${(metrics.cashIn - metrics.cashOut).toLocaleString()}` },
         { Metric: "Total Fuel Issued (LTR)", Value: metrics.fuelLtr },
-        { Metric: "Total Fuel Slips", Value: metrics.fuelSlips },
-        { Metric: "Total Vouchers Created", Value: metrics.voucherCount },
-        { Metric: "Total Voucher Amount", Value: `₹${metrics.voucherAmount.toLocaleString()}` }
+        { Metric: "Total Fuel Slips", Value: metrics.fuelSlips }
       ];
       const wsSummary = XLSX.utils.json_to_sheet(summaryData);
       XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
 
       // 2. Cement Register
-      const cementRows = (data.cement || []).map((e, idx) => ({
-        "SL NO": idx + 1,
+      const cementRows = (data.cement || []).map(e => ({
         "GCN NO": e["GCN NO"] || "",
         "BILL NO": e["BILL NO"] || "",
         "INVOICE NO": e["INVOICE NO"] || e["INVOICE NO."] || "",
         "SITE": e["SITE"] || "",
-        "BILLING RATE": parseFloat(e["BILLING"]) || 0,
-        "QUANTITY (MT)": parseFloat(e["MT"]) || 0,
-        "BILLING AMOUNT": parseFloat(e["Billing Amount"]) || parseFloat(e["AMOUNT"]) || 0
+        "BILLING RATE": parseNum(e["BILLING"]),
+        "QTY (MT)": parseNum(e["MT"]),
+        "AMOUNT": parseNum(e["Billing Amount"]) || parseNum(e["AMOUNT"]),
+        "LOADING ADVANCE": parseNum(e["ADVANCE"] || e["LOADING ADVANCE"])
       }));
       const wsCement = XLSX.utils.json_to_sheet(cementRows);
       XLSX.utils.book_append_sheet(wb, wsCement, "Cement Register");
 
-      // 3. Cashbook
-      const cashbookRows = (data.cashbook || []).map(e => ({
-        "SL NO": e["SL NO"] || "",
-        "DATE": e["DATE"] || "",
-        "PARTICULARS": e["PARTICULARS"] || "",
-        "RECEIPTS": parseFloat(e["RECEIPTS"]) || 0,
-        "PAYMENTS": parseFloat(e["PAYMENTS"]) || 0,
-        "BALANCE": parseFloat(e["BALANCE"]) || 0
-      }));
-      const wsCash = XLSX.utils.json_to_sheet(cashbookRows);
-      XLSX.utils.book_append_sheet(wb, wsCash, "Cashbook");
-
-      // 4. Diesel slips
+      // 3. Diesel slips
       const fuelRows = (data.pumpSlips || []).map((e, idx) => ({
         "SL NO": idx + 1,
         "PUMP NAME": e["PUMP NAME"] || "",
         "VEHICLE NO": e["VEHICLE NUMBER"] || e["VEHICLE NO"] || "",
         "HSD SLIP NO": e["HSD SLIP NO"] || "",
-        "HSD (LTR)": parseFloat(e["HSD (LTR)"]) || 0,
-        "HSD AMOUNT": parseFloat(e["HSD AMOUNT"]) || 0
+        "HSD (LTR)": parseNum(e["HSD (LTR)"]),
+        "HSD AMOUNT": parseNum(e["HSD AMOUNT"])
       }));
       const wsFuel = XLSX.utils.json_to_sheet(fuelRows);
       XLSX.utils.book_append_sheet(wb, wsFuel, "Diesel Slips");
-
-      // 5. Vouchers
-      const voucherRows = (data.vouchers || []).map((e, idx) => ({
-        "SL NO": idx + 1,
-        "VOUCHER NUMBER": e.voucherNumber || "",
-        "EXPENSE TYPE": e.expenseType || "",
-        "VEHICLE NUMBER": e.vehicleNumber || "",
-        "PURPOSE": e.purpose || "",
-        "AMOUNT": parseFloat(e.amount) || 0,
-        "REMARKS": e.remarks || ""
-      }));
-      const wsVoucher = XLSX.utils.json_to_sheet(voucherRows);
-      XLSX.utils.book_append_sheet(wb, wsVoucher, "Vouchers");
 
       XLSX.writeFile(wb, `Daily_Operations_Report_${date}.xlsx`);
       setSnack({ severity: 'success', msg: 'Daily Excel operations report downloaded successfully.' });
@@ -132,43 +107,52 @@ export default function DailySummaryReport({ onBack }) {
   };
 
   const metrics = useMemo(() => {
-    if (!data) return { cementMT: 0, cementTrips: 0, cashIn: 0, cashOut: 0, fuelLtr: 0, fuelSlips: 0, voucherCount: 0, voucherAmount: 0 };
+    if (!data) return { 
+      invoicesUploaded: 0, cementMT: 0, cementTrips: 0, fuelLtr: 0, fuelSlips: 0, loadingAdvanceAmt: 0, advanceVehicles: [],
+      cashReceivedAmount: 0, cashOpeningBalance: 0, miscExpenses: 0, closingAdvanceBalance: 0 
+    };
     
     // Cement
     let cMT = 0;
+    let advAmt = 0;
+    const advVehicles = [];
     (data.cement || []).forEach(e => {
-      cMT += parseFloat(e["MT"]) || 0;
-    });
-
-    // Cashbook
-    let cIn = 0;
-    let cOut = 0;
-    (data.cashbook || []).forEach(e => {
-      cIn += parseFloat(e["RECEIPTS"]) || 0;
-      cOut += parseFloat(e["PAYMENTS"]) || 0;
+      cMT += parseNum(e["MT"]);
+      const adv = parseNum(e["ADVANCE"] || e["LOADING ADVANCE"]);
+      if (adv > 0) {
+        advAmt += adv;
+        const veh = e["VEHICLE NUMBER"] || e["VEHICLE NO"] || e["VEHICLE NO."] || "Unknown";
+        if (veh !== "Unknown") {
+          advVehicles.push(veh);
+        }
+      }
     });
 
     // Fuel Slips
     let fL = 0;
     (data.pumpSlips || []).forEach(e => {
-      fL += parseFloat(e["HSD (LTR)"]) || 0;
+      fL += parseNum(e["HSD (LTR)"]);
     });
 
-    // Vouchers
-    let vAmt = 0;
-    (data.vouchers || []).forEach(e => {
-      vAmt += parseFloat(e.amount) || 0;
-    });
+    const cb = data.cashbookEntry || {};
+    const cashRecv = parseNum(cb["P_WITHDRAW"]);
+    const cashOpen = parseNum(cb["O_OPENING"]) + parseNum(cb["P_OPENING"]) + parseNum(cb["S_OPENING"]);
+    const miscExp = parseNum(cb["O_EXPENSE"]);
 
     return {
+      invoicesUploaded: data.invoicesUploaded || 0,
       cementMT: Math.round(cMT * 100) / 100,
       cementTrips: (data.cement || []).length,
-      cashIn: cIn,
-      cashOut: cOut,
       fuelLtr: Math.round(fL * 100) / 100,
       fuelSlips: (data.pumpSlips || []).length,
-      voucherCount: (data.vouchers || []).length,
-      voucherAmount: vAmt
+      loadingAdvanceAmt: advAmt,
+      advanceVehicles: advVehicles,
+      
+      // Cashbook logic
+      cashReceivedAmount: cashRecv,
+      cashOpeningBalance: cashOpen,
+      miscExpenses: miscExp,
+      closingAdvanceBalance: (cashRecv - cashOpen - advAmt - miscExp)
     };
   }, [data]);
 
@@ -234,63 +218,109 @@ export default function DailySummaryReport({ onBack }) {
       ) : (
         <Box sx={{ px: { xs: 2, md: 4 }, mt: 4 }}>
           {/* --- KPI Grid --- */}
-          <Grid container spacing={3} mb={4}>
-            {/* Cement Card */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #004d40 0%, #00796b 100%)', color: '#fff' }}>
-                <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box>
-                    <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Cement Loaded</Typography>
-                    <Typography variant="h4" fontWeight={950} mt={0.5}>{metrics.cementMT} <span style={{ fontSize: 16 }}>MT</span></Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>{metrics.cementTrips} Trip(s)</Typography>
-                  </Box>
-                  <LocalShippingIcon sx={{ fontSize: 48, opacity: 0.3 }} />
-                </CardContent>
-              </Card>
-            </Grid>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(5, 1fr)' }, gap: 3, mb: 4 }}>
+            {/* Total Invoices Card */}
+            <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: '#fff' }}>
+              <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Invoices Uploaded</Typography>
+                  <Typography variant="h4" fontWeight={950} mt={0.5}>{metrics.invoicesUploaded}</Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>Processed automatically</Typography>
+                </Box>
+                <ReceiptLongIcon sx={{ fontSize: 48, opacity: 0.3 }} />
+              </CardContent>
+            </Card>
 
-            {/* Cash Balance Card */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #b45309 0%, #d97706 100%)', color: '#fff' }}>
-                <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box>
-                    <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Net Cash Flow</Typography>
-                    <Typography variant="h4" fontWeight={950} mt={0.5}>₹{(metrics.cashIn - metrics.cashOut).toLocaleString()}</Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>In: ₹{metrics.cashIn.toLocaleString()} | Out: ₹{metrics.cashOut.toLocaleString()}</Typography>
-                  </Box>
-                  <CurrencyRupeeIcon sx={{ fontSize: 48, opacity: 0.3 }} />
-                </CardContent>
-              </Card>
-            </Grid>
+            {/* Cement Card */}
+            <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #004d40 0%, #00796b 100%)', color: '#fff' }}>
+              <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Total Cement Load</Typography>
+                  <Typography variant="h4" fontWeight={950} mt={0.5}>{metrics.cementMT} <span style={{ fontSize: 16 }}>MT</span></Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>{metrics.cementTrips} Trip(s)</Typography>
+                </Box>
+                <LocalShippingIcon sx={{ fontSize: 48, opacity: 0.3 }} />
+              </CardContent>
+            </Card>
 
             {/* Diesel Card */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #0369a1 0%, #0284c7 100%)', color: '#fff' }}>
-                <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box>
-                    <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Diesel Issued</Typography>
-                    <Typography variant="h4" fontWeight={950} mt={0.5}>{metrics.fuelLtr} <span style={{ fontSize: 16 }}>LTR</span></Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>{metrics.fuelSlips} Slip(s)</Typography>
-                  </Box>
-                  <LocalGasStationIcon sx={{ fontSize: 48, opacity: 0.3 }} />
-                </CardContent>
-              </Card>
-            </Grid>
+            <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #0369a1 0%, #0284c7 100%)', color: '#fff' }}>
+              <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Total Diesel</Typography>
+                  <Typography variant="h4" fontWeight={950} mt={0.5}>{metrics.fuelLtr} <span style={{ fontSize: 16 }}>LTR</span></Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>{metrics.fuelSlips} Slip(s)</Typography>
+                </Box>
+                <LocalGasStationIcon sx={{ fontSize: 48, opacity: 0.3 }} />
+              </CardContent>
+            </Card>
+            
+            {/* Loading Advance Card */}
+            <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #4338ca 0%, #4f46e5 100%)', color: '#fff' }}>
+              <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Total Loading Advance</Typography>
+                  <Typography variant="h4" fontWeight={950} mt={0.5}>₹{metrics.loadingAdvanceAmt.toLocaleString()}</Typography>
+                  
+                  <Tooltip 
+                    title={
+                      metrics.advanceVehicles.length > 0 
+                        ? <Box sx={{ p: 0.5, maxHeight: 150, overflowY: 'auto' }}>
+                            <Typography variant="body2" fontWeight={600} mb={1}>Vehicles:</Typography>
+                            {metrics.advanceVehicles.map((v, i) => <Typography key={i} variant="caption" display="block">{v}</Typography>)}
+                          </Box> 
+                        : "No loading advances issued."
+                    }
+                    arrow
+                    placement="top"
+                  >
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        opacity: 0.9, mt: 0.5, 
+                        display: 'inline-block', 
+                        cursor: 'help', 
+                        borderBottom: '1px dotted rgba(255,255,255,0.6)' 
+                      }}
+                    >
+                      {metrics.advanceVehicles.length} Vehicle(s)
+                    </Typography>
+                  </Tooltip>
+                </Box>
+                <AccountBalanceWalletIcon sx={{ fontSize: 48, opacity: 0.3 }} />
+              </CardContent>
+            </Card>
 
-            {/* Vouchers Card */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #701a75 0%, #86198f 100%)', color: '#fff' }}>
-                <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box>
-                    <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Vouchers Value</Typography>
-                    <Typography variant="h4" fontWeight={950} mt={0.5}>₹{metrics.voucherAmount.toLocaleString()}</Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>{metrics.voucherCount} Voucher(s)</Typography>
-                  </Box>
-                  <ReceiptLongIcon sx={{ fontSize: 48, opacity: 0.3 }} />
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
+            {/* Closing Advance Calculation Card */}
+            <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%)', color: '#fff' }}>
+              <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography variant="caption" sx={{ opacity: 0.9, fontWeight: 700, textTransform: 'uppercase', mb: 1 }}>Closing Advance Calculation</Typography>
+                
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" sx={{ opacity: 0.8 }}>Cash Received Amount:</Typography>
+                  <Typography variant="body2" fontWeight={700}>₹{metrics.cashReceivedAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" sx={{ opacity: 0.8 }}>Cash Opening Balance:</Typography>
+                  <Typography variant="body2" fontWeight={700}>₹{metrics.cashOpeningBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" sx={{ opacity: 0.8 }}>Loading Advance Total:</Typography>
+                  <Typography variant="body2" fontWeight={700}>₹{metrics.loadingAdvanceAmt.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
+                  <Typography variant="body2" sx={{ opacity: 0.8 }}>Miscellaneous Expenses:</Typography>
+                  <Typography variant="body2" fontWeight={700}>₹{metrics.miscExpenses.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
+                </Box>
+
+                <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.2)', pt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body1" fontWeight={700}>Closing Balance:</Typography>
+                  <Typography variant="h5" fontWeight={950}>₹{metrics.closingAdvanceBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
+                </Box>
+              </CardContent>
+            </Card>
+
+          </Box>
 
           {/* --- Detail Sections --- */}
           <Paper sx={{ borderRadius: '20px', overflow: 'hidden', boxShadow: '0 4px 30px rgba(0,0,0,0.03)' }}>
@@ -308,9 +338,7 @@ export default function DailySummaryReport({ onBack }) {
                 }}
               >
                 <Tab label="Cement Loading" />
-                <Tab label="Cashbook" />
                 <Tab label="Diesel slips" />
-                <Tab label="Vouchers" />
               </Tabs>
             </Box>
 
@@ -341,9 +369,9 @@ export default function DailySummaryReport({ onBack }) {
                             <TableCell>{e["BILL NO"] || "-"}</TableCell>
                             <TableCell>{e["INVOICE NO"] || e["INVOICE NO."] || "-"}</TableCell>
                             <TableCell>{e["SITE"] || "-"}</TableCell>
-                            <TableCell>₹{parseFloat(e["BILLING"])?.toLocaleString() || "-"}</TableCell>
+                            <TableCell>₹{parseNum(e["BILLING"])?.toLocaleString() || "-"}</TableCell>
                             <TableCell>{e["MT"] || "-"}</TableCell>
-                            <TableCell>₹{(parseFloat(e["Billing Amount"]) || parseFloat(e["AMOUNT"]))?.toLocaleString() || "-"}</TableCell>
+                            <TableCell>₹{(parseNum(e["Billing Amount"]) || parseNum(e["AMOUNT"]))?.toLocaleString() || "-"}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -353,49 +381,8 @@ export default function DailySummaryReport({ onBack }) {
               </Box>
             )}
 
-            {/* Tab Panel 1: Cashbook */}
+            {/* Tab Panel 1: Diesel slips */}
             {tabValue === 1 && (
-              <Box p={3} bgcolor="#fff">
-                <Typography variant="h6" fontWeight={850} mb={2}>Cashbook Registry</Typography>
-                {!data?.cashbook?.length ? (
-                  <Typography color="text.secondary">No cashbook transactions on this date.</Typography>
-                ) : (
-                  <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-                    <Table>
-                      <TableHead sx={{ bgcolor: '#f8fafc' }}>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 850 }}>SL NO</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }}>PARTICULARS</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }} align="right">RECEIPTS</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }} align="right">PAYMENTS</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }} align="right">BALANCE</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {data.cashbook.map((e, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell>{e["SL NO"] || "-"}</TableCell>
-                            <TableCell>{e["PARTICULARS"] || "-"}</TableCell>
-                            <TableCell align="right" sx={{ color: parseFloat(e["RECEIPTS"]) > 0 ? '#166534' : 'inherit', fontWeight: parseFloat(e["RECEIPTS"]) > 0 ? 700 : 'inherit' }}>
-                              {parseFloat(e["RECEIPTS"]) > 0 ? `₹${parseFloat(e["RECEIPTS"]).toLocaleString()}` : "-"}
-                            </TableCell>
-                            <TableCell align="right" sx={{ color: parseFloat(e["PAYMENTS"]) > 0 ? '#991b1b' : 'inherit', fontWeight: parseFloat(e["PAYMENTS"]) > 0 ? 700 : 'inherit' }}>
-                              {parseFloat(e["PAYMENTS"]) > 0 ? `₹${parseFloat(e["PAYMENTS"]).toLocaleString()}` : "-"}
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 700 }}>
-                              ₹{parseFloat(e["BALANCE"])?.toLocaleString() || "-"}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </Box>
-            )}
-
-            {/* Tab Panel 2: Diesel slips */}
-            {tabValue === 2 && (
               <Box p={3} bgcolor="#fff">
                 <Typography variant="h6" fontWeight={850} mb={2}>Diesel Issuance Registry</Typography>
                 {!data?.pumpSlips?.length ? (
@@ -419,44 +406,7 @@ export default function DailySummaryReport({ onBack }) {
                             <TableCell>{e["VEHICLE NUMBER"] || e["VEHICLE NO"] || "-"}</TableCell>
                             <TableCell>{e["HSD SLIP NO"] || "-"}</TableCell>
                             <TableCell>{e["HSD (LTR)"] || "-"}</TableCell>
-                            <TableCell>₹{parseFloat(e["HSD AMOUNT"])?.toLocaleString() || "-"}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </Box>
-            )}
-
-            {/* Tab Panel 3: Vouchers */}
-            {tabValue === 3 && (
-              <Box p={3} bgcolor="#fff">
-                <Typography variant="h6" fontWeight={850} mb={2}>Voucher Entry Ledger</Typography>
-                {!data?.vouchers?.length ? (
-                  <Typography color="text.secondary">No voucher entries created on this date.</Typography>
-                ) : (
-                  <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-                    <Table>
-                      <TableHead sx={{ bgcolor: '#f8fafc' }}>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 850 }}>VOUCHER NO</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }}>EXPENSE TYPE</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }}>VEHICLE NUMBER</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }}>PURPOSE</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }}>AMOUNT</TableCell>
-                          <TableCell sx={{ fontWeight: 850 }}>REMARKS</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {data.vouchers.map((e, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell>{e.voucherNumber || "-"}</TableCell>
-                            <TableCell>{e.expenseType || "-"}</TableCell>
-                            <TableCell>{e.vehicleNumber || "-"}</TableCell>
-                            <TableCell>{e.purpose || "-"}</TableCell>
-                            <TableCell>₹{parseFloat(e.amount)?.toLocaleString() || "-"}</TableCell>
-                            <TableCell>{e.remarks || "-"}</TableCell>
+                            <TableCell>₹{parseNum(e["HSD AMOUNT"])?.toLocaleString() || "-"}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

@@ -3,15 +3,10 @@ const mongoose = require("mongoose");
 const auth = require("../middleware/authMiddleware");
 
 const router = express.Router();
-
-const Voucher = require("../models/Voucher");
+const Invoice = require("../models/Invoice");
 
 function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
-}
-
-function getCashbookCol() {
-  return mongoose.connection.useDb("main_cashbook").collection("entries");
 }
 
 function getDatePatterns(dateStr) {
@@ -36,7 +31,6 @@ function getDatePatterns(dateStr) {
     `${dd}/${mm}/${yShort}`,
     `${d}/${m}/${yShort}`
   ];
-  // Remove duplicates
   return Array.from(new Set(patterns));
 }
 
@@ -48,40 +42,20 @@ router.get("/data", auth, async (req, res) => {
     }
 
     const patterns = getDatePatterns(date);
-    
-    // Construct Date bounds for Voucher query
-    const parts = date.split('-');
-    const y = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10) - 1;
-    const d = parseInt(parts[2], 10);
 
-    // Cover UTC day bounds
-    const startOfDay = new Date(Date.UTC(y, m, d, 0, 0, 0));
-    const endOfDay = new Date(Date.UTC(y, m, d, 23, 59, 59, 999));
+    // Fetch Cement Register entries based on date patterns
+    const cementEntries = await getCementCol().find({
+      $or: [
+        { "LOADING DT": { $in: patterns } },
+        { "LOADING DATE": { $in: patterns } },
+        { "BILL DATE": { $in: patterns } }
+      ]
+    }).toArray();
 
-    // Cover local day bounds just in case dates are stored in local time offset
-    const localStart = new Date(y, m, d, 0, 0, 0);
-    const localEnd = new Date(y, m, d, 23, 59, 59, 999);
-
-    // Parallel DB Reads
-    const [cementEntries, cashbookEntries, vouchers] = await Promise.all([
-      getCementCol().find({
-        $or: [
-          { "LOADING DT": { $in: patterns } },
-          { "LOADING DATE": { $in: patterns } },
-          { "BILL DATE": { $in: patterns } }
-        ]
-      }).toArray(),
-      getCashbookCol().find({
-        DATE: { $in: patterns }
-      }).toArray(),
-      Voucher.find({
-        $or: [
-          { date: { $gte: startOfDay, $lte: endOfDay } },
-          { date: { $gte: localStart, $lte: localEnd } }
-        ]
-      }).lean()
-    ]);
+    // Fetch Main Cashbook entry for the selected date
+    const cashbookEntry = await mongoose.connection.useDb("main_cashbook").collection("entries").findOne({
+      DATE: { $in: patterns }
+    });
 
     // Extract pump slips (entries from cement register with pump details)
     const pumpSlips = cementEntries.filter(e => {
@@ -92,10 +66,10 @@ router.get("/data", auth, async (req, res) => {
 
     res.json({
       success: true,
+      invoicesUploaded: cementEntries.length,
       cement: cementEntries,
-      cashbook: cashbookEntries,
-      vouchers,
-      pumpSlips
+      pumpSlips,
+      cashbookEntry
     });
 
   } catch (err) {

@@ -439,7 +439,14 @@ export default function FinancialYearDetails({ onBack }) {
 
   // Payment Status Dashboard Filtered Rows
   const dashboardRows = useMemo(() => {
-    return computedRows.filter(r => getMonthIndexFromDate(r.invoiceDate) === dashboardM);
+    return computedRows.filter(r => {
+      let mIdx = getMonthIndexFromDate(r.invoiceDate);
+      if (mIdx === 99 && r.month) {
+        const found = MONTHS_LIST.find(m => m.label.toUpperCase() === String(r.month).toUpperCase());
+        if (found) mIdx = found.value;
+      }
+      return mIdx === dashboardM;
+    });
   }, [computedRows, dashboardM]);
 
   // Payment Status Dashboard Details Calculation
