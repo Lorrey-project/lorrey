@@ -77,6 +77,17 @@ const getMonthIndexFromDate = (dateStr) => {
   return 99;
 };
 
+const formatDateForInput = (dateStr) => {
+  if (!dateStr) return '';
+  if (String(dateStr).includes('T')) return String(dateStr).split('T')[0];
+  const parts = String(dateStr).split('-');
+  if (parts.length === 3) {
+    if (parts[2].length === 4) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    if (parts[0].length === 4) return String(dateStr);
+  }
+  return '';
+};
+
 const DEBIT_REASONS = [
   'None',
   'Damage / Shortage',
@@ -127,6 +138,7 @@ export default function FinancialYearDetails({ onBack }) {
   const [dirtyGroups, setDirtyGroups] = useState(new Set());
   const [page, setPage] = useState(0);
   const [siteFilter, setSiteFilter] = useState('All'); // 'All' | 'NVCL' | 'NVL'
+  const [selectedMonth, setSelectedMonth] = useState('All'); // 'All' | '1' | '2' etc
   const [selYear, setSelYear] = useState('2025-2026');
 
   // Payment Status Dashboard States
@@ -419,11 +431,23 @@ export default function FinancialYearDetails({ onBack }) {
   const isNVL = useCallback((site) => /^NVL$/i.test((site || '').trim()), []);
   const isNVCL = useCallback((site) => /^NVCL$/i.test((site || '').trim()), []);
   const filteredRows = useMemo(() => {
-    if (siteFilter === 'All') return computedRows;
-    if (siteFilter === 'NVL') return computedRows.filter(r => isNVL(r.site));
-    if (siteFilter === 'NVCL') return computedRows.filter(r => isNVCL(r.site));
-    return computedRows;
-  }, [computedRows, siteFilter, isNVL, isNVCL]);
+    let result = computedRows;
+    if (siteFilter === 'NVL') result = result.filter(r => isNVL(r.site));
+    if (siteFilter === 'NVCL') result = result.filter(r => isNVCL(r.site));
+    
+    if (selectedMonth !== 'All') {
+      const mTarget = parseInt(selectedMonth, 10);
+      result = result.filter(r => {
+        let mIdx = getMonthIndexFromDate(r.invoiceDate);
+        if (mIdx === 99 && r.month) {
+          const found = MONTHS_LIST.find(m => m.label.toUpperCase() === String(r.month).toUpperCase());
+          if (found) mIdx = found.value;
+        }
+        return mIdx === mTarget;
+      });
+    }
+    return result;
+  }, [computedRows, siteFilter, selectedMonth, isNVL, isNVCL]);
 
   const groupSpanMap = useMemo(() => {
     const map = {};
@@ -833,7 +857,7 @@ export default function FinancialYearDetails({ onBack }) {
         <td style={td({ textAlign: 'center' })}>
           <input
             type="date"
-            value={r.invoiceDate ? r.invoiceDate.split('T')[0] : ''}
+            value={formatDateForInput(r.invoiceDate)}
             onChange={e => handleRowEdit(r.invoiceNumber, 'invoiceDate', e.target.value)}
             style={{ ...iStyle, width: 110, textAlign: 'center', fontWeight: 600 }}
           />
@@ -1033,6 +1057,26 @@ export default function FinancialYearDetails({ onBack }) {
               </span>
             </button>
           ))}
+        </Box>
+
+        {/* ── Month Filter Tabs ── */}
+        <Box sx={{ display: 'flex', gap: 0.5, bgcolor: '#f1f5f9', borderRadius: '10px', p: '3px' }}>
+          <select 
+            value={selectedMonth} 
+            onChange={e => { setSelectedMonth(e.target.value); setPage(0); }}
+            style={{
+              border: 'none', cursor: 'pointer', borderRadius: '8px', padding: '4px 14px',
+              fontWeight: 700, fontSize: 13, fontFamily: 'Inter,sans-serif',
+              background: selectedMonth !== 'All' ? '#4f46e5' : 'transparent',
+              color: selectedMonth !== 'All' ? '#fff' : '#64748b',
+              outline: 'none', appearance: 'none'
+            }}
+          >
+            <option value="All" style={{ color: '#000' }}>All Months</option>
+            {MONTHS_LIST.map(m => (
+              <option key={m.value} value={String(m.value)} style={{ color: '#000' }}>{m.label}</option>
+            ))}
+          </select>
         </Box>
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
