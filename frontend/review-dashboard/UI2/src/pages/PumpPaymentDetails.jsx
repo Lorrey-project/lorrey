@@ -246,7 +246,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       // For pump admins: hide rows that have no vehicle number AND no HSD litres
       // (these are ghost/dummy entries with nothing actionable to verify)
       const filtered = isPumpAdmin
-        ? merged.filter(r => r['VEHICLE NUMBER'] && (r['HSD (LTR)'] !== '' && r['HSD (LTR)'] !== 0 && r['HSD (LTR)'] !== null && r['HSD (LTR)'] !== undefined))
+        ? merged.filter(r => r['VEHICLE NUMBER'] || (r['HSD (LTR)'] !== '' && r['HSD (LTR)'] !== 0 && r['HSD (LTR)'] !== null && r['HSD (LTR)'] !== undefined))
         : merged;
       setRows(filtered);
     } catch (err) {
@@ -1047,7 +1047,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                               {display === 'Verified' ? (
                                 <Chip label="Verified" size="small" sx={{ height: 20, fontSize: 10, bgcolor: '#dcfce7', color: '#166534', fontWeight: 800 }} />
                               ) : (
-                                <Chip label="Not Verified" size="small" sx={{ height: 20, fontSize: 10, bgcolor: '#fee2e2', color: '#991b1b', fontWeight: 800 }} />
+                                <Chip label="Pending" size="small" sx={{ height: 20, fontSize: 10, bgcolor: '#fef9c3', color: '#854d0e', fontWeight: 800 }} />
                               )}
                             </div>
                           ) : col.key === 'VERIFICATION CODE' ? (

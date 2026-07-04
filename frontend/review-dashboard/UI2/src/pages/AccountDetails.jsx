@@ -1003,7 +1003,8 @@ export default function AccountDetails({ onBack }) {
                           style={{
                             width: '100%', height: '100%', border: 'none', padding: '6px 8px',
                             background: 'transparent', outline: 'none', fontSize: '12px',
-                            resize: 'vertical', minHeight: '36px', fontFamily: 'inherit'
+                            resize: 'vertical', minHeight: '80px', fontFamily: 'inherit',
+                            whiteSpace: 'pre-wrap'
                           }}
                         />
                       ) : (

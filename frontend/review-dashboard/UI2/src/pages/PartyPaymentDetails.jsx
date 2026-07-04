@@ -77,7 +77,7 @@ const COLUMNS = [
   { key: 'BALANCE DUE',          label: 'Balance Due',             width: 100, calc: true, highlight: '#fee2e2' },
   // ㉜–㉝ Manual
   { key: 'PAYMENT DATE',         label: 'Payment\nDate',           width: 110, editable: true, date: true, bg: '#f8fafc' },
-  { key: 'REMARKS',              label: 'Remarks',                 width: 350, editable: true, bg: '#f8fafc' },
+  { key: 'REMARKS',              label: 'Remarks',                 width: 500, editable: true, bg: '#f8fafc' },
 ];
 
 export default function PartyPaymentDetails({ onBack }) {
@@ -599,6 +599,11 @@ export default function PartyPaymentDetails({ onBack }) {
                                   color: isDirty ? '#92400e' : '#0f172a',
                                   textAlign: align,
                                   fontFamily: !isText && !isDate ? 'monospace' : 'inherit',
+                                  ...(col.key === 'REMARKS' || col.key === 'WITHHOLD REASON' || col.key === 'OTHER REASON' ? {
+                                    resize: 'vertical',
+                                    minHeight: '80px',
+                                    whiteSpace: 'pre-wrap'
+                                  } : {}),
                                   // remove ugly calendar picker default styles when empty
                                   '&::-webkit-calendar-picker-indicator': {
                                     cursor: 'pointer',

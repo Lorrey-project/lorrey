@@ -566,13 +566,22 @@ function normalizeDateStr(str, expectedMonth, expectedYear) {
   if (!str) return str;
   const s = String(str).trim();
   // Already dd-mm-yyyy
-  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
+  const ddmm = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (ddmm) {
+    let d = parseInt(ddmm[1], 10);
+    let m = expectedMonth ? expectedMonth : parseInt(ddmm[2], 10);
+    let y = expectedYear ? expectedYear : parseInt(ddmm[3], 10);
+    return `${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`;
+  }
 
   // Excel Serial Date
   if (/^\d{5}(\.\d+)?$/.test(s)) {
     const excelDays = parseFloat(s);
     const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));
-    return `${String(date.getUTCDate()).padStart(2, '0')}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${date.getUTCFullYear()}`;
+    let d = date.getUTCDate();
+    let m = expectedMonth ? expectedMonth : date.getUTCMonth() + 1;
+    let y = expectedYear ? expectedYear : date.getUTCFullYear();
+    return `${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`;
   }
 
   // dd/mm/yyyy or d/m/yy or mm/dd/yyyy
@@ -587,35 +596,42 @@ function normalizeDateStr(str, expectedMonth, expectedYear) {
     if (expectedMonth) {
       if (p1 === expectedMonth && p2 !== expectedMonth) {
         d = p2;
-        month = p1;
       } else if (p2 === expectedMonth && p1 !== expectedMonth) {
         d = p1;
-        month = p2;
       } else if (p2 > 12) {
         d = p2;
-        month = p1;
       }
+      month = expectedMonth;
     } else {
       if (p2 > 12) {
         d = p2;
         month = p1;
       }
     }
-    return `${String(d).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+    let y = expectedYear ? expectedYear : year;
+    return `${String(d).padStart(2, '0')}-${String(month).padStart(2, '0')}-${y}`;
   }
 
   // yyyy-mm-dd
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+  if (iso) {
+    let d = iso[3];
+    let m = expectedMonth ? expectedMonth : iso[2];
+    let y = expectedYear ? expectedYear : iso[1];
+    return `${d}-${String(m).padStart(2, '0')}-${y}`;
+  }
 
   // dd-Mon-yyyy
   const monMatch = s.match(/^(\d{1,2})[\/-](\w+)[\/-](\d{2,4})$/);
   if (monMatch) {
     const monthIdx = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(monMatch[2].toLowerCase().slice(0, 3));
     if (monthIdx >= 0) {
+      let d = monMatch[1];
+      let m = expectedMonth ? expectedMonth : (monthIdx + 1);
       let year = parseInt(monMatch[3], 10);
       if (year < 100) year += 2000;
-      return `${monMatch[1].padStart(2, '0')}-${String(monthIdx + 1).padStart(2, '0')}-${year}`;
+      let y = expectedYear ? expectedYear : year;
+      return `${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`;
     }
   }
 

@@ -114,10 +114,10 @@ const COLUMNS = [
 
   // Remarks
   {
-    key: 'REMARKS_EXP', label: 'Office exp details', width: 350, type: 'calc', group: 'remarks',
+    key: 'REMARKS_EXP', label: 'Office exp details', width: 500, type: 'calc', group: 'remarks',
     formula: r => r.REMARKS_EXP || ''
   },
-  { key: 'REMARKS', label: 'Remarks', width: 350, type: 'manual', group: 'remarks' },
+  { key: 'REMARKS', label: 'Remarks', width: 500, type: 'manual', group: 'remarks' },
 ];
 
 // Numeric columns for monthly summary totals
@@ -947,7 +947,8 @@ export default function MainCashbook({ onBack }) {
                               width: '100%', height: '100%', padding: '6px',
                               border: 'none', background: 'transparent', textAlign: 'left',
                               fontSize: '12px', fontWeight: isDirty ? 700 : 400, outline: 'none',
-                              resize: 'vertical', minHeight: '36px', fontFamily: 'inherit'
+                              resize: 'vertical', minHeight: '80px', fontFamily: 'inherit',
+                              whiteSpace: 'pre-wrap'
                             }}
                           />
                         ) : (

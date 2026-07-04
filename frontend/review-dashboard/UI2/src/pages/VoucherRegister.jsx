@@ -29,7 +29,7 @@ const COLUMNS = [
   { key: 'name',          label: 'PAYEE NAME',        width: 150, type: 'manual'  },
   { key: 'reason',        label: 'REASON',            width: 160, type: 'manual'  },
   { key: 'amount',        label: 'AMOUNT (₹)',        width: 120, type: 'manual'  },
-  { key: 'remarks',       label: 'REMARKS',           width: 350, type: 'manual'  },
+  { key: 'remarks',       label: 'REMARKS',           width: 500, type: 'manual'  },
   { key: 'createdAt',     label: 'CREATED AT',        width: 140, type: 'auto'    },
   { key: 'slip_url',      label: 'VOUCHER\nSLIP PDF', width: 120, type: 'slipUrl' },
 ];
@@ -428,7 +428,20 @@ export default function VoucherRegister({ onBack }) {
                     }
 
                     // ── Manual editable ─────────────────────────────────────
-                    return (
+                    return col.key === 'remarks' ? (
+                      <td key={col.key} style={cellStyle}>
+                        <textarea
+                          value={isDirty ? String(localVal) : String(rawVal ?? '')}
+                          onChange={e => handleCellEdit(row._id, col.key, e.target.value)}
+                          style={{
+                            width: '100%', height: '100%', border: 'none', padding: '0',
+                            background: isDirty ? 'rgba(254,243,199,0.6)' : 'transparent',
+                            outline: 'none', fontSize: '11px', resize: 'vertical',
+                            minHeight: '80px', fontFamily: 'inherit', whiteSpace: 'pre-wrap'
+                          }}
+                        />
+                      </td>
+                    ) : (
                       <EditableCell key={col.key}
                         value={isDirty ? String(localVal) : String(rawVal ?? '')}
                         isDirty={isDirty}
