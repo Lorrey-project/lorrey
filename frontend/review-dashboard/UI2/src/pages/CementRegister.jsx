@@ -733,6 +733,7 @@ export default function CementRegister({ onBack }) {
   const [isBillingMode, setIsBillingMode] = useState(false);
   const [bulkBillInput, setBulkBillInput] = useState({ billNo: '', billDate: '' });
   const [activeRowId, setActiveRowId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -1397,6 +1398,31 @@ export default function CementRegister({ onBack }) {
                 </Select>
               </Box>
 
+              {/* Search Bar */}
+              <Box display="flex" alignItems="center" sx={{ 
+                bgcolor: '#f1f5f9', borderRadius: '8px', px: 1.5, py: 0.5, ml: 1, border: '1px solid #e2e8f0', 
+                '&:focus-within': { borderColor: '#7c3aed', boxShadow: '0 0 0 1px #7c3aed' }, width: 220 
+              }}>
+                <input
+                  type="text"
+                  placeholder="Search Vehicle, Inv, GCN..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', width: '100%', color: '#0f172a' }}
+                />
+                {searchQuery && (
+                  <div onClick={() => setSearchQuery('')} style={{ cursor: 'pointer', color: '#94a3b8', fontSize: '14px', marginLeft: '4px', fontWeight: 'bold' }}>
+                    ✕
+                  </div>
+                )}
+              </Box>
+
+              {searchQuery && !computedRows.some(r => Object.values(r).some(v => String(v || '').toLowerCase().includes(searchQuery.toLowerCase()))) && (
+                <Typography variant="caption" sx={{ color: '#dc2626', fontWeight: 600, ml: 1 }}>
+                  No matching records found
+                </Typography>
+              )}
+
               {/* Status Chip */}
               {getStatusChip()}
             </Box>
@@ -1629,15 +1655,27 @@ export default function CementRegister({ onBack }) {
             {computedRows.map((row, ri) => {
               const hasDraft = !!localData[row._id];
               const isSelected = selectedIds.has(row._id);
+              
+              let isMatch = false;
+              if (searchQuery) {
+                const q = searchQuery.toLowerCase();
+                isMatch = Object.values(row).some(val => String(val || '').toLowerCase().includes(q));
+              }
+
               return (
                 <tr key={row._id} style={{
-                  background: isSelected
-                    ? 'rgba(124,58,237,0.08)'
-                    : row.isUnsavedImport
-                      ? '#f3e8ff'
-                      : hasDraft ? '#fffbeb'
-                        : ri % 2 === 0 ? '#fff' : '#f8fafc',
-                  outline: isSelected ? '2px solid rgba(124,58,237,0.4)' : 'none',
+                  background: isMatch
+                    ? '#ffffff'
+                    : isSelected
+                      ? 'rgba(124,58,237,0.08)'
+                      : row.isUnsavedImport
+                        ? '#f3e8ff'
+                        : hasDraft ? '#fffbeb'
+                          : ri % 2 === 0 ? '#fff' : '#f8fafc',
+                  outline: isMatch ? '2px solid #94a3b8' : (isSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'),
+                  opacity: (searchQuery && !isMatch) ? 0.35 : 1,
+                  transition: 'opacity 0.2s',
+                  boxShadow: isMatch ? 'inset 0 0 0 1px #e2e8f0' : 'none'
                 }}>
                   {/* Row checkbox */}
                   <td style={{
