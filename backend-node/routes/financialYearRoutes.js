@@ -380,11 +380,12 @@ router.post('/save-row', async (req, res) => {
 
       // Determine projected column based on debit reason
       let projectedCol = '';
-      if (debitReason === 'Damage / Shortage') projectedCol = 'SHORTAGE AMOUNT';
-      else if (debitReason === 'GPS Trip Charges') projectedCol = 'GPS MONITORING CHARGE';
-      else if (debitReason === 'GPS Deviation Charges') projectedCol = 'GPS MONITORING CHARGE';
+      if (debitReason === 'Damage / Shortage') projectedCol = 'SHORTAGE (AMOUNT)';
+      else if (debitReason === 'GPS Trip Charges') projectedCol = 'GPS Monitoring Charge';
+      else if (debitReason === 'GPS Deviation Charges') projectedCol = 'GPS Monitoring Charge';
       else if (debitReason === 'Device Installation Charges') projectedCol = 'GPS DEVICE';
-      else if (debitReason === 'RFID Deduction / Charges' || debitReason === 'Substance') projectedCol = 'OTHERS DEDUCTION';
+      else if (debitReason === 'RFID Deduction / Charges') projectedCol = 'RFID TAG';
+      else if (debitReason === 'Substance') projectedCol = 'Others deduction';
 
       if (projectedCol) {
         // 2. Set new overrides for the selected trips
@@ -407,18 +408,23 @@ router.post('/save-row', async (req, res) => {
           const dbTrip = await cementCol.findOne(query);
           if (dbTrip) {
             const projVal = parseFloat(String(dbTrip[projectedCol] || '0').replace(/,/g, '')) || 0;
-            const overridePath = `deductionsOverride.${debitReason}`;
-            const updateDoc = {
-              $set: {
-                [overridePath]: {
-                  projected: projVal,
-                  actual: manualAmt,
-                  billRegisterRef: billNo,
-                  timestamp: new Date()
+            
+            if (manualAmt > projVal) {
+              const overridePath = `deductionsOverride.${debitReason}`;
+              const updateDoc = {
+                $set: {
+                  [overridePath]: {
+                    projected: projVal,
+                    actual: manualAmt,
+                    billRegisterRef: billNo,
+                    timestamp: new Date()
+                  },
+                  [projectedCol]: manualAmt,
+                  'DEDICATED': 'Actual'
                 }
-              }
-            };
-            await cementCol.updateOne({ _id: dbTrip._id }, updateDoc);
+              };
+              await cementCol.updateOne({ _id: dbTrip._id }, updateDoc);
+            }
           }
         }
       }
