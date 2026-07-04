@@ -1491,7 +1491,10 @@ export default function CementRegister({ onBack }) {
             <Button size="small" variant="outlined"
               onClick={() => {
                 setIsBillingMode(true);
-                setSelectedIds(new Set());
+                if (selectedIds.size > 8) {
+                  setSnack({ severity: 'warning', msg: 'Batch billing limited to 8 bills. Selecting the first 8.' });
+                  setSelectedIds(prev => new Set([...prev].slice(0, 8)));
+                }
               }}
               sx={{
                 fontWeight: 700, borderRadius: '10px', px: 2, fontSize: '0.8rem',
