@@ -439,10 +439,11 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
             </Grid>
 
             {/* Remarks */}
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12}>
               <TextField
                 fullWidth label="Remarks (Optional)" name="remarks"
                 value={form.remarks} onChange={handleChange}
+                multiline rows={3}
                 InputProps={{ sx: { borderRadius: '14px' } }}
               />
             </Grid>

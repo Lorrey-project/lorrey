@@ -48,8 +48,20 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 const _reqLogStream = require('fs').createWriteStream(
   require('path').join(__dirname, '..', 'request_log.txt'), { flags: 'a' }
 );
-app.use((req, _res, next) => {
+const { triggerRecalculateAdvances } = require("./utils/advanceCalculator");
+
+app.use((req, res, next) => {
   _reqLogStream.write(`[${new Date().toISOString()}] ${req.method} ${req.url}\n`);
+  
+  // Hook into response finish to trigger recalculation if data was modified
+  res.on('finish', () => {
+    if (['POST', 'PUT', 'DELETE'].includes(req.method) && res.statusCode >= 200 && res.statusCode < 300) {
+      if (req.url.includes('/cement-register') || req.url.includes('/main-cashbook')) {
+        triggerRecalculateAdvances();
+      }
+    }
+  });
+
   next();
 });
 

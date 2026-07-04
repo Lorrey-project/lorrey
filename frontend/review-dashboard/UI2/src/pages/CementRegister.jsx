@@ -643,13 +643,7 @@ const validateImportData = (rows, existingEntries) => {
     const vehicleNum = row['VEHICLE NUMBER'];
     const invoiceNo = row['INVOICE NO'] || '';
 
-    // Error checks
-    if (!loadingDt) {
-      errors.push(`Row ${rowNumInFile}: Missing Invoice Date (LOADING DT)`);
-    }
-    if (!vehicleNum) {
-      errors.push(`Row ${rowNumInFile}: Missing Vehicle Number`);
-    }
+    // Removed missing data checks to allow smooth importing without warning interruptions
 
     // Duplicate checks
     if (loadingDt && vehicleNum) {
@@ -961,7 +955,7 @@ export default function CementRegister({ onBack }) {
           const compRow = computedRows.find(cr => cr._id === row._id);
           const finalSlNo = compRow ? compRow['SL NO'] : row['SL NO'];
           // Strip temporary React metadata
-          const cleaned = { ...calculated, 'SL NO': finalSlNo };
+          const cleaned = { ...calculated, 'SL NO': finalSlNo, month: selectedMonth, year: selectedYear };
           delete cleaned._id;
           delete cleaned.isUnsavedImport;
           return cleaned;
@@ -1157,24 +1151,18 @@ export default function CementRegister({ onBack }) {
             if (val !== '') rowObj[internalKey] = val;
           });
           if (Object.keys(rowObj).length > 0) {
-            // A valid row must contain SL NO, LOADING DT, VEHICLE NUMBER, or INVOICE NO
-            if (rowObj['SL NO'] || rowObj['LOADING DT'] || rowObj['VEHICLE NUMBER'] || rowObj['INVOICE NO']) {
+            // A valid row must contain at least a date or a vehicle number.
+            // If it only contains auto-generated SL NO or BILL NO, it's likely a trailing empty row.
+            if (rowObj['LOADING DT'] || rowObj['VEHICLE NUMBER']) {
               mappedRows.push(rowObj);
             }
           }
         });
 
-        // Filter by selected month + year if a date column was found
+        // Bypass strict date-filtering so all rows in the Excel file are accepted 
+        // and tagged with the selected month/year.
         let filteredRows = mappedRows;
         let filterApplied = false;
-        if (mappedDateCol) {
-          const internalDateKey = headerMapping[mappedDateCol];
-          filteredRows = mappedRows.filter(row => {
-            const parsed = parseDateMY(row[internalDateKey]);
-            return parsed && parsed.month === wizardMonth && parsed.year === wizardYear;
-          });
-          filterApplied = true;
-        }
 
         const validation = validateImportData(filteredRows, entries);
         setValidationResult(validation);
@@ -1887,7 +1875,7 @@ export default function CementRegister({ onBack }) {
                       display: 'flex', flexDirection: 'column', gap: 1
                     }}>
                       <Typography fontSize="13px" fontWeight={800} color="#92400e">
-                        ⚠️ Duplicate Warnings Found ({validationResult.warnings.length} Warnings)
+                        ⚠️ Import Warnings Found ({validationResult.warnings.length} Warnings)
                       </Typography>
                       <Box sx={{ maxHeight: 120, overflowY: 'auto', pl: 2 }}>
                         {validationResult.warnings.map((warn, i) => (

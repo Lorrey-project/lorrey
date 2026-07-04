@@ -114,10 +114,10 @@ const COLUMNS = [
 
   // Remarks
   {
-    key: 'REMARKS_EXP', label: 'Office exp details', width: 250, type: 'calc', group: 'remarks',
+    key: 'REMARKS_EXP', label: 'Office exp details', width: 350, type: 'calc', group: 'remarks',
     formula: r => r.REMARKS_EXP || ''
   },
-  { key: 'REMARKS', label: 'Remarks', width: 250, type: 'manual', group: 'remarks' },
+  { key: 'REMARKS', label: 'Remarks', width: 350, type: 'manual', group: 'remarks' },
 ];
 
 // Numeric columns for monthly summary totals
@@ -937,7 +937,19 @@ export default function MainCashbook({ onBack }) {
                         fontWeight: isCalcLike ? 700 : 400
                       }}>
                         {isCalcLike ? (
-                          <div style={{ padding: '6px', textAlign: 'center' }}>{displayVal}</div>
+                          <div style={{ padding: '6px', textAlign: col.key === 'REMARKS_EXP' ? 'left' : 'center', whiteSpace: col.key === 'REMARKS_EXP' ? 'pre-wrap' : 'normal' }}>{displayVal}</div>
+                        ) : col.key === 'REMARKS' ? (
+                          <textarea
+                            value={displayVal}
+                            onChange={e => handleCellEdit(row._id, col.key, e.target.value)}
+                            onBlur={e => handleBlur(row._id, col.key, e.target.value, row)}
+                            style={{
+                              width: '100%', height: '100%', padding: '6px',
+                              border: 'none', background: 'transparent', textAlign: 'left',
+                              fontSize: '12px', fontWeight: isDirty ? 700 : 400, outline: 'none',
+                              resize: 'vertical', minHeight: '36px', fontFamily: 'inherit'
+                            }}
+                          />
                         ) : (
                           <input
                             type="text"

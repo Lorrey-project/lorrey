@@ -965,7 +965,7 @@ export default function FinancialYearDetails({ onBack }) {
         {/* Remarks */}
         {(!gid || isGroupStart) && (
           <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
-            <input value={gd.remarks || ''} onChange={e => handleInlineEdit(gid, 'remarks', e.target.value, gd)} style={iStyle} />
+            <textarea value={gd.remarks || ''} onChange={e => handleInlineEdit(gid, 'remarks', e.target.value, gd)} style={{...iStyle, resize: 'vertical', minHeight: '36px', fontFamily: 'inherit'}} />
           </td>
         )}
       </tr>
@@ -1131,7 +1131,7 @@ export default function FinancialYearDetails({ onBack }) {
                   <th style={thStyle({ minWidth: 100, background: '#6b21a8' })}>Reference No</th>
                   <th style={thStyle({ minWidth: 110, background: '#6b21a8' })}>Debit Amount</th>
                   <th style={thStyle({ minWidth: 140 })}>Debit Reasons(Deduction)</th>
-                  <th style={thStyle({ minWidth: 150, background: '#6b21a8' })}>Remarks</th>
+                  <th style={thStyle({ minWidth: 350, background: '#6b21a8' })}>Remarks</th>
                 </tr>
               </thead>
               <tbody>
@@ -1161,7 +1161,7 @@ export default function FinancialYearDetails({ onBack }) {
           <TextField label="TDS Provision" fullWidth value={paymentForm.tdsProvision} onChange={e => setPaymentForm({ ...paymentForm, tdsProvision: e.target.value })} type="number" />
           <TextField label="Payment Date" fullWidth value={paymentForm.paymentDate} onChange={e => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} type="date" InputLabelProps={{ shrink: true }} />
           <TextField label="Reference No" fullWidth value={paymentForm.referenceNo} onChange={e => setPaymentForm({ ...paymentForm, referenceNo: e.target.value })} />
-          <TextField label="Remarks" fullWidth value={paymentForm.remarks} onChange={e => setPaymentForm({ ...paymentForm, remarks: e.target.value })} />
+          <TextField label="Remarks" fullWidth multiline rows={3} value={paymentForm.remarks} onChange={e => setPaymentForm({ ...paymentForm, remarks: e.target.value })} />
         </DialogContent>
         <DialogActions>
           <Button onClick={clearSelectionFromGroup} color="error" sx={{ mr: 'auto' }}>Clear Grouping</Button>

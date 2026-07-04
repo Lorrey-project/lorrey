@@ -90,22 +90,16 @@ router.get("/", async (req, res) => {
     }
 
     if (req.query.month && req.query.year) {
-      const monthStr = String(req.query.month).padStart(2, '0');
-      const yearStr = String(req.query.year);
-      const yr2 = yearStr.slice(-2);
-      const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.](${yearStr}|${yr2})`);
-      filter["$or"] = [
-        { "LOADING DT": { $regex: dateRegex } },
-        { "LOADING DATE": { $regex: dateRegex } }
-      ];
+      filter.month = parseInt(req.query.month, 10);
+      filter.year = parseInt(req.query.year, 10);
     }
 
     const entries = await col.find(filter).toArray();
 
     // Sort chronologically by date
     entries.sort((a, b) => {
-      const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"]);
-      const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"]);
+      const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"] || a["UNLOADING STATUS"]);
+      const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"] || b["UNLOADING STATUS"]);
       if (dateA.getTime() !== dateB.getTime()) {
         return dateA.getTime() - dateB.getTime();
       }
@@ -398,15 +392,9 @@ router.delete("/by-period", auth, async (req, res) => {
     if (!month || !year) {
       return res.status(400).json({ success: false, error: "Provide month and year." });
     }
-    const monthStr = String(month).padStart(2, '0');
-    const yearStr = String(year);
-    const dateRegex = new RegExp(`^\\d{2}[-/]${monthStr}[-/]${yearStr}`);
-
     const filter = {
-      $or: [
-        { "LOADING DT": { $regex: dateRegex } },
-        { "LOADING DATE": { $regex: dateRegex } }
-      ]
+      month: parseInt(month, 10),
+      year: parseInt(year, 10)
     };
 
     const result = await col.deleteMany(filter);

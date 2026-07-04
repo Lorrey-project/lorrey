@@ -995,6 +995,17 @@ export default function AccountDetails({ onBack }) {
                             '& .MuiAutocomplete-endAdornment': { display: 'none' }
                           }}
                         />
+                      ) : col.key === 'Remarks' ? (
+                        <textarea
+                          value={val}
+                          readOnly={isAuto && isFromBank && !localData[row._id]?.[col.key]}
+                          onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
+                          style={{
+                            width: '100%', height: '100%', border: 'none', padding: '6px 8px',
+                            background: 'transparent', outline: 'none', fontSize: '12px',
+                            resize: 'vertical', minHeight: '36px', fontFamily: 'inherit'
+                          }}
+                        />
                       ) : (
                         <input
                           type={col.isDate ? 'date' : 'text'}

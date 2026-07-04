@@ -57,6 +57,17 @@ router.get("/data", auth, async (req, res) => {
       DATE: { $in: patterns }
     });
 
+    // Fetch Advance Summary for the selected date
+    let isoDateObj = new Date(date);
+    let advanceSummary = null;
+    if (!isNaN(isoDateObj.getTime())) {
+      const y = isoDateObj.getFullYear();
+      const m = String(isoDateObj.getMonth() + 1).padStart(2, '0');
+      const d = String(isoDateObj.getDate()).padStart(2, '0');
+      const isoFmt = `${y}-${m}-${d}`;
+      advanceSummary = await mongoose.connection.useDb("invoiceAI").collection("daily_advances").findOne({ date: isoFmt });
+    }
+
     // Extract pump slips (entries from cement register with pump details)
     const pumpSlips = cementEntries.filter(e => {
       const hasPump = !!e["PUMP NAME"];
@@ -69,7 +80,8 @@ router.get("/data", auth, async (req, res) => {
       invoicesUploaded: cementEntries.length,
       cement: cementEntries,
       pumpSlips,
-      cashbookEntry
+      cashbookEntry,
+      advanceSummary
     });
 
   } catch (err) {

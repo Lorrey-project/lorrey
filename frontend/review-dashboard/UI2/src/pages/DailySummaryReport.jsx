@@ -3,7 +3,8 @@ import {
   Box, Button, CircularProgress, Typography, IconButton,
   Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper,
-  Snackbar, Alert, TextField, Tooltip
+  Snackbar, Alert, TextField, Tooltip, Dialog, DialogTitle,
+  DialogContent, DialogActions
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -25,6 +26,8 @@ export default function DailySummaryReport({ onBack }) {
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [billBreakdownOpen, setBillBreakdownOpen] = useState(false);
+  const [billTabValue, setBillTabValue] = useState(0);
   const [tabValue, setTabValue] = useState(0);
   const [snack, setSnack] = useState(null);
 
@@ -109,15 +112,17 @@ export default function DailySummaryReport({ onBack }) {
   const metrics = useMemo(() => {
     if (!data) return { 
       invoicesUploaded: 0, cementMT: 0, cementTrips: 0, fuelLtr: 0, fuelSlips: 0, loadingAdvanceAmt: 0, advanceVehicles: [],
-      cashReceivedAmount: 0, cashOpeningBalance: 0, miscExpenses: 0, closingAdvanceBalance: 0 
+      cashReceivedAmount: 0, cashOpeningBalance: 0, miscExpenses: 0, closingAdvanceBalance: 0, totalBillAmt: 0 
     };
     
     // Cement
     let cMT = 0;
     let advAmt = 0;
+    let tBillAmt = 0;
     const advVehicles = [];
     (data.cement || []).forEach(e => {
       cMT += parseNum(e["MT"]);
+      tBillAmt += parseNum(e["Billing Amount"] || 0);
       const adv = parseNum(e["ADVANCE"] || e["LOADING ADVANCE"]);
       if (adv > 0) {
         advAmt += adv;
@@ -135,9 +140,13 @@ export default function DailySummaryReport({ onBack }) {
     });
 
     const cb = data.cashbookEntry || {};
-    const cashRecv = parseNum(cb["P_WITHDRAW"]);
-    const cashOpen = parseNum(cb["O_OPENING"]) + parseNum(cb["P_OPENING"]) + parseNum(cb["S_OPENING"]);
-    const miscExp = parseNum(cb["O_EXPENSE"]);
+    const advData = data.advanceSummary || {};
+    
+    // Values from advanceSummary (from DB), fallback to basic calculation if missing
+    const cashRecv = advData.cashReceived ?? parseNum(cb["P_GIVEN_DAC"]);
+    const cashOpen = advData.openingBalance ?? 0;
+    const miscExp = advData.miscExpense ?? parseNum(cb["O_EXPENSE"]);
+    const closingAdv = advData.closingBalance ?? (cashRecv - cashOpen - advAmt - miscExp);
 
     return {
       invoicesUploaded: data.invoicesUploaded || 0,
@@ -152,7 +161,33 @@ export default function DailySummaryReport({ onBack }) {
       cashReceivedAmount: cashRecv,
       cashOpeningBalance: cashOpen,
       miscExpenses: miscExp,
-      closingAdvanceBalance: (cashRecv - cashOpen - advAmt - miscExp)
+      closingAdvanceBalance: closingAdv,
+      totalBillAmt: tBillAmt
+    };
+  }, [data]);
+
+  // Bill Breakdown Categories
+  const billBreakdown = useMemo(() => {
+    const pending = [];
+    const nonStamp = [];
+    const stamp = [];
+    
+    (data?.cement || []).forEach(e => {
+      const billAmt = parseNum(e["Billing Amount"] || 0);
+      if (billAmt === 0) return; // Only count those that contribute to the total
+
+      const status = String(e["CHALLAN STATUS"] || "").toUpperCase().trim();
+      if (status === "STAMP") stamp.push(e);
+      else if (status.includes("NON-STAMP") || status.includes("NON STAMP")) nonStamp.push(e);
+      else pending.push(e);
+    });
+
+    const sumAmt = (arr) => arr.reduce((acc, e) => acc + parseNum(e["Billing Amount"] || 0), 0);
+
+    return { 
+      pending, pendingAmt: sumAmt(pending),
+      nonStamp, nonStampAmt: sumAmt(nonStamp),
+      stamp, stampAmt: sumAmt(stamp)
     };
   }, [data]);
 
@@ -218,7 +253,7 @@ export default function DailySummaryReport({ onBack }) {
       ) : (
         <Box sx={{ px: { xs: 2, md: 4 }, mt: 4 }}>
           {/* --- KPI Grid --- */}
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(5, 1fr)' }, gap: 3, mb: 4 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)', xl: 'repeat(6, 1fr)' }, gap: 3, mb: 4 }}>
             {/* Total Invoices Card */}
             <Card sx={{ borderRadius: '16px', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: '#fff' }}>
               <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -228,6 +263,28 @@ export default function DailySummaryReport({ onBack }) {
                   <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>Processed automatically</Typography>
                 </Box>
                 <ReceiptLongIcon sx={{ fontSize: 48, opacity: 0.3 }} />
+              </CardContent>
+            </Card>
+
+            {/* Total Bill Summary Card */}
+            <Card 
+              onClick={() => setBillBreakdownOpen(true)}
+              sx={{ 
+                borderRadius: '16px', 
+                background: 'linear-gradient(135deg, #b45309 0%, #78350f 100%)', 
+                color: '#fff',
+                cursor: 'pointer',
+                transition: 'transform 0.2s',
+                '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 10px 20px rgba(180, 83, 9, 0.4)' }
+              }}
+            >
+              <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Total Bill Amount</Typography>
+                  <Typography variant="h4" fontWeight={950} mt={0.5}>₹{metrics.totalBillAmt.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.7, mt: 0.5 }}>Gross Freight</Typography>
+                </Box>
+                <AccountBalanceWalletIcon sx={{ fontSize: 48, opacity: 0.3 }} />
               </CardContent>
             </Card>
 
@@ -418,6 +475,115 @@ export default function DailySummaryReport({ onBack }) {
           </Paper>
         </Box>
       )}
+
+      {/* --- Bill Breakdown Modal --- */}
+      <Dialog 
+        open={billBreakdownOpen} 
+        onClose={() => setBillBreakdownOpen(false)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', minHeight: '60vh' }
+        }}
+      >
+        <DialogTitle sx={{ p: 3, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box display="flex" alignItems="center" gap={1.5}>
+            <span style={{ fontSize: '24px' }}>📋</span>
+            <Typography variant="h6" fontWeight={800} color="#0f172a">
+              Total Bill Breakdown
+            </Typography>
+          </Box>
+          <IconButton onClick={() => setBillBreakdownOpen(false)} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            ✕
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 0 }}>
+          <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', px: 3, pt: 2 }}>
+            <Tabs 
+              value={billTabValue} 
+              onChange={(e, v) => setBillTabValue(v)}
+              TabIndicatorProps={{ style: { backgroundColor: '#4f46e5', height: 3, borderRadius: '3px 3px 0 0' } }}
+            >
+              <Tab 
+                label={
+                  <Box>
+                    <Typography fontWeight={700}>Pending Challan</Typography>
+                    <Typography variant="caption" color="text.secondary">{billBreakdown.pending.length} Bills | ₹{billBreakdown.pendingAmt.toLocaleString(undefined, {minimumFractionDigits:2})}</Typography>
+                  </Box>
+                }
+              />
+              <Tab 
+                label={
+                  <Box>
+                    <Typography fontWeight={700}>Non-Stamp</Typography>
+                    <Typography variant="caption" color="text.secondary">{billBreakdown.nonStamp.length} Bills | ₹{billBreakdown.nonStampAmt.toLocaleString(undefined, {minimumFractionDigits:2})}</Typography>
+                  </Box>
+                }
+              />
+              <Tab 
+                label={
+                  <Box>
+                    <Typography fontWeight={700}>Stamp</Typography>
+                    <Typography variant="caption" color="text.secondary">{billBreakdown.stamp.length} Bills | ₹{billBreakdown.stampAmt.toLocaleString(undefined, {minimumFractionDigits:2})}</Typography>
+                  </Box>
+                }
+              />
+            </Tabs>
+          </Box>
+          
+          <Box sx={{ p: 3, bgcolor: '#fafafa', minHeight: '400px' }}>
+            <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', maxHeight: '500px', overflowY: 'auto' }}>
+              <Table stickyHeader size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9' }}>Bill Number</TableCell>
+                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9' }}>Invoice Number</TableCell>
+                    {billTabValue === 0 && <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9' }}>Invoice Date</TableCell>}
+                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9' }}>Vehicle Number</TableCell>
+                    {billTabValue === 0 && <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9' }}>Party Name</TableCell>}
+                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9' }}>Bill Amount</TableCell>
+                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9' }}>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(() => {
+                    const activeList = billTabValue === 0 ? billBreakdown.pending : billTabValue === 1 ? billBreakdown.nonStamp : billBreakdown.stamp;
+                    if (activeList.length === 0) {
+                      return (
+                        <TableRow>
+                          <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                            <Typography color="text.secondary" fontStyle="italic">No bills found in this category.</Typography>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+                    return activeList.map((row, idx) => (
+                      <TableRow key={idx} hover>
+                        <TableCell>{row["BILL NO"] || "-"}</TableCell>
+                        <TableCell>{row["INVOICE NO"] || "-"}</TableCell>
+                        {billTabValue === 0 && <TableCell>{row["RECEIVING DATE"] || row["BILL DATE"] || row["LOADING DT"] || "-"}</TableCell>}
+                        <TableCell>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || "-"}</TableCell>
+                        {billTabValue === 0 && <TableCell>{row["PARTY NAME"] || "-"}</TableCell>}
+                        <TableCell fontWeight={600}>₹{parseNum(row["Billing Amount"] || 0).toLocaleString(undefined, {minimumFractionDigits:2})}</TableCell>
+                        <TableCell>
+                          <Box sx={{ 
+                            px: 1.5, py: 0.5, borderRadius: '20px', display: 'inline-block', fontSize: '0.75rem', fontWeight: 800,
+                            bgcolor: billTabValue === 0 ? '#fffbeb' : billTabValue === 1 ? '#fef2f2' : '#ecfdf5',
+                            color: billTabValue === 0 ? '#b45309' : billTabValue === 1 ? '#b91c1c' : '#047857',
+                            border: `1px solid ${billTabValue === 0 ? '#fcd34d' : billTabValue === 1 ? '#fca5a5' : '#6ee7b7'}`
+                          }}>
+                            {billTabValue === 0 ? 'Pending' : billTabValue === 1 ? 'Non-Stamp' : 'Stamp'}
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ));
+                  })()}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </DialogContent>
+      </Dialog>
 
       {/* --- Snackbar alerts --- */}
       <Snackbar

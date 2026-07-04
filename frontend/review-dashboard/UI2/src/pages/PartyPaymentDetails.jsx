@@ -77,7 +77,7 @@ const COLUMNS = [
   { key: 'BALANCE DUE',          label: 'Balance Due',             width: 100, calc: true, highlight: '#fee2e2' },
   // ㉜–㉝ Manual
   { key: 'PAYMENT DATE',         label: 'Payment\nDate',           width: 110, editable: true, date: true, bg: '#f8fafc' },
-  { key: 'REMARKS',              label: 'Remarks',                 width: 160, editable: true, bg: '#f8fafc' },
+  { key: 'REMARKS',              label: 'Remarks',                 width: 350, editable: true, bg: '#f8fafc' },
 ];
 
 export default function PartyPaymentDetails({ onBack }) {
@@ -590,6 +590,7 @@ export default function PartyPaymentDetails({ onBack }) {
                               value={val !== undefined && val !== null ? val : ''}
                               onChange={e => handleEdit(ri, col.key, e.target.value)}
                               InputProps={{ disableUnderline: true }}
+                              multiline={col.key === 'REMARKS' || col.key === 'WITHHOLD REASON' || col.key === 'OTHER REASON'}
                               sx={{
                                 width: '100%',
                                 '.MuiInputBase-input': {

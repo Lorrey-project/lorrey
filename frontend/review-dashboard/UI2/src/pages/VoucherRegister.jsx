@@ -29,7 +29,7 @@ const COLUMNS = [
   { key: 'name',          label: 'PAYEE NAME',        width: 150, type: 'manual'  },
   { key: 'reason',        label: 'REASON',            width: 160, type: 'manual'  },
   { key: 'amount',        label: 'AMOUNT (₹)',        width: 120, type: 'manual'  },
-  { key: 'remarks',       label: 'REMARKS',           width: 180, type: 'manual'  },
+  { key: 'remarks',       label: 'REMARKS',           width: 350, type: 'manual'  },
   { key: 'createdAt',     label: 'CREATED AT',        width: 140, type: 'auto'    },
   { key: 'slip_url',      label: 'VOUCHER\nSLIP PDF', width: 120, type: 'slipUrl' },
 ];
@@ -372,7 +372,8 @@ export default function VoucherRegister({ onBack }) {
 
                     const cellStyle = {
                       padding: '4px 5px', border: '1px solid #e2e8f0', fontSize: '11px',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                      whiteSpace: col.key === 'remarks' ? 'pre-wrap' : 'nowrap',
                       borderRight: isDirty ? '2px solid #f59e0b' : '1px solid #e2e8f0',
                       width: col.width, maxWidth: col.width,
                     };
@@ -505,6 +506,7 @@ function EditableCell({ value, isDirty, onChange, style }) {
       style={{
         ...style, outline: 'none', cursor: 'text',
         background: isDirty ? 'rgba(254,243,199,0.6)' : '#fff7ed0a',
+        minHeight: '36px', verticalAlign: 'top'
       }}
       onFocus={e => { e.currentTarget.style.boxShadow = 'inset 0 0 0 2px #3b82f6'; e.currentTarget.style.background = '#eff6ff'; }}
       onBlurCapture={e => { e.currentTarget.style.boxShadow = ''; e.currentTarget.style.background = ''; }}
