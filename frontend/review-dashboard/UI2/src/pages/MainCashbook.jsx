@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Select, MenuItem, FormControl, InputLabel,
@@ -375,7 +376,7 @@ export default function MainCashbook({ onBack }) {
                 [field]: String(minVal)
               }
             }));
-            setSnack({ severity: 'warning', msg: `Withdraw amount cannot be less than Account Details synced amount (${minVal})` });
+            setSnack({ severity: 'warning', msg: `Withdraw amount cannot be less than Bank Book synced amount (${minVal})` });
           }
         }
       }
@@ -386,7 +387,7 @@ export default function MainCashbook({ onBack }) {
     const file = e.target.files[0];
     if (!file) return;
     setImportFile(file);
-    
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -394,7 +395,7 @@ export default function MainCashbook({ onBack }) {
         const workbook = XLSX.read(dataBytes, { type: 'array' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
-        
+
         let headerRowIdx = 0;
         let maxMatches = 0;
         for (let i = 0; i < Math.min(15, aoa.length); i++) {
@@ -460,92 +461,92 @@ export default function MainCashbook({ onBack }) {
 
         const newEntries = [];
         let ignoredCount = 0;
-        
+
         const fyStartYear = parseInt(String(importYear).split('-')[0], 10);
         const targetMonths = (importMonths || []).map(Number);
-        
+
         aoa.slice(headerRowIdx + 1).forEach((rowArr) => {
           if (!rowArr || !rowArr.some(cell => String(cell).trim() !== '')) return;
-          
+
           const rowObj = {};
           Object.entries(headerMapping).forEach(([colIdxStr, internalKey]) => {
-             const val = String(rowArr[parseInt(colIdxStr, 10)] ?? '').trim();
-             if (val !== '') rowObj[internalKey] = val;
+            const val = String(rowArr[parseInt(colIdxStr, 10)] ?? '').trim();
+            if (val !== '') rowObj[internalKey] = val;
           });
-          
-          if (rowObj['P_SOURCE'] !== undefined) {
-             const pSource = String(rowObj['P_SOURCE'] || '').trim();
-             if (pSource.startsWith('DAC-RS-')) {
-                rowObj['P_LOAN_PAY'] = pSource;
-                rowObj['P_LOAN_RECV'] = '';
-             } else {
-                rowObj['P_LOAN_RECV'] = pSource;
-                rowObj['P_LOAN_PAY'] = '';
-             }
-             delete rowObj['P_SOURCE'];
-          }
-          
-          if (rowObj['DATE']) {
-             let dateStr = String(rowObj['DATE']).trim();
-             let day = null, month = null, year = null;
-             
-             if (/^\d{4,5}$/.test(dateStr)) {
-                 // Serial date
-                 let serial = parseInt(dateStr, 10);
-                 let dateObj = new Date(Math.round((serial - 25569)*86400*1000));
-                 day = dateObj.getUTCDate();
-                 month = dateObj.getUTCMonth() + 1;
-                 year = dateObj.getUTCFullYear();
-             } else {
-                 const parts = dateStr.split(/[-\/ \.]/);
-                 if (parts.length >= 3) {
-                     let p0 = parts[0].trim(), p1 = parts[1].trim(), p2 = parts[2].trim();
-                     if (p0.length === 4) {
-                         year = parseInt(p0, 10);
-                         month = parseInt(p1, 10);
-                         day = parseInt(p2, 10);
-                     } else {
-                         const monthMap = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
-                         let mVal = null;
-                         if (isNaN(parseInt(p1)) && monthMap[p1.toLowerCase().substring(0,3)]) {
-                             mVal = monthMap[p1.toLowerCase().substring(0,3)];
-                         }
-                         
-                         let v0 = parseInt(p0, 10);
-                         let v1 = mVal !== null ? mVal : parseInt(p1, 10);
-                         let y = parseInt(p2, 10);
-                         if (y < 100) y += 2000;
-                         year = y;
-                         
-                         if (formatDetected === 'MDY') {
-                             month = v0;
-                             day = v1;
-                         } else { // DMY
-                             month = v1;
-                             day = v0;
-                         }
-                     }
-                 }
-             }
 
-             if (day !== null && month !== null && year !== null && !isNaN(day) && !isNaN(month) && !isNaN(year)) {
-                rowObj['DATE'] = `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
-                const expectedCalendarYear = month >= 4 ? fyStartYear : fyStartYear + 1;
-                if (targetMonths.includes(Number(month)) && Number(year) === expectedCalendarYear) {
-                   rowObj.month = Number(month);
-                   rowObj.year = Number(year);
-                   newEntries.push(rowObj);
+          if (rowObj['P_SOURCE'] !== undefined) {
+            const pSource = String(rowObj['P_SOURCE'] || '').trim();
+            if (pSource.startsWith('DAC-RS-')) {
+              rowObj['P_LOAN_PAY'] = pSource;
+              rowObj['P_LOAN_RECV'] = '';
+            } else {
+              rowObj['P_LOAN_RECV'] = pSource;
+              rowObj['P_LOAN_PAY'] = '';
+            }
+            delete rowObj['P_SOURCE'];
+          }
+
+          if (rowObj['DATE']) {
+            let dateStr = String(rowObj['DATE']).trim();
+            let day = null, month = null, year = null;
+
+            if (/^\d{4,5}$/.test(dateStr)) {
+              // Serial date
+              let serial = parseInt(dateStr, 10);
+              let dateObj = new Date(Math.round((serial - 25569) * 86400 * 1000));
+              day = dateObj.getUTCDate();
+              month = dateObj.getUTCMonth() + 1;
+              year = dateObj.getUTCFullYear();
+            } else {
+              const parts = dateStr.split(/[-\/ \.]/);
+              if (parts.length >= 3) {
+                let p0 = parts[0].trim(), p1 = parts[1].trim(), p2 = parts[2].trim();
+                if (p0.length === 4) {
+                  year = parseInt(p0, 10);
+                  month = parseInt(p1, 10);
+                  day = parseInt(p2, 10);
                 } else {
-                   ignoredCount++;
+                  const monthMap = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+                  let mVal = null;
+                  if (isNaN(parseInt(p1)) && monthMap[p1.toLowerCase().substring(0, 3)]) {
+                    mVal = monthMap[p1.toLowerCase().substring(0, 3)];
+                  }
+
+                  let v0 = parseInt(p0, 10);
+                  let v1 = mVal !== null ? mVal : parseInt(p1, 10);
+                  let y = parseInt(p2, 10);
+                  if (y < 100) y += 2000;
+                  year = y;
+
+                  if (formatDetected === 'MDY') {
+                    month = v0;
+                    day = v1;
+                  } else { // DMY
+                    month = v1;
+                    day = v0;
+                  }
                 }
-             } else {
-                ignoredCount++; // Invalid date format
-             }
+              }
+            }
+
+            if (day !== null && month !== null && year !== null && !isNaN(day) && !isNaN(month) && !isNaN(year)) {
+              rowObj['DATE'] = `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+              const expectedCalendarYear = month >= 4 ? fyStartYear : fyStartYear + 1;
+              if (targetMonths.includes(Number(month)) && Number(year) === expectedCalendarYear) {
+                rowObj.month = Number(month);
+                rowObj.year = Number(year);
+                newEntries.push(rowObj);
+              } else {
+                ignoredCount++;
+              }
+            } else {
+              ignoredCount++; // Invalid date format
+            }
           } else {
-             ignoredCount++; // Missing date
+            ignoredCount++; // Missing date
           }
         });
-        
+
         setImportPreview({ entries: newEntries, validCount: newEntries.length, ignoredCount });
       } catch (err) {
         setSnack({ severity: 'error', msg: 'Failed to parse Excel: ' + err.message });
@@ -694,21 +695,21 @@ export default function MainCashbook({ onBack }) {
         {/* Month selector */}
         <FormControl size="small" sx={{ minWidth: 130 }}>
           <InputLabel sx={{ fontSize: 12 }}>Month</InputLabel>
-          <Select value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}
+          <SearchableSelect value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}
             sx={{ fontSize: 12, fontWeight: 700 }}>
             {MONTH_NAMES.map((m, i) => (
               <MenuItem key={i + 1} value={i + 1} sx={{ fontSize: 12 }}>{m}</MenuItem>
             ))}
-          </Select>
+          </SearchableSelect>
         </FormControl>
 
         {/* Year selector */}
         <FormControl size="small" sx={{ minWidth: 100 }}>
           <InputLabel sx={{ fontSize: 12 }}>Financial Year</InputLabel>
-          <Select value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}
+          <SearchableSelect value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}
             sx={{ fontSize: 12, fontWeight: 700 }}>
             {yearOptions.map(y => <MenuItem key={y} value={y} sx={{ fontSize: 12 }}>{y}</MenuItem>)}
-          </Select>
+          </SearchableSelect>
         </FormControl>
 
         <Chip label={`${MONTH_NAMES[selMonth - 1]} ${selMonth >= 4 ? selYear.split('-')[0] : parseInt(selYear.split('-')[0], 10) + 1}`}
@@ -753,12 +754,12 @@ export default function MainCashbook({ onBack }) {
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>XLS</Button>
           <Button size="small" variant="contained"
             startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
-            onClick={handleSave} 
+            onClick={handleSave}
             disabled={(dirtyCount === 0 && importedEntries.length === 0) || saving}
             sx={{
               fontWeight: 800, borderRadius: 2, px: 2.5,
-              background: importedEntries.length > 0 
-                ? 'linear-gradient(135deg, #22c55e, #16a34a)' 
+              background: importedEntries.length > 0
+                ? 'linear-gradient(135deg, #22c55e, #16a34a)'
                 : (dirtyCount > 0 ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#cbd5e1'),
               opacity: (dirtyCount === 0 && importedEntries.length === 0) ? 0.5 : 1,
               filter: (dirtyCount === 0 && importedEntries.length === 0) ? 'blur(0.5px)' : 'none',
@@ -922,7 +923,7 @@ export default function MainCashbook({ onBack }) {
                     } else if (col.key === 'DIFFERENCE' && num(displayVal) !== 0) {
                       cellBg = '#fca5a5'; // red mismatch
                     } else if (col.key === 'P_LOAN_PAY' && (sourceYellow || String(displayVal).startsWith('DAC-RS-'))) {
-                      cellBg = '#fef08a'; // yellow when Others > 0 or Account Details sync
+                      cellBg = '#fef08a'; // yellow when Others > 0 or Bank Book sync
                     } else if (isDirty) {
                       cellBg = '#fff3cd'; // dirty edits
                     } else if (isCalcLike) {
@@ -1007,17 +1008,17 @@ export default function MainCashbook({ onBack }) {
         <DialogContent sx={{ py: 3, display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
           <FormControl fullWidth size="small">
             <InputLabel>Financial Year</InputLabel>
-            <Select value={importYear} label="Financial Year" onChange={e => {
+            <SearchableSelect value={importYear} label="Financial Year" onChange={e => {
               setImportYear(e.target.value);
               setImportPreview(null); // Reset preview on criteria change
               setImportFile(null);
             }}>
               {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
-            </Select>
+            </SearchableSelect>
           </FormControl>
           <FormControl fullWidth size="small">
             <InputLabel>Select Months</InputLabel>
-            <Select
+            <SearchableSelect
               multiple
               value={importMonths}
               onChange={e => {
@@ -1034,9 +1035,9 @@ export default function MainCashbook({ onBack }) {
                   <ListItemText primary={name} />
                 </MenuItem>
               ))}
-            </Select>
+            </SearchableSelect>
           </FormControl>
-          
+
           <Button variant="outlined" component="label" sx={{ py: 3, borderStyle: 'dashed' }}>
             {importFile ? importFile.name : 'Click to Select Excel File'}
             <input type="file" accept=".xls,.xlsx" hidden onChange={handleImportFileChange} />
@@ -1051,9 +1052,9 @@ export default function MainCashbook({ onBack }) {
         </DialogContent>
         <DialogActions sx={{ p: 2, borderTop: '1px solid #e2e8f0' }}>
           <Button onClick={() => setImportModalOpen(false)}>Cancel</Button>
-          <Button 
-            variant="contained" 
-            onClick={handleImportSubmit} 
+          <Button
+            variant="contained"
+            onClick={handleImportSubmit}
             disabled={!importPreview || importPreview.validCount === 0}
           >
             Import

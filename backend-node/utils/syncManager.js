@@ -17,6 +17,65 @@ function getCementCol() {
 function getInvoiceSystemDb() {
   return mongoose.connection.useDb("invoice_system");
 }
+// ─── Shared Truck Contact Lookup ──────────────────────────────────────────────
+async function getTruckDetails(vehicleNumber) {
+  let wheel = "", ownerName = "", tdsPercent = 1, isATO = false, driverNo = "", hasStO = false;
+  let basicFreightCommission = 0.05;
+
+  if (!vehicleNumber) return { wheel, ownerName, tdsPercent, isATO, driverNo, hasStO, basicFreightCommission };
+
+  const truckCol = getInvoiceSystemDb().db.collection("Truck Contact Number");
+  const truckRegex = makeSpaceAgnosticRegex(vehicleNumber);
+  const truck = await truckCol.findOne({
+    $or: [
+      { "Truck No": { $regex: truckRegex } },
+      { truck_no: { $regex: truckRegex } },
+      { "Contact No.(Truck No.)": { $regex: truckRegex } },
+      { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
+    ]
+  });
+
+  if (truck) {
+    let vType = truck["Type of vehicle"] || truck.type || truck["Vehicle Type"] || truck.type_of_vehicle || truck.vehicle_type || "";
+    if (!vType) {
+      for (let key in truck) {
+        const lk = key.toLowerCase();
+        if (lk.includes("type") || lk.includes("wheel") || lk.includes("vehicle")) {
+          const val = truck[key];
+          if (val && typeof val === "string") { vType = val; break; }
+          if (val && typeof val === "number") { vType = val.toString(); break; }
+        }
+      }
+    }
+    const wheelMatch = vType ? vType.toString().match(/(\d+)/) : null;
+    wheel = wheelMatch ? `${wheelMatch[1]}W` : vType;
+    ownerName = safe(truck["Owner Name"] || truck.owner_name);
+    driverNo = safe(truck["DRIVER CONTACT"] || truck.contact_no || truck["Contact No."]);
+
+    const custType = safe(truck["TYPE OF CUSTOMER"] || truck["type_of_customer"] || "").toUpperCase();
+    isATO = custType.includes("ATO");
+    hasStO = custType.includes("STO");
+
+    // TDS dynamic logic
+    const rawTds = truck["tds_applicability"] || truck["TDS Applicability"];
+    if (rawTds !== undefined && rawTds !== null && String(rawTds).trim() !== "") {
+      tdsPercent = num(rawTds) * 100;
+    } else {
+      const pan = safe(truck["PAN No."] || truck.pan_no);
+      const aadhar = safe(truck["Aadhar No."] || truck.aadhar_no);
+      tdsPercent = (pan && aadhar) ? 0 : 1;
+    }
+
+    const rawComm = truck["basic_freight_commission"];
+    let commVal = (rawComm !== null && rawComm !== undefined && rawComm !== '') ? num(rawComm) : 5;
+    if (commVal > 0 && commVal < 1) {
+      commVal = commVal * 100;
+    }
+    basicFreightCommission = commVal / 100;
+  }
+
+  return { wheel, ownerName, tdsPercent, isATO, driverNo, hasStO, basicFreightCommission };
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function safe(val, fallback = "") {
@@ -226,55 +285,21 @@ async function pushToRegister(invoiceId, overrides) {
     };
     const addonGpsDevice = getAddon("GPS Device");
     const addonRfidTag = getAddon("RFID Tag");
-    const addonRfidReassure = getAddon("RFID Tag Reassurance");
     const addonFastag = getAddon("Fastag");
 
     // ── Truck Contact lookup ─────────────────────────────────────────────
     let wheel = "", ownerName = "", tdsPercent = 1, isATO = false, driverNo = "", hasStO = false;
     let basicFreightCommission = 0.05; // default — owner gets 5% deducted (party gets 95%)
+    
     if (vehicleNumber) {
-      const truckCol = getInvoiceSystemDb().db.collection("Truck Contact Number");
-      const truckRegex = makeSpaceAgnosticRegex(vehicleNumber);
-      const truck = await truckCol.findOne({
-        $or: [
-          { "Truck No": { $regex: truckRegex } },
-          { truck_no: { $regex: truckRegex } },
-          { "Contact No.(Truck No.)": { $regex: truckRegex } },
-          { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
-        ]
-      });
-      if (truck) {
-        // Robust vehicle type / wheel count detection
-        let vType = truck["Type of vehicle"] || truck.type || truck["Vehicle Type"] || truck.type_of_vehicle || truck.vehicle_type || "";
-
-        if (!vType) {
-          for (let key in truck) {
-            const lk = key.toLowerCase();
-            if (lk.includes("type") || lk.includes("wheel") || lk.includes("vehicle")) {
-              const val = truck[key];
-              if (val && typeof val === "string") { vType = val; break; }
-              if (val && typeof val === "number") { vType = val.toString(); break; }
-            }
-          }
-        }
-
-        const wheelMatch = vType ? vType.toString().match(/(\d+)/) : null;
-        wheel = wheelMatch ? `${wheelMatch[1]}W` : vType;
-        ownerName = safe(truck["Owner Name"] || truck.owner_name);
-        driverNo = safe(truck["DRIVER CONTACT"] || truck.contact_no || truck["Contact No."]);
-
-        const pan = safe(truck["PAN No."] || truck.pan_no);
-        const aadhar = safe(truck["Aadhar No."] || truck.aadhar_no);
-        tdsPercent = (pan && aadhar) ? 0 : 1;
-
-        const custType = safe(truck["TYPE OF CUSTOMER"] || truck["type_of_customer"] || "").toUpperCase();
-        isATO = custType.includes("ATO");
-        hasStO = custType.includes("STO");
-
-        // Read basic freight commission; null/undefined → default 0.05
-        const rawComm = truck["basic_freight_commission"];
-        basicFreightCommission = (rawComm !== null && rawComm !== undefined) ? num(rawComm) : 0.05;
-      }
+      const truckDetails = await getTruckDetails(vehicleNumber);
+      wheel = truckDetails.wheel;
+      ownerName = truckDetails.ownerName;
+      tdsPercent = truckDetails.tdsPercent;
+      isATO = truckDetails.isATO;
+      driverNo = truckDetails.driverNo;
+      hasStO = truckDetails.hasStO;
+      basicFreightCommission = truckDetails.basicFreightCommission;
     }
     // ── Freight lookup — match by destination against DEST ZONE DESC ────
     let billing = 0, distanceKm = 0;
@@ -459,7 +484,7 @@ async function pushToRegister(invoiceId, overrides) {
       "BILLING ER VAR": billingErVar !== undefined ? billingErVar : "",
       "AMOUNT": amount || "",
       "PROFIT": profit || "",
-      "TDS@1%": tdsAmount || "",
+      "TDS": tdsAmount || "",
       "_freight_commission": basicFreightCommission,
       "ADVANCE": advance || "",
       "Site Cash": siteCash || "",
@@ -481,7 +506,6 @@ async function pushToRegister(invoiceId, overrides) {
       "OWNER NAME": ownerName,
       "GPS DEVICE": addonGpsDevice || "",
       "RFID TAG": addonRfidTag || "",
-      "RFID REASSURANCE": addonRfidReassure || "",
       "FASTAG": addonFastag || "",
       "VERIFICATION STATUS": invoice.is_hsd_verified ? "Verified" : "Not Verified",
       "_tds_percent": tdsPercent,
@@ -669,4 +693,4 @@ async function syncVoucherDummy(voucherId) {
   }
 }
 
-module.exports = { pushToRegister, pushToInvoice, removeFromRegister, syncVoucherDummy };
+module.exports = { pushToRegister, pushToInvoice, removeFromRegister, syncVoucherDummy, getTruckDetails };

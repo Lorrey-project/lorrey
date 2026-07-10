@@ -83,6 +83,11 @@ router.get('/data', async (req, res) => {
       'AMOUNT': 1, 'Billing Amount': 1,
       'VEHICLE NUMBER': 1, 'VEHICLE NO': 1,
       'PARTY NAME': 1,
+      'CHALLAN STATUS': 1,
+      'UNLOADING BILL NO': 1, 'UNLOADING BILL DATE': 1,
+      'EXTRA UNLOADING': 1,
+      'Freight Generated': 1, 'Unloading Generated': 1,
+      'SHIPMENT NO': 1,
       _id: 0
     };
 
@@ -94,20 +99,27 @@ router.get('/data', async (req, res) => {
 
     // Filter cement entries by financial year
     const filteredCement = allCement.filter(row => {
-      // 1. Try to parse date
-      const invDate = row['BILL DATE'] || row['LOADING DT'] || row['LOADING DATE'] || '';
-      const dObj = parseDate(invDate);
-      if (dObj) {
-        const y = dObj.getFullYear();
-        const m = dObj.getMonth() + 1;
-        if (m >= 4 && y === startYear) return true;
-        if (m <= 3 && y === startYear + 1) return true;
-        return false;
-      }
-      // 2. Fallback: check if BILL NO contains the short year
+      if (String(row['CHALLAN STATUS']).toUpperCase().trim() !== 'BILLED') return false;
+
       const invNo = row['BILL NO'] || row['INVOICE NO'];
-      if (invNo) {
-        if (String(invNo).includes(shortCode)) return true;
+      const uInvNo = row['UNLOADING BILL NO'];
+
+      const hasShortCode = (invNo && String(invNo).includes(shortCode)) || (uInvNo && String(uInvNo).includes(shortCode));
+
+      if (hasShortCode) return true;
+
+      const fInvDate = row['BILL DATE'] || row['LOADING DT'] || row['LOADING DATE'] || '';
+      const uInvDate = row['UNLOADING BILL DATE'] || '';
+
+      for (const d of [fInvDate, uInvDate]) {
+        if (!d) continue;
+        const dObj = parseDate(d);
+        if (dObj) {
+          const y = dObj.getFullYear();
+          const m = dObj.getMonth() + 1;
+          if (m >= 4 && y === startYear) return true;
+          if (m <= 3 && y === startYear + 1) return true;
+        }
       }
       return false;
     });
@@ -120,20 +132,19 @@ router.get('/data', async (req, res) => {
 
     // ── Aggregate cement rows by invoice number AND site ──────────────
     const aggregated = {};
-    for (const row of filteredCement) {
-      let invNo = row['BILL NO'];
-      if (!invNo) continue;
+
+    const addBillToAggregated = (invNo, invDate, amount, row, defaultBillType) => {
+      if (!invNo) return;
       invNo = String(invNo).trim();
 
       const rawSite = normalizeSite(row['SITE']);
-      if (rawSite !== 'NVCL' && rawSite !== 'NVL') continue;
+      if (rawSite !== 'NVCL' && rawSite !== 'NVL') return;
 
       const prefix = rawSite === 'NVCL' ? 'NVCL/' : 'DAC/';
       const cleanInvNo = invNo.replace(/^(DAC|NVCL)\//i, '');
       const finalInvNo = `${prefix}${cleanInvNo}`;
 
       if (!aggregated[finalInvNo]) {
-        const invDate = row['BILL DATE'] || row['LOADING DT'] || row['LOADING DATE'] || '';
         let monthStr = '';
         const dObj = parseDate(invDate);
         if (dObj) {
@@ -147,18 +158,15 @@ router.get('/data', async (req, res) => {
           month: monthStr,
           site: rawSite,
           amount: 0,
+          billType: defaultBillType,
           invoiceNos: new Set(),
           vehicleNumbers: new Set(),
-          partyNames: new Set()
+          partyNames: new Set(),
+          shipmentNos: new Set()
         };
       }
 
-      const amt =
-        parseFloat(row['BILLING AMOUNT']) ||
-        parseFloat(row['Billing Amount']) ||
-        parseFloat(row['BILLING ER 95%']) ||
-        parseFloat(row['AMOUNT']) || 0;
-      aggregated[finalInvNo].amount += amt;
+      aggregated[finalInvNo].amount += amount;
 
       const singleInvNo = row['INVOICE NO'] || row['INVOICE NO.'] || '';
       if (singleInvNo) aggregated[finalInvNo].invoiceNos.add(String(singleInvNo).trim());
@@ -168,6 +176,23 @@ router.get('/data', async (req, res) => {
 
       const singleParty = row['PARTY NAME'] || '';
       if (singleParty) aggregated[finalInvNo].partyNames.add(String(singleParty).trim());
+
+      const singleShipment = row['SHIPMENT NO'] || '';
+      if (singleShipment) aggregated[finalInvNo].shipmentNos.add(String(singleShipment).trim());
+    };
+
+    for (const row of filteredCement) {
+      if (row['BILL NO']) {
+        const fAmt = parseFloat(row['BILLING AMOUNT']) || parseFloat(row['Billing Amount']) || parseFloat(row['BILLING ER 95%']) || parseFloat(row['AMOUNT']) || 0;
+        const fDate = row['BILL DATE'] || row['LOADING DT'] || row['LOADING DATE'] || '';
+        addBillToAggregated(row['BILL NO'], fDate, fAmt, row, 'FREIGHT');
+      }
+
+      if (row['UNLOADING BILL NO']) {
+        const uAmt = parseFloat(row['EXTRA UNLOADING']) || 0;
+        const uDate = row['UNLOADING BILL DATE'] || '';
+        addBillToAggregated(row['UNLOADING BILL NO'], uDate, uAmt, row, 'UNLOADING');
+      }
     }
 
     // ── Merge overrides and manual rows ──────────────────────────
@@ -186,7 +211,7 @@ router.get('/data', async (req, res) => {
 
       finalRows.push({
         ...r,
-        billType: ov.billType ?? 'FREIGHT',
+        billType: ov.billType ?? r.billType ?? 'FREIGHT',
         invoiceDate: ov.editedInvoiceDate ?? r.invoiceDate,
         displayInvoiceNumber: ov.editedInvoiceNumber ?? r.invoiceNumber,
         month: ov.editedMonth ?? r.month,
@@ -207,7 +232,8 @@ router.get('/data', async (req, res) => {
         // Convert sets to arrays
         invoiceNos: Array.from(r.invoiceNos).filter(Boolean),
         vehicleNumbers: Array.from(r.vehicleNumbers).filter(Boolean),
-        partyNames: Array.from(r.partyNames).filter(Boolean)
+        partyNames: Array.from(r.partyNames).filter(Boolean),
+        shipmentNos: Array.from(r.shipmentNos).filter(Boolean)
       });
     }
 
@@ -281,6 +307,217 @@ router.get('/data', async (req, res) => {
   }
 });
 
+router.get('/pending-bills', async (req, res) => {
+  try {
+    const { party } = req.query; // 'NVL' or 'NVCL'
+    if (!party) return res.status(400).json({ error: 'Party is required' });
+
+    const CEMENT_PROJECTION = {
+      'GCN NO': 1, 'BILL NO': 1, 'INVOICE NO': 1, 'BILLING': 1,
+      'LOADING DT': 1, 'LOADING DATE': 1,
+      'BILL DATE': 1,
+      'SITE': 1,
+      'BILLING ER 95%': 1, 'BILLING @ 95% (PARTY PAYABLE)': 1,
+      'AMOUNT': 1, 'Billing Amount': 1,
+      'VEHICLE NUMBER': 1, 'VEHICLE NO': 1,
+      'PARTY NAME': 1,
+      _id: 0
+    };
+
+    const [allCement, rowOverrides, payments] = await Promise.all([
+      getCementCol().find({ SITE: { $regex: new RegExp(`^${party}$`, 'i') } }, { projection: CEMENT_PROJECTION }).toArray(),
+      FinancialYearRow.find({}).lean(),
+      FinancialYearPayment.find({}).lean()
+    ]);
+
+    // Apply the same aggregation as /data
+    const aggregated = {};
+    for (const row of allCement) {
+      let invNo = row['BILL NO'];
+      if (!invNo || String(row['CHALLAN STATUS']).toUpperCase().trim() !== 'BILLED') continue;
+      invNo = String(invNo).trim();
+
+      const rawSite = normalizeSite(row['SITE']);
+      if (rawSite !== party.toUpperCase()) continue;
+
+      const prefix = rawSite === 'NVCL' ? 'NVCL/' : 'DAC/';
+      const cleanInvNo = invNo.replace(/^(DAC|NVCL)\//i, '');
+      const finalInvNo = `${prefix}${cleanInvNo}`;
+
+      if (!aggregated[finalInvNo]) {
+        const invDate = row['BILL DATE'] || row['LOADING DT'] || row['LOADING DATE'] || '';
+        let monthStr = '';
+        const dObj = parseDate(invDate);
+        if (dObj) {
+          const m = dObj.getMonth();
+          const yy = String(dObj.getFullYear()).slice(-2);
+          monthStr = `${MONTH_NAMES[m]} '${yy}`;
+        }
+        aggregated[finalInvNo] = {
+          invoiceDate: invDate,
+          invoiceNumber: finalInvNo,
+          month: monthStr,
+          site: rawSite,
+          amount: 0,
+          invoiceNos: new Set(),
+          vehicleNumbers: new Set(),
+          partyNames: new Set()
+        };
+      }
+
+      const amt =
+        parseFloat(row['BILLING AMOUNT']) ||
+        parseFloat(row['Billing Amount']) ||
+        parseFloat(row['BILLING ER 95%']) ||
+        parseFloat(row['AMOUNT']) || 0;
+      aggregated[finalInvNo].amount += amt;
+
+      const singleInvNo = row['INVOICE NO'] || row['INVOICE NO.'] || '';
+      if (singleInvNo) aggregated[finalInvNo].invoiceNos.add(String(singleInvNo).trim());
+
+      const singleVeh = row['VEHICLE NUMBER'] || row['VEHICLE NO'] || '';
+      if (singleVeh) aggregated[finalInvNo].vehicleNumbers.add(String(singleVeh).trim());
+
+      const singleParty = row['PARTY NAME'] || '';
+      if (singleParty) aggregated[finalInvNo].partyNames.add(String(singleParty).trim());
+    }
+
+    const rowMap = {};
+    for (const r of rowOverrides) rowMap[r.billNo] = r;
+
+    const computedRows = [];
+    for (const r of Object.values(aggregated)) {
+      const invNo = r.invoiceNumber;
+      const ov = rowMap[invNo] || {};
+      if (ov.hidden) continue;
+
+      const siteUpper = normalizeSite(ov.editedSite ?? r.site).toUpperCase();
+      const billUpper = (ov.billType ?? 'FREIGHT').toUpperCase();
+
+      const amt = parseFloat(ov.editedAmount ?? r.amount) || 0;
+      const cgst = Math.round((amt * 0.09) * 100) / 100;
+      const sgst = Math.round((amt * 0.09) * 100) / 100;
+      const totalAmount = amt + cgst + sgst;
+
+      const tdsRate = (siteUpper === 'NVL' && billUpper === 'TOLL') ? 0 : 0.02;
+      const tds = Math.round((amt * tdsRate) * 100) / 100;
+
+      const receivable = totalAmount - tds;
+      let autoInv = ov.editedInvoiceNumber ?? r.invoiceNumber ?? '';
+
+      const paymentObj = payments.find(p => p.billNos?.includes(r.invoiceNumber));
+
+      computedRows.push({
+        invoiceDate: ov.editedInvoiceDate ?? r.invoiceDate,
+        invoiceNumber: r.invoiceNumber,
+        displayInvoiceNumber: autoInv,
+        amount: amt,
+        receivable,
+        invoiceNos: Array.from(r.invoiceNos).filter(Boolean),
+        vehicleNumbers: Array.from(r.vehicleNumbers).filter(Boolean),
+        partyNames: Array.from(r.partyNames).filter(Boolean),
+        groupId: paymentObj?.id || `AUTO-${r.invoiceNumber}`,
+        groupData: paymentObj || {}
+      });
+    }
+
+    // Process manual rows
+    for (const ov of rowOverrides) {
+      if (aggregated[ov.billNo] || ov.hidden) continue;
+      const siteUpper = normalizeSite(ov.editedSite || '').toUpperCase();
+      if (siteUpper !== party.toUpperCase()) continue;
+
+      const billUpper = (ov.billType ?? 'FREIGHT').toUpperCase();
+      const amt = parseFloat(ov.editedAmount) || 0;
+      const cgst = Math.round((amt * 0.09) * 100) / 100;
+      const sgst = Math.round((amt * 0.09) * 100) / 100;
+      const totalAmount = amt + cgst + sgst;
+      const tdsRate = (siteUpper === 'NVL' && billUpper === 'TOLL') ? 0 : 0.02;
+      const tds = Math.round((amt * tdsRate) * 100) / 100;
+      const receivable = totalAmount - tds;
+
+      const paymentObj = payments.find(p => p.billNos?.includes(ov.billNo));
+
+      computedRows.push({
+        invoiceDate: ov.editedInvoiceDate || '',
+        invoiceNumber: ov.billNo,
+        displayInvoiceNumber: ov.editedInvoiceNumber || ov.billNo,
+        amount: amt,
+        receivable,
+        invoiceNos: [],
+        vehicleNumbers: [],
+        partyNames: [],
+        groupId: paymentObj?.id || `AUTO-${ov.billNo}`,
+        groupData: paymentObj || {}
+      });
+    }
+
+    // Now calculate pending amounts
+    const pendingBills = [];
+    const groupRowsMap = {};
+    for (const row of computedRows) {
+      if (!groupRowsMap[row.groupId]) groupRowsMap[row.groupId] = [];
+      groupRowsMap[row.groupId].push(row);
+    }
+
+    for (const r of computedRows) {
+      const gid = r.groupId;
+      const gd = r.groupData || {};
+
+      const groupRows = groupRowsMap[gid];
+      const groupTotalRecv = groupRows.reduce((s, x) => s + (x.receivable || 0), 0);
+
+      const paymentAmt = parseFloat(gd.paymentAmount) || 0;
+      const debitAmt = parseFloat(gd.debitAmount) || 0;
+      const tdsProv = parseFloat(gd.tdsProvision) || 0;
+
+      const isPaid = paymentAmt > 0 && (paymentAmt + debitAmt + tdsProv >= groupTotalRecv - 1);
+
+      let individualAmountPaid = 0;
+      let individualOutstanding = r.receivable || 0;
+      let status = 'Pending';
+
+      if (isPaid) {
+        individualAmountPaid = r.receivable || 0;
+        individualOutstanding = 0;
+        status = 'Paid';
+      } else if (paymentAmt > 0 || debitAmt > 0 || tdsProv > 0) {
+        const ratio = groupTotalRecv > 0 ? ((paymentAmt + debitAmt + tdsProv) / groupTotalRecv) : 0;
+        individualAmountPaid = (r.receivable || 0) * ratio;
+        individualOutstanding = Math.max(0, (r.receivable || 0) - individualAmountPaid);
+        if (individualOutstanding < 1) {
+          individualOutstanding = 0;
+          status = 'Paid';
+        }
+      }
+
+      if (status === 'Pending') {
+        pendingBills.push({
+          invoiceNumber: r.invoiceNos.length > 0 ? r.invoiceNos.join(', ') : '—',
+          billNumber: r.displayInvoiceNumber,
+          rawBillNumber: r.invoiceNumber,
+          invoiceDate: r.invoiceDate,
+          vehicleNumber: r.vehicleNumbers.length > 0 ? r.vehicleNumbers.join(', ') : '—',
+          billAmount: r.receivable || 0,
+          amountPaid: individualAmountPaid,
+          pendingAmount: individualOutstanding
+        });
+      }
+    }
+
+    pendingBills.sort((a, b) => {
+      const dA = parseDate(a.invoiceDate) || new Date(0);
+      const dB = parseDate(b.invoiceDate) || new Date(0);
+      return dB - dA;
+    });
+
+    res.json({ pendingBills });
+  } catch (err) {
+    console.error('[FYDetails] /pending-bills error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.post('/save-group', async (req, res) => {
   try {
     const { id, billNos, paymentAmount, paymentDate, referenceNo, debitAmount, remarks, tdsProvision } = req.body;
@@ -289,6 +526,119 @@ router.post('/save-group', async (req, res) => {
       { billNos, paymentAmount, paymentDate, referenceNo, debitAmount, remarks, tdsProvision },
       { upsert: true, returnDocument: 'after' }
     );
+
+    // --- Cement Register Deductions Override Logic via Remarks ---
+    if (remarks) {
+      const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
+      const lines = remarks.split('\n');
+
+      for (const line of lines) {
+        const match = line.trim().match(/^([a-zA-Z]+)\s*-\s*([A-Z0-9]+)\s*-\s*Trip No\.\s*(\d+)\s*\(([\d\-\.\/]+)\)\s*-\s*(.*?)\s*-\s*₹([\d,\.]+)/i);
+        if (match) {
+          const monthStrName = match[1];
+          const vehicle = match[2];
+          const tripNumber = parseInt(match[3], 10);
+          const tripDate = match[4];
+          const reason = match[5].trim();
+          const manualAmt = parseFloat(match[6].replace(/,/g, '')) || 0;
+
+          const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+          const monthIdx = MONTHS.findIndex(m => m.toLowerCase() === monthStrName.toLowerCase()) + 1;
+
+          if (monthIdx > 0) {
+            const dateParts = tripDate.split(/[-/.]/);
+            if (dateParts.length >= 3) {
+              const mm = String(dateParts[1]).padStart(2, '0');
+              const yyyy = dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2];
+              const yy = yyyy.slice(-2);
+
+              const dateRegex = new RegExp(`^\\d{2}[-/\\.]${mm}[-/\\.](${yyyy}|${yy})`);
+
+              const tripsQuery = {
+                $or: [{ 'VEHICLE NUMBER': vehicle }, { 'VEHICLE NO': vehicle }],
+                $and: [
+                  {
+                    $or: [
+                      { "LOADING DT": dateRegex },
+                      { "LOADING DATE": dateRegex },
+                      { "BILL DATE": dateRegex }
+                    ]
+                  }
+                ]
+              };
+
+              const dbTrips = await cementCol.find(tripsQuery).toArray();
+
+              const parseCustomDate = (dStr) => {
+                if (!dStr) return 0;
+                const parts = String(dStr).split(/[-/\\.]/);
+                if (parts.length >= 3) {
+                  const [day, m, year] = parts;
+                  let y = parseInt(year);
+                  if (y < 100) y += 2000;
+                  return new Date(y, parseInt(m) - 1, parseInt(day)).getTime();
+                }
+                return 0;
+              };
+
+              dbTrips.sort((a, b) => {
+                const dateA = parseCustomDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || 'Unknown');
+                const dateB = parseCustomDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || 'Unknown');
+                return dateA - dateB;
+              });
+
+              let dbTrip = null;
+              if (tripNumber && dbTrips[tripNumber - 1]) {
+                dbTrip = dbTrips[tripNumber - 1];
+              } else {
+                const exactDateQuery = {
+                  $or: [{ 'VEHICLE NUMBER': vehicle }, { 'VEHICLE NO': vehicle }],
+                  $or: [
+                    { 'LOADING DT': tripDate },
+                    { 'LOADING DATE': tripDate },
+                    { 'BILL DATE': tripDate },
+                    { 'RECEIVING DATE': tripDate },
+                    { 'DATE': tripDate },
+                    { 'INVOICE DATE': tripDate }
+                  ]
+                };
+                dbTrip = await cementCol.findOne(exactDateQuery);
+              }
+
+              if (dbTrip) {
+                let projectedCol = '';
+                const lowerReason = reason.toLowerCase();
+                if (lowerReason.includes('damage') || lowerReason.includes('shortage')) projectedCol = 'SHORTAGE (AMOUNT)';
+                else if (lowerReason.includes('gps trip')) projectedCol = 'GPS Monitoring Charge';
+                else if (lowerReason.includes('gps deviation')) projectedCol = 'GPS Deviation Charges';
+                else if (lowerReason.includes('device installation')) projectedCol = 'Give GPS DEVICE';
+                else if (lowerReason.includes('rfid')) projectedCol = 'Give RFID TAG';
+                else if (lowerReason.includes('substance')) projectedCol = 'Others deduction';
+
+                if (projectedCol) {
+                  const projVal = parseFloat(String(dbTrip[projectedCol] || '0').replace(/,/g, '')) || 0;
+                  const overridePath = `deductionsOverride.${reason}`;
+                  const updateDoc = {
+                    $set: {
+                      [overridePath]: {
+                        projected: projVal,
+                        actual: manualAmt,
+                        billRegisterRef: id,
+                        timestamp: new Date()
+                      },
+                      [projectedCol]: manualAmt,
+                      'DEDICATED': 'Actual'
+                    }
+                  };
+                  await cementCol.updateOne({ _id: dbTrip._id }, updateDoc);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -382,9 +732,9 @@ router.post('/save-row', async (req, res) => {
       let projectedCol = '';
       if (debitReason === 'Damage / Shortage') projectedCol = 'SHORTAGE (AMOUNT)';
       else if (debitReason === 'GPS Trip Charges') projectedCol = 'GPS Monitoring Charge';
-      else if (debitReason === 'GPS Deviation Charges') projectedCol = 'GPS Monitoring Charge';
-      else if (debitReason === 'Device Installation Charges') projectedCol = 'GPS DEVICE';
-      else if (debitReason === 'RFID Deduction / Charges') projectedCol = 'RFID TAG';
+      else if (debitReason === 'GPS Deviation Charges') projectedCol = 'GPS Deviation Charges';
+      else if (debitReason === 'Device Installation Charges') projectedCol = 'Give GPS DEVICE';
+      else if (debitReason === 'RFID Deduction / Charges') projectedCol = 'Give RFID TAG';
       else if (debitReason === 'Substance') projectedCol = 'Others deduction';
 
       if (projectedCol) {
@@ -393,23 +743,84 @@ router.post('/save-row', async (req, res) => {
           const amountVal = damageVehicleAmounts[t.invoiceNo];
           const manualAmt = parseFloat(String(amountVal).replace(/,/g, '')) || 0;
 
-          // Find the exact trip in the cement register
-          const query = {
-            $or: [
-              { 'VEHICLE NUMBER': t.vehicle },
-              { 'VEHICLE NO': t.vehicle }
-            ],
-            $or: [
-              { 'INVOICE NO': t.invoiceNo },
-              { 'BILL NO': t.invoiceNo }
+          // Find the exact trip in the cement register using Month, FY, Vehicle, and Trip Number
+          const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+          const monthIdx = MONTHS.indexOf(damageMonth) + 1;
+          let yearRegexPart = '';
+          if (damageYear) {
+            const parts = damageYear.split('-');
+            if (parts.length === 2) {
+              let startY = parseInt(parts[0]);
+              let endY = parseInt(parts[1]);
+              if (startY < 100) startY += 2000;
+              if (endY < 100) endY += 2000;
+              const calendarYear = (monthIdx >= 4) ? startY : endY;
+              const yrStr = String(calendarYear);
+              const yr2 = yrStr.slice(-2);
+              yearRegexPart = `(${yrStr}|${yr2})`;
+            }
+          }
+          const monthStr = String(monthIdx).padStart(2, '0');
+          const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.]${yearRegexPart}`);
+
+          const tripsQuery = {
+            $or: [{ 'VEHICLE NUMBER': t.vehicle }, { 'VEHICLE NO': t.vehicle }],
+            $and: [
+              {
+                $or: [
+                  { "LOADING DT": dateRegex },
+                  { "LOADING DATE": dateRegex },
+                  { "BILL DATE": dateRegex }
+                ]
+              }
             ]
           };
 
-          const dbTrip = await cementCol.findOne(query);
+          const dbTrips = await cementCol.find(tripsQuery).toArray();
+
+          const parseCustomDate = (dStr) => {
+            if (!dStr) return 0;
+            const parts = String(dStr).split(/[-/\\.]/);
+            if (parts.length >= 3) {
+              const [day, m, year] = parts;
+              let y = parseInt(year);
+              if (y < 100) y += 2000;
+              return new Date(y, parseInt(m) - 1, parseInt(day)).getTime();
+            }
+            return 0;
+          };
+
+          dbTrips.sort((a, b) => {
+            const dateA = parseCustomDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || 'Unknown');
+            const dateB = parseCustomDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || 'Unknown');
+            return dateA - dateB;
+          });
+
+          let dbTrip = null;
+          if (t.tripNumber && dbTrips[t.tripNumber - 1]) {
+            dbTrip = dbTrips[t.tripNumber - 1];
+          } else {
+            // Fallback
+            const query = {
+              $or: [
+                { 'VEHICLE NUMBER': t.vehicle },
+                { 'VEHICLE NO': t.vehicle }
+              ],
+              $or: [
+                { 'LOADING DT': t.tripDate },
+                { 'LOADING DATE': t.tripDate },
+                { 'BILL DATE': t.tripDate },
+                { 'RECEIVING DATE': t.tripDate },
+                { 'DATE': t.tripDate },
+                { 'INVOICE DATE': t.tripDate }
+              ]
+            };
+            dbTrip = await cementCol.findOne(query);
+          }
           if (dbTrip) {
             const projVal = parseFloat(String(dbTrip[projectedCol] || '0').replace(/,/g, '')) || 0;
-            
-            if (manualAmt > projVal) {
+
+            if (true) {
               const overridePath = `deductionsOverride.${debitReason}`;
               const updateDoc = {
                 $set: {

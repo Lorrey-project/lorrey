@@ -40,7 +40,7 @@ const _dashSocket = io('/', { autoConnect: true });
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport }) => {
     const { user, logout } = useAuth();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -910,6 +910,54 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             </CardContent>
                         </Card>
 
+                        {/* ── Pump Payment Register Block ─────────────────────────── */}
+                        <Card sx={{
+                            height: '100%',
+                            borderRadius: '20px',
+                            background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                            color: '#fff',
+                            boxShadow: '0 16px 40px rgba(2,132,199,0.3)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            overflow: 'hidden',
+                            position: 'relative',
+                        }}>
+                            <Box sx={{
+                                position: 'absolute', top: -20, right: -20,
+                                width: 100, height: 100, borderRadius: '50%',
+                                bgcolor: 'rgba(255,255,255,0.06)',
+                            }} />
+                            <CardContent sx={{ p: 2.5 }}>
+                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
+                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
+                                        <LocalGasStationIcon sx={{ fontSize: 20 }} />
+                                    </Box>
+                                    <Box>
+                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
+                                            PUMP PAYMENT REGISTER
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                                            Record payments to pumps
+                                        </Typography>
+                                    </Box>
+                                </Box>
+                                <Button
+                                    fullWidth variant="contained"
+                                    startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
+                                    onClick={onOpenPumpPaymentRegister}
+                                    sx={{
+                                        borderRadius: '12px', py: 1.1, fontWeight: 800,
+                                        bgcolor: 'rgba(255,255,255,0.2)', color: '#fff',
+                                        boxShadow: 'none',
+                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+                                        transition: 'all 0.2s', justifyContent: 'flex-start',
+                                        border: '1px solid rgba(255,255,255,0.2)',
+                                    }}
+                                >
+                                    Open Register
+                                </Button>
+                            </CardContent>
+                        </Card>
+
                         {/* ── Party Payment Details Block ─────────────────────────── */}
                         <Card sx={{
                             height: '100%',
@@ -958,7 +1006,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             </CardContent>
                         </Card>
 
-                        {/* ── Account Details Block ─────────────────────────── */}
+                        {/* ── Bank Book Block ─────────────────────────── */}
                         <Card sx={{
                             height: '100%',
                             borderRadius: '20px',
@@ -981,7 +1029,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     </Box>
                                     <Box>
                                         <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            ACCOUNT DETAILS
+                                            BANK BOOK
                                         </Typography>
                                         <Typography variant="caption" sx={{ opacity: 0.7 }}>
                                             Transaction & Balances

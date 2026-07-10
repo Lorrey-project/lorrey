@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Typography, Button, IconButton, TextField, CircularProgress,
   Chip, Snackbar, Alert, Tooltip, MenuItem, Select, FormControl, InputLabel
@@ -34,64 +35,64 @@ const normVeh = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, '');
 // highlight = special background for computed result columns
 const COLUMNS = [
   // ① Truck DB
-  { key: 'OWNER NAME',          label: 'Owner Name',              width: 150, calc: true  },
-  { key: 'VEHICLE NO',           label: 'Vehicle No',              width: 120, calc: true  },
+  { key: 'OWNER NAME', label: 'Owner Name', width: 150, calc: true },
+  { key: 'VEHICLE NO', label: 'Vehicle No', width: 120, calc: true },
   // ③–⑫ Aggregated from Cement Register
-  { key: 'GROSS FREIGHT',        label: 'Gross Freight\n(95% Payable)', width: 110, calc: true, bg: '#fef3c7' },
-  { key: 'LOADING ADVANCE',      label: 'Loading\nAdvance',        width: 90,  calc: true  },
-  { key: 'FUEL',                 label: 'Fuel\n(HSD Amt)',         width: 90,  calc: true  },
-  { key: 'TDS',                  label: 'TDS\n(1%)',               width: 80,  calc: true  },
-  { key: 'TRAVELLING EXP',       label: 'Travelling\nExp',         width: 90,  calc: true  },
-  { key: 'DAMAGE RECOVERY',      label: 'Damage\nRecovery',        width: 90,  calc: true  },
-  { key: 'CASH_BANK_OTHERS',     label: 'Cash/Bank\nTF/Others',    width: 100, calc: true  },
-  { key: 'OTHER DEDUCTION',      label: 'Other\nDeduction',        width: 90,  calc: true  },
-  { key: 'OTHER REASON',         label: 'Other\nReason',           width: 120, editable: true, bg: '#fef3c7' },
-  { key: 'GPS TRIP CHARGE',      label: 'GPS Trip\nCharge',        width: 80,  calc: true  },
-  { key: 'GPS DEVICE',           label: 'GPS\nDevice',             width: 80,  calc: true  },
+  { key: 'GROSS FREIGHT', label: 'Gross Freight\n(95% Payable)', width: 110, calc: true, bg: '#fef3c7' },
+  { key: 'LOADING ADVANCE', label: 'Loading\nAdvance', width: 90, calc: true },
+  { key: 'FUEL', label: 'Fuel\n(HSD Amt)', width: 90, calc: true },
+  { key: 'TDS', label: 'TDS\n(1%)', width: 80, calc: true },
+  { key: 'TRAVELLING EXP', label: 'Travelling\nExp', width: 90, calc: true },
+  { key: 'DAMAGE RECOVERY', label: 'Damage\nRecovery', width: 90, calc: true },
+  { key: 'CASH_BANK_OTHERS', label: 'Cash/Bank\nTF/Others', width: 100, calc: true },
+  { key: 'OTHER DEDUCTION', label: 'Other\nDeduction', width: 90, calc: true },
+  { key: 'OTHER REASON', label: 'Other\nReason', width: 120, editable: true, bg: '#fef3c7' },
+  { key: 'GPS TRIP CHARGE', label: 'GPS Trip\nCharge', width: 80, calc: true },
+  { key: 'GPS DEVICE', label: 'GPS\nDevice', width: 80, calc: true },
   // ⑬ Net Amount  (calculated)
-  { key: 'NET AMOUNT',           label: 'Net Amount',              width: 100, calc: true, highlight: '#dcfce7' },
+  { key: 'NET AMOUNT', label: 'Net Amount', width: 100, calc: true, highlight: '#dcfce7' },
   // ⑭–⑲ Incentives from Cement Register
-  { key: '8.5% NVCL',           label: '8.5% NVCL\nIncentive',   width: 90,  calc: true, bg: '#e0f2fe' },
-  { key: 'DEDICATED INCENTIVE',  label: 'Dedicated\nIncentive',    width: 90,  calc: true, bg: '#e0f2fe' },
-  { key: 'RAFTER',               label: 'Others',                  width: 80,  calc: true, bg: '#e0f2fe' },
-  { key: 'EXTRA U/L',            label: 'Extra U/L',               width: 80,  calc: true, bg: '#e0f2fe' },
-  { key: 'TOLL UP',              label: 'Toll UP',                 width: 80,  calc: true, bg: '#fef08a' },
-  { key: 'TOLL DOWN',            label: 'Toll Down',               width: 80,  calc: true, bg: '#fef08a' },
+  { key: '8.5% NVCL', label: '8.5% NVCL\nIncentive', width: 90, calc: true, bg: '#e0f2fe' },
+  { key: 'DEDICATED INCENTIVE', label: 'Dedicated\nIncentive', width: 90, calc: true, bg: '#e0f2fe' },
+  { key: 'RAFTER', label: 'Others', width: 80, calc: true, bg: '#e0f2fe' },
+  { key: 'EXTRA U/L', label: 'Extra U/L', width: 80, calc: true, bg: '#e0f2fe' },
+  { key: 'TOLL UP', label: 'Toll UP', width: 80, calc: true, bg: '#fef08a' },
+  { key: 'TOLL DOWN', label: 'Toll Down', width: 80, calc: true, bg: '#fef08a' },
   // ⑳ TDS on Incentive (calculated)
-  { key: 'TDS ON INCENTIVE',     label: 'TDS on\nIncentive/UL',   width: 90,  calc: true, bg: '#bbf7d0' },
+  { key: 'TDS ON INCENTIVE', label: 'TDS on\nIncentive/UL', width: 90, calc: true, bg: '#bbf7d0' },
   // ㉑ Total Freight (calculated)
-  { key: 'TOTAL FREIGHT',        label: 'Total Freight',           width: 100, calc: true, highlight: '#f3e8ff' },
+  { key: 'TOTAL FREIGHT', label: 'Total Freight', width: 100, calc: true, highlight: '#f3e8ff' },
   // Manual entries
-  { key: 'GST FCM',              label: 'GST FCM',                 width: 90,  editable: true, bg: '#fee2e2' },
-  { key: 'WITHHOLD AMOUNT',      label: 'Withhold\nAmount',        width: 90,  editable: true, bg: '#fee2e2' },
-  { key: 'WITHHOLD REASON',      label: 'Withhold\nReason',        width: 120, editable: true, bg: '#fee2e2' },
-  { key: 'PREV MONTH DUE',       label: 'Prev Month\nDue',         width: 100, editable: true, bg: '#fee2e2' },
+  { key: 'GST FCM', label: 'GST FCM', width: 90, editable: true, bg: '#fee2e2' },
+  { key: 'WITHHOLD AMOUNT', label: 'Withhold\nAmount', width: 90, editable: true, bg: '#fee2e2' },
+  { key: 'WITHHOLD REASON', label: 'Withhold\nReason', width: 120, editable: true, bg: '#fee2e2' },
+  { key: 'PREV MONTH DUE', label: 'Prev Month\nDue', width: 100, editable: true, bg: '#fee2e2' },
   // Net Payable (calculated)
-  { key: 'NET PAYABLE',          label: 'Net Payable\n(after deduct)', width: 120, calc: true, highlight: '#e0e7ff' },
+  { key: 'NET PAYABLE', label: 'Net Payable\n(after deduct)', width: 120, calc: true, highlight: '#e0e7ff' },
   // ㉙ Manual
-  { key: 'RECOVERED TO DAC',     label: 'Recovered\nto DAC',       width: 100, editable: true, bg: '#fce7f3' },
+  { key: 'RECOVERED TO DAC', label: 'Recovered\nto DAC', width: 100, editable: true, bg: '#fce7f3' },
   // ㉚ Amount Paid (manual)
-  { key: 'CREDIT REFUND',        label: 'Credit\nRefund',          width: 90,  editable: true, bg: '#d1fae5' },
-  { key: 'PAID TO PARTY',        label: 'Paid to\nParty',          width: 90,  editable: true, bg: '#d1fae5' },
+  { key: 'CREDIT REFUND', label: 'Credit\nRefund', width: 90, editable: true, bg: '#d1fae5' },
+  { key: 'PAID TO PARTY', label: 'Paid to\nParty', width: 90, editable: true, bg: '#d1fae5' },
   // ㉛ Balance Due (calculated)
-  { key: 'BALANCE DUE',          label: 'Balance Due',             width: 100, calc: true, highlight: '#fee2e2' },
+  { key: 'BALANCE DUE', label: 'Balance Due', width: 100, calc: true, highlight: '#fee2e2' },
   // ㉜–㉝ Manual
-  { key: 'PAYMENT DATE',         label: 'Payment\nDate',           width: 110, editable: true, date: true, bg: '#f8fafc' },
-  { key: 'REMARKS',              label: 'Remarks',                 width: 500, editable: true, bg: '#f8fafc' },
+  { key: 'PAYMENT DATE', label: 'Payment\nDate', width: 110, editable: true, date: true, bg: '#f8fafc' },
+  { key: 'REMARKS', label: 'Remarks', width: 500, editable: true, bg: '#f8fafc' },
 ];
 
 export default function PartyPaymentDetails({ onBack }) {
   const now = new Date();
   const currentFyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
-  const [selYear,  setSelYear]  = useState(`${currentFyStart}-${currentFyStart + 1}`);
+  const [selYear, setSelYear] = useState(`${currentFyStart}-${currentFyStart + 1}`);
 
-  const [rows,       setRows]       = useState([]);
+  const [rows, setRows] = useState([]);
   const [localEdits, setLocalEdits] = useState({});
-  const [loading,    setLoading]    = useState(false);
-  const [saving,     setSaving]     = useState(false);
-  const [snack,      setSnack]      = useState(null);
-  const [debugInfo,  setDebugInfo]  = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [snack, setSnack] = useState(null);
+  const [debugInfo, setDebugInfo] = useState('');
 
   const yearOptions = [];
   for (let y = currentFyStart - 2; y <= currentFyStart + 1; y++) yearOptions.push(`${y}-${y + 1}`);
@@ -138,29 +139,29 @@ export default function PartyPaymentDetails({ onBack }) {
       entries.forEach(row => {
         // Field name in DB: "VEHICLE NUMBER"
         const rawVeh = row['VEHICLE NUMBER'] || '';
-        const vKey   = normVeh(rawVeh);
+        const vKey = normVeh(rawVeh);
         if (!vKey) return;
 
         if (!agg[vKey]) {
           agg[vKey] = {
-            'VEHICLE NO':          rawVeh.trim().toUpperCase(),
-            'OWNER NAME':          truckMap[vKey] || (row['OWNER NAME'] || '').trim() || 'Unknown',
-            'GROSS FREIGHT':       0,   // = SUM of "BILLING @ 95% (PARTY PAYABLE)"
-            'LOADING ADVANCE':     0,   // = SUM of "ADVANCE"
-            'FUEL':                0,   // = SUM of "HSD AMOUNT"
-            'TDS':                 0,   // = SUM of "TDS@1%"
-            'TRAVELLING EXP':      0,   // = SUM of "TRAVELLING EXP"
-            'DAMAGE RECOVERY':     0,   // = SUM of "SHORTAGE AMOUNT"
-            'CASH_BANK_OTHERS':    0,   // = SUM of BANK TF + OTHERS + SITE CASH
-            'OTHER DEDUCTION':     0,   // = SUM of "OTHERS DEDUCTION"
-            'GPS TRIP CHARGE':     0,   // = SUM of "GPS MONITORING CHARGE"
-            'GPS DEVICE':          0,   // = SUM of "GPS DEVICE"
-            '8.5% NVCL':           0,   // = SUM of "10W EXTRA 8.5%"
+            'VEHICLE NO': rawVeh.trim().toUpperCase(),
+            'OWNER NAME': truckMap[vKey] || (row['OWNER NAME'] || '').trim() || 'Unknown',
+            'GROSS FREIGHT': 0,   // = SUM of "BILLING @ 95% (PARTY PAYABLE)"
+            'LOADING ADVANCE': 0,   // = SUM of "ADVANCE"
+            'FUEL': 0,   // = SUM of "HSD AMOUNT"
+            'TDS': 0,   // = SUM of "TDS"
+            'TRAVELLING EXP': 0,   // = SUM of "TRAVELLING EXP"
+            'DAMAGE RECOVERY': 0,   // = SUM of "SHORTAGE AMOUNT"
+            'CASH_BANK_OTHERS': 0,   // = SUM of BANK TF + OTHERS + SITE CASH
+            'OTHER DEDUCTION': 0,   // = SUM of "OTHERS DEDUCTION"
+            'GPS TRIP CHARGE': 0,   // = SUM of "GPS MONITORING CHARGE"
+            'GPS DEVICE': 0,   // = SUM of "GPS DEVICE"
+            '8.5% NVCL': 0,   // = SUM of "10W EXTRA 8.5%"
             'DEDICATED INCENTIVE': 0,   // = SUM of "DEDICATED"
-            'RAFTER':              0,   // = SUM of "RAFTER"
-            'EXTRA U/L':           0,   // = SUM of "EXTRA UNLOADING"
-            'TOLL UP':             0,   // = SUM of "UP TOLL"
-            'TOLL DOWN':           0,   // = SUM of "DOWN TOLL"
+            'RAFTER': 0,   // = SUM of "RAFTER"
+            'EXTRA U/L': 0,   // = SUM of "EXTRA UNLOADING"
+            'TOLL UP': 0,   // = SUM of "UP TOLL"
+            'TOLL DOWN': 0,   // = SUM of "DOWN TOLL"
           };
         }
 
@@ -183,40 +184,40 @@ export default function PartyPaymentDetails({ onBack }) {
         };
 
         // ③ Gross Freight — actual DB keys include 'BILLING ER 95%', 'BILLING ER VAR', and 'AMOUNT'
-        a['GROSS FREIGHT']       += getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT');
+        a['GROSS FREIGHT'] += getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT');
 
         // ④ Loading Advance
-        a['LOADING ADVANCE']     += getF('ADVANCE');
+        a['LOADING ADVANCE'] += getF('ADVANCE');
 
         // ⑤ Fuel (HSD Amount)
-        a['FUEL']                += getF('HSD AMOUNT');
+        a['FUEL'] += getF('HSD AMOUNT');
 
-        // ⑥ TDS — stored as _tds_percent (percentage) or TDS@1% (absolute)
-        const tdsAbs  = getF('TDS@1%', 'TDS 1%', 'TDS');
-        const tdsPct  = getF('_tds_percent');
-        const grFr    = getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'AMOUNT');
+        // ⑥ TDS — stored as _tds_percent (percentage) or TDS (absolute)
+        const tdsAbs = getF('TDS', 'TDS 1%');
+        const tdsPct = getF('_tds_percent');
+        const grFr = getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'AMOUNT');
         a['TDS'] += tdsAbs !== 0 ? tdsAbs : (tdsPct > 0 ? grFr * (tdsPct / 100) : grFr * 0.01);
 
         // ⑦ Travelling Expense
-        a['TRAVELLING EXP']      += getF('TRAVELLING EXP', 'TRAVELLING  EXP', 'TRAVEL EXP');
+        a['TRAVELLING EXP'] += getF('TRAVELLING EXP', 'TRAVELLING  EXP', 'TRAVEL EXP');
 
         // ⑧ Damage Recovery (check direct amount or price per bag * total bags)
-        const shortageAmt  = getF('SHORTAGE (AMOUNT)', 'SHORTAGE AMOUNT');
+        const shortageAmt = getF('SHORTAGE (AMOUNT)', 'SHORTAGE AMOUNT');
         const shortageBags = getF('SHORTAGE (BAG)', 'SHORTAGE BAG');
         const shortageRate = getF('SHORTAGE (RATE)', 'SHORTAGE RATE');
-        a['DAMAGE RECOVERY']     += shortageAmt || (shortageBags * shortageRate);
+        a['DAMAGE RECOVERY'] += shortageAmt || (shortageBags * shortageRate);
 
         // ⑨ Cash/Bank TF/Others — note actual keys include 'Site Cash', 'OFFICE CASH', 'Bank TF'
-        a['CASH_BANK_OTHERS']    += getF('BANK TF', 'BANK TF ', 'Bank TF') + getF('Site Cash', 'SITE CASH', 'SITE_CASH') + getF('OFFICE CASH', 'Office Cash', 'OFFICE_CASH');
+        a['CASH_BANK_OTHERS'] += getF('BANK TF', 'BANK TF ', 'Bank TF') + getF('Site Cash', 'SITE CASH', 'SITE_CASH') + getF('OFFICE CASH', 'Office Cash', 'OFFICE_CASH');
 
         // ⑩ Other Deduction — check manual entry keys
-        a['OTHER DEDUCTION']     += getF('OTHERS DEDUCTION', 'OTHERS  DEDUCTION', 'OTHER DEDUCTION', 'OTHERS', 'Others deduction', 'Other');
+        a['OTHER DEDUCTION'] += getF('OTHERS DEDUCTION', 'OTHERS  DEDUCTION', 'OTHER DEDUCTION', 'OTHERS', 'Others deduction', 'Other');
 
         // ⑪ GPS Trip Charge
-        a['GPS TRIP CHARGE']     += getF('GPS Monitoring Charge', 'GPS MONITORING CHARGE', 'GPS MONITORING  CHARGE', 'GPS TRIP CHARGE');
+        a['GPS TRIP CHARGE'] += getF('GPS Monitoring Charge', 'GPS MONITORING CHARGE', 'GPS MONITORING  CHARGE', 'GPS TRIP CHARGE');
 
         // ⑫ GPS Device
-        a['GPS DEVICE']          += getF('GPS DEVICE', 'GPS  DEVICE');
+        a['GPS DEVICE'] += getF('GPS DEVICE', 'GPS  DEVICE');
 
         // ⑭ 8.5% NVCL Incentive — stored as nested '10W EXTRA 8': {'5%': 59.92}
         const ncvl85 = row['10W EXTRA 8.5%'] !== undefined
@@ -232,34 +233,34 @@ export default function PartyPaymentDetails({ onBack }) {
         a['DEDICATED INCENTIVE'] += getF('DEDICATED', 'DEDICATED INCENTIVE');
 
         // ⑯ Rafter
-        a['RAFTER']              += getF('RAFTER');
+        a['RAFTER'] += getF('RAFTER');
 
         // ⑰ Extra U/L
-        a['EXTRA U/L']           += getF('EXTRA UNLOADING', 'EXTRA  UNLOADING', 'EXTRA UL');
+        a['EXTRA U/L'] += getF('EXTRA UNLOADING', 'EXTRA  UNLOADING', 'EXTRA UL');
 
         // ⑱ Toll UP
-        a['TOLL UP']             += getF('UP TOLL', 'TOLL UP', 'TOLL_UP', 'TOLL UP ');
+        a['TOLL UP'] += getF('UP TOLL', 'TOLL UP', 'TOLL_UP', 'TOLL UP ');
 
         // ⑲ Toll Down
-        a['TOLL DOWN']           += getF('DOWN TOLL', 'TOLL DOWN', 'TOLL_DOWN', 'TOLL DOWN ');
+        a['TOLL DOWN'] += getF('DOWN TOLL', 'TOLL DOWN', 'TOLL_DOWN', 'TOLL DOWN ');
       });
 
       // 5. Build final rows merging aggregated + saved manuals
       const finalRows = Object.values(agg).map(ag => {
-        const vKey  = normVeh(ag['VEHICLE NO']);
+        const vKey = normVeh(ag['VEHICLE NO']);
         const saved = manualMap[vKey] || {};
         return {
           ...ag,
-          'GST FCM':          num(saved.gstFcm),
-          'WITHHOLD AMOUNT':  num(saved.withholdAmount),
-          'WITHHOLD REASON':  saved.withholdReason || '',
-          'OTHER REASON':     saved.otherReason || '',
-          'PREV MONTH DUE':   num(saved.prevMonthDue),
+          'GST FCM': num(saved.gstFcm),
+          'WITHHOLD AMOUNT': num(saved.withholdAmount),
+          'WITHHOLD REASON': saved.withholdReason || '',
+          'OTHER REASON': saved.otherReason || '',
+          'PREV MONTH DUE': num(saved.prevMonthDue),
           'RECOVERED TO DAC': num(saved.recoveredToDac),
-          'CREDIT REFUND':    num(saved.creditRefund),
-          'PAID TO PARTY':    num(saved.paidToParty),
-          'PAYMENT DATE':     saved.paymentDate || '',
-          'REMARKS':          saved.remarks     || '',
+          'CREDIT REFUND': num(saved.creditRefund),
+          'PAID TO PARTY': num(saved.paidToParty),
+          'PAYMENT DATE': saved.paymentDate || '',
+          'REMARKS': saved.remarks || '',
         };
       });
 
@@ -288,8 +289,8 @@ export default function PartyPaymentDetails({ onBack }) {
       // ⑬ Net Amount = Gross Freight - (all deductions)
       const totalDeductions =
         num(r['LOADING ADVANCE']) +
-        num(r['FUEL'])            +
-        num(r['TDS'])             +
+        num(r['FUEL']) +
+        num(r['TDS']) +
         num(r['TRAVELLING EXP']) +
         num(r['DAMAGE RECOVERY']) +
         num(r['CASH_BANK_OTHERS']) +
@@ -303,17 +304,17 @@ export default function PartyPaymentDetails({ onBack }) {
 
       // ㉑ Total Freight = Net Amount + (8.5% NVCL + Dedicated + Extra UL + Toll UP + Toll Down) − TDS on Incentive
       const incentiveSum =
-        num(r['8.5% NVCL'])           +
+        num(r['8.5% NVCL']) +
         num(r['DEDICATED INCENTIVE']) +
-        num(r['EXTRA U/L'])           +
-        num(r['TOLL UP'])             +
+        num(r['EXTRA U/L']) +
+        num(r['TOLL UP']) +
         num(r['TOLL DOWN']);
       r['TOTAL FREIGHT'] = round2(r['NET AMOUNT'] + incentiveSum - r['TDS ON INCENTIVE']);
 
       // ㉘ Net Payable = Total Freight + GST FCM + Prev Month Due − Withhold Amount
       r['NET PAYABLE'] = round2(
         r['TOTAL FREIGHT'] +
-        num(r['GST FCM'])        +
+        num(r['GST FCM']) +
         num(r['PREV MONTH DUE']) -
         num(r['WITHHOLD AMOUNT'])
       );
@@ -347,20 +348,20 @@ export default function PartyPaymentDetails({ onBack }) {
     const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
     try {
       const token = localStorage.getItem('token');
-      const data  = dirtyIdxs.map(ri => {
+      const data = dirtyIdxs.map(ri => {
         const cr = computedRows[ri];
         return {
-          vehicleNo:      cr['VEHICLE NO'],
-          gstFcm:         num(cr['GST FCM']),
+          vehicleNo: cr['VEHICLE NO'],
+          gstFcm: num(cr['GST FCM']),
           withholdAmount: num(cr['WITHHOLD AMOUNT']),
           withholdReason: cr['WITHHOLD REASON'] || '',
-          otherReason:    cr['OTHER REASON']    || '',
-          prevMonthDue:   num(cr['PREV MONTH DUE']),
+          otherReason: cr['OTHER REASON'] || '',
+          prevMonthDue: num(cr['PREV MONTH DUE']),
           recoveredToDac: num(cr['RECOVERED TO DAC']),
-          creditRefund:   num(cr['CREDIT REFUND']),
-          paidToParty:    num(cr['PAID TO PARTY']),
-          paymentDate:    cr['PAYMENT DATE'] || '',
-          remarks:        cr['REMARKS']      || '',
+          creditRefund: num(cr['CREDIT REFUND']),
+          paidToParty: num(cr['PAID TO PARTY']),
+          paymentDate: cr['PAYMENT DATE'] || '',
+          remarks: cr['REMARKS'] || '',
         };
       });
       await axios.post(`${API_URL}/party-payment/bulk`,
@@ -419,18 +420,12 @@ export default function PartyPaymentDetails({ onBack }) {
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>Month</InputLabel>
-            <Select value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}>
-              {MONTH_NAMES.map((m, i) => <MenuItem key={i} value={i + 1}>{m}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Financial Year</InputLabel>
-            <Select value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}>
-              {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
-            </Select>
-          </FormControl>
+          <SearchableSelect sx={{ minWidth: 140 }} value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}>
+            {MONTH_NAMES.map((m, i) => <MenuItem key={i} value={i + 1}>{m}</MenuItem>)}
+          </SearchableSelect>
+          <SearchableSelect sx={{ minWidth: 120 }} value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}>
+            {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+          </SearchableSelect>
 
           <Chip
             label={`${computedRows.length} vehicle${computedRows.length !== 1 ? 's' : ''}`}
@@ -493,8 +488,8 @@ export default function PartyPaymentDetails({ onBack }) {
 
                 {COLUMNS.map((col, ci) => {
                   const isSticky = col.key === 'OWNER NAME' || col.key === 'VEHICLE NO';
-                  const leftPx   = isSticky ? stickyLeft[col.key] : undefined;
-                  const bg       = col.editable ? '#e11d48' : col.highlight ? '#4f46e5' : '#6d28d9';
+                  const leftPx = isSticky ? stickyLeft[col.key] : undefined;
+                  const bg = col.editable ? '#e11d48' : col.highlight ? '#4f46e5' : '#6d28d9';
                   return (
                     <th key={col.key} style={{
                       position: 'sticky', top: 0,
@@ -507,7 +502,7 @@ export default function PartyPaymentDetails({ onBack }) {
                     }}>
                       {col.label}
                       {col.editable && <div style={{ fontSize: 9, opacity: 0.85, fontWeight: 400, marginTop: 1 }}>✎ manual</div>}
-                      {col.calc    && <div style={{ fontSize: 9, opacity: 0.65, fontWeight: 400, marginTop: 1 }}>∑ auto</div>}
+                      {col.calc && <div style={{ fontSize: 9, opacity: 0.65, fontWeight: 400, marginTop: 1 }}>∑ auto</div>}
                     </th>
                   );
                 })}
@@ -539,14 +534,14 @@ export default function PartyPaymentDetails({ onBack }) {
                     </td>
 
                     {COLUMNS.map(col => {
-                      const val     = row[col.key];
+                      const val = row[col.key];
                       const isDirty = localEdits[ri]?.[col.key] !== undefined;
                       const isSticky = col.key === 'OWNER NAME' || col.key === 'VEHICLE NO';
-                      const leftPx   = isSticky ? stickyLeft[col.key] : undefined;
+                      const leftPx = isSticky ? stickyLeft[col.key] : undefined;
 
-                      const isText   = ['OWNER NAME', 'VEHICLE NO', 'REMARKS'].includes(col.key);
-                      const isDate   = col.key === 'PAYMENT DATE';
-                      const align    = isText ? 'left' : isDate ? 'center' : 'right';
+                      const isText = ['OWNER NAME', 'VEHICLE NO', 'REMARKS'].includes(col.key);
+                      const isDate = col.key === 'PAYMENT DATE';
+                      const align = isText ? 'left' : isDate ? 'center' : 'right';
 
                       // Cell background priority: dirty → highlight → col.bg → alternating row
                       const cellBg = isDirty
@@ -640,7 +635,7 @@ export default function PartyPaymentDetails({ onBack }) {
 
                   {COLUMNS.map(col => {
                     const isSticky = col.key === 'OWNER NAME' || col.key === 'VEHICLE NO';
-                    const leftPx   = isSticky ? stickyLeft[col.key] : undefined;
+                    const leftPx = isSticky ? stickyLeft[col.key] : undefined;
 
                     let cellContent = '—';
                     if (col.key === 'OWNER NAME') cellContent = 'TOTAL';

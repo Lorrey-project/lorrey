@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import SearchableSelect from './SearchableSelect';
 import axios from 'axios';
 import {
   Box, Button, Typography, IconButton, Select, MenuItem,
@@ -179,8 +180,13 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
         else if (upper === 'MKT') displayType = 'MKT';
       }
 
-      const commApp = contact ? (contact['Basic Freight Comission Applicability '] || contact.basic_freight_commission_applicability || '') : '';
-      const commValue = contact ? (contact.basic_freight_commission || contact['basic_freight_commission '] || 0.05) : 0.05;
+      const commApp = contact ? (contact['Incentive Comission Appliciability '] || contact.incentive_commission_applicability || '') : '';
+      let rawComm = contact ? (contact.incentive_commission || contact['incentive_commission ']) : undefined;
+      let commValue = (rawComm !== null && rawComm !== undefined && rawComm !== '') ? num(rawComm) : 5;
+      if (commValue > 0 && commValue < 1) {
+        commValue = commValue * 100;
+      }
+      commValue = commValue / 100;
 
       byTruck[truck] = {
         type: displayType,
@@ -241,11 +247,7 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
       }
     }
 
-    // Commission logic (use dynamic rate from contact, fallback to 5%)
-    if (entry.hasComm) {
-      const commRate = num(entry.commRate, 0.05);
-      entry.commission += orgFreight * commRate;
-    }
+    // Commission calculation moved to final aggregation (based on total incentive)
   }
   // 3. Final Aggregation with Achievement Criteria
   return Object.values(byTruck).map(t => {
@@ -266,6 +268,12 @@ function buildIncentiveData(rows, year, month, truckContacts = []) {
 
     const nvlNvclTotal = t.nvl.amt + t.nvcl.amt;
     const totalIncentiveWithBonus = nvlNvclTotal + t.extra10W + t.extra6W;
+    
+    // Incentive Commission Amount = Incentive Amount × (Incentive Commission % ÷ 100)
+    if (t.hasComm) {
+      t.commission = Math.round(totalIncentiveWithBonus * num(t.commRate, 0.05));
+    }
+    
     const totalFinal = totalIncentiveWithBonus; // Final Settlement (Removed commission subtraction as per plan)
 
     return { ...t, total: nvlNvclTotal, totalFinal };
@@ -1686,6 +1694,50 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     });
   }, [comparisonViewDef]);
 
+  const getActualNVL = (truckNo) => {
+    const act = actuals[truckNo];
+    if (typeof act === 'object' && act !== null) return act.nvl || '';
+    return '';
+  };
+
+  const getActualNVCL = (truckNo) => {
+    const act = actuals[truckNo];
+    if (typeof act === 'object' && act !== null) return act.nvcl || '';
+    return typeof act !== 'undefined' ? act : '';
+  };
+
+  const getActual10WH = (truckNo) => {
+    const act = actuals[truckNo];
+    if (typeof act === 'object' && act !== null) return act.w10 || '';
+    return '';
+  };
+
+  const getActual6WH = (truckNo) => {
+    const act = actuals[truckNo];
+    if (typeof act === 'object' && act !== null) return act.w6 || '';
+    return '';
+  };
+
+  const getTotalActual = (truckNo) => {
+    const act = actuals[truckNo];
+    if (typeof act === 'object' && act !== null) return num(act.nvl) + num(act.nvcl) + num(act.w10) + num(act.w6);
+    return num(act);
+  };
+
+  const updateActual = (truckNo, field, value) => {
+    setActuals(prev => {
+      const current = prev[truckNo];
+      let newObj = { nvl: '', nvcl: '', w10: '', w6: '' };
+      if (typeof current === 'object' && current !== null) {
+        newObj = { ...current };
+      } else if (typeof current !== 'undefined') {
+        newObj.nvcl = current;
+      }
+      newObj[field] = value;
+      return { ...prev, [truckNo]: newObj };
+    });
+  };
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif' }}>
 
@@ -1709,7 +1761,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
 
           {/* Month & Year Selectors */}
           <Box display="flex" alignItems="center" gap={1}>
-            <Select
+            <SearchableSelect
               size="small"
               value={month}
               onChange={(e) => {
@@ -1742,9 +1794,9 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
               {MONTH_NAMES.map((m, i) => (
                 <MenuItem key={i} value={i} sx={{ fontSize: '11px', fontWeight: 600 }}>{m}</MenuItem>
               ))}
-            </Select>
+            </SearchableSelect>
 
-            <Select
+            <SearchableSelect
               size="small"
               value={year}
               onChange={(e) => {
@@ -1777,7 +1829,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
               {years.map(y => (
                 <MenuItem key={y} value={y} sx={{ fontSize: '11px', fontWeight: 600 }}>{y}</MenuItem>
               ))}
-            </Select>
+            </SearchableSelect>
           </Box>
 
           {/* Status Badge */}
@@ -2000,26 +2052,37 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
         <Box sx={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', minWidth: 900, fontFamily: 'inherit', fontSize: 12 }}>
             <thead>
-              {/* Row 1: Column group headers */}
+              {/* Row 1: Top Level group headers */}
               <tr>
-                <th rowSpan={2} style={{ ...thBase, bgcolor: '#bfdbfe', background: '#bfdbfe', minWidth: 60 }}>TYPE</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#bfdbfe', minWidth: 180 }}>Owner Name</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#bfdbfe', minWidth: 120 }}>Truck No</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#bfdbfe', minWidth: 70 }}>Wheel</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#bfdbfe', minWidth: 60 }}>Trips</th>
-                {/* NVL group */}
+                <th rowSpan={3} style={{ ...thBase, bgcolor: '#bfdbfe', background: '#bfdbfe', minWidth: 60 }}>TYPE</th>
+                <th rowSpan={3} style={{ ...thBase, background: '#bfdbfe', minWidth: 180 }}>Owner Name</th>
+                <th rowSpan={3} style={{ ...thBase, background: '#bfdbfe', minWidth: 120 }}>Truck No</th>
+                <th rowSpan={3} style={{ ...thBase, background: '#bfdbfe', minWidth: 70 }}>Wheel</th>
+                <th rowSpan={3} style={{ ...thBase, background: '#bfdbfe', minWidth: 60 }}>Trips</th>
+                <th colSpan={10} style={{ ...thBase, background: '#e2e8f0', color: '#1e293b', letterSpacing: '1px' }}>PROJECTED / DEDICATED</th>
+                <th colSpan={4} style={{ ...thBase, background: '#fed7aa', color: '#9a3412', letterSpacing: '1px' }}>ACTUAL / DEDICATED</th>
+                <th rowSpan={3} style={{ ...thBase, background: '#fbcfe8', minWidth: 90 }}>DIFFERENCE<br />(ACTUAL-PROJECTED)</th>
+                <th rowSpan={3} style={{ ...thBase, background: '#e0e7ff', minWidth: 90 }}>SETTLED AMOUNT</th>
+              </tr>
+
+              {/* Row 2: Sub-Level group headers */}
+              <tr>
+                {/* Under PROJECTED / DEDICATED */}
                 <th colSpan={3} style={{ ...thBase, background: '#ddd6fe', color: '#4c1d95' }}>NVL</th>
-                {/* NVCL group */}
                 <th colSpan={3} style={{ ...thBase, background: '#bbf7d0', color: '#14532d' }}>NVCL</th>
                 <th rowSpan={2} style={{ ...thBase, background: '#fef9c3', minWidth: 80 }}>Total</th>
                 <th rowSpan={2} style={{ ...thBase, background: '#fef9c3', minWidth: 90 }}>10WH extra 8.5% incentive</th>
                 <th rowSpan={2} style={{ ...thBase, background: '#fef9c3', minWidth: 90 }}>6WH extra 15% incentive</th>
                 <th rowSpan={2} style={{ ...thBase, background: '#fef9c3', minWidth: 80 }}>Total (Projected)</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#fed7aa', minWidth: 80 }}>ACTUAL</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#fbcfe8', minWidth: 90 }}>DIFFERENCE<br />(ACTUAL-PROJECTED)</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#e0e7ff', minWidth: 90 }}>SETTLED AMOUNT</th>
+
+                {/* Under ACTUAL / DEDICATED */}
+                <th rowSpan={2} style={{ ...thBase, background: '#ffedd5', color: '#4c1d95', minWidth: 70 }}>NVL</th>
+                <th rowSpan={2} style={{ ...thBase, background: '#ffedd5', color: '#14532d', minWidth: 70 }}>NVCL</th>
+                <th rowSpan={2} style={{ ...thBase, background: '#ffedd5', color: '#b91c1c', minWidth: 70 }}>10WH</th>
+                <th rowSpan={2} style={{ ...thBase, background: '#ffedd5', color: '#b91c1c', minWidth: 70 }}>6WH</th>
               </tr>
-              {/* Row 2: Sub-column headers */}
+
+              {/* Row 3: Third-Level headers */}
               <tr>
                 <th style={{ ...thBase, background: '#ede9fe', fontSize: 10 }}>Sum of{'\n'}Inv Qty</th>
                 <th style={{ ...thBase, background: '#ede9fe', fontSize: 10 }}>Sum of{'\n'}ORG{'\n'}FREIGHT</th>
@@ -2066,31 +2129,65 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                   <td style={{ ...tdBase, fontWeight: 800, color: '#0f172a', background: 'rgba(254,249,195,0.4)' }}>{fmt(t.totalFinal)}</td>
                   <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
                     <input type="number"
-                      value={actuals[t.truckNo] || ''}
-                      onChange={e => setActuals(prev => ({ ...prev, [t.truckNo]: e.target.value }))}
+                      value={getActualNVL(t.truckNo)}
+                      onChange={e => updateActual(t.truckNo, 'nvl', e.target.value)}
                       style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#166534', padding: '4px' }}
                       placeholder="0"
                     />
                   </td>
-                  <td style={{ ...tdBase, fontWeight: 800, color: (num(actuals[t.truckNo]) - t.totalFinal) < 0 ? '#b91c1c' : '#047857', background: 'rgba(251,207,232,0.3)' }}>
-                    {fmt(num(actuals[t.truckNo]) - t.totalFinal)}
+                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
+                    <input type="number"
+                      value={getActualNVCL(t.truckNo)}
+                      onChange={e => updateActual(t.truckNo, 'nvcl', e.target.value)}
+                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#166534', padding: '4px' }}
+                      placeholder="0"
+                    />
+                  </td>
+                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
+                    <input type="number"
+                      value={getActual10WH(t.truckNo)}
+                      onChange={e => updateActual(t.truckNo, 'w10', e.target.value)}
+                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#b91c1c', padding: '4px' }}
+                      placeholder="0"
+                    />
+                  </td>
+                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
+                    <input type="number"
+                      value={getActual6WH(t.truckNo)}
+                      onChange={e => updateActual(t.truckNo, 'w6', e.target.value)}
+                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#b91c1c', padding: '4px' }}
+                      placeholder="0"
+                    />
+                  </td>
+                  <td style={{ ...tdBase, fontWeight: 800, color: (getTotalActual(t.truckNo) - t.totalFinal) < 0 ? '#b91c1c' : '#047857', background: 'rgba(251,207,232,0.3)' }}>
+                    {fmt(getTotalActual(t.truckNo) - t.totalFinal)}
                   </td>
                   <td style={{ ...tdBase, fontWeight: 800, color: '#4338ca', background: 'rgba(224,231,255,0.4)' }}>
-                    {fmt(num(actuals[t.truckNo]) > t.totalFinal ? t.totalFinal : num(actuals[t.truckNo]))}
+                    {fmt(getTotalActual(t.truckNo) > t.totalFinal ? t.totalFinal : getTotalActual(t.truckNo))}
                   </td>
                 </tr>
               ))}
 
               {/* Totals footer row */}
               {data.length > 0 && (() => {
-                let totalActual = 0;
+                let totalActualNVL = 0;
+                let totalActualNVCL = 0;
+                let totalActual10WH = 0;
+                let totalActual6WH = 0;
                 let totalDiff = 0;
                 let totalSettled = 0;
                 data.forEach(t => {
-                  const act = num(actuals[t.truckNo]);
-                  totalActual += act;
-                  totalDiff += (act - t.totalFinal);
-                  totalSettled += (act > t.totalFinal ? t.totalFinal : act);
+                  const actNVL = num(getActualNVL(t.truckNo));
+                  const actNVCL = num(getActualNVCL(t.truckNo));
+                  const act10WH = num(getActual10WH(t.truckNo));
+                  const act6WH = num(getActual6WH(t.truckNo));
+                  const totalAct = actNVL + actNVCL + act10WH + act6WH;
+                  totalActualNVL += actNVL;
+                  totalActualNVCL += actNVCL;
+                  totalActual10WH += act10WH;
+                  totalActual6WH += act6WH;
+                  totalDiff += (totalAct - t.totalFinal);
+                  totalSettled += (totalAct > t.totalFinal ? t.totalFinal : totalAct);
                 });
                 return (
                   <tr style={{ background: '#e2e8f0', borderTop: '2px solid #475569' }}>
@@ -2108,7 +2205,10 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                     <td style={{ ...tdBase, fontWeight: 800 }}>{fmt(totals.extra10W)}</td>
                     <td style={{ ...tdBase, fontWeight: 800 }}>{fmt(totals.extra6W)}</td>
                     <td style={{ ...tdBase, fontWeight: 900, fontSize: 13, color: '#0f172a', background: 'rgba(254,249,195,0.9)' }}>{fmt(totals.grand)}</td>
-                    <td style={{ ...tdBase, fontWeight: 900, fontSize: 13, color: '#166534', background: 'rgba(254,215,170,0.6)' }}>{fmt(totalActual)}</td>
+                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,237,213,0.7)', color: '#9a3412' }}>{fmt(totalActualNVL)}</td>
+                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,237,213,0.7)', color: '#9a3412' }}>{fmt(totalActualNVCL)}</td>
+                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,237,213,0.7)', color: '#9a3412' }}>{fmt(totalActual10WH)}</td>
+                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,237,213,0.7)', color: '#9a3412' }}>{fmt(totalActual6WH)}</td>
                     <td style={{ ...tdBase, fontWeight: 900, fontSize: 13, color: totalDiff < 0 ? '#b91c1c' : '#047857', background: 'rgba(251,207,232,0.8)' }}>{fmt(totalDiff)}</td>
                     <td style={{ ...tdBase, fontWeight: 900, fontSize: 13, color: '#312e81', background: 'rgba(224,231,255,0.8)' }}>{fmt(totalSettled)}</td>
                   </tr>

@@ -77,6 +77,7 @@ app.use("/fy-details", require("./routes/financialYearRoutes"));
 app.use("/account-details", require("./routes/accountDetailRoutes"));
 app.use("/remittance-advise", require("./routes/remittanceAdviseRoutes"));
 app.use("/daily-summary", require("./routes/dailySummaryRoutes"));
+app.use("/pump-payment-register", require("./routes/pumpPaymentRegisterRoutes"));
 
 const activePortals = {
   office: 0,

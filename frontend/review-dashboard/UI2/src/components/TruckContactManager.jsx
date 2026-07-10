@@ -92,6 +92,7 @@ const DB_KEYS = {
   driverPanAadharLink: 'Driver PAN Aadhar Link ',
   basicFreightComm: 'basic_freight_commission',
   incentiveCommVal: 'incentive_commission',
+  gstDocs: 'gst_documents',
 };
 
 const getStr = (...candidates) => {
@@ -140,6 +141,7 @@ export default function TruckContactManager({ open, onClose }) {
       setForm({});
       setErrors({});
       setEditId(null);
+      setDocs(prev => prev.map(d => ({ ...d, status: 'Pending', url: undefined, fileName: undefined })));
       fetchContacts();
       if (userRole === 'Head-office') fetchApprovals();
     }
@@ -247,13 +249,25 @@ export default function TruckContactManager({ open, onClose }) {
         driverPanAadharLink: form.driverPanAadharLink,
         basicFreightComm: form.basicFreightComm,
         incentiveCommVal: form.incentiveCommVal,
+        gstDocs: form.gstDocs,
       };
+
+      docs.forEach(d => {
+        if (d.url) {
+          payload[`doc_url_${d.id}`] = d.url;
+          if (d.fileName) payload[`doc_fileName_${d.id}`] = d.fileName;
+        }
+      });
 
       Object.entries(formToKey).forEach(([k, v]) => {
         const dbKey = DB_KEYS[k];
         if (dbKey && v !== undefined && v !== null) {
-          const val = String(v).trim();
-          if (val !== '' || !editId) payload[dbKey] = val;
+          if (Array.isArray(v)) {
+            payload[dbKey] = v;
+          } else {
+            const val = String(v).trim();
+            if (val !== '' || !editId) payload[dbKey] = val;
+          }
         }
       });
 
@@ -316,7 +330,7 @@ export default function TruckContactManager({ open, onClose }) {
       custType: getStr(c["TYPE OF CUSTOMER "], c.type),
       nilTds: getStr(c["NIL TDS Declaration "], c.nil_tds_declaration),
       tdsApp: getStr(c["TDS Applicability "], c.tds_applicability),
-      basicFreight: getStr(c["Basic Freight Comission Applicability "], c.incentive_commission_applicability),
+      basicFreight: getStr(c["Basic Freight Comission Applicability "], c.basic_freight_commission_applicability),
       incentiveComm: getStr(c["Incentive Comission Appliciability "], c.incentive_commission_applicability),
       gstType: getStr(c["GST TYPE "], c.gst_type),
       gstNo: getStr(c["GST NO "], c.gst_no),
@@ -341,10 +355,20 @@ export default function TruckContactManager({ open, onClose }) {
       driverPanAadharLink: getStr(c["Driver PAN Aadhar Link "], c.driver_pan_aadhar_link),
       basicFreightComm: getStr(c.basic_freight_commission, c["basic_freight_commission "]),
       incentiveCommVal: getStr(c.incentive_commission, c["incentive_commission "]),
+      gstDocs: Array.isArray(c.gst_documents) ? c.gst_documents : [],
     });
     setEditId(c._id);
     setTab(0);
     setFormTab(0);
+    
+    setDocs(prevDocs => prevDocs.map(d => {
+      const url = c[`doc_url_${d.id}`];
+      const fileName = c[`doc_fileName_${d.id}`];
+      if (url) {
+        return { ...d, status: 'Uploaded', url, fileName };
+      }
+      return { ...d, status: 'Pending', url: undefined, fileName: undefined };
+    }));
   };
 
   const handleDelete = async (id) => {
@@ -364,7 +388,17 @@ export default function TruckContactManager({ open, onClose }) {
   };
 
   const handleChange = (field, val) => {
-    setForm(p => ({ ...p, [field]: val }));
+    setForm(p => {
+      const updated = { ...p, [field]: val };
+      if (field === 'nilTds' && val === 'Yes') {
+        updated.tdsApp = '';
+      }
+      if (field === 'gstType' && val === 'URD (Unregistered)') {
+        updated.gstNo = '';
+        updated.gstPercent = '';
+      }
+      return updated;
+    });
     if (errors[field]) setErrors(p => ({ ...p, [field]: null }));
   };
 
@@ -464,6 +498,45 @@ export default function TruckContactManager({ open, onClose }) {
     );
   };
 
+  const handleDocUpload = async (e, globalIdx) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('document', file);
+    
+    try {
+      setSaving(true);
+      const res = await axios.post(`${API_URL}/truck-contacts/upload-document`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (res.data.success) {
+        const newDocs = [...docs];
+        newDocs[globalIdx].status = 'Uploaded';
+        newDocs[globalIdx].fileName = file.name;
+        newDocs[globalIdx].url = res.data.url;
+        setDocs(newDocs);
+        setSnack({ type: 'success', message: 'Document uploaded successfully' });
+      }
+    } catch (err) {
+      setSnack({ type: 'error', message: 'Failed to upload document.' });
+    } finally {
+      setSaving(false);
+      e.target.value = null;
+    }
+  };
+
+  const handleDocDelete = (globalIdx) => {
+    const newDocs = [...docs];
+    newDocs[globalIdx].status = 'Pending';
+    newDocs[globalIdx].fileName = undefined;
+    newDocs[globalIdx].url = undefined;
+    setDocs(newDocs);
+  };
+
   const TabDocVault = (allowedIds, label = "Mandatory Documents") => {
     const filteredDocs = docs.filter(d => allowedIds.includes(d.id));
     return (
@@ -480,7 +553,7 @@ export default function TruckContactManager({ open, onClose }) {
               }}>
                 <DescriptionIcon sx={{ color: doc.status === 'Uploaded' ? '#16a34a' : '#94a3b8', fontSize: 20 }} />
                 <Typography flex={1} variant="body2" fontWeight={700} color={doc.status === 'Uploaded' ? '#166534' : '#475569'}>
-                  {doc.label}
+                  {doc.fileName || doc.label}
                 </Typography>
                 <Chip
                   label={doc.status}
@@ -492,23 +565,134 @@ export default function TruckContactManager({ open, onClose }) {
                     color: doc.status === 'Uploaded' ? '#166534' : '#64748b'
                   }}
                 />
-                <Button
-                  component="label" size="small" variant="text"
-                  sx={{ textTransform: 'none', fontWeight: 800, color: '#7b1fa2' }}
-                >
-                  {doc.status === 'Uploaded' ? 'Change PDF' : 'Upload PDF'}
-                  <input type="file" hidden accept="application/pdf" onChange={(e) => {
-                    if (e.target.files[0]) {
-                      const newDocs = [...docs];
-                      newDocs[globalIdx].status = 'Uploaded';
-                      newDocs[globalIdx].fileName = e.target.files[0].name;
-                      setDocs(newDocs);
-                    }
-                  }} />
-                </Button>
+                
+                {doc.url && (
+                  <Button
+                    size="small" variant="text"
+                    onClick={() => window.open(doc.url, '_blank')}
+                    sx={{ textTransform: 'none', fontWeight: 800, color: '#1976d2' }}
+                  >
+                    View
+                  </Button>
+                )}
+                
+                {doc.url && (
+                  <Button
+                    size="small" variant="text"
+                    onClick={() => handleDocDelete(globalIdx)}
+                    sx={{ textTransform: 'none', fontWeight: 800, color: '#d32f2f' }}
+                  >
+                    Delete
+                  </Button>
+                )}
+                
+                {!doc.url && (
+                  <Button
+                    component="label" size="small" variant="text"
+                    sx={{ textTransform: 'none', fontWeight: 800, color: '#7b1fa2' }}
+                  >
+                    Upload PDF
+                    <input type="file" hidden accept="application/pdf,image/jpeg,image/png" onChange={(e) => handleDocUpload(e, globalIdx)} />
+                  </Button>
+                )}
               </Box>
             );
           })}
+        </Box>
+      </Box>
+    );
+  };
+
+  const handleGstUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('document', file);
+    
+    try {
+      setSaving(true);
+      const res = await axios.post(`${API_URL}/truck-contacts/upload-document`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (res.data.success) {
+        const newDoc = { name: file.name, url: res.data.url };
+        handleChange('gstDocs', [...(form.gstDocs || []), newDoc]);
+        setSnack({ type: 'success', message: 'GST Document uploaded successfully' });
+      }
+    } catch (err) {
+      setSnack({ type: 'error', message: 'Failed to upload GST document.' });
+    } finally {
+      setSaving(false);
+      e.target.value = null;
+    }
+  };
+
+  const handleGstDelete = (idx) => {
+    const newDocs = [...(form.gstDocs || [])];
+    newDocs.splice(idx, 1);
+    handleChange('gstDocs', newDocs);
+  };
+
+  const GstDocVault = () => {
+    const currentGstDocs = form.gstDocs || [];
+    return (
+      <Box sx={{ mt: 3, pt: 3, borderTop: '1px dashed #e2e8f0' }}>
+        <SectionLabel icon={CloudUploadIcon} label="GST Documents" />
+        <Box sx={{ border: '1px solid #f3e5f5', borderRadius: '16px', overflow: 'hidden' }}>
+          {currentGstDocs.length === 0 && (
+            <Box sx={{ p: 2, textAlign: 'center' }}>
+              <Typography variant="body2" color="text.secondary">No GST documents uploaded.</Typography>
+            </Box>
+          )}
+          {currentGstDocs.map((doc, idx) => (
+            <Box key={idx} sx={{
+              display: 'flex', alignItems: 'center', gap: 2, p: 1.5,
+              borderBottom: idx === currentGstDocs.length - 1 ? 'none' : '1px solid #f1f5f9',
+              bgcolor: '#f0fdf4'
+            }}>
+              <DescriptionIcon sx={{ color: '#16a34a', fontSize: 20 }} />
+              <Typography flex={1} variant="body2" fontWeight={700} color={'#166534'}>
+                {doc.name || `GST Document ${idx + 1}`}
+              </Typography>
+              <Chip
+                label="Uploaded"
+                size="small"
+                icon={<CheckCircleIcon />}
+                sx={{
+                  fontSize: '10px', height: 20, fontWeight: 800,
+                  bgcolor: '#dcfce7',
+                  color: '#166534'
+                }}
+              />
+              <Button
+                size="small" variant="text"
+                onClick={() => window.open(doc.url, '_blank')}
+                sx={{ textTransform: 'none', fontWeight: 800, color: '#1976d2' }}
+              >
+                View
+              </Button>
+              <Button
+                size="small" variant="text"
+                onClick={() => handleGstDelete(idx)}
+                sx={{ textTransform: 'none', fontWeight: 800, color: '#d32f2f' }}
+              >
+                Delete
+              </Button>
+            </Box>
+          ))}
+          <Box sx={{ p: 1.5, borderTop: currentGstDocs.length > 0 ? '1px solid #f1f5f9' : 'none', bgcolor: '#fafafa', textAlign: 'center' }}>
+            <Button
+              component="label" size="small" variant="contained"
+              sx={{ textTransform: 'none', fontWeight: 700, bgcolor: '#7b1fa2', '&:hover': { bgcolor: '#6a1b9a' } }}
+            >
+              Upload GST Document
+              <input type="file" hidden accept="application/pdf,image/jpeg,image/png" onChange={handleGstUpload} />
+            </Button>
+          </Box>
         </Box>
       </Box>
     );
@@ -694,30 +878,44 @@ export default function TruckContactManager({ open, onClose }) {
                         <SectionLabel icon={CurrencyRupeeIcon} label="Financial & Commission Settings" />
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
                           <Box>
-                            {tf('Basic Freight Comm (e.g. 0.05)', 'basicFreightComm', ReceiptIcon)}
+                            {tf('Basic Freight Comm (%)', 'basicFreightComm', ReceiptIcon)}
                             {form.basicFreightComm && !isNaN(parseFloat(form.basicFreightComm)) && (
                               <Typography variant="caption" sx={{ color: '#16a34a', fontWeight: 800, ml: 1 }}>
-                                {(100 - (parseFloat(form.basicFreightComm) * 100)).toFixed(0)}% Payout to Owner
+                                {(() => {
+                                  let val = parseFloat(form.basicFreightComm);
+                                  if (val > 0 && val < 1) val = val * 100;
+                                  return (100 - val).toFixed(1);
+                                })()}% Payout to Owner
                               </Typography>
                             )}
                           </Box>
                           <Box>
-                            {tf('Incentive Commission', 'incentiveCommVal', ReceiptIcon)}
+                            {tf('Incentive Commission (%)', 'incentiveCommVal', ReceiptIcon)}
+                            {form.incentiveCommVal && !isNaN(parseFloat(form.incentiveCommVal)) && (
+                              <Typography variant="caption" sx={{ color: '#16a34a', fontWeight: 800, ml: 1 }}>
+                                {(() => {
+                                  let val = parseFloat(form.incentiveCommVal);
+                                  if (val > 0 && val < 1) val = val * 100;
+                                  return (100 - val).toFixed(1);
+                                })()}% Payout to Owner
+                              </Typography>
+                            )}
                           </Box>
                         </Box>
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
                           {selectTf('NIL TDS Option', 'nilTds', ['Yes', 'No'], ArticleIcon)}
-                          {tf('TDS Category (%)', 'tdsApp', ReceiptIcon)}
+                          {tf('TDS Category (%)', 'tdsApp', ReceiptIcon, { disabled: form.nilTds === 'Yes' })}
                         </Box>
 
                         <SectionLabel icon={ReceiptIcon} label="GST Information" />
                         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1.5fr 0.5fr' }, gap: 2 }}>
-                          {tf('GST Type', 'gstType')}
-                          {tf('GST No', 'gstNo')}
-                          {tf('GST %', 'gstPercent')}
+                          {selectTf('GST Type', 'gstType', ['URD (Unregistered)', 'RCM (Reverse Charge Mechanism)', 'FCM (Forward Charge Mechanism)'])}
+                          {tf('GST No', 'gstNo', null, { disabled: form.gstType === 'URD (Unregistered)' })}
+                          {tf('GST %', 'gstPercent', null, { disabled: form.gstType === 'URD (Unregistered)' })}
                         </Box>
 
                         {TabDocVault(['pan', 'aadhar', 'bank'], "Owner Identification Documents")}
+                        {GstDocVault()}
                       </Box>
                     )}
 

@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from 'react';
+import SearchableSelect from './SearchableSelect';
 import {
   Box, TextField, Card, CardHeader, CardContent,
   MenuItem, Select, InputLabel, FormControl, InputAdornment
@@ -62,7 +63,7 @@ export default function InvoiceDetails({ data, errors, onChange }) {
           {/* Invoice Type — SO / STO / NT */}
           <FormControl fullWidth variant="outlined">
             <InputLabel>Invoice Type</InputLabel>
-            <Select
+            <SearchableSelect
               name="invoice_type"
               value={data?.invoice_type || ""}
               onChange={(e) => onChange("invoice_details", "invoice_type", e.target.value)}
@@ -72,7 +73,7 @@ export default function InvoiceDetails({ data, errors, onChange }) {
               <MenuItem value="SO">SO</MenuItem>
               <MenuItem value="STO">STO</MenuItem>
               <MenuItem value="NT">NT</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
 
           {/* Reference Number */}

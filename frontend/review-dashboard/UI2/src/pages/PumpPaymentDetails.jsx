@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Select, MenuItem, FormControl,
@@ -719,33 +720,33 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
           ) : (
             <FormControl size="small" sx={{ minWidth: 140 }}>
               <InputLabel sx={{ fontSize: 12 }}>Pump</InputLabel>
-              <Select value={selPump} label="Pump" onChange={e => setSelPump(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
+              <SearchableSelect value={selPump} label="Pump" onChange={e => setSelPump(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
                 {pumps.map(p => <MenuItem key={p} value={p} sx={{ fontSize: 12 }}>{p}</MenuItem>)}
-              </Select>
+              </SearchableSelect>
             </FormControl>
           )}
 
           {/* Month */}
           <FormControl size="small" sx={{ minWidth: 120 }}>
             <InputLabel sx={{ fontSize: 12 }}>Month</InputLabel>
-            <Select value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
+            <SearchableSelect value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
               {MONTH_NAMES.map((m, i) => <MenuItem key={i + 1} value={i + 1} sx={{ fontSize: 12 }}>{m}</MenuItem>)}
-            </Select>
+            </SearchableSelect>
           </FormControl>
 
           <FormControl size="small" sx={{ minWidth: 100 }}>
             <InputLabel sx={{ fontSize: 12 }}>Financial Year</InputLabel>
-            <Select value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
+            <SearchableSelect value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
               {yearOptions.map(y => <MenuItem key={y} value={y} sx={{ fontSize: 12 }}>{y}</MenuItem>)}
-            </Select>
+            </SearchableSelect>
           </FormControl>
 
           {/* Period */}
           <FormControl size="small" sx={{ minWidth: 160 }}>
             <InputLabel sx={{ fontSize: 12 }}>Period</InputLabel>
-            <Select value={selPeriod} label="Period" onChange={e => setSelPeriod(parseInt(e.target.value))} sx={{ fontSize: 12, fontWeight: 700 }}>
+            <SearchableSelect value={selPeriod} label="Period" onChange={e => setSelPeriod(parseInt(e.target.value))} sx={{ fontSize: 12, fontWeight: 700 }}>
               {PERIODS.map(p => <MenuItem key={p.value} value={p.value} sx={{ fontSize: 12 }}>{p.label}</MenuItem>)}
-            </Select>
+            </SearchableSelect>
           </FormControl>
 
           {isOfficeAdmin && dirtyCount > 0 && <Chip label="Unsaved changes" size="small" color="warning" sx={{ fontWeight: 700 }} />}
@@ -1152,7 +1153,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                     <Box display="flex" flexDirection="column" gap={1} alignItems="center">
                       {isOfficeAdmin ? (
                         <>
-                          <select
+                          <SearchableSelect variant="standard"
                             value={periodPaymentStatus}
                             onChange={e => handleSavePeriodPayment(e.target.value)}
                             style={{
@@ -1165,7 +1166,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                           >
                             <option value="Unpaid">Unpaid Period</option>
                             <option value="Paid">Paid Period</option>
-                          </select>
+                          </SearchableSelect>
                           <Button 
                             component="label" 
                             variant="outlined" 

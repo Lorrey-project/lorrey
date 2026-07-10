@@ -13,8 +13,10 @@ const accountDetailSchema = new mongoose.Schema({
   closingBalance: { type: String, default: '' },
   remittanceFileUrl: { type: String, default: '' },
   remittanceFileName: { type: String, default: '' },
+  month: { type: String, default: '' },
   selectedMonth: { type: String, default: '' },
   selectedYear: { type: String, default: '' },
+  vehicle: { type: String, default: '' },
   _source: { type: String, default: 'manual' }
 }, {
   timestamps: true,

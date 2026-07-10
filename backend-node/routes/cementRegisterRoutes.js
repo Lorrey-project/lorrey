@@ -1,7 +1,7 @@
 const express = require("express");
 const { getIO } = require("../socket");
 const router = express.Router();
-const { pushToInvoice } = require("../utils/syncManager");
+const { pushToInvoice, getTruckDetails } = require("../utils/syncManager");
 const mongoose = require("mongoose");
 const { ObjectId } = require("mongodb");
 const auth = require("../middleware/authMiddleware");
@@ -57,7 +57,7 @@ const formatDateToDDMMYY = (dStr) => {
 //   E-WAY BILL VALIDITY, GCN NO, INVOICE NO, SHIPMENT NO, CHALLAN STATUS,
 //   WHEEL, BILL TYPE, DESTINATION, PARTY NAME, UNLOADING STATUS NOTE,
 //   BILLING RATE, MT, PARTY RATE, BILLING AMOUNT,
-//   BILLING @ 95% (PARTY PAYABLE), AMOUNT, PROFIT, TDS@1%, ADVANCE,
+//   BILLING @ 95% (PARTY PAYABLE), AMOUNT, PROFIT, TDS, ADVANCE,
 //   SITE CASH, BANK TF, OTHERS DEDUCTION, GPS MONITORING CHARGE, GPS DEVICE,
 //   PUMP NAME, HSD SLIP NO, HSD BILL NO, KM AS PER RATE CHART (UP+DOWN),
 //   FUEL REQUIRED, HSD (LTR), BALANCE, EXTRA ALLOWED, ACTUAL EXTRA,
@@ -199,27 +199,18 @@ router.get("/next-batch-serial", auth, async (req, res) => {
 
     const existing = await col.find({"BILL NO": { $regex: /\d{2}-\d{2}\/\d+$/ }}).toArray();
     let maxSerial = 0;
-    let existingSerialForDate = null;
     
     for (const row of existing) {
        const match = String(row['BILL NO']).match(/(\d{2}-\d{2})\/(\d+)$/);
        if (match) {
          const serial = parseInt(match[2], 10);
-         if (match[1] === currentFy) {
-           if (serial > maxSerial) {
-             maxSerial = serial;
-           }
-           if (
-             (targetFormattedDate && row['BILL DATE'] === targetFormattedDate) ||
-             (targetRawDate && row['BILL DATE'] === targetRawDate)
-           ) {
-             existingSerialForDate = serial;
-           }
+         if (match[1] === currentFy && serial > maxSerial) {
+           maxSerial = serial;
          }
        }
     }
     
-    const finalSerial = existingSerialForDate !== null ? existingSerialForDate : (maxSerial + 1);
+    const finalSerial = maxSerial + 1;
     const autoBatchSerial = `${currentFy}/${String(finalSerial).padStart(4, '0')}`;
     res.json({ success: true, nextSerial: autoBatchSerial });
   } catch (err) {
@@ -357,6 +348,17 @@ router.put("/bulk-update", auth, async (req, res) => {
     }
 
     const io = getIO();
+    
+    // Inject dynamic truck details if VEHICLE NUMBER changed
+    for (const u of updates) {
+      if (u.changes && u.changes["VEHICLE NUMBER"]) {
+        const truckDetails = await getTruckDetails(u.changes["VEHICLE NUMBER"]);
+        if (truckDetails.ownerName) u.changes["OWNER NAME"] = truckDetails.ownerName;
+        u.changes["_tds_percent"] = truckDetails.tdsPercent;
+        u.changes["_freight_commission"] = truckDetails.basicFreightCommission;
+      }
+    }
+
     const bulkOps = updates.map(u => ({
       updateOne: {
         filter: { _id: new ObjectId(u.id) },
@@ -371,6 +373,128 @@ router.put("/bulk-update", auth, async (req, res) => {
     io.emit('cementUpdates', { action: 'bulkUpdate' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── POST /cement-register/generate-batch-bills ──────────────────────────────
+router.post("/generate-batch-bills", auth, async (req, res) => {
+  try {
+    const { recordIds, billDate, billType } = req.body;
+    if (!recordIds || !Array.isArray(recordIds) || recordIds.length === 0) {
+      return res.status(400).json({ success: false, error: "No records provided" });
+    }
+    if (!billDate || !billType) {
+      return res.status(400).json({ success: false, error: "Missing billDate or billType" });
+    }
+
+    const col = getCollection();
+    
+    // Parse FY from billDate (YYYY-MM-DD)
+    const dObj = new Date(billDate);
+    const year = dObj.getFullYear();
+    const month = dObj.getMonth() + 1;
+    const currentFy = (month >= 4) ? `${String(year).slice(-2)}-${String(year+1).slice(-2)}` : `${String(year-1).slice(-2)}-${String(year).slice(-2)}`;
+    
+    // Format Date to DD/MM/YYYY
+    const parts = billDate.split('-');
+    const formattedBillDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+    // Fetch records
+    const objectIds = recordIds.map(id => new ObjectId(id));
+    const records = await col.find({ _id: { $in: objectIds } }).toArray();
+
+    // Group by Party
+    const groups = { NVCL: [], DAC: [] };
+    for (const record of records) {
+      const rawSite = String(record['SITE'] || '').trim().toUpperCase();
+      const party = rawSite === 'NVL' ? 'DAC' : 'NVCL';
+      groups[party].push(record);
+    }
+
+    const db = mongoose.connection.useDb("cement_register");
+    const countersCol = db.collection("bill_counters");
+    const billsCol = db.collection("generated_bills");
+
+    const bulkOps = [];
+    const pushUpdates = [];
+    const generatedBillsSummary = [];
+
+    for (const [party, partyRecords] of Object.entries(groups)) {
+      if (partyRecords.length === 0) continue;
+
+      // MongoDB Node Driver findOneAndUpdate returns a FindAndModifyWriteOpResultObject
+      // For mongoose/native driver it usually has `.value` or directly returns the doc depending on version/config
+      const sequenceDoc = await countersCol.findOneAndUpdate(
+        { _id: `${party}_${currentFy}` },
+        { $inc: { seq: 1 } },
+        { returnDocument: 'after', upsert: true }
+      );
+      
+      const seqValue = sequenceDoc?.value?.seq || sequenceDoc?.seq || 1;
+
+      const currentSerial = String(seqValue).padStart(4, '0');
+      const billNumber = `${party}/${currentFy}/${currentSerial}`;
+      
+      generatedBillsSummary.push({ party, billNumber, recordCount: partyRecords.length });
+
+      // Save to generated_bills
+      await billsCol.insertOne({
+        billNumber,
+        billDate: formattedBillDate,
+        billType,
+        party,
+        financialYear: currentFy,
+        cementRegisterRecordIds: partyRecords.map(r => r._id),
+        createdAt: new Date()
+      });
+
+      // Prepare updates for each record
+      for (const record of partyRecords) {
+        const changes = {};
+        if (billType === 'Freight') {
+          changes['BILL NO'] = billNumber;
+          changes['BILL DATE'] = formattedBillDate;
+          changes['Bill Type'] = billType;
+          changes['Freight Generated'] = 'Yes';
+        } else {
+          changes['UNLOADING BILL NO'] = billNumber;
+          changes['UNLOADING BILL DATE'] = formattedBillDate;
+          changes['Unloading Generated'] = 'Yes';
+        }
+        
+        const fGen = changes['Freight Generated'] || record['Freight Generated'];
+        const uGen = changes['Unloading Generated'] || record['Unloading Generated'];
+        if (fGen === 'Yes' && uGen === 'Yes') {
+          changes['Billing Completed'] = 'Yes';
+        }
+        changes['CHALLAN STATUS'] = 'BILLED';
+
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: record._id },
+            update: { $set: changes }
+          }
+        });
+        
+        pushUpdates.push({ id: record._id, changes });
+      }
+    }
+
+    if (bulkOps.length > 0) {
+      await col.bulkWrite(bulkOps);
+    }
+
+    for (const u of pushUpdates) {
+      await pushToInvoice(u.id, u.changes);
+    }
+
+    res.json({ success: true, summary: generatedBillsSummary });
+    const io = getIO();
+    io.emit('cementUpdates', { action: 'batchBillsGenerated' });
+
+  } catch (error) {
+    console.error("Error generating batch bills:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -454,6 +578,15 @@ router.delete("/bulk-delete", auth, async (req, res) => {
 router.put("/:id", auth, cementValidationRules, validateCement, async (req, res) => {
   try {
     const col = getCollection();
+    
+    // Inject dynamic truck details if VEHICLE NUMBER changed
+    if (req.body["VEHICLE NUMBER"]) {
+      const truckDetails = await getTruckDetails(req.body["VEHICLE NUMBER"]);
+      if (truckDetails.ownerName) req.body["OWNER NAME"] = truckDetails.ownerName;
+      req.body["_tds_percent"] = truckDetails.tdsPercent;
+      req.body["_freight_commission"] = truckDetails.basicFreightCommission;
+    }
+
     const result = await col.findOneAndUpdate(
       { _id: new ObjectId(req.params.id) },
       { $set: req.body },

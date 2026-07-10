@@ -27,7 +27,9 @@ const YEARS = Array.from({length: 10}, (_, i) => String(currentYear - 5 + i));
 const COLUMNS = [
   { key: 'Transaction Date', label: 'TRANSACTION\nDATE', width: 140, isDate: true },
   { key: 'Ledger Name', label: 'LEDGER\nNAME', width: 180 },
+  { key: 'Month', label: 'MONTH', width: 140 },
   { key: 'Names', label: 'NAMES', width: 160 },
+  { key: 'Vehicle', label: 'VEHICLE', width: 150 },
   { key: 'Particulars', label: 'PARTICULARS', width: 220 },
   { key: 'Remarks', label: 'REMARKS', width: 800 },
   { key: 'Reference No', label: 'REFERENCE\nNO', width: 140 },
@@ -66,16 +68,18 @@ const NAMES_OPTIONS = [
 ];
 
 const AUTO_COLS = new Set(['Transaction Date', 'Remarks', 'Reference No', 'Cheque No', 'Withdraw', 'Deposit', 'Closing Balance']);
-const MANUAL_COLS = new Set(['Ledger Name', 'Names', 'Particulars']);
+const MANUAL_COLS = new Set(['Ledger Name', 'Month', 'Names', 'Vehicle', 'Particulars']);
 
 
 const RAW_EXCEL_HEADER_MAP = {
   // Transaction Date
   'transaction date': 'Transaction Date', 'date': 'Transaction Date', 'txn date': 'Transaction Date', 'value date': 'Transaction Date', 'tran date': 'Transaction Date', 'trans date': 'Transaction Date', 'booking date': 'Transaction Date', 'narration date': 'Transaction Date', 'tx date': 'Transaction Date', 'transactiondate': 'Transaction Date', 'txndate': 'Transaction Date',
 
-  // Ledger Name & Names
+  // Ledger Name & Names & Month
   'ledger name': 'Ledger Name', 'ledger': 'Ledger Name', 'ledgername': 'Ledger Name',
+  'month': 'Month',
   'names': 'Names', 'name': 'Names',
+  'vehicle': 'Vehicle', 'vehicle no': 'Vehicle', 'vehicle number': 'Vehicle', 'truck no': 'Vehicle', 'veh no': 'Vehicle',
 
   // Particulars & Remarks
   'particulars': 'Particulars', 'particular': 'Particulars',
@@ -163,6 +167,8 @@ function formatExcelDate(rawDate) {
 
 export default function AccountDetails({ onBack }) {
   const [entries, setEntries] = useState([]);
+  const [vehicleList, setVehicleList] = useState([]);
+  const [ownerVehicleMap, setOwnerVehicleMap] = useState({});
   const [localData, setLocalData] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -189,6 +195,52 @@ export default function AccountDetails({ onBack }) {
   const [unsavedImportRows, setUnsavedImportRows] = useState([]);
   const wizardFileRef = useRef(null);
 
+  const [pendingBillsModal, setPendingBillsModal] = useState({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [] });
+
+  const openPendingBillsModal = async (rowId, party) => {
+    setPendingBillsModal({ open: true, rowId, party, bills: [], loading: true, selectedBills: [] });
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/fy-details/pending-bills?party=${party}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPendingBillsModal(prev => ({ ...prev, loading: false, bills: res.data.pendingBills }));
+    } catch (err) {
+      setSnack({ severity: 'error', msg: 'Failed to fetch pending bills' });
+      setPendingBillsModal(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handlePendingBillsToggleSelect = (bill) => {
+    setPendingBillsModal(prev => {
+      const isSelected = prev.selectedBills.some(b => b.rawBillNumber === bill.rawBillNumber);
+      let newSelected;
+      if (isSelected) {
+        newSelected = prev.selectedBills.filter(b => b.rawBillNumber !== bill.rawBillNumber);
+      } else {
+        newSelected = [...prev.selectedBills, bill];
+      }
+      return { ...prev, selectedBills: newSelected };
+    });
+  };
+
+  const handlePendingBillsApply = () => {
+    const totalAmount = pendingBillsModal.selectedBills.reduce((sum, b) => sum + (b.pendingAmount || 0), 0);
+    const billsStr = pendingBillsModal.selectedBills.map(b => b.billNumber).join(', ');
+    const existingRemarks = localData[pendingBillsModal.rowId]?.['Remarks'] || entries.find(e => e._id === pendingBillsModal.rowId)?.['Remarks'] || '';
+    
+    setLocalData(prev => ({
+      ...prev,
+      [pendingBillsModal.rowId]: {
+        ...(prev[pendingBillsModal.rowId] || {}),
+        'Deposit': totalAmount.toFixed(2),
+        'Names': pendingBillsModal.party,
+        'Remarks': billsStr ? `${existingRemarks} [Auto-Allocated: ${billsStr}]`.trim() : existingRemarks
+      }
+    }));
+    setPendingBillsModal({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [] });
+  };
+
   const dirtyCount = Object.keys(localData).length;
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -209,6 +261,41 @@ export default function AccountDetails({ onBack }) {
     } catch (err) {
       console.warn('Socket error in AccountDetails:', err.message);
     }
+    
+    const fetchVehicles = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await axios.get(`${API_URL}/truck-contacts`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.data && res.data.contacts) {
+          const ownerMap = {};
+          res.data.contacts.forEach(c => {
+            const owner = c['Owner Name '] || c['Owner Name'] || c.owner_name;
+            const truck = c['Truck No '] || c['Truck No'] || c.truck_no;
+            if (owner && truck) {
+              const oName = String(owner).trim();
+              const tNo = String(truck).trim();
+              if (oName && tNo) {
+                if (!ownerMap[oName]) ownerMap[oName] = [];
+                ownerMap[oName].push(tNo);
+              }
+            }
+          });
+          for (let owner in ownerMap) {
+            ownerMap[owner] = [...new Set(ownerMap[owner])].sort();
+          }
+          setOwnerVehicleMap(ownerMap);
+
+          const uniqueVehicles = [...new Set(res.data.contacts.map(c => c['Truck No ']).filter(Boolean))].sort();
+          setVehicleList(uniqueVehicles);
+        }
+      } catch (err) {
+        console.error('Failed to fetch vehicles:', err);
+      }
+    };
+    fetchVehicles();
+
     return () => { if (socket) socket.disconnect(); };
   }, []);
 
@@ -287,10 +374,16 @@ export default function AccountDetails({ onBack }) {
       const tA = parseDateStr(a['Transaction Date'] || a.transactionDate) || 0;
       const tB = parseDateStr(b['Transaction Date'] || b.transactionDate) || 0;
       // Also consider created_at for stable sort if dates are equal
-      if (tB !== tA) return tB - tA; 
-      // If dates are equal, sort new rows to top, or use internal ID
-      if (a.isNewRow && !b.isNewRow) return -1;
-      if (!a.isNewRow && b.isNewRow) return 1;
+      if (tA !== tB) return tA - tB; 
+      // If dates are equal, sort new rows to bottom (since they are newer in ascending chronological order)
+      if (a.isNewRow && !b.isNewRow) return 1;
+      if (!a.isNewRow && b.isNewRow) return -1;
+
+      // Stable sort by id if available
+      const idA = a._id ? a._id.toString() : '';
+      const idB = b._id ? b._id.toString() : '';
+      if (idA && idB) return idA.localeCompare(idB);
+      
       return 0;
     });
 
@@ -450,7 +543,7 @@ export default function AccountDetails({ onBack }) {
     }
   };
 
-  const handleExport = () => exportToCsv('account_details.xls', computedRows);
+  const handleExport = () => exportToCsv('bank_book.xls', computedRows);
 
   const handleUploadBankStatementClick = () => {
     setBankFromDate('');
@@ -666,7 +759,7 @@ export default function AccountDetails({ onBack }) {
     return (
       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
         <CircularProgress size={48} thickness={4} sx={{ color: '#0f766e' }} />
-        <Typography color="text.secondary" fontWeight={600}>Loading Account Details…</Typography>
+        <Typography color="text.secondary" fontWeight={600}>Loading Bank Book…</Typography>
       </Box>
     );
   }
@@ -683,7 +776,7 @@ export default function AccountDetails({ onBack }) {
           <ArrowBackIcon fontSize="small" />
         </IconButton>
         <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-          Account Details
+          Bank Book
         </Typography>
 
         {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" color="warning" sx={{ fontWeight: 700 }} />}
@@ -937,12 +1030,58 @@ export default function AccountDetails({ onBack }) {
                             </Button>
                           )}
                         </Box>
-                      ) : col.key === 'Ledger Name' || col.key === 'Names' ? (
+                      ) : col.key === 'Ledger Name' || col.key === 'Names' || col.key === 'Month' || col.key === 'Vehicle' ? (
                         <Autocomplete
-                          options={col.key === 'Ledger Name' ? LEDGER_OPTIONS : NAMES_OPTIONS}
+                          disabled={col.key === 'Vehicle' && !(localData[row._id]?.['Names'] || row['Names'])}
+                          options={
+                            col.key === 'Month'
+                              ? MONTHS
+                              : col.key === 'Vehicle'
+                                ? (() => {
+                                    const typed = String(localData[row._id]?.['Names'] || row['Names'] || '').trim();
+                                    if (!typed) return [];
+                                    if (ownerVehicleMap[typed]) return ownerVehicleMap[typed];
+                                    const typedLower = typed.toLowerCase();
+                                    return [...new Set(Object.keys(ownerVehicleMap).reduce((acc, k) => {
+                                      if (k.toLowerCase().includes(typedLower) || typedLower.includes(k.toLowerCase())) {
+                                        return acc.concat(ownerVehicleMap[k]);
+                                      }
+                                      return acc;
+                                    }, []))];
+                                  })()
+                                : col.key === 'Ledger Name'
+                                  ? LEDGER_OPTIONS
+                                  : ( (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '')?.toLowerCase().includes('payment')
+                                      && (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '')?.toLowerCase().includes('receiv')
+                                        ? ['NVL', 'NVCL'] : NAMES_OPTIONS )
+                          }
                           value={val || ''}
                           freeSolo
-                          onChange={(e, newValue) => handleCellEdit(row._id, col.key, newValue)}
+                          onChange={(e, newValue) => {
+                            handleCellEdit(row._id, col.key, newValue);
+                            if (col.key === 'Names') {
+                              if (newValue === 'NVL' || newValue === 'NVCL') {
+                                const ledger = localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '';
+                                if (ledger.toLowerCase().includes('payment') && ledger.toLowerCase().includes('receiv')) {
+                                    openPendingBillsModal(row._id, newValue);
+                                }
+                              }
+                              // Clear vehicle if it doesn't belong to the new owner
+                              const currentVehicle = localData[row._id]?.['Vehicle'] !== undefined ? localData[row._id]['Vehicle'] : (row['Vehicle'] || '');
+                              if (currentVehicle) {
+                                const typedLower = String(newValue || '').trim().toLowerCase();
+                                const allowedVehicles = Object.keys(ownerVehicleMap).reduce((acc, k) => {
+                                  if (k.toLowerCase().includes(typedLower) || typedLower.includes(k.toLowerCase())) {
+                                    return acc.concat(ownerVehicleMap[k]);
+                                  }
+                                  return acc;
+                                }, []);
+                                if (allowedVehicles.length > 0 && !allowedVehicles.includes(currentVehicle)) {
+                                  handleCellEdit(row._id, 'Vehicle', '');
+                                }
+                              }
+                            }
+                          }}
                           onInputChange={(e, newInputValue) => handleCellEdit(row._id, col.key, newInputValue)}
                           ListboxProps={{
                             style: {
@@ -970,7 +1109,7 @@ export default function AccountDetails({ onBack }) {
                             <TextField
                               {...params}
                               variant="standard"
-                              placeholder={col.key === 'Ledger Name' ? "Search Ledger..." : "Search Name..."}
+                              placeholder={col.key === 'Month' ? 'Select Month...' : col.key === 'Ledger Name' ? "Search Ledger..." : col.key === 'Vehicle' ? "Search Vehicle..." : "Search Name..."}
                               InputProps={{
                                 ...params.InputProps,
                                 disableUnderline: true,
@@ -1202,7 +1341,7 @@ export default function AccountDetails({ onBack }) {
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4, gap: 2, border: '2px dashed #cbd5e1', borderRadius: '8px', mt: 2 }}>
               <UploadIcon sx={{ fontSize: 40, color: '#94a3b8' }} />
               <Typography variant="body1" sx={{ color: '#475569', fontWeight: 500 }}>
-                Upload Account Details Excel for {wizardMonth} {wizardYear}
+                Upload Bank Book Excel for {wizardMonth} {wizardYear}
               </Typography>
               <Typography variant="body2" sx={{ color: '#64748b' }}>
                 Any rows with dates outside {wizardMonth} {wizardYear} will be skipped.
@@ -1287,6 +1426,73 @@ export default function AccountDetails({ onBack }) {
             </Box>
           )}
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={pendingBillsModal.open} onClose={() => setPendingBillsModal(prev => ({ ...prev, open: false }))} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+          Select Pending Bills for {pendingBillsModal.party}
+        </DialogTitle>
+        <DialogContent sx={{ p: 0, bgcolor: '#fff' }}>
+          {pendingBillsModal.loading ? (
+            <Box p={4} display="flex" justifyContent="center"><CircularProgress /></Box>
+          ) : pendingBillsModal.bills.length === 0 ? (
+            <Box p={4} display="flex" justifyContent="center"><Typography>No pending bills found for {pendingBillsModal.party}.</Typography></Box>
+          ) : (
+            <TableContainer sx={{ maxHeight: 400 }}>
+              <Table stickyHeader size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        indeterminate={pendingBillsModal.selectedBills.length > 0 && pendingBillsModal.selectedBills.length < pendingBillsModal.bills.length}
+                        checked={pendingBillsModal.bills.length > 0 && pendingBillsModal.selectedBills.length === pendingBillsModal.bills.length}
+                        onChange={(e) => {
+                          if (e.target.checked) setPendingBillsModal(prev => ({ ...prev, selectedBills: [...prev.bills] }));
+                          else setPendingBillsModal(prev => ({ ...prev, selectedBills: [] }));
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Bill No</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Inv No</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Vehicle</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="right">Bill Amt</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="right">Paid Amt</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="right">Pending</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pendingBillsModal.bills.map(b => (
+                    <TableRow key={b.rawBillNumber} hover>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          checked={pendingBillsModal.selectedBills.some(s => s.rawBillNumber === b.rawBillNumber)}
+                          onChange={() => handlePendingBillsToggleSelect(b)}
+                        />
+                      </TableCell>
+                      <TableCell>{b.billNumber}</TableCell>
+                      <TableCell>{b.invoiceNumber}</TableCell>
+                      <TableCell>{b.invoiceDate ? new Date(b.invoiceDate).toLocaleDateString() : ''}</TableCell>
+                      <TableCell>{b.vehicleNumber}</TableCell>
+                      <TableCell align="right">₹{b.billAmount.toLocaleString('en-IN')}</TableCell>
+                      <TableCell align="right" sx={{ color: 'success.main' }}>₹{b.amountPaid.toLocaleString('en-IN')}</TableCell>
+                      <TableCell align="right" sx={{ color: 'error.main', fontWeight: 600 }}>₹{b.pendingAmount.toLocaleString('en-IN')}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+          <Typography sx={{ mr: 'auto', fontWeight: 600 }}>
+            {pendingBillsModal.selectedBills.length} bills selected (Total Pending: ₹{pendingBillsModal.selectedBills.reduce((s, b) => s + (b.pendingAmount || 0), 0).toLocaleString('en-IN')})
+          </Typography>
+          <Button onClick={() => setPendingBillsModal(prev => ({ ...prev, open: false }))} color="inherit">Cancel</Button>
+          <Button onClick={handlePendingBillsApply} variant="contained" disabled={pendingBillsModal.selectedBills.length === 0}>
+            Apply Total to Deposit
+          </Button>
+        </DialogActions>
       </Dialog>
 
     </Box>

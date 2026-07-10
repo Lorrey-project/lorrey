@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Select, MenuItem
@@ -414,15 +415,22 @@ export default function VoucherRegister({ onBack }) {
                       const bgColor = col.colorMap?.[display] || 'inherit';
                       return (
                         <td key={col.key} style={{ ...cellStyle, padding: 0, background: bgColor }}>
-                          <select value={display}
+                          <SearchableSelect value={display}
                             onChange={e => handleCellEdit(row._id, col.key, e.target.value)}
-                            style={{
-                              width: '100%', height: '100%', border: 'none', background: 'transparent',
-                              fontSize: '11px', cursor: 'pointer', padding: '4px 5px',
-                              color: PURPOSE_COLORS[display] || '#0f172a', fontWeight: 700,
+                            variant="standard"
+                            sx={{
+                              width: '100%', height: '100%',
+                              '.MuiInputBase-input': {
+                                fontSize: '11px', cursor: 'pointer', padding: '4px 5px !important',
+                                color: PURPOSE_COLORS[display] || '#0f172a', fontWeight: 700,
+                              },
+                              '.MuiInput-underline:before': { borderBottom: 'none' },
+                              '.MuiInput-underline:hover:not(.Mui-disabled):before': { borderBottom: 'none' },
+                              '.MuiInput-underline:after': { borderBottom: 'none' },
+                              background: 'transparent'
                             }}>
                             {col.options.map(o => <option key={o} value={o}>{o}</option>)}
-                          </select>
+                          </SearchableSelect>
                         </td>
                       );
                     }

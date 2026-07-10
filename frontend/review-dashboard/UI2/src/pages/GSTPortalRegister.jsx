@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Select, MenuItem,
@@ -402,22 +403,22 @@ export default function GSTPortalRegister({ onBack }) {
 
         {activeTab === 1 && (
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', ml: 2 }}>
-            <Select
+            <SearchableSelect
               size="small"
               value={filterMonth}
               onChange={e => setFilterMonth(e.target.value)}
               sx={{ fontSize: '12px', fontWeight: 700, bgcolor: '#fff', borderRadius: 2, height: 32 }}
             >
               {MONTH_NAMES.map((m, i) => <MenuItem key={i + 1} value={i + 1}>{m}</MenuItem>)}
-            </Select>
-            <Select
+            </SearchableSelect>
+            <SearchableSelect
               size="small"
               value={filterYear}
               onChange={e => setFilterYear(e.target.value)}
               sx={{ fontSize: '12px', fontWeight: 700, bgcolor: '#fff', borderRadius: 2, height: 32 }}
             >
               {[2024, 2025, 2026, 2027, 2028].map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
-            </Select>
+            </SearchableSelect>
           </Box>
         )}
 
@@ -632,7 +633,7 @@ export default function GSTPortalRegister({ onBack }) {
                         if (col.type === 'dropdown') {
                           return (
                             <td key={col.key} style={{ ...cellStyle, padding: 0 }}>
-                              <select value={display}
+                              <SearchableSelect variant="standard" value={display}
                                 onChange={e => handleCellEdit(row._id, col.key, e.target.value)}
                                 style={{
                                   width: '100%', height: '100%', border: 'none', background: 'transparent',
@@ -640,7 +641,7 @@ export default function GSTPortalRegister({ onBack }) {
                                   color: '#0f172a', fontWeight: 700,
                                 }}>
                                 {col.options.map(o => <option key={o} value={o}>{o}</option>)}
-                              </select>
+                              </SearchableSelect>
                             </td>
                           );
                         }

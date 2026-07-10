@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 const { ObjectId } = require("mongodb");
+const truckContactUpload = require("../middleware/truckContactUpload");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // We bypass Mongoose entirely and use the raw MongoDB native driver.
@@ -18,8 +19,19 @@ function getApprovalCollection() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// APPROVAL WORKFLOW ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────
+
+// POST /truck-contacts/upload-document — Upload a document to S3
+router.post("/upload-document", truckContactUpload.single("document"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "No file uploaded" });
+    }
+    res.json({ success: true, url: req.file.location });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // GET /truck-contacts/approvals — Fetch pending requests (Head Office only)
 router.get("/approvals", async (req, res) => {

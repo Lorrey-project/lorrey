@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import SearchableSelect from '../../components/SearchableSelect';
 import {
     Box, Typography, Container, Grid, Card, CardContent,
     IconButton, Button, Avatar, Chip, Paper,
@@ -617,7 +618,7 @@ const MobileDashboard = ({
                     <Box display="flex" gap={1.5} mb={2} mt={1}>
                         <FormControl size="small" sx={{ flex: 1, bgcolor: '#fff', borderRadius: 2 }}>
                             <InputLabel sx={{ fontSize: 13, fontWeight: 600 }}>Month</InputLabel>
-                            <Select
+                            <SearchableSelect
                                 value={filterMonth}
                                 label="Month"
                                 onChange={(e) => setFilterMonth(e.target.value)}
@@ -627,12 +628,12 @@ const MobileDashboard = ({
                                 {[...Array(12)].map((_, i) => (
                                     <MenuItem key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleString('en', { month: 'short' })}</MenuItem>
                                 ))}
-                            </Select>
+                            </SearchableSelect>
                         </FormControl>
 
                         <FormControl size="small" sx={{ flex: 1, bgcolor: '#fff', borderRadius: 2 }}>
                             <InputLabel sx={{ fontSize: 13, fontWeight: 600 }}>Year</InputLabel>
-                            <Select
+                            <SearchableSelect
                                 value={filterYear}
                                 label="Year"
                                 onChange={(e) => setFilterYear(e.target.value)}
@@ -642,7 +643,7 @@ const MobileDashboard = ({
                                 {yearOptions.map(y => (
                                     <MenuItem key={y} value={y}>{y}</MenuItem>
                                 ))}
-                            </Select>
+                            </SearchableSelect>
                         </FormControl>
                     </Box>
 

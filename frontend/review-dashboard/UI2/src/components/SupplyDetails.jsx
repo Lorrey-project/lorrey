@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import SearchableSelect from './SearchableSelect';
 import {
   Box, TextField, Card, CardHeader, CardContent, Chip, InputAdornment, Typography, CircularProgress,
   FormControl, InputLabel, Select, MenuItem
@@ -100,7 +101,7 @@ export default function SupplyDetails({ data, errors, onChange }) {
           />
           <FormControl fullWidth variant="outlined">
             <InputLabel id="dest-state-label">Destination State</InputLabel>
-            <Select
+            <SearchableSelect
               labelId="dest-state-label"
               name="destination_state"
               value={(() => {
@@ -127,7 +128,7 @@ export default function SupplyDetails({ data, errors, onChange }) {
               {data?.destination_state && !["Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal"].find(s => s.toLowerCase() === String(data.destination_state).toLowerCase()) && (
                 <MenuItem key="fallback" value={data.destination_state} sx={{ display: 'none' }}>{data.destination_state}</MenuItem>
               )}
-            </Select>
+            </SearchableSelect>
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1 }}>
               Used to identify NT/NVR route billing state
             </Typography>

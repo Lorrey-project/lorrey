@@ -1,3 +1,4 @@
+import SearchableSelect from '../components/SearchableSelect';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box, Typography, Button, IconButton, CircularProgress,
@@ -73,7 +74,7 @@ const getMonthIndexFromDate = (dateStr) => {
   try {
     const d = new Date(dateStr);
     if (!isNaN(d.getTime())) return d.getMonth() + 1;
-  } catch (_) {}
+  } catch (_) { }
   return 99;
 };
 
@@ -284,11 +285,7 @@ export default function FinancialYearDetails({ onBack }) {
     const targetAmt = Math.abs(num(damageTarget.debitAmount));
     // Sum amounts keyed by invoiceNo (one per trip-row)
     const allocatedAmt = damageSelectedTrips.reduce((sum, t) => sum + num(damageVehicleAmounts[t.invoiceNo] || 0), 0);
-    // Only enforce amount match when a non-zero debit amount exists
-    if (targetAmt > 0 && allocatedAmt !== targetAmt) {
-      setSnack({ severity: 'error', msg: `Total allocated (₹${allocatedAmt}) must match Debit Amount (₹${targetAmt})` });
-      return;
-    }
+    // Amount matching validation removed as per user request
 
     // Auto-populate group remarks – one line per trip-row (vehicle + trip + amount)
     let suffix = damageTarget.reason;
@@ -434,7 +431,7 @@ export default function FinancialYearDetails({ onBack }) {
     let result = computedRows;
     if (siteFilter === 'NVL') result = result.filter(r => isNVL(r.site));
     if (siteFilter === 'NVCL') result = result.filter(r => isNVCL(r.site));
-    
+
     if (selectedMonth !== 'All') {
       const mTarget = parseInt(selectedMonth, 10);
       result = result.filter(r => {
@@ -766,10 +763,10 @@ export default function FinancialYearDetails({ onBack }) {
   const handleExport = () => {
     exportToCsv('FinancialYearDetails.xls', computedRows.map(r => {
       const g = r.groupData || {};
-      const diff = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((s, x) => s + x.receivable, 0) - num(g.paymentAmount) : 0;
-      const groupTotalRecv = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((s, x) => s + x.receivable, 0) : 0;
-      const calcDebit = g.id ? num(g.paymentAmount) - groupTotalRecv : 0;
-      return { 'Invoice Date': r.invoiceDate, 'Invoice Number': r.invoiceNumber, 'Month': r.month, 'SITE': r.site, 'BILL': r.billType, 'Amount': r.amount, 'CGST': r.cgst, 'SGST': r.sgst, 'Total Amount': r.totalAmount, 'Tds @2%': r.tds, 'Receivable': r.receivable, 'Payment Amount': g.paymentAmount || 0, 'TDS Provision': g.tdsProvision || 0, 'Difference': diff, 'Payment Date': g.paymentDate || '', 'Reference No': g.referenceNo || '', 'Debit Amount': calcDebit, 'Debit Reasons(Deduction)': r.debitReason || 'None', 'Remarks': g.remarks || '' };
+      const groupTotalRecv = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((s, x) => s + (x.receivable || 0), 0) : 0;
+      const calcDebit = g.id ? num(g.debitAmount) : 0;
+      const diff = g.id ? groupTotalRecv - num(g.paymentAmount) - calcDebit - num(g.tdsProvision) : 0;
+      return { 'Invoice Date': r.invoiceDate, 'Invoice Number': r.invoiceNumber, 'Shipment Number': r.shipmentNos?.join(', ') || '', 'Month': r.month, 'SITE': r.site, 'BILL': r.billType, 'Amount': r.amount, 'CGST': r.cgst, 'SGST': r.sgst, 'Total Amount': r.totalAmount, 'Tds @2%': r.tds, 'Receivable': r.receivable, 'Payment Amount': g.paymentAmount || 0, 'TDS Provision': g.tdsProvision || 0, 'Difference': diff, 'Payment Date': g.paymentDate || '', 'Reference No': g.referenceNo || '', 'Debit Amount': calcDebit, 'Debit Reasons(Deduction)': r.debitReason || 'None', 'Remarks': g.remarks || '' };
     }));
   };
 
@@ -784,8 +781,8 @@ export default function FinancialYearDetails({ onBack }) {
       ? computedRows.filter(cr => cr.groupId === gid).reduce((s, x) => s + x.receivable, 0)
       : 0;
 
-    const groupDiff = isGroupStart ? groupTotalRecv - num(gd.paymentAmount) : 0;
-    const calcDebit = isGroupStart ? num(gd.paymentAmount) - groupTotalRecv : 0;
+    const calcDebit = isGroupStart ? num(gd.debitAmount) : 0;
+    const groupDiff = isGroupStart ? groupTotalRecv - num(gd.paymentAmount) - calcDebit - num(gd.tdsProvision) : 0;
 
     const bg = ri % 2 ? '#f8fafc' : '#fff';
     const td = (extra = {}) => ({ padding: '5px 6px', borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0', fontSize: 12, verticalAlign: 'middle', background: bg, ...extra });
@@ -848,151 +845,166 @@ export default function FinancialYearDetails({ onBack }) {
           {/* Sl No */}
           <td style={td({ textAlign: 'center', color: '#64748b', fontWeight: 600 })}>{page * PAGE_SIZE + ri + 1}</td>
 
-        {/* Select */}
-        <td style={td({ textAlign: 'center' })}>
-          <input type="checkbox" checked={selectedIds.includes(r.invoiceNumber)} onChange={() => toggleSelect(r.invoiceNumber)} style={{ cursor: 'pointer', width: 14, height: 14 }} />
-        </td>
+          {/* Select */}
+          <td style={td({ textAlign: 'center' })}>
+            <input type="checkbox" checked={selectedIds.includes(r.invoiceNumber)} onChange={() => toggleSelect(r.invoiceNumber)} style={{ cursor: 'pointer', width: 14, height: 14 }} />
+          </td>
 
-        {/* Invoice Date */}
-        <td style={td({ textAlign: 'center' })}>
-          <input
-            type="date"
-            value={formatDateForInput(r.invoiceDate)}
-            onChange={e => handleRowEdit(r.invoiceNumber, 'invoiceDate', e.target.value)}
-            style={{ ...iStyle, width: 110, textAlign: 'center', fontWeight: 600 }}
-          />
-        </td>
+          {/* Invoice Date */}
+          <td style={td({ textAlign: 'center' })}>
+            <input
+              type="date"
+              value={formatDateForInput(r.invoiceDate)}
+              onChange={e => handleRowEdit(r.invoiceNumber, 'invoiceDate', e.target.value)}
+              style={{ ...iStyle, width: 110, textAlign: 'center', fontWeight: 600 }}
+            />
+          </td>
 
-        {/* Invoice Number */}
-        <td style={td({ textAlign: 'left', position: 'sticky', left: 0, background: bg, zIndex: 4 })}>
-          <input value={r.displayInvoiceNumber || ''} onChange={e => handleRowEdit(r.invoiceNumber, 'displayInvoiceNumber', e.target.value)} style={{ ...iStyle, fontWeight: 700 }} />
-        </td>
+          {/* Invoice Number */}
+          <td style={td({ textAlign: 'left', position: 'sticky', left: 0, background: bg, zIndex: 4 })}>
+            <input value={r.displayInvoiceNumber || ''} onChange={e => handleRowEdit(r.invoiceNumber, 'displayInvoiceNumber', e.target.value)} style={{ ...iStyle, fontWeight: 700 }} />
+          </td>
 
-        {/* Month */}
-        <td style={td({ textAlign: 'center' })}>
-          <div style={{ display: 'flex', gap: 2 }}>
-            <select value={curM} onChange={e => handleMonthYearChange('M', e.target.value)} style={selStyle}>
-              <option value="">Month</option>
-              {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <select value={curY} onChange={e => handleMonthYearChange('Y', e.target.value)} style={selStyle}>
-              <option value="">Year</option>
-              {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-        </td>
+          {/* Shipment Number */}
+          <td style={td({ textAlign: 'left', whiteSpace: 'normal', maxWidth: 120 })}>
+            {r.shipmentNos?.join(', ') || ''}
+          </td>
 
-        {/* Site */}
-        <td style={td({ textAlign: 'center' })}>
-          <select
-            value={r.site || 'NVCL'}
-            onChange={e => handleRowEdit(r.invoiceNumber, 'site', e.target.value)}
-            style={{ ...selStyle, fontWeight: 600, textAlign: 'center' }}
-          >
-            <option value="NVCL">NVCL</option>
-            <option value="NVL">NVL</option>
-          </select>
-        </td>
-
-        {/* Bill Type */}
-        <td style={td()}>
-          <select value={r.billType || 'FREIGHT'} onChange={e => handleRowEdit(r.invoiceNumber, 'billType', e.target.value)} style={selStyle}>
-            {BILL_TYPES.map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
-        </td>
-
-        {/* Amount */}
-        <td style={td({ textAlign: 'right' })}>
-          <input
-            type="number"
-            value={r.amount || ''}
-            onChange={e => handleRowEdit(r.invoiceNumber, 'amount', e.target.value)}
-            style={{ ...iStyle, textAlign: 'right', fontWeight: 600 }}
-            placeholder="0"
-          />
-        </td>
-
-        {/* CGST */}
-        <td style={td({ textAlign: 'right', background: '#fef9e7' })}>₹{r.cgst?.toLocaleString('en-IN')}</td>
-        {/* SGST */}
-        <td style={td({ textAlign: 'right', background: '#fef9e7' })}>₹{r.sgst?.toLocaleString('en-IN')}</td>
-        {/* Total Amount */}
-        <td style={td({ textAlign: 'right', background: '#eef2ff', fontWeight: 700 })}>₹{r.totalAmount?.toLocaleString('en-IN')}</td>
-        {/* TDS */}
-        <td style={td({ textAlign: 'right', background: '#ecfeff', fontWeight: 600 })}>₹{r.tds?.toLocaleString('en-IN')}</td>
-        {/* Receivable */}
-        <td style={td({ textAlign: 'right', background: '#f0fdf4', fontWeight: 700 })}>₹{r.receivable?.toLocaleString('en-IN')}</td>
-
-        {/* Payment Amount — grouped cell */}
-        {(!gid || isGroupStart) && (
-          <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <div style={{ textAlign: 'right', fontWeight: 700, color: '#1e293b', fontSize: '12px' }}>
-                {gd.paymentAmount || 0}
-              </div>
-              <label style={{ cursor: 'pointer' }}>
-                <span style={{ fontSize: 9, color: '#6b7280', border: '1px solid #d1d5db', borderRadius: 3, padding: '1px 4px' }}>
-                  {uploadingGroup === gid ? 'Uploading…' : gd.paymentProofUrl ? 'Change Proof' : 'Upload Proof'}
-                </span>
-                <input type="file" hidden accept=".pdf,image/*" onChange={e => { if (e.target.files[0]) handleFileUpload(gid, e.target.files[0], gd); }} />
-              </label>
-              {gd.paymentProofUrl && <a href={gd.paymentProofUrl} target="_blank" rel="noreferrer" style={{ fontSize: 9, color: '#3b82f6' }}>View Proof</a>}
+          {/* Month */}
+          <td style={td({ textAlign: 'center' })}>
+            <div style={{ display: 'flex', gap: 2 }}>
+              <SearchableSelect variant="standard" value={curM} onChange={e => handleMonthYearChange('M', e.target.value)} style={selStyle}>
+                <option value="">Month</option>
+                {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+              </SearchableSelect>
+              <SearchableSelect variant="standard" value={curY} onChange={e => handleMonthYearChange('Y', e.target.value)} style={selStyle}>
+                <option value="">Year</option>
+                {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+              </SearchableSelect>
             </div>
           </td>
-        )}
 
-        {/* TDS Provision */}
-        {(!gid || isGroupStart) && (
-          <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
-            <input type="number" value={gd.tdsProvision || ''} onChange={e => handleInlineEdit(gid, 'tdsProvision', e.target.value, gd)} style={{ ...iStyle, textAlign: 'right', fontWeight: 700, color: '#0f172a' }} placeholder="0" />
+          {/* Site */}
+          <td style={td({ textAlign: 'center' })}>
+            <SearchableSelect variant="standard"
+              value={r.site || 'NVCL'}
+              onChange={e => handleRowEdit(r.invoiceNumber, 'site', e.target.value)}
+              style={{ ...selStyle, fontWeight: 600, textAlign: 'center' }}
+            >
+              <option value="NVCL">NVCL</option>
+              <option value="NVL">NVL</option>
+            </SearchableSelect>
           </td>
-        )}
 
-        {/* Difference */}
-        {(!gid || isGroupStart) && (
-          <td style={td({ textAlign: 'right', background: '#fdf2f8', fontWeight: 700, color: groupDiff < 0 ? '#dc2626' : '#166534' })} rowSpan={rowSpan}>
-            {isGroupStart ? `₹${groupDiff.toLocaleString('en-IN')}` : ''}
+          {/* Bill Type */}
+          <td style={td()}>
+            <SearchableSelect variant="standard" value={r.billType || 'FREIGHT'} onChange={e => handleRowEdit(r.invoiceNumber, 'billType', e.target.value)} style={selStyle}>
+              {BILL_TYPES.map(b => <option key={b} value={b}>{b}</option>)}
+            </SearchableSelect>
           </td>
-        )}
 
-        {/* Payment Date */}
-        {(!gid || isGroupStart) && (
-          <td style={td({ textAlign: 'center', background: '#fdf2f8', fontWeight: 600, color: '#334155' })} rowSpan={rowSpan}>
-            {gd.paymentDate ? (() => {
-              const p = gd.paymentDate.split('-');
-              return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : gd.paymentDate;
-            })() : ''}
+          {/* Amount */}
+          <td style={td({ textAlign: 'right' })}>
+            <input
+              type="number"
+              value={r.amount || ''}
+              onChange={e => handleRowEdit(r.invoiceNumber, 'amount', e.target.value)}
+              style={{ ...iStyle, textAlign: 'right', fontWeight: 600 }}
+              placeholder="0"
+            />
           </td>
-        )}
 
-        {/* Reference No */}
-        {(!gid || isGroupStart) && (
-          <td style={td({ background: '#fdf2f8', fontWeight: 600, color: '#334155' })} rowSpan={rowSpan}>
-            {gd.referenceNo || ''}
+          {/* CGST */}
+          <td style={td({ textAlign: 'right', background: '#fef9e7' })}>₹{r.cgst?.toLocaleString('en-IN')}</td>
+          {/* SGST */}
+          <td style={td({ textAlign: 'right', background: '#fef9e7' })}>₹{r.sgst?.toLocaleString('en-IN')}</td>
+          {/* Total Amount */}
+          <td style={td({ textAlign: 'right', background: '#eef2ff', fontWeight: 700 })}>₹{r.totalAmount?.toLocaleString('en-IN')}</td>
+          {/* TDS */}
+          <td style={td({ textAlign: 'right', background: '#ecfeff', fontWeight: 600 })}>₹{r.tds?.toLocaleString('en-IN')}</td>
+          {/* Receivable */}
+          <td style={td({ textAlign: 'right', background: '#f0fdf4', fontWeight: 700 })}>₹{r.receivable?.toLocaleString('en-IN')}</td>
+
+          {/* Payment Amount — grouped cell */}
+          {(!gid || isGroupStart) && (
+            <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <input
+                  type="number"
+                  value={gd.paymentAmount || ''}
+                  onChange={e => handleInlineEdit(gid, 'paymentAmount', e.target.value, gd)}
+                  style={{ ...iStyle, textAlign: 'right', fontWeight: 700, color: '#1e293b' }}
+                  placeholder="0"
+                />
+                <label style={{ cursor: 'pointer', textAlign: 'right' }}>
+                  <span style={{ fontSize: 9, color: '#6b7280', border: '1px solid #d1d5db', borderRadius: 3, padding: '1px 4px' }}>
+                    {uploadingGroup === gid ? 'Uploading…' : gd.paymentProofUrl ? 'Change Proof' : 'Upload Proof'}
+                  </span>
+                  <input type="file" hidden accept=".pdf,image/*" onChange={e => { if (e.target.files[0]) handleFileUpload(gid, e.target.files[0], gd); }} />
+                </label>
+                {gd.paymentProofUrl && <a href={gd.paymentProofUrl} target="_blank" rel="noreferrer" style={{ fontSize: 9, color: '#3b82f6', textAlign: 'right' }}>View Proof</a>}
+              </div>
+            </td>
+          )}
+
+          {/* TDS Provision */}
+          {(!gid || isGroupStart) && (
+            <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
+              <input type="number" value={gd.tdsProvision || ''} onChange={e => handleInlineEdit(gid, 'tdsProvision', e.target.value, gd)} style={{ ...iStyle, textAlign: 'right', fontWeight: 700, color: '#0f172a' }} placeholder="0" />
+            </td>
+          )}
+
+          {/* Difference */}
+          {(!gid || isGroupStart) && (
+            <td style={td({ textAlign: 'right', background: '#fdf2f8', fontWeight: 700, color: groupDiff < 0 ? '#dc2626' : '#166534' })} rowSpan={rowSpan}>
+              {isGroupStart ? `₹${groupDiff.toLocaleString('en-IN')}` : ''}
+            </td>
+          )}
+
+          {/* Payment Date */}
+          {(!gid || isGroupStart) && (
+            <td style={td({ textAlign: 'center', background: '#fdf2f8', fontWeight: 600, color: '#334155' })} rowSpan={rowSpan}>
+              {gd.paymentDate ? (() => {
+                const p = gd.paymentDate.split('-');
+                return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : gd.paymentDate;
+              })() : ''}
+            </td>
+          )}
+
+          {/* Reference No */}
+          {(!gid || isGroupStart) && (
+            <td style={td({ background: '#fdf2f8', fontWeight: 600, color: '#334155' })} rowSpan={rowSpan}>
+              {gd.referenceNo || ''}
+            </td>
+          )}
+
+          {/* Debit Amount */}
+          {(!gid || isGroupStart) && (
+            <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
+              <input
+                type="number"
+                value={gd.debitAmount || ''}
+                onChange={e => handleInlineEdit(gid, 'debitAmount', e.target.value, gd)}
+                style={{ ...iStyle, textAlign: 'right', fontWeight: 700, color: '#0f172a' }}
+                placeholder="0"
+              />
+            </td>
+          )}
+
+          {/* Debit Reasons (per row) */}
+          <td style={td()}>
+            <SearchableSelect variant="standard" value={r.debitReason || 'None'} onChange={e => handleRowEdit(r.invoiceNumber, 'debitReason', e.target.value)} style={selStyle}>
+              {DEBIT_REASONS.map(d => <option key={d} value={d}>{d}</option>)}
+            </SearchableSelect>
           </td>
-        )}
 
-        {/* Debit Amount */}
-        {(!gid || isGroupStart) && (
-          <td style={td({ textAlign: 'right', background: '#fdf2f8', fontWeight: 700, color: calcDebit > 0 ? '#166534' : (calcDebit < 0 ? '#dc2626' : 'inherit') })} rowSpan={rowSpan}>
-            {isGroupStart ? (calcDebit === 0 ? '0' : `₹${calcDebit.toLocaleString('en-IN')}`) : ''}
-          </td>
-        )}
-
-        {/* Debit Reasons (per row) */}
-        <td style={td()}>
-          <select value={r.debitReason || 'None'} onChange={e => handleRowEdit(r.invoiceNumber, 'debitReason', e.target.value)} style={selStyle}>
-            {DEBIT_REASONS.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </td>
-
-        {/* Remarks */}
-        {(!gid || isGroupStart) && (
-          <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
-            <textarea value={gd.remarks || ''} onChange={e => handleInlineEdit(gid, 'remarks', e.target.value, gd)} style={{...iStyle, resize: 'vertical', minHeight: '36px', fontFamily: 'inherit'}} />
-          </td>
-        )}
-      </tr>
+          {/* Remarks */}
+          {(!gid || isGroupStart) && (
+            <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
+              <textarea value={gd.remarks || ''} onChange={e => handleInlineEdit(gid, 'remarks', e.target.value, gd)} style={{ ...iStyle, resize: 'vertical', minHeight: '36px', fontFamily: 'inherit' }} />
+            </td>
+          )}
+        </tr>
       </React.Fragment>
     );
   };
@@ -1020,14 +1032,15 @@ export default function FinancialYearDetails({ onBack }) {
           </Typography>
           <Typography variant="caption" sx={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 0.5 }}>
             FY
-            <select
+            <SearchableSelect variant="standard"
               value={selYear}
               onChange={e => setSelYear(e.target.value)}
+              sx={{ minWidth: 120 }}
               style={{
                 border: 'none', outline: 'none', background: '#f1f5f9',
                 fontWeight: 700, color: '#4f46e5', cursor: 'pointer',
                 fontFamily: 'Inter, sans-serif', fontSize: '12px',
-                padding: '2px 6px', borderRadius: '4px', marginLeft: '4px'
+                borderRadius: '4px', marginLeft: '4px'
               }}
             >
               <option value="2024-2025">2024-25</option>
@@ -1035,7 +1048,7 @@ export default function FinancialYearDetails({ onBack }) {
               <option value="2026-2027">2026-27</option>
               <option value="2027-2028">2027-28</option>
               <option value="2028-2029">2028-29</option>
-            </select>
+            </SearchableSelect>
           </Typography>
         </Box>
 
@@ -1061,11 +1074,12 @@ export default function FinancialYearDetails({ onBack }) {
 
         {/* ── Month Filter Tabs ── */}
         <Box sx={{ display: 'flex', gap: 0.5, bgcolor: '#f1f5f9', borderRadius: '10px', p: '3px' }}>
-          <select 
-            value={selectedMonth} 
+          <SearchableSelect variant="standard"
+            value={selectedMonth}
             onChange={e => { setSelectedMonth(e.target.value); setPage(0); }}
             style={{
-              border: 'none', cursor: 'pointer', borderRadius: '8px', padding: '4px 14px',
+              minWidth: '120px',
+              border: 'none', cursor: 'pointer',
               fontWeight: 700, fontSize: 13, fontFamily: 'Inter,sans-serif',
               background: selectedMonth !== 'All' ? '#4f46e5' : 'transparent',
               color: selectedMonth !== 'All' ? '#fff' : '#64748b',
@@ -1076,7 +1090,7 @@ export default function FinancialYearDetails({ onBack }) {
             {MONTHS_LIST.map(m => (
               <option key={m.value} value={String(m.value)} style={{ color: '#000' }}>{m.label}</option>
             ))}
-          </select>
+          </SearchableSelect>
         </Box>
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1109,13 +1123,13 @@ export default function FinancialYearDetails({ onBack }) {
             Upload PDF {pageDocuments.length > 0 && `(${pageDocuments.length})`}
           </Button>
 
-          <Button 
-            variant="contained" 
-            startIcon={loading ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />} 
+          <Button
+            variant="contained"
+            startIcon={loading ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
             onClick={saveAllChanges}
-            disabled={(dirtyRows.size === 0 && dirtyGroups.size === 0) || loading} 
-            sx={{ 
-              fontWeight: 800, 
+            disabled={(dirtyRows.size === 0 && dirtyGroups.size === 0) || loading}
+            sx={{
+              fontWeight: 800,
               borderRadius: 2,
               px: 2.5,
               background: (dirtyRows.size > 0 || dirtyGroups.size > 0)
@@ -1159,6 +1173,7 @@ export default function FinancialYearDetails({ onBack }) {
                   <th style={thStyle({ minWidth: 50 })}>Select</th>
                   <th style={thStyle({ minWidth: 120 })}>Invoice Date</th>
                   <th style={thStyle({ minWidth: 170, position: 'sticky', left: 0, zIndex: 12 })}>Invoice Number</th>
+                  <th style={thStyle({ minWidth: 150 })}>Shipment Number</th>
                   <th style={thStyle({ minWidth: 150 })}>Month</th>
                   <th style={thStyle({ minWidth: 120 })}>SITE</th>
                   <th style={thStyle({ minWidth: 120 })}>BILL</th>
@@ -1267,17 +1282,17 @@ export default function FinancialYearDetails({ onBack }) {
         <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Box>
             <Typography variant="body2" fontWeight={600} mb={1}>1. Select Financial Year</Typography>
-            <select value={damageYear} onChange={handleDamageYearChange} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
+            <SearchableSelect variant="standard" value={damageYear} onChange={handleDamageYearChange} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
               <option value="">Select Financial Year</option>
               {FY_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
+            </SearchableSelect>
           </Box>
           <Box>
             <Typography variant="body2" fontWeight={600} mb={1}>2. Select Month</Typography>
-            <select value={damageMonth} onChange={e => fetchDamageVehicles(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} disabled={!damageYear}>
+            <SearchableSelect variant="standard" value={damageMonth} onChange={e => fetchDamageVehicles(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} disabled={!damageYear}>
               <option value="">Select Month</option>
               {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
+            </SearchableSelect>
           </Box>
           <Box>
             <Typography variant="body2" fontWeight={600} mb={1}>3. Select Vehicle(s)</Typography>
@@ -1321,11 +1336,11 @@ export default function FinancialYearDetails({ onBack }) {
                   try {
                     const p = dStr.split(/[-/.]/);
                     if (p.length === 3) {
-                      const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                      const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                       let y = parseInt(p[2]); if (y < 100) y += 2000;
                       return `${p[0]} ${M[parseInt(p[1]) - 1]} ${y}`;
                     }
-                  } catch(_) {}
+                  } catch (_) { }
                   return dStr;
                 };
 
@@ -1531,7 +1546,7 @@ export default function FinancialYearDetails({ onBack }) {
                             />
                           </td>
                         </tr>
-                    ))}
+                      ))}
                   </tbody>
                   {/* Totals row */}
                   <tfoot>
@@ -1633,10 +1648,7 @@ export default function FinancialYearDetails({ onBack }) {
             onClick={handleDamageSubmit}
             disabled={
               loading ||
-              damageSelectedTrips.length === 0 ||
-              // Only enforce amount match when a non-zero debit amount is set
-              (Math.abs(num(damageTarget?.debitAmount || 0)) > 0 &&
-                damageSelectedTrips.reduce((s, t) => s + num(damageVehicleAmounts[t.invoiceNo] || 0), 0) !== Math.abs(num(damageTarget?.debitAmount || 0)))
+              damageSelectedTrips.length === 0
             }
           >
             {loading ? 'Saving…' : 'Save Details'}
@@ -1669,7 +1681,7 @@ export default function FinancialYearDetails({ onBack }) {
           </Box>
           <Box display="flex" alignItems="center" gap={2}>
             {/* Year Selector */}
-            <select
+            <SearchableSelect variant="standard"
               value={selYear}
               onChange={(e) => setSelYear(e.target.value)}
               style={{
@@ -1688,10 +1700,10 @@ export default function FinancialYearDetails({ onBack }) {
               <option value="2025-2026">FY 2025–26</option>
               <option value="2026-2027">FY 2026–27</option>
               <option value="2027-2028">FY 2027–28</option>
-            </select>
+            </SearchableSelect>
 
             {/* Month Selector */}
-            <select
+            <SearchableSelect variant="standard"
               value={dashboardM}
               onChange={(e) => setDashboardM(Number(e.target.value))}
               style={{
@@ -1709,7 +1721,7 @@ export default function FinancialYearDetails({ onBack }) {
               {MONTHS_LIST.map(m => (
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
-            </select>
+            </SearchableSelect>
 
             <IconButton onClick={() => setDashboardOpen(false)} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
               ✕

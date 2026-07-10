@@ -1,4 +1,5 @@
 import React from 'react';
+import SearchableSelect from './SearchableSelect';
 import { Box, TextField, Card, CardHeader, CardContent, Chip, MenuItem, Select, InputLabel, FormControl } from '@mui/material';
 import LockIcon from '@mui/icons-material/Lock';
 
@@ -25,7 +26,7 @@ export default function SellerDetails({ data, errors, onChange }) {
           
           <FormControl fullWidth variant="outlined">
             <InputLabel shrink id="seller-name-label">Seller Name</InputLabel>
-            <Select
+            <SearchableSelect
               labelId="seller-name-label"
               name="seller_name"
               value={data?.seller_name === 'NVL' || data?.seller_name === 'NVCL' ? data.seller_name : ''}
@@ -37,7 +38,7 @@ export default function SellerDetails({ data, errors, onChange }) {
               <MenuItem value="" disabled><em>— Select Seller Name —</em></MenuItem>
               <MenuItem value="NVL">NU VISTA LTD</MenuItem>
               <MenuItem value="NVCL">NUVOCO VISTAS CORP. LTD</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
 
           <TextField fullWidth label="Seller Address" name="seller_address" value="PANAGARH INDUSTRIAL PARK, KOTAGRAM, BURDWAN" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />

@@ -84,7 +84,7 @@ router.get('/debug-cement', async (req, res) => {
 
     // Get all distinct date field values
     const allDates = [];
-    const allRaw = await col.find({}, { projection: { 'LOADING DATE': 1, 'LOADING DT': 1, 'VEHICLE NUMBER': 1, 'BILLING @ 95% (PARTY PAYABLE)': 1, 'TDS@1%': 1, 'HSD AMOUNT': 1, 'ADVANCE': 1 } }).limit(20).toArray();
+    const allRaw = await col.find({}, { projection: { 'LOADING DATE': 1, 'LOADING DT': 1, 'VEHICLE NUMBER': 1, 'BILLING @ 95% (PARTY PAYABLE)': 1, 'TDS': 1, 'HSD AMOUNT': 1, 'ADVANCE': 1 } }).limit(20).toArray();
 
     res.json({
       totalDocs: await col.countDocuments(),
@@ -95,7 +95,7 @@ router.get('/debug-cement', async (req, res) => {
         'LOADING DATE': r['LOADING DATE'],
         'LOADING DT': r['LOADING DT'],
         'BILLING @ 95% (PARTY PAYABLE)': r['BILLING @ 95% (PARTY PAYABLE)'],
-        'TDS@1%': r['TDS@1%'],
+        'TDS': r['TDS'],
         'HSD AMOUNT': r['HSD AMOUNT'],
         'ADVANCE': r['ADVANCE'],
       }))

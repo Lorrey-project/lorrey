@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
-  Snackbar, Alert, Chip, Tooltip, Select, MenuItem,
+  Snackbar, Alert, Chip, Tooltip, MenuItem,
   Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
+import SearchableSelect from '../components/SearchableSelect';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -34,8 +35,10 @@ const COLUMNS = [
   { key: 'SL NO', label: 'SL NO', width: 60, type: 'auto', group: 'id', sticky: true },
   { key: 'LOADING DT', label: 'INVOICE DATE', width: 120, type: 'auto', group: 'id' },
   { key: 'RECEIVING DATE', label: 'RECEIVING\nDATE', width: 120, type: 'manual', group: 'id', isDate: true },
-  { key: 'BILL NO', label: 'BILL NO', width: 160, type: 'auto', group: 'id', hasAttach: 'bill_pdf_auto' },
-  { key: 'BILL DATE', label: 'BILL DATE', width: 120, type: 'auto', group: 'id' },
+  { key: 'BILL NO', label: 'FREIGHT BILL NO', width: 160, type: 'auto', group: 'id', hasAttach: 'bill_pdf_auto' },
+  { key: 'BILL DATE', label: 'FREIGHT BILL DATE', width: 130, type: 'auto', group: 'id' },
+  { key: 'UNLOADING BILL NO', label: 'UNLOADING BILL NO', width: 160, type: 'auto', group: 'id' },
+  { key: 'UNLOADING BILL DATE', label: 'UNLOADING BILL DATE', width: 150, type: 'auto', group: 'id' },
   { key: 'By Portal', label: 'BY PORTAL', width: 120, type: 'dropdown', options: ['By Portal', ''], group: 'id' },
   { key: 'SITE', label: 'SITE', width: 190, type: 'auto', group: 'id' },
   { key: 'VEHICLE NUMBER', label: 'VEHICLE NUMBER', width: 145, type: 'auto', group: 'id' },
@@ -108,7 +111,7 @@ const COLUMNS = [
   },
   { key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.05) },
   {
-    key: 'TDS@1%', label: 'TDS@1%', width: 80, type: 'calc', group: 'billing',
+    key: 'TDS', label: 'TDS', width: 80, type: 'calc', group: 'billing',
     formula: r => {
       const comm = r._freight_commission;
       const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
@@ -126,9 +129,10 @@ const COLUMNS = [
   { key: 'Others deduction', label: 'OTHERS\nDEDUCTION', width: 130, type: 'manual', group: 'deductions' },
   { key: 'Other', label: 'OTHER', width: 100, type: 'manual', group: 'deductions' },
   { key: 'GPS Monitoring Charge', label: 'GPS MONITORING\nCHARGE', width: 150, type: 'manual', group: 'deductions' },
-  { key: 'GPS DEVICE', label: 'GPS DEVICE', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
-  { key: 'RFID TAG', label: 'RFID TAG', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
-  { key: 'RFID REASSURANCE', label: 'RFID\nREASSURANCE', width: 130, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
+  { key: 'Give GPS DEVICE', label: 'GIVE GPS DEVICE', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
+  { key: 'GPS Deviation Charges', label: 'GPS DEVIATION\nCHARGES', width: 150, type: 'manual', group: 'deductions' },
+  { key: 'Give RFID TAG', label: 'GIVE RFID TAG', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
+
   { key: 'FASTAG', label: 'FASTAG', width: 100, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
 
   // ── Group 4: HSD / Fuel ────────────────────────────────────────────────────
@@ -173,7 +177,14 @@ const COLUMNS = [
   { key: 'SHORTAGE (RATE)', label: 'SHORTAGE (RATE)', width: 120, type: 'manual', group: 'hsd' },
   {
     key: 'SHORTAGE (AMOUNT)', label: 'SHORTAGE (AMOUNT)', width: 130, type: 'calc', group: 'hsd',
-    formula: r => fmt2(num(r['SHORTAGE (RATE)']) * num(r['SHORTAGE (BAG)']))
+    formula: r => {
+      // Prioritize manual input/override over calculation
+      const manualAmt = num(r['SHORTAGE (AMOUNT)']);
+      if (manualAmt > 0) return fmt2(manualAmt);
+
+      const calc = num(r['SHORTAGE (RATE)']) * num(r['SHORTAGE (BAG)']);
+      return fmt2(calc);
+    }
   },
 
   // ── Group 5: Net / Gross ───────────────────────────────────────────────────
@@ -185,15 +196,16 @@ const COLUMNS = [
       const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
       return fmt2(
         base
-        - num(r['TDS@1%'])
+        - num(r['TDS'])
         - num(r.ADVANCE)
         - num(r['Site Cash'])
         - num(r['OFFICE CASH'])
         - num(r['Bank TF'])
         - num(r['Others deduction'])
         - num(r['GPS Monitoring Charge'])
-        - num(r['GPS DEVICE'])
-        - num(r['RFID TAG'])
+        - num(r['Give GPS DEVICE'])
+        - num(r['GPS Deviation Charges'])
+        - num(r['Give RFID TAG'])
         - num(r['RFID REASSURANCE'])
         - num(r['FASTAG'])
         - num(r['HSD AMOUNT'])
@@ -249,7 +261,7 @@ const COLUMNS = [
     width: 110,
     type: 'auto',
     group: 'payment',
-    hint: 'Auto-filled when Account Details deposit is mapped to this bill'
+    hint: 'Auto-filled when Bank Book deposit is mapped to this bill'
   },
   {
     key: 'PAYMENT DATE',
@@ -265,7 +277,7 @@ const COLUMNS = [
     width: 150,
     type: 'auto',
     group: 'payment',
-    hint: 'Reference No / Cheque No from Account Details'
+    hint: 'Reference No / Cheque No from Bank Book'
   },
   {
     key: 'DIFFERENCE',
@@ -357,9 +369,9 @@ const VISIBLE_COLS = COLUMNS.filter((c, i, arr) =>
 );
 
 const NUMERIC_KEYS = new Set([
-  'MT', 'Billing Amount', 'BILLING ER 95%', 'BILLING ER VAR', 'PROFIT', 'TDS@1%',
+  'MT', 'Billing Amount', 'BILLING ER 95%', 'BILLING ER VAR', 'PROFIT', 'TDS',
   'ADVANCE', 'Site Cash', 'OFFICE CASH', 'Bank TF', 'Others deduction', 'Other',
-  'GPS Monitoring Charge', 'GPS DEVICE', 'RFID TAG', 'RFID REASSURANCE', 'FASTAG',
+  'GPS Monitoring Charge', 'Give GPS DEVICE', 'GPS Deviation Charges', 'Give RFID TAG', 'RFID REASSURANCE', 'FASTAG',
   'FUEL REQUIRED', 'HSD (LTR)', 'ACTUAL EXTRA', 'HSD AMOUNT', 'TRAVELLING EXP',
   'SHORTAGE (BAG)', 'SHORTAGE (AMOUNT)', 'NET AMOUNT', 'UP TOLL', 'DOWN TOLL',
   'EXTRA UNLOADING', 'DEDICATED', '10W EXTRA 8.5%', 'GROSS AMOUNT', 'AMOUNT'
@@ -470,14 +482,15 @@ const RAW_EXCEL_HEADER_MAP = {
   'billing er 95%': 'BILLING ER 95%', 'billing er 95 %': 'BILLING ER 95%', 'billing er 95% (party payable)': 'BILLING ER 95%', 'billing er 95 % (party payable)': 'BILLING ER 95%', 'billing er 95 % party payable': 'BILLING ER 95%',
   'amount': 'AMOUNT',
   'profit': 'PROFIT',
-  'tds@1%': 'TDS@1%', 'tds': 'TDS@1%', 'tds1%': 'TDS@1%',
+  'tds': 'TDS', 'tds1%': 'TDS', 'tds@1%': 'TDS',
   // Deductions
   'others deduction': 'Others deduction', 'other deduction': 'Others deduction', 'deduction': 'Others deduction',
   'other': 'Other',
   'gps monitoring charge': 'GPS Monitoring Charge', 'gps charge': 'GPS Monitoring Charge', 'gps': 'GPS Monitoring Charge', 'gps monitaring charge': 'GPS Monitoring Charge',
-  'gps device': 'GPS DEVICE',
-  'rfid tag': 'RFID TAG', 'rfid': 'RFID TAG',
-  'rfid reassurance': 'RFID REASSURANCE',
+  'gps device': 'Give GPS DEVICE',
+  'gps deviation charges': 'GPS Deviation Charges', 'gps deviation': 'GPS Deviation Charges',
+  'rfid tag': 'Give RFID TAG', 'rfid': 'Give RFID TAG',
+
   'fastag': 'FASTAG', 'fas tag': 'FASTAG',
   // HSD / Fuel
   'pump name': 'PUMP NAME', 'pump': 'PUMP NAME',
@@ -730,35 +743,12 @@ export default function CementRegister({ onBack }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [isBillingMode, setIsBillingMode] = useState(false);
-  const [bulkBillInput, setBulkBillInput] = useState({ billNo: '', billDate: '' });
+  const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
+  const [bulkBillInput, setBulkBillInput] = useState({ billDate: '', billType: '' });
   const [activeRowId, setActiveRowId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const allSelected = entries.length > 0 && selectedIds.size === entries.length;
-  const someSelected = selectedIds.size > 0 && !allSelected;
 
-  const toggleSelect = (id) => setSelectedIds(prev => {
-    if (isBillingMode && !prev.has(id) && prev.size >= 8) {
-      setSnack({ severity: 'warning', msg: 'Maximum 8 bills can be selected for batch billing.' });
-      return prev;
-    }
-    const s = new Set(prev);
-    s.has(id) ? s.delete(id) : s.add(id);
-    return s;
-  });
-  const toggleSelectAll = () => {
-    if (allSelected || someSelected) {
-      setSelectedIds(new Set());
-    } else {
-      if (isBillingMode && computedRows.length > 8) {
-        setSnack({ severity: 'warning', msg: 'Selecting first 8 bills. Maximum 8 bills can be processed at once.' });
-        setSelectedIds(new Set(computedRows.slice(0, 8).map(r => r._id)));
-      } else {
-        setSelectedIds(new Set(computedRows.map(r => r._id)));
-      }
-    }
-  };
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (silent = false) => {
@@ -825,10 +815,6 @@ export default function CementRegister({ onBack }) {
 
     let rows = [...dbRows, ...previewRows];
 
-    if (isBillingMode) {
-      // Show ONLY entries that are STAMPED but NOT yet BILLED
-      rows = rows.filter(r => r['CHALLAN STATUS'] === 'STAMP' && !r['BILL NO']);
-    }
 
     // Sort chronologically by date
     rows.sort((a, b) => {
@@ -848,20 +834,41 @@ export default function CementRegister({ onBack }) {
       'SL NO': String(index + 1),
       'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
     }));
-  }, [entries, unsavedImportRows, localData, isBillingMode]);
+  }, [entries, unsavedImportRows, localData]);
+
+  const filteredRows = useMemo(() => {
+    if (!searchQuery) return computedRows;
+    const q = searchQuery.toLowerCase();
+    return computedRows.filter(row => Object.values(row).some(val => String(val || '').toLowerCase().includes(q)));
+  }, [computedRows, searchQuery]);
 
   const monthlyTotals = useMemo(() => {
     const totals = {};
     NUMERIC_KEYS.forEach(key => {
       let sum = 0;
-      computedRows.forEach(row => {
+      filteredRows.forEach(row => {
         sum += num(row[key]);
       });
       totals[key] = sum;
     });
     return totals;
-  }, [computedRows]);
+  }, [filteredRows]);
+  const unbilledRows = computedRows.filter(r => String(r['CHALLAN STATUS']).toUpperCase().trim() !== 'BILLED');
+  const allSelected = unbilledRows.length > 0 && selectedIds.size === unbilledRows.length;
+  const someSelected = selectedIds.size > 0 && !allSelected;
 
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const s = new Set(prev);
+    s.has(id) ? s.delete(id) : s.add(id);
+    return s;
+  });
+  const toggleSelectAll = () => {
+    if (allSelected || someSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(unbilledRows.map(r => r._id)));
+    }
+  };
   // ── Cell edit (local draft) ────────────────────────────────────────────────
   const handleCellEdit = useCallback((rowId, field, value) => {
     setLocalData(prev => ({
@@ -911,10 +918,11 @@ export default function CementRegister({ onBack }) {
   };
 
   // ── Bulk Save ──────────────────────────────────────────────────────────────
-  const executeSave = async (isOverwrite = false) => {
+  const executeSave = async (isOverwrite = false, overrideData = null) => {
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
+      const dataToSave = overrideData || localData;
 
       if (isOverwrite) {
         // Delete existing entries for this period
@@ -925,7 +933,7 @@ export default function CementRegister({ onBack }) {
       } else {
         // Perform normal DB updates if any (only when not overwriting the entire period)
         const dbUpdates = [];
-        Object.entries(localData).forEach(([id, changes]) => {
+        Object.entries(dataToSave).forEach(([id, changes]) => {
           if (!id.startsWith('temp-')) {
             const originalRow = entries.find(r => r._id === id);
             if (originalRow) {
@@ -958,7 +966,7 @@ export default function CementRegister({ onBack }) {
       // Prepare and POST new import entries if any
       if (unsavedImportRows.length > 0) {
         const tempEdits = {};
-        Object.entries(localData).forEach(([id, changes]) => {
+        Object.entries(dataToSave).forEach(([id, changes]) => {
           if (id.startsWith('temp-')) {
             tempEdits[id] = changes;
           }
@@ -1014,55 +1022,64 @@ export default function CementRegister({ onBack }) {
   // ── CSV Export ─────────────────────────────────────────────────────────────
   const handleExport = () => exportToCsv('cement_register.xls', computedRows);
 
-  // ── Apply Bulk Bill to selected rows (draft only) ─────────────────────────
+  // ── Apply Bulk Bill to selected rows ─────────────────────────
   const handleBulkBillApply = async () => {
-    const { billDate } = bulkBillInput;
+    const { billDate, billType } = bulkBillInput;
     const ids = [...selectedIds];
     if (ids.length === 0) {
       setSnack({ severity: 'warning', msg: 'No rows selected for billing' });
       return;
     }
-    if (ids.length > 8) {
-      setSnack({ severity: 'error', msg: 'Batch billing is limited to a maximum of 8 bills at a time.' });
+    if (!billDate || !billType) {
+      setSnack({ severity: 'error', msg: 'Please select both Bill Date and Bill Type.' });
+      return;
+    }
+
+    // Ensure none of the selected records are already billed for the same type
+    const isAlreadyGenerated = ids.some(id => {
+      const r = computedRows.find(row => row._id === id);
+      if (!r) return false;
+      const fGen = r['Freight Generated'] === 'Yes';
+      const uGen = r['Unloading Generated'] === 'Yes';
+      return (billType === 'Freight' && fGen) || (billType === 'Unloading' && uGen);
+    });
+
+    if (isAlreadyGenerated) {
+      setSnack({ severity: 'error', msg: 'One or more selected records have already been billed for this type.' });
       return;
     }
 
     try {
+      setSnack({ severity: 'info', msg: `Generating batch bills...` });
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${API_URL}/cement-register/next-batch-serial?date=${billDate || ''}`, {
+      const payload = {
+        recordIds: ids,
+        billDate,
+        billType
+      };
+
+      const res = await axios.post(`${API_URL}/cement-register/generate-batch-bills`, payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const autoBatchSerial = res.data.nextSerial; // e.g. "25-26/0001"
 
-      setLocalData(prev => {
-        const next = { ...prev };
-        ids.forEach(id => {
-          const row = computedRows.find(r => r._id === id);
-          const rawSite = String(row?.['SITE'] || '').trim().toUpperCase();
-          const prefix = rawSite === 'NVL' ? 'DAC/' : 'NVCL/';
+      if (res.data.success) {
+        setIsBillingModalOpen(false);
+        setBulkBillInput({ billDate: '', billType: '' });
+        setSelectedIds(new Set());
 
-          const formattedBillDate = billDate ? (() => {
-            const [y, m, d] = billDate.split('-');
-            return `${d}/${m}/${y}`;
-          })() : '';
+        const generatedCount = res.data.summary?.length || 0;
+        setSnack({ severity: 'success', msg: `Successfully generated ${generatedCount} party-wise bill(s).` });
 
-          next[id] = {
-            ...(next[id] || {}),
-            'BILL NO': `${prefix}${autoBatchSerial}`,
-            'BILL DATE': formattedBillDate
-          };
-        });
-        return next;
-      });
-      setIsBillingMode(false);
-      setSelectedIds(new Set());
-      setSnack({ severity: 'success', msg: `Drafted Auto-Generated Bill for ${ids.length} rows. Click SAVE to finalize!` });
+        // Refresh data to show new bill numbers
+        fetchData();
+      } else {
+        setSnack({ severity: 'error', msg: res.data.error || 'Failed to generate batch bills.' });
+      }
     } catch (err) {
-      setSnack({ severity: 'error', msg: 'Failed to generate auto serial.' });
+      console.error(err);
+      setSnack({ severity: 'error', msg: 'Failed to generate batch bills: ' + (err.response?.data?.error || err.message) });
     }
   };
-
-
 
   // ── CSV Import ─────────────────────────────────────────────────────────────
   const handleImport = async (e) => {
@@ -1137,8 +1154,14 @@ export default function CementRegister({ onBack }) {
         excelHeaders.forEach((h, colIdx) => {
           if (!h) return; // skip empty headers
           const key = EXCEL_HEADER_MAP[normalizeHeader(h)];
-          if (key) headerMapping[colIdx] = key;
-          else unmappedHeaders.push(h);
+          if (key) {
+            headerMapping[colIdx] = key;
+          } else {
+            // Map to original header so no column data is lost/skipped
+            // Replace . and $ as MongoDB doesn't allow them in keys
+            headerMapping[colIdx] = h.trim().replace(/[\.$]/g, '_');
+            unmappedHeaders.push(h);
+          }
         });
 
         // Find a date column to filter by month/year
@@ -1165,7 +1188,7 @@ export default function CementRegister({ onBack }) {
             if (dateCols.has(internalKey)) {
               val = normalizeDateStr(val, wizardMonth, wizardYear);
             }
-            if (val !== '') rowObj[internalKey] = val;
+            rowObj[internalKey] = val;
           });
           if (Object.keys(rowObj).length > 0) {
             // A valid row must contain at least a date or a vehicle number.
@@ -1187,7 +1210,7 @@ export default function CementRegister({ onBack }) {
 
         setWizardPreview({
           sheetName,
-          totalInFile: dataRows.length, // Only count data rows, not headers/titles
+          totalInFile: mappedRows.length, // Match valid rows so the UI doesn't incorrectly report missing rows
           filteredRows,
           allRows: mappedRows,
           headerMapping,
@@ -1331,7 +1354,7 @@ export default function CementRegister({ onBack }) {
 
               {/* Month & Year Selectors */}
               <Box display="flex" alignItems="center" gap={1}>
-                <Select
+                <SearchableSelect
                   value={selectedMonth}
                   onChange={(e) => {
                     setSelectedMonth(Number(e.target.value));
@@ -1339,7 +1362,6 @@ export default function CementRegister({ onBack }) {
                   }}
                   size="small"
                   sx={{
-                    height: 28,
                     borderRadius: '8px',
                     fontSize: '11px',
                     fontWeight: 700,
@@ -1354,7 +1376,7 @@ export default function CementRegister({ onBack }) {
                     '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
                       borderColor: '#7c3aed',
                     },
-                    minWidth: 105,
+                    minWidth: 130,
                   }}
                 >
                   {MONTHS.map((mo, idx) => (
@@ -1362,9 +1384,9 @@ export default function CementRegister({ onBack }) {
                       {mo}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
 
-                <Select
+                <SearchableSelect
                   value={selectedYear}
                   onChange={(e) => {
                     setSelectedYear(Number(e.target.value));
@@ -1372,7 +1394,6 @@ export default function CementRegister({ onBack }) {
                   }}
                   size="small"
                   sx={{
-                    height: 28,
                     borderRadius: '8px',
                     fontSize: '11px',
                     fontWeight: 700,
@@ -1387,7 +1408,7 @@ export default function CementRegister({ onBack }) {
                     '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
                       borderColor: '#7c3aed',
                     },
-                    minWidth: 75,
+                    minWidth: 130,
                   }}
                 >
                   {years.map(yr => (
@@ -1395,13 +1416,13 @@ export default function CementRegister({ onBack }) {
                       {yr}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
               </Box>
 
               {/* Search Bar */}
-              <Box display="flex" alignItems="center" sx={{ 
-                bgcolor: '#f1f5f9', borderRadius: '8px', px: 1.5, py: 0.5, ml: 1, border: '1px solid #e2e8f0', 
-                '&:focus-within': { borderColor: '#7c3aed', boxShadow: '0 0 0 1px #7c3aed' }, width: 220 
+              <Box display="flex" alignItems="center" sx={{
+                bgcolor: '#f1f5f9', borderRadius: '8px', px: 1.5, py: 0.5, ml: 1, border: '1px solid #e2e8f0',
+                '&:focus-within': { borderColor: '#7c3aed', boxShadow: '0 0 0 1px #7c3aed' }, width: 220
               }}>
                 <input
                   type="text"
@@ -1467,34 +1488,10 @@ export default function CementRegister({ onBack }) {
             📊 Incentive Calculation Sheet
           </Button>
 
-          {isBillingMode ? (
-            <Box sx={{
-              display: 'flex', alignItems: 'center', gap: 1.5,
-              bgcolor: '#f8fafc', px: 2, py: 0.75, borderRadius: '12px', border: '1px solid #e2e8f0'
-            }}>
-              <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#475569', letterSpacing: '0.5px' }}>BILLING STAGE (AUTO BILL NO)</Typography>
-              <input
-                type="date"
-                value={bulkBillInput.billDate}
-                onChange={e => setBulkBillInput(prev => ({ ...prev, billDate: e.target.value }))}
-                style={{ width: 130, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
-              />
-              <Button size="small" variant="contained" onClick={handleBulkBillApply}
-                disabled={selectedIds.size === 0 || selectedIds.size > 8}
-                sx={{ fontWeight: 700, fontSize: '0.75rem', px: 2, borderRadius: '8px', bgcolor: '#0f172a', '&:hover': { bgcolor: '#1e293b' }, boxShadow: 'none' }}>
-                Apply ({selectedIds.size})
-              </Button>
-              <Button size="small" sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b', minWidth: 0, px: 1, textTransform: 'none' }}
-                onClick={() => setIsBillingMode(false)}>Exit</Button>
-            </Box>
-          ) : (
+          {selectedIds.size > 0 && (
             <Button size="small" variant="outlined"
               onClick={() => {
-                setIsBillingMode(true);
-                if (selectedIds.size > 8) {
-                  setSnack({ severity: 'warning', msg: 'Batch billing limited to 8 bills. Selecting the first 8.' });
-                  setSelectedIds(prev => new Set([...prev].slice(0, 8)));
-                }
+                setIsBillingModalOpen(true);
               }}
               sx={{
                 fontWeight: 700, borderRadius: '10px', px: 2, fontSize: '0.8rem',
@@ -1508,7 +1505,7 @@ export default function CementRegister({ onBack }) {
 
           <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
 
-          {selectedIds.size > 0 && !isBillingMode && (
+          {selectedIds.size > 0 && (
             <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }} />}
               onClick={() => setConfirmDel(true)}
               sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', boxShadow: 'none' }}>
@@ -1655,30 +1652,27 @@ export default function CementRegister({ onBack }) {
                 </td>
               </tr>
             )}
-            {computedRows.map((row, ri) => {
+            {filteredRows.map((row, ri) => {
               const hasDraft = !!localData[row._id];
               const isSelected = selectedIds.has(row._id);
-              
-              let isMatch = false;
-              if (searchQuery) {
-                const q = searchQuery.toLowerCase();
-                isMatch = Object.values(row).some(val => String(val || '').toLowerCase().includes(q));
-              }
+
+              const isMatch = !!searchQuery;
+
+              const isLocked = row['Billing Completed'] === 'Yes';
 
               return (
                 <tr key={row._id} style={{
-                  background: isMatch
-                    ? '#ffffff'
+                  background: isLocked ? '#e2e8f0' : isMatch
+                    ? '#f1f5f9' // Light grey background for highlighted search results
                     : isSelected
                       ? 'rgba(124,58,237,0.08)'
                       : row.isUnsavedImport
                         ? '#f3e8ff'
                         : hasDraft ? '#fffbeb'
                           : ri % 2 === 0 ? '#fff' : '#f8fafc',
-                  outline: isMatch ? '2px solid #94a3b8' : (isSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'),
-                  opacity: (searchQuery && !isMatch) ? 0.35 : 1,
-                  transition: 'opacity 0.2s',
-                  boxShadow: isMatch ? 'inset 0 0 0 1px #e2e8f0' : 'none'
+                  outline: isMatch ? '2px solid #cbd5e1' : (isSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'),
+                  transition: 'background 0.2s',
+                  opacity: isLocked ? 0.6 : 1,
                 }}>
                   {/* Row checkbox */}
                   <td style={{
@@ -1689,9 +1683,12 @@ export default function CementRegister({ onBack }) {
                     <input
                       type="checkbox"
                       checked={isSelected}
-                      disabled={isBillingMode && !isSelected && selectedIds.size >= 8}
+                      disabled={isLocked}
                       onChange={() => toggleSelect(row._id)}
-                      style={{ cursor: isBillingMode && !isSelected && selectedIds.size >= 8 ? 'not-allowed' : 'pointer', width: 13, height: 13, accentColor: '#7c3aed' }}
+                      style={{
+                        cursor: isLocked ? 'not-allowed' : 'pointer',
+                        width: 13, height: 13, accentColor: '#7c3aed'
+                      }}
                     />
                   </td>
                   {VISIBLE_COLS.map((col) => {
@@ -1727,7 +1724,7 @@ export default function CementRegister({ onBack }) {
                 </tr>
               );
             })}
-            {computedRows.length > 0 && (
+            {filteredRows.length > 0 && (
               <tr style={{
                 fontWeight: 900,
                 borderTop: '2px double #cbd5e1',
@@ -1751,7 +1748,7 @@ export default function CementRegister({ onBack }) {
                     : isNumeric
                       ? formatTotalValue(col.key, val)
                       : '';
-                  
+
                   return (
                     <td key={`total-${col.key}`} style={{
                       border: '1px solid #cbd5e1',
@@ -1761,7 +1758,7 @@ export default function CementRegister({ onBack }) {
                       textAlign: isNumeric ? 'right' : 'left',
                       fontWeight: 900,
                       position: 'sticky', bottom: 0, zIndex: 10,
-                      background: isNumeric 
+                      background: isNumeric
                         ? 'linear-gradient(180deg, #f5f3ff 0%, #ede9fe 100%)' // purple tint for numeric total cells
                         : 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
                       boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
@@ -2205,8 +2202,93 @@ export default function CementRegister({ onBack }) {
         </Alert>
       </Snackbar>
 
+      {/* ── Billing Confirmation Modal ──────────────────────────────────── */}
+      <Dialog open={isBillingModalOpen} onClose={() => setIsBillingModalOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#0f172a' }}>
+          Billing Confirmation
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2, p: 3 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            You have selected {selectedIds.size} row(s). Please review the details below, set the Bill Date and Bill Type, and click Generate Bill.
+          </Typography>
 
+          <Box sx={{ overflowX: 'auto', mb: 3, border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                  <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Shipment Number</th>
+                  <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Vehicle Number</th>
+                  <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Invoice Number</th>
+                  <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Trip Date</th>
+                  <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Party Name</th>
+                  <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Destination</th>
+                  <th style={{ padding: '8px' }}>Freight Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...selectedIds].map(id => {
+                  const row = computedRows.find(r => r._id === id);
+                  if (!row) return null;
+                  return (
+                    <tr key={id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SHIPMENT NO'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['VEHICLE NUMBER'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['INVOICE NO'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['LOADING DT'] || row['LOADING DATE'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['NAMES'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SITE'] || ''}</td>
+                      <td style={{ padding: '8px' }}>{row['BILLING ER 95%'] || row['BILLING ER VAR'] || ''}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Box>
 
+          <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', mb: 0.5, display: 'block' }}>BILL DATE</Typography>
+              <input
+                type="date"
+                value={bulkBillInput.billDate}
+                onChange={e => setBulkBillInput(prev => ({ ...prev, billDate: e.target.value }))}
+                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none' }}
+              />
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', mb: 0.5, display: 'block' }}>BILL TYPE</Typography>
+              <SearchableSelect
+                value={bulkBillInput.billType}
+                onChange={e => setBulkBillInput(prev => ({ ...prev, billType: e.target.value }))}
+                fullWidth
+                size="small"
+                displayEmpty
+                sx={{ borderRadius: '8px', bgcolor: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#cbd5e1' } }}
+              >
+                <MenuItem value="" disabled>Select Bill Type</MenuItem>
+                <MenuItem
+                  value="Freight"
+                  disabled={
+                    computedRows.some(r => selectedIds.has(r._id) && r['Freight Generated'] === 'Yes')
+                  }
+                >Freight</MenuItem>
+                <MenuItem
+                  value="Unloading"
+                  disabled={
+                    computedRows.some(r => selectedIds.has(r._id) && r['Unloading Generated'] === 'Yes')
+                  }
+                >Unloading</MenuItem>
+              </SearchableSelect>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 3, pt: 1, borderTop: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
+          <Button onClick={() => setIsBillingModalOpen(false)} sx={{ color: '#64748b', fontWeight: 600 }}>Cancel</Button>
+          <Button variant="contained" onClick={handleBulkBillApply} sx={{ bgcolor: '#0f172a', fontWeight: 700, px: 3, borderRadius: '8px', boxShadow: 'none' }}>
+            Generate Bill
+          </Button>
+        </DialogActions>
+      </Dialog>
 
     </Box>
   );
@@ -2305,8 +2387,8 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
                 : value === 'Partial' ? '#92400e'
                   : '#64748b',
             border: `1px solid ${value === 'Paid' ? '#86efac'
-                : value === 'Partial' ? '#fde68a'
-                  : '#e2e8f0'
+              : value === 'Partial' ? '#fde68a'
+                : '#e2e8f0'
               }`,
           }}>
             {value === 'Paid' ? '✓ Paid'
@@ -2341,20 +2423,27 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
       return (
         <td style={{ ...cellStyle, padding: 0, background: bgColor }}>
           <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-            <select
+            <SearchableSelect
               value={value || ''}
               onChange={e => onChange(e.target.value)}
-              style={{
-                flex: 1, minWidth: 0, height: '100%', border: 'none', background: 'transparent',
-                fontSize: '11px', cursor: 'pointer', padding: '4px 5px',
-                color: value === 'STAMP' ? '#15803d' : value === 'NON STAMP' ? '#dc2626' : '#94a3b8',
-                fontWeight: 700,
+              variant="standard"
+              sx={{
+                flex: 1, minWidth: 0, height: '100%',
+                '.MuiInputBase-input': {
+                  fontSize: '11px', cursor: 'pointer', padding: '4px 5px !important',
+                  color: value === 'STAMP' ? '#15803d' : value === 'NON STAMP' ? '#dc2626' : '#94a3b8',
+                  fontWeight: 700,
+                },
+                '.MuiInput-underline:before': { borderBottom: 'none' },
+                '.MuiInput-underline:hover:not(.Mui-disabled):before': { borderBottom: 'none' },
+                '.MuiInput-underline:after': { borderBottom: 'none' },
+                background: 'transparent'
               }}
             >
               {(col.options || []).map(opt => (
                 <option key={opt} value={opt}>{opt || '(none)'}</option>
               ))}
-            </select>
+            </SearchableSelect>
             <AttachButton rowId={row?._id} attachType={col.hasAttach} existingUrl={attachUrl} onSaved={onAttachSaved} />
           </div>
         </td>
@@ -2362,19 +2451,26 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
     }
     return (
       <td style={{ ...cellStyle, padding: 0, background: bgColor }}>
-        <select
+        <SearchableSelect
           value={value || ''}
           onChange={e => onChange(e.target.value)}
-          style={{
-            width: '100%', height: '100%', border: 'none', background: 'transparent',
-            fontSize: '11px', cursor: 'pointer', padding: '4px 5px',
-            color: value ? '#0f172a' : '#94a3b8', fontWeight: 600
+          variant="standard"
+          sx={{
+            width: '100%', height: '100%',
+            '.MuiInputBase-input': {
+              fontSize: '11px', cursor: 'pointer', padding: '4px 5px !important',
+              color: value ? '#0f172a' : '#94a3b8', fontWeight: 600
+            },
+            '.MuiInput-underline:before': { borderBottom: 'none' },
+            '.MuiInput-underline:hover:not(.Mui-disabled):before': { borderBottom: 'none' },
+            '.MuiInput-underline:after': { borderBottom: 'none' },
+            background: 'transparent'
           }}
         >
           {(col.options || []).map(opt => (
             <option key={opt} value={opt}>{opt || '(none)'}</option>
           ))}
-        </select>
+        </SearchableSelect>
       </td>
     );
   }

@@ -24,6 +24,7 @@ import FinancialYearDetails from './pages/FinancialYearDetails';
 import AccountDetails from './pages/AccountDetails';
 import AccountApprovalsPage from './pages/AccountApprovalsPage';
 import DailySummaryReport from './pages/DailySummaryReport';
+import PumpPaymentRegister from './pages/PumpPaymentRegister';
 
 const theme = createTheme({
   palette: {
@@ -209,6 +210,10 @@ function AppContent() {
     return <PumpPaymentDetails onBack={() => setCurrentView('dashboard')} />;
   }
 
+  if (currentView === 'pumpPaymentRegister') {
+    return <PumpPaymentRegister onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'partyPayment') {
     return <PartyPaymentDetails onBack={() => setCurrentView('dashboard')} />;
   }
@@ -288,6 +293,7 @@ function AppContent() {
         onOpenGSTPortalRegister={() => setCurrentView('gstPortalRegister')}
         onOpenMainCashbook={() => setCurrentView('mainCashbook')}
         onOpenPumpPayment={() => setCurrentView('pumpPayment')}
+        onOpenPumpPaymentRegister={() => setCurrentView('pumpPaymentRegister')}
         onOpenPartyPayment={() => setCurrentView('partyPayment')}
         onOpenFYDetails={() => setCurrentView('fyDetails')}
         onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}

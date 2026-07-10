@@ -2,10 +2,193 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const AccountDetail = require('../models/AccountDetail');
+const PartyPayment = require('../models/PartyPayment');
 const { getIO } = require('../socket');
 const { parseBankStatement } = require('../utils/parseBankStatement');
 const remittanceUpload = require('../middleware/remittanceUpload');
 const { allocatePaymentToBills, detectPaymentRow } = require('../utils/paymentMapper');
+
+// ── Auto-sync Bank Book Freight/Toll Payments -> Party Payment Details ──────
+const syncPartyPayments = async (affectedDocs) => {
+  const monthNameToNumber = (name) => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    return months.indexOf(name) + 1;
+  };
+
+  const getCombo = (doc) => {
+    const ledger = (doc.ledgerName || '').trim().toLowerCase();
+    if (ledger !== 'freight payment' && ledger !== 'toll payment') return null;
+    const v = (doc.vehicle || '').trim();
+    if (!v) return null;
+    
+    const docMonthStr = (doc.month || doc.selectedMonth || '').trim();
+    const m = monthNameToNumber(docMonthStr);
+    if (m < 1 || m > 12) return null;
+    
+    let fyStart = parseInt(doc.selectedYear, 10);
+    if (isNaN(fyStart)) return null;
+    
+    const y = (m >= 4) ? fyStart : fyStart + 1;
+    return { vehicleNo: v, month: m, year: y };
+  };
+
+  const combinationsToUpdate = new Set();
+  
+  affectedDocs.forEach(doc => {
+    const combo = getCombo(doc);
+    if (combo) combinationsToUpdate.add(JSON.stringify(combo));
+  });
+
+  for (const comboStr of combinationsToUpdate) {
+    const combo = JSON.parse(comboStr);
+    
+    const relatedDocs = await AccountDetail.find({
+      vehicle: combo.vehicleNo,
+      ledgerName: { $regex: /^(freight payment|toll payment)$/i }
+    });
+
+    let totalWithdraw = 0;
+    relatedDocs.forEach(d => {
+      const dCombo = getCombo(d);
+      if (dCombo && dCombo.month === combo.month && dCombo.year === combo.year) {
+        const amt = parseFloat(String(d.withdraw || '').replace(/,/g, ''));
+        if (!isNaN(amt)) totalWithdraw += amt;
+      }
+    });
+
+    await PartyPayment.updateOne(
+      { vehicleNo: combo.vehicleNo, month: combo.month, year: combo.year },
+      { $set: { paidToParty: totalWithdraw } },
+      { upsert: true }
+    );
+  }
+};
+
+// ── Auto-sync Bank Book Freight Advance -> Cement Register ──────────────────
+const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
+  const monthNameToNumber = (name) => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    return months.indexOf(name) + 1;
+  };
+
+  const parseToDate = (dStr) => {
+    if (!dStr) return new Date(0);
+    const clean = String(dStr).trim();
+    const parts = clean.split(/[-\/\.]/);
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      let year = parseInt(parts[2], 10);
+      if (parts[2].length === 2) {
+        year += (year >= 70 ? 1900 : 2000);
+      }
+      const date = new Date(year, month, day);
+      if (!isNaN(date.getTime())) return date;
+    }
+    let d = new Date(dStr);
+    if (!isNaN(d.getTime())) return d;
+    return new Date(0);
+  };
+
+  const makeSpaceAgnosticRegex = (str) => {
+    if (!str) return /^$/;
+    const stripped = str.replace(/[^a-zA-Z0-9]/g, '');
+    const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
+    return new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
+  };
+
+  const getCombo = (doc) => {
+    const ledger = (doc.ledgerName || '').trim().toLowerCase();
+    if (ledger !== 'freight advance') return null;
+    const v = (doc.vehicle || '').trim();
+    const owner = (doc.names || '').trim();
+    if (!v || !owner) return null;
+    
+    const docMonthStr = (doc.month || doc.selectedMonth || '').trim();
+    const m = monthNameToNumber(docMonthStr);
+    if (m < 1 || m > 12) return null;
+    
+    let fyStart = parseInt(doc.selectedYear, 10);
+    if (isNaN(fyStart)) return null;
+    
+    const y = (m >= 4) ? fyStart : fyStart + 1;
+    return { vehicleNo: v, month: m, year: y, ownerName: owner };
+  };
+
+  const combinationsToUpdate = new Set();
+  
+  affectedDocs.forEach(doc => {
+    const combo = getCombo(doc);
+    if (combo) combinationsToUpdate.add(JSON.stringify(combo));
+  });
+
+  if (combinationsToUpdate.size === 0) return;
+
+  const mongoose = require('mongoose');
+  const col = mongoose.connection.useDb('cement_register').collection('entries');
+  const { getIO } = require('../socket');
+
+  for (const comboStr of combinationsToUpdate) {
+    const combo = JSON.parse(comboStr);
+    
+    // Find all 'freight advance' documents for this vehicle/owner in the Bank Book
+    const relatedDocs = await AccountDetail.find({
+      vehicle: combo.vehicleNo,
+      names: combo.ownerName,
+      ledgerName: { $regex: /^freight advance$/i }
+    });
+
+    let totalWithdraw = 0;
+    relatedDocs.forEach(d => {
+      const dCombo = getCombo(d);
+      if (dCombo && dCombo.month === combo.month && dCombo.year === combo.year && dCombo.ownerName === combo.ownerName) {
+        const amt = parseFloat(String(d.withdraw || '').replace(/,/g, ''));
+        if (!isNaN(amt)) totalWithdraw += amt;
+      }
+    });
+
+    // Find all matching Cement Register rows for this Vehicle and Owner
+    const cementRows = await col.find({
+      "VEHICLE NUMBER": { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) },
+      "OWNER NAME": { $regex: new RegExp(`^\\s*${combo.ownerName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\s*$`, "i") }
+    }).toArray();
+
+    const idsToUpdate = [];
+    for (const row of cementRows) {
+      let rowMonth, rowYear;
+      if (row.month && row.year) {
+        rowMonth = parseInt(row.month, 10);
+        rowYear = parseInt(row.year, 10);
+      } else {
+        const dStr = row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || row["RECEIVING DATE"] || row["INVOICE DATE"];
+        const d = parseToDate(dStr);
+        if (d.getTime() > 0) {
+          rowMonth = d.getMonth() + 1;
+          rowYear = d.getFullYear();
+        }
+      }
+
+      if (rowMonth === combo.month && rowYear === combo.year) {
+        idsToUpdate.push(row._id);
+      }
+    }
+
+    if (idsToUpdate.length > 0) {
+      await col.updateMany(
+        { _id: { $in: idsToUpdate } },
+        { $set: { "Bank TF": totalWithdraw } }
+      );
+    }
+  }
+  
+  try {
+    const io = getIO();
+    if (io) io.emit('cementUpdates', { action: 'bulkUpdate' });
+  } catch (e) {
+    console.warn('Socket emit failed:', e.message);
+  }
+};
+// ────────────────────────────────────────────────────────────────────────────
 
 // In-memory multer for bank statement uploads (max 10MB)
 const statementUpload = multer({
@@ -26,6 +209,7 @@ const statementUpload = multer({
 const keyMap = {
   'Transaction Date': 'transactionDate',
   'Ledger Name': 'ledgerName',
+  'Month': 'month',
   'Names': 'names',
   'Particulars': 'particulars',
   'Remarks': 'remarks',
@@ -37,7 +221,8 @@ const keyMap = {
   'remittanceFileUrl': 'remittanceFileUrl',
   'remittanceFileName': 'remittanceFileName',
   'selectedMonth': 'selectedMonth',
-  'selectedYear': 'selectedYear'
+  'selectedYear': 'selectedYear',
+  'Vehicle': 'vehicle'
 };
 const reverseMap = Object.fromEntries(Object.entries(keyMap).map(([k, v]) => [v, k]));
 
@@ -58,7 +243,7 @@ router.get('/', async (req, res) => {
       query.selectedMonth = month;
       query.selectedYear = year;
     }
-    const docs = await AccountDetail.find(query).sort({ transactionDate: -1, createdAt: -1 });
+    const docs = await AccountDetail.find(query).sort({ transactionDate: 1, createdAt: 1 });
     res.json({ success: true, entries: docs.map(docToFrontend) });
   } catch (error) {
     console.error('Fetch Account Details Error:', error);
@@ -70,20 +255,37 @@ router.get('/', async (req, res) => {
 router.put('/bulk-update', async (req, res) => {
   try {
     const { updates } = req.body;
+    const affectedDocsForSync = [];
     for (const item of updates) {
       if (item.isNewRow) {
         const newDoc = {};
         for (const [lbl, val] of Object.entries(item.changes)) {
           if (keyMap[lbl]) newDoc[keyMap[lbl]] = val;
         }
-        await AccountDetail.create(newDoc);
+        const createdDoc = await AccountDetail.create(newDoc);
+        affectedDocsForSync.push(createdDoc);
       } else if (item.id) {
         const updateDoc = {};
         for (const [lbl, val] of Object.entries(item.changes)) {
           if (keyMap[lbl]) updateDoc[keyMap[lbl]] = val;
         }
-        await AccountDetail.findByIdAndUpdate(item.id, updateDoc);
+        const oldDoc = await AccountDetail.findById(item.id);
+        if (oldDoc) affectedDocsForSync.push(oldDoc);
+        const updatedDoc = await AccountDetail.findByIdAndUpdate(item.id, updateDoc, { new: true });
+        if (updatedDoc) affectedDocsForSync.push(updatedDoc);
       }
+    }
+
+    try {
+      await syncPartyPayments(affectedDocsForSync);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] syncPartyPayments error:', syncErr.message);
+    }
+
+    try {
+      await syncFreightAdvanceToCementRegister(affectedDocsForSync);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] syncFreightAdvanceToCementRegister error:', syncErr.message);
     }
 
     try {
@@ -152,7 +354,20 @@ router.delete('/bulk-delete', async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids array required' });
+    const docsToDelete = await AccountDetail.find({ _id: { $in: ids } });
     await AccountDetail.deleteMany({ _id: { $in: ids } });
+
+    try {
+      await syncPartyPayments(docsToDelete);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] syncPartyPayments error on delete:', syncErr.message);
+    }
+
+    try {
+      await syncFreightAdvanceToCementRegister(docsToDelete);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] syncFreightAdvanceToCementRegister error on delete:', syncErr.message);
+    }
 
     try {
       const io = getIO();
