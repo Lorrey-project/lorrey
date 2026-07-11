@@ -25,6 +25,7 @@ import AccountDetails from './pages/AccountDetails';
 import AccountApprovalsPage from './pages/AccountApprovalsPage';
 import DailySummaryReport from './pages/DailySummaryReport';
 import PumpPaymentRegister from './pages/PumpPaymentRegister';
+import IncentiveCalculationSheet from './pages/IncentiveCalculationSheet';
 
 const theme = createTheme({
   palette: {
@@ -235,7 +236,19 @@ function AppContent() {
   }
 
   if (currentView === 'dailySummary') {
-    return <DailySummaryReport onBack={() => setCurrentView('dashboard')} />;
+    return (
+      <DailySummaryReport 
+        onBack={() => setCurrentView('dashboard')} 
+        onUploadNew={() => setCurrentView('dashboard')} // Will trigger upload via dashboard or we can just go dashboard
+        onOpenCementRegister={() => setCurrentView('cementRegister')}
+        onOpenPartyPayment={() => setCurrentView('partyPayment')}
+        onOpenPumpPaymentRegister={() => setCurrentView('pumpPaymentRegister')}
+      />
+    );
+  }
+
+  if (currentView === 'incentiveCalculationSheet') {
+    return <IncentiveCalculationSheet onBack={() => setCurrentView('dashboard')} />;
   }
 
   if (currentView === 'dashboard') {
@@ -300,6 +313,7 @@ function AppContent() {
         onOpenAccountDetails={() => setCurrentView('accountDetails')}
         onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
         onOpenDailySummaryReport={() => setCurrentView('dailySummary')}
+        onOpenIncentiveSheet={() => setCurrentView('incentiveCalculationSheet')}
       />
     );
   }

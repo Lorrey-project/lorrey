@@ -40,7 +40,7 @@ const _dashSocket = io('/', { autoConnect: true });
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet }) => {
     const { user, logout } = useAuth();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -66,6 +66,9 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
     const [pendingCount, setPendingCount]             = useState(0);
     // Invoice IDs queued for PDF regeneration after a fuel rate change
     const [regenQueue, setRegenQueue] = useState([]);
+    
+    // For Dashboard Daily Stats
+    const [todayStats, setTodayStats] = useState(null);
 
     const [portalStatuses, setPortalStatuses] = useState([]);
 
@@ -78,10 +81,26 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
         setPage(0);
     };
 
+    const fetchTodayStats = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const today = new Date().toISOString().split('T')[0];
+            const res = await axios.get(`${API_URL}/daily-summary?date=${today}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.success) {
+                setTodayStats(res.data.summary);
+            }
+        } catch (e) {
+            console.error('Error fetching today stats:', e);
+        }
+    };
+
     useEffect(() => { 
         fetchInvoices(); 
         fetchVouchers(); 
         fetchFuelRates(); 
+        fetchTodayStats();
         
         // Portal status poller for Head Office
         if (user?.role === 'HEAD_OFFICE') {
@@ -384,858 +403,315 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                     </Box>
                 </Box>
                 <Box display="flex" flexDirection="column" gap={4}>
+                <Box display="flex" flexDirection="column" gap={4}>
 
-                    {/* ── Top Horizontal Action Blocks ─────────────────────────── */}
+                    {/* ── Hero Section (Invoices & Daily Summary) ─────────────────────────── */}
                     <Box sx={{
                         display: 'grid',
-                        gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' },
-                        gridAutoRows: '1fr',
-                        gap: 3, pb: 2, alignItems: 'stretch'
+                        gridTemplateColumns: { xs: '1fr', lg: '7fr 5fr' },
+                        gap: 3, alignItems: 'stretch'
                     }}>
-                        <Card
-                            onClick={() => setVaultModalOpen(true)}
-                            sx={{
-                                cursor: 'pointer',
-                                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                                '&:hover': { transform: 'scale(1.02)', boxShadow: '0 24px 48px rgba(13,27,78,0.4)', borderColor: 'rgba(255,255,255,0.3)' },
-                                borderRadius: 6,
-                                height: '100%',
-                                background: 'linear-gradient(135deg, #0d1b4e 0%, #1a237e 100%)',
-                                color: '#fff',
-                                boxShadow: '0 20px 40px rgba(13,27,78,0.25)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                position: 'relative',
-                                overflow: 'hidden'
-                            }}>
-                            <CardContent sx={{ p: { xs: 3, md: 4 }, display: 'flex', flexDirection: 'column', flexGrow: 1, justifyContent: 'flex-start' }}>
-                                <Box display="flex" alignItems="center" gap={2} mb={3}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 2 }}>
-                                        <StorageIcon sx={{ fontSize: 24 }} />
-                                    </Box>
-                                    <Typography variant="h6" fontWeight="900" sx={{ letterSpacing: '0.5px' }}>Invoices & Slips</Typography>
-                                </Box>
-                                <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', mb: 3 }} />
-                                <Box display="flex" sx={{ flexDirection: { xs: 'row', md: 'column' }, flexWrap: 'wrap', gap: { xs: 2, md: 2.5 } }}>
-                                    {[
-                                        { label: 'Total Slips', val: invoices.length, color: '#fff' },
-                                        { label: 'Approved', val: invoices.filter(i => i.status === 'approved').length, color: '#4caf50' },
-                                        { label: 'In S3', val: invoices.filter(i => i.s3_exists).length, color: '#4285f4' },
-                                        { label: 'Pending', val: invoices.filter(i => i.status === 'pending').length, color: '#ff9800' },
-                                    ].map(({ label, val, color }) => (
-                                        <Box key={label} sx={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            flex: { xs: '1 1 120px', md: '1 1 auto' },
-                                            bgcolor: { xs: 'rgba(255,255,255,0.05)', md: 'transparent' },
-                                            p: { xs: 1.5, md: 0 },
-                                            borderRadius: { xs: 2, md: 0 }
+                        {/* Invoice Hero Panel */}
+                        <Card sx={{
+                            borderRadius: '24px',
+                            background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+                            border: '1px solid #cbd5e1',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.05)',
+                            position: 'relative',
+                            overflow: 'hidden'
+                        }}>
+                            <Box sx={{
+                                position: 'absolute', right: -40, top: -40,
+                                width: 200, height: 200, borderRadius: '50%',
+                                background: 'radial-gradient(circle, rgba(26,115,232,0.1) 0%, transparent 70%)'
+                            }} />
+                            <CardContent sx={{ p: { xs: 3, md: 4 }, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', letterSpacing: 1.5, mb: 1 }}>
+                                    CORE OPERATIONS
+                                </Typography>
+                                <Typography variant="h3" fontWeight={900} sx={{ color: '#0f172a', mb: 1, letterSpacing: '-1px' }}>
+                                    Invoice Management
+                                </Typography>
+                                <Typography variant="body1" sx={{ color: '#475569', mb: 4, maxWidth: 500, fontWeight: 500 }}>
+                                    Upload, process, and manage all your slips and invoices. 
+                                    Our AI automatically extracts data for you.
+                                </Typography>
+                                <Box display="flex" gap={2}>
+                                    <Button variant="contained" size="large" startIcon={<AddIcon />} onClick={onUploadNew}
+                                        sx={{
+                                            borderRadius: '14px', px: 4, py: 1.5, fontWeight: 900,
+                                            boxShadow: '0 10px 20px rgba(26,115,232,0.25)',
+                                            background: 'linear-gradient(45deg, #1a73e8 30%, #4285f4 90%)',
+                                            '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 14px 28px rgba(26,115,232,0.35)' },
+                                            transition: 'all 0.2s'
                                         }}>
-                                            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</Typography>
-                                            <Typography variant="h6" fontWeight="900" sx={{ color }}>{val}</Typography>
-                                        </Box>
-                                    ))}
-                                </Box>
-                            </CardContent>
-                        </Card>
-
-
-                        {/* ── Voucher Block ────────────────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'flex-start',
-
-                            borderRadius: '20px',
-                            background: 'linear-gradient(160deg, #4a148c 0%, #7b1fa2 60%, #9c27b0 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(74,20,140,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            {/* Decorative circle */}
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', flexGrow: 1, justifyContent: 'flex-start' }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <ReceiptLongIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            VOUCHERS
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            {vouchers.length} slip{vouchers.length !== 1 ? 's' : ''} created
-                                        </Typography>
-                                    </Box>
-                                </Box>
-
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    {/* New Voucher */}
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<AddIcon sx={{ fontSize: 18 }} />}
-                                        onClick={() => { setVoucherDialogOpen(true); setVoucherDialogTab(0); }}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.2)',
-                                            color: '#fff',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                            transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.2)',
-                                        }}
-                                    >
-                                        New Voucher
+                                        Upload New Slip
                                     </Button>
-
-                                    {/* Download Voucher */}
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<DownloadIcon sx={{ fontSize: 18 }} />}
-                                        onClick={() => { setVoucherDialogOpen(true); setVoucherDialogTab(2); }}
+                                    <Button variant="outlined" size="large" startIcon={<StorageIcon />} onClick={() => setVaultModalOpen(true)}
                                         sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.12)',
-                                            color: '#fff',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.22)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                            transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.15)',
-                                        }}
-                                    >
-                                        Download Voucher
-                                    </Button>
-
-                                    {/* Previous Vouchers */}
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<HistoryIcon sx={{ fontSize: 18 }} />}
-                                        onClick={() => { setVoucherDialogOpen(true); setVoucherDialogTab(1); }}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.08)',
-                                            color: 'rgba(255,255,255,0.85)',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.18)', color: '#fff' },
-                                            transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.12)',
-                                        }}
-                                    >
-                                        Previous Vouchers
-                                    </Button>
-                                    {/* Voucher Register Sheet */}
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<TableChartIcon sx={{ fontSize: 18 }} />}
-                                        onClick={() => onOpenVoucherRegister?.()}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.15)',
-                                            color: '#fff',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.28)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                            transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.18)',
-                                        }}
-                                    >
-                                        Voucher Register (Excel)
-                                    </Button>
-                                </Box>
-                            </CardContent>
-                        </Card>
-
-                        {/* ── Truck & Driver Contacts Block ────────────────────────────────── */}
-                        {user?.role === 'HEAD_OFFICE' && (
-                        <Card sx={{
-                            height: '100%',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'flex-start',
-
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #0d47a1 0%, #1976d2 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(13,71,161,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            {/* Decorative circle */}
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', flexGrow: 1, justifyContent: 'flex-start' }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <LocalShippingIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            CONTACTS
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            Manage Trucks & Drivers
-                                        </Typography>
-                                    </Box>
-                                </Box>
-
-                                <Button
-                                    fullWidth
-                                    variant="contained"
-                                    startIcon={<PersonIcon sx={{ fontSize: 18 }} />}
-                                    onClick={() => setTruckManagerOpen(true)}
-                                    sx={{
-                                        borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                        bgcolor: 'rgba(255,255,255,0.2)',
-                                        color: '#fff',
-                                        boxShadow: 'none',
-                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                        transition: 'all 0.2s',
-                                        justifyContent: 'flex-start',
-                                        border: '1px solid rgba(255,255,255,0.2)',
-                                    }}
-                                >
-                                    Add/Remove Owner
-                                </Button>
-                            </CardContent>
-                        </Card>
-                        )}
-
-                        {/* ── Account Approvals Summary Block (HEAD_OFFICE only) ───────── */}
-                        {user?.role === 'HEAD_OFFICE' && (
-                        <Card id="account-approvals-anchor" sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #1e0a3c 0%, #3b0764 50%, #6d28d9 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(109,40,217,0.25)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                            cursor: 'pointer',
-                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                            '&:hover': { transform: 'scale(1.02)', boxShadow: '0 24px 48px rgba(109,40,217,0.35)' }
-                        }} onClick={onOpenAccountApprovals}>
-                            <Box sx={{ position: 'absolute', top: -30, right: -30, width: 130, height: 130, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.05)' }} />
-                            <Box sx={{ position: 'absolute', bottom: -20, left: -20, width: 90, height: 90, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.04)' }} />
-                            <CardContent sx={{ p: { xs: 3, md: 4 }, display: 'flex', flexDirection: 'column', flexGrow: 1, justifyContent: 'space-between', height: '100%' }}>
-                                <Box>
-                                    <Box display="flex" alignItems="center" gap={2} mb={3}>
-                                        <Box sx={{ p: 1.2, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '12px' }}>
-                                            <PersonAddAlt1Icon sx={{ fontSize: 24 }} />
-                                        </Box>
-                                        <Typography variant="h6" fontWeight={900} sx={{ letterSpacing: '0.3px' }}>Account Approvals</Typography>
-                                    </Box>
-                                    <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', mb: 3 }} />
-
-                                    {/* Big count display */}
-                                    <Box sx={{ textAlign: 'center', py: 3 }}>
-                                        <Typography sx={{
-                                            fontSize: '4.5rem', fontWeight: 900, lineHeight: 1,
-                                            color: pendingCount > 0 ? '#fbbf24' : 'rgba(255,255,255,0.5)',
-                                            letterSpacing: '-3px',
+                                            borderRadius: '14px', px: 4, py: 1.5, fontWeight: 800,
+                                            color: '#334155', borderColor: '#cbd5e1',
+                                            bgcolor: 'white',
+                                            '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
                                         }}>
-                                            {pendingCount}
-                                        </Typography>
-                                        <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: 600, mt: 1 }}>
-                                            {pendingCount === 1 ? 'account waiting for approval' : 'accounts waiting for approval'}
-                                        </Typography>
-                                    </Box>
-                                </Box>
-
-                                <Button
-                                    variant="contained" fullWidth
-                                    onClick={(e) => { e.stopPropagation(); onOpenAccountApprovals?.(); }}
-                                    sx={{
-                                        mt: 2, py: 1.5, borderRadius: '14px',
-                                        bgcolor: pendingCount > 0 ? '#fbbf24' : 'rgba(255,255,255,0.15)',
-                                        color: pendingCount > 0 ? '#1e0a3c' : '#fff',
-                                        fontWeight: 900, fontSize: 14,
-                                        boxShadow: pendingCount > 0 ? '0 4px 20px rgba(251,191,36,0.4)' : 'none',
-                                        '&:hover': { bgcolor: pendingCount > 0 ? '#f59e0b' : 'rgba(255,255,255,0.25)' },
-                                        textTransform: 'none',
-                                    }}>
-                                    {pendingCount > 0 ? `Review ${pendingCount} Request${pendingCount !== 1 ? 's' : ''}` : 'Manage Approvals'}
-                                </Button>
-                            </CardContent>
-                        </Card>
-                        )}
-
-                        {/* ── Cement Register Block ───────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #004d40 0%, #00796b 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(0,77,64,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            {/* Decorative circle */}
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <AssignmentIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            CEMENT REGISTER
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            Manage Cement Details
-                                        </Typography>
-                                    </Box>
-                                </Box>
-
-                                <Button
-                                    fullWidth
-                                    variant="contained"
-                                    startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
-                                    onClick={onOpenCementRegister}
-                                    sx={{
-                                        borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                        bgcolor: 'rgba(255,255,255,0.2)',
-                                        color: '#fff',
-                                        boxShadow: 'none',
-                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                        transition: 'all 0.2s',
-                                        justifyContent: 'flex-start',
-                                        border: '1px solid rgba(255,255,255,0.2)',
-                                    }}
-                                >
-                                    Open Spreadsheet
-                                </Button>
-                            </CardContent>
-                        </Card>
-
-                        {/* ── GST Portal Details Block ────────────────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(2,132,199,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            {/* Decorative circle */}
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <TableChartIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            GST PORTAL DETAILS EXCEL
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            Manage GST Details & Files
-                                        </Typography>
-                                    </Box>
-                                </Box>
-
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<AddIcon sx={{ fontSize: 18 }} />}
-                                        onClick={onOpenGSTPortalRegister}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.2)',
-                                            color: '#fff',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                            transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.2)',
-                                        }}
-                                    >
-                                        New Bill
-                                    </Button>
-
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
-                                        onClick={onOpenGSTPortalRegister}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.12)',
-                                            color: '#fff',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.22)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                            transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.15)',
-                                        }}
-                                    >
-                                        Open Spreadsheet
+                                        Open Vault
                                     </Button>
                                 </Box>
                             </CardContent>
                         </Card>
 
-
-                        {/* ── Main Cashbook Block ────────────────────────────────── */}
+                        {/* Daily Summary Report Dashboard Card */}
                         <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #d84315 0%, #ff5722 100%)',
+                            borderRadius: '24px',
+                            background: 'linear-gradient(135deg, #4c1d95 0%, #6d28d9 100%)',
                             color: '#fff',
-                            boxShadow: '0 16px 40px rgba(216,67,21,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            {/* Decorative circle */}
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <AccountBalanceWalletIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            MAIN CASHBOOK
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            Pump, Site & Office Cash
-                                        </Typography>
-                                    </Box>
-                                </Box>
-
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
-                                        onClick={onOpenMainCashbook}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.2)',
-                                            color: '#fff',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                            transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.2)',
-                                        }}
-                                    >
-                                        Open Cashbook
-                                    </Button>
-                                </Box>
-                            </CardContent>
-                        </Card>
-
-
-                        {/* ── Pump Payment Details Block ─────────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #0e7490 0%, #0891b2 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(8,145,178,0.35)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <LocalGasStationIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            PUMP PAYMENT DETAILS
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            HSD Billing — 10-Day Intervals
-                                        </Typography>
-                                    </Box>
-                                </Box>
-                                <Button
-                                    fullWidth variant="contained"
-                                    startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
-                                    onClick={onOpenPumpPayment}
-                                    sx={{
-                                        borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                        bgcolor: 'rgba(255,255,255,0.2)', color: '#fff',
-                                        boxShadow: 'none',
-                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                        transition: 'all 0.2s', justifyContent: 'flex-start',
-                                        border: '1px solid rgba(255,255,255,0.2)',
-                                    }}
-                                >
-                                    Open Billing Sheet
-                                </Button>
-                            </CardContent>
-                        </Card>
-
-                        {/* ── Pump Payment Register Block ─────────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(2,132,199,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <LocalGasStationIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            PUMP PAYMENT REGISTER
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            Record payments to pumps
-                                        </Typography>
-                                    </Box>
-                                </Box>
-                                <Button
-                                    fullWidth variant="contained"
-                                    startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
-                                    onClick={onOpenPumpPaymentRegister}
-                                    sx={{
-                                        borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                        bgcolor: 'rgba(255,255,255,0.2)', color: '#fff',
-                                        boxShadow: 'none',
-                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                        transition: 'all 0.2s', justifyContent: 'flex-start',
-                                        border: '1px solid rgba(255,255,255,0.2)',
-                                    }}
-                                >
-                                    Open Register
-                                </Button>
-                            </CardContent>
-                        </Card>
-
-                        {/* ── Party Payment Details Block ─────────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #6d28d9 0%, #8b5cf6 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(109,40,217,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <AccountBalanceWalletIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            PARTY PAYMENT DETAILS
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            Aggregated Monthly Ledger
-                                        </Typography>
-                                    </Box>
-                                </Box>
-                                <Button
-                                    fullWidth variant="contained"
-                                    startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
-                                    onClick={onOpenPartyPayment}
-                                    sx={{
-                                        borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                        bgcolor: 'rgba(255,255,255,0.2)', color: '#fff',
-                                        boxShadow: 'none',
-                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                        transition: 'all 0.2s', justifyContent: 'flex-start',
-                                        border: '1px solid rgba(255,255,255,0.2)',
-                                    }}
-                                >
-                                    Open Party Sheet
-                                </Button>
-                            </CardContent>
-                        </Card>
-
-                        {/* ── Bank Book Block ─────────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #0f766e 0%, #115e59 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(15,118,110,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
-                            }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <AccountBalanceWalletIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            BANK BOOK
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            Transaction & Balances
-                                        </Typography>
-                                    </Box>
-                                </Box>
-                                <Button
-                                    fullWidth variant="contained"
-                                    startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
-                                    onClick={onOpenAccountDetails}
-                                    sx={{
-                                        borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                        bgcolor: 'rgba(255,255,255,0.2)', color: '#fff',
-                                        boxShadow: 'none',
-                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                        transition: 'all 0.2s', justifyContent: 'flex-start',
-                                        border: '1px solid rgba(255,255,255,0.2)',
-                                    }}
-                                >
-                                    Open Details Sheet
-                                </Button>
-                            </CardContent>
-                        </Card>
-                        {/* ── Financial Year Details Block ────────────────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(15,23,42,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                        }}>
-                            <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.04)',
-                            }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: '10px' }}>
-                                        <TableChartIcon sx={{ fontSize: 20 }} />
-                                    </Box>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                            BILL REGISTER
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.6 }}>
-                                            Payment Ledger
-                                        </Typography>
-                                    </Box>
-                                </Box>
-
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
-                                        onClick={onOpenFYDetails}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.12)',
-                                            color: '#fff',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.22)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-                                            transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.15)',
-                                        }}
-                                    >
-                                        Open Spreadsheet
-                                    </Button>
-                                </Box>
-                            </CardContent>
-                        </Card>
-
-                        {/* ── Daily Summary Report Block ───────────────────────── */}
-                        <Card sx={{
-                            height: '100%',
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, #701a75 0%, #86198f 100%)',
-                            color: '#fff',
-                            boxShadow: '0 16px 40px rgba(134,25,143,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            overflow: 'hidden',
-                            position: 'relative',
+                            boxShadow: '0 20px 40px rgba(109,40,217,0.3)',
+                            position: 'relative', overflow: 'hidden',
                             cursor: 'pointer',
-                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                            '&:hover': { transform: 'scale(1.02)', boxShadow: '0 24px 48px rgba(134,25,143,0.4)' }
+                            transition: 'all 0.3s ease',
+                            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 24px 48px rgba(109,40,217,0.45)' }
                         }} onClick={onOpenDailySummaryReport}>
                             <Box sx={{
-                                position: 'absolute', top: -20, right: -20,
-                                width: 100, height: 100, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.06)',
+                                position: 'absolute', top: -30, right: -30,
+                                width: 150, height: 150, borderRadius: '50%',
+                                bgcolor: 'rgba(255,255,255,0.05)',
                             }} />
-                            <CardContent sx={{ p: 2.5 }}>
-                                <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-                                    <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                        <AssignmentIcon sx={{ fontSize: 20 }} />
+                            <CardContent sx={{ p: { xs: 3, md: 4 }, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
+                                <Box display="flex" alignItems="flex-start" gap={2} mb={2}>
+                                    <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '12px' }}>
+                                        <AssignmentIcon sx={{ fontSize: 32 }} />
                                     </Box>
                                     <Box>
-                                        <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
+                                        <Typography variant="h5" fontWeight={900} sx={{ letterSpacing: 0.5, mb: 0.5 }}>
                                             DAILY SUMMARY REPORT
                                         </Typography>
-                                        <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                            Daily Operations Metrics & Sheets
+                                        <Typography variant="body2" sx={{ opacity: 0.8, fontWeight: 500 }}>
+                                            Live operational overview for today
                                         </Typography>
                                     </Box>
                                 </Box>
-
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                {todayStats && (
+                                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 3 }}>
+                                        <Box>
+                                            <Typography variant="caption" sx={{ opacity: 0.7, fontWeight: 700 }}>Invoices Uploaded</Typography>
+                                            <Typography variant="h4" fontWeight={900}>{todayStats?.invoiceStats?.totalUploaded || 0}</Typography>
+                                        </Box>
+                                        <Box>
+                                            <Typography variant="caption" sx={{ opacity: 0.7, fontWeight: 700 }}>Pending Review</Typography>
+                                            <Typography variant="h4" fontWeight={900} color={todayStats?.invoiceStats?.pendingInvoices > 0 ? '#fbbf24' : 'inherit'}>
+                                                {todayStats?.invoiceStats?.pendingInvoices || 0}
+                                            </Typography>
+                                        </Box>
+                                    </Box>
+                                )}
+                                <Box sx={{ mt: 'auto' }}>
                                     <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
+                                        fullWidth variant="contained"
+                                        startIcon={<VisibilityIcon />}
                                         onClick={(e) => { e.stopPropagation(); onOpenDailySummaryReport(); }}
                                         sx={{
-                                            borderRadius: '12px', py: 1.1, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.2)',
-                                            color: '#fff',
-                                            boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+                                            borderRadius: '12px', py: 1.5, fontWeight: 900, fontSize: '1rem',
+                                            bgcolor: '#fff', color: '#6d28d9',
+                                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                                            '&:hover': { bgcolor: '#f8fafc', transform: 'scale(1.02)' },
                                             transition: 'all 0.2s',
-                                            justifyContent: 'flex-start',
-                                            border: '1px solid rgba(255,255,255,0.2)',
                                         }}
                                     >
-                                        Open Report
+                                        Open Today's Dashboard
                                     </Button>
                                 </Box>
                             </CardContent>
                         </Card>
-
-                        {/* ── Fuel Rate Settings (HEAD_OFFICE only) ─────────── */}
-                        {user?.role === 'HEAD_OFFICE' && (
-                            <Card sx={{
-                                height: '100%',
-                                borderRadius: '20px',
-                                background: 'linear-gradient(135deg, #0c3547 0%, #0f4c6e 60%, #1565c0 100%)',
-                                color: '#fff',
-                                boxShadow: '0 16px 40px rgba(12,53,71,0.4)',
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                overflow: 'hidden',
-                                position: 'relative',
-                            }}>
-                                <Box sx={{
-                                    position: 'absolute', top: -20, right: -20,
-                                    width: 100, height: 100, borderRadius: '50%',
-                                    bgcolor: 'rgba(255,255,255,0.05)',
-                                }} />
-                                <CardContent sx={{ p: 2.5 }}>
-                                    <Box display="flex" alignItems="center" gap={1.5} mb={2.5}>
-                                        <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                            <LocalGasStationIcon sx={{ fontSize: 20 }} />
-                                        </Box>
-                                        <Box>
-                                            <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 0.5 }}>
-                                                FUEL RATE SETTINGS
-                                            </Typography>
-                                            <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                                                Diesel rate per pump
-                                            </Typography>
-                                        </Box>
-                                    </Box>
-
-                                    {/* Current rates display */}
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2.5 }}>
-                                        {['SAS-1', 'SAS-2'].map(pump => (
-                                            <Box key={pump} display="flex" justifyContent="space-between" alignItems="center" sx={{
-                                                bgcolor: 'rgba(255,255,255,0.07)', borderRadius: '10px',
-                                                px: 1.8, py: 1.2, border: '1px solid rgba(255,255,255,0.1)',
-                                            }}>
-                                                <Typography variant="body2" fontWeight={800} sx={{ opacity: 0.9 }}>{pump}</Typography>
-                                                <Box display="flex" alignItems="baseline" gap={0.4}>
-                                                    <Typography variant="caption" sx={{ opacity: 0.6, fontWeight: 700 }}>₹</Typography>
-                                                    <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1 }}>{(fuelRates || {})[pump] ?? 90}</Typography>
-                                                    <Typography variant="caption" sx={{ opacity: 0.5, fontWeight: 700 }}>/L</Typography>
-                                                </Box>
-                                            </Box>
-                                        ))}
-                                    </Box>
-
-                                    {/* Update button */}
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        startIcon={<LocalGasStationIcon sx={{ fontSize: 18 }} />}
-                                        onClick={onOpenFuelRateSettings}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.2, fontWeight: 800,
-                                            bgcolor: 'rgba(255,255,255,0.18)',
-                                            color: '#fff', boxShadow: 'none',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.3)', boxShadow: '0 4px 14px rgba(0,0,0,0.2)' },
-                                            transition: 'all 0.2s',
-                                            border: '1px solid rgba(255,255,255,0.2)',
-                                            justifyContent: 'flex-start',
-                                        }}
-                                    >
-                                        Update Fuel Rate
-                                    </Button>
-                                </CardContent>
-                            </Card>
-                        )}
                     </Box>
 
+                    {/* ── High Priority Registers ─────────────────────────── */}
+                    <Box>
+                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
+                            HIGH PRIORITY REGISTERS
+                        </Typography>
+                        <Grid container spacing={3}>
+                            {[
+                                { title: 'CEMENT REGISTER', subtitle: 'Trip & Freight Logic', icon: <LocalShippingIcon sx={{ fontSize: 24 }} />, bg: '#0369a1', onClick: onOpenCementRegister },
+                                { title: 'BILL REGISTER', subtitle: 'Pending & Cleared Bills', icon: <TableChartIcon sx={{ fontSize: 24 }} />, bg: '#0f172a', onClick: onOpenFYDetails },
+                                { title: 'PARTY PAYMENT DETAILS', subtitle: 'Aggregated Monthly Ledger', icon: <AccountBalanceWalletIcon sx={{ fontSize: 24 }} />, bg: '#1d4ed8', onClick: onOpenPartyPayment }
+                            ].map((item, idx) => (
+                                <Grid item xs={12} md={4} key={idx}>
+                                    <Card sx={{
+                                        borderRadius: '20px', bgcolor: item.bg, color: '#fff',
+                                        boxShadow: `0 10px 20px rgba(0,0,0,0.15)`,
+                                        border: '1px solid rgba(255,255,255,0.1)',
+                                        cursor: 'pointer', transition: 'all 0.2s',
+                                        '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.25)` }
+                                    }} onClick={item.onClick}>
+                                        <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                            <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '12px' }}>
+                                                {item.icon}
+                                            </Box>
+                                            <Box>
+                                                <Typography variant="subtitle1" fontWeight={900}>{item.title}</Typography>
+                                                <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>{item.subtitle}</Typography>
+                                            </Box>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            ))}
+                        </Grid>
+                    </Box>
+
+                    {/* ── Financial Section ─────────────────────────── */}
+                    <Box>
+                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
+                            FINANCIAL MANAGEMENT
+                        </Typography>
+                        <Grid container spacing={3}>
+                            {[
+                                { title: 'BANK BOOK', subtitle: 'Transactions & Balances', icon: <AccountBalanceWalletIcon sx={{ fontSize: 24 }} />, bg: '#0f766e', onClick: onOpenAccountDetails },
+                                { title: 'MAIN CASHBOOK', subtitle: 'Daily Cash Flow', icon: <DescriptionIcon sx={{ fontSize: 24 }} />, bg: '#047857', onClick: onOpenMainCashbook },
+                                { title: 'PUMP PAYMENT DETAILS', subtitle: 'Clear pump dues', icon: <LocalGasStationIcon sx={{ fontSize: 24 }} />, bg: '#0ea5e9', onClick: onOpenPumpPayment },
+                                { title: 'PUMP PAYMENT REGISTER', subtitle: 'Record payments', icon: <ReceiptLongIcon sx={{ fontSize: 24 }} />, bg: '#0284c7', onClick: onOpenPumpPaymentRegister }
+                            ].map((item, idx) => (
+                                <Grid item xs={12} sm={6} md={3} key={idx}>
+                                    <Card sx={{
+                                        borderRadius: '20px', bgcolor: item.bg, color: '#fff',
+                                        boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
+                                        border: '1px solid rgba(255,255,255,0.1)',
+                                        cursor: 'pointer', transition: 'all 0.2s',
+                                        '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
+                                    }} onClick={item.onClick}>
+                                        <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                            <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
+                                                {item.icon}
+                                            </Box>
+                                            <Box>
+                                                <Typography variant="subtitle2" fontWeight={900}>{item.title}</Typography>
+                                                <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>{item.subtitle}</Typography>
+                                            </Box>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            ))}
+                            {/* Incentive Calculation Sheet Placeholder */}
+                            <Grid item xs={12} sm={6} md={3}>
+                                <Card sx={{
+                                    borderRadius: '20px', bgcolor: 'white', color: '#1e293b',
+                                    border: '1px solid #e2e8f0',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.02)',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease',
+                                    '&:hover': {
+                                        transform: 'translateY(-2px)',
+                                        boxShadow: '0 8px 24px rgba(0,0,0,0.06)',
+                                        borderColor: '#94a3b8'
+                                    }
+                                }} onClick={onOpenIncentiveSheet}>
+                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <Box sx={{ p: 1.5, bgcolor: '#f1f5f9', borderRadius: '12px', color: '#64748b' }}>
+                                            <PersonIcon sx={{ fontSize: 24 }} />
+                                        </Box>
+                                        <Box>
+                                            <Typography variant="subtitle2" fontWeight={800}>INCENTIVE SHEET</Typography>
+                                            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 500 }}>Compare ATO/MKT</Typography>
+                                        </Box>
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+                        </Grid>
+                    </Box>
+
+                    {/* ── Master Data & Operations ─────────────────────────── */}
+                    <Box>
+                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
+                            MASTER DATA & SETTINGS
+                        </Typography>
+                        <Grid container spacing={3}>
+                            {/* GST Portal Details */}
+                            <Grid item xs={12} sm={6} md={3}>
+                                <Card sx={{
+                                    borderRadius: '20px', bgcolor: '#be123c', color: '#fff',
+                                    boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    cursor: 'pointer', transition: 'all 0.2s',
+                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
+                                }} onClick={onOpenGSTPortalRegister}>
+                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
+                                            <ReceiptIcon sx={{ fontSize: 24 }} />
+                                        </Box>
+                                        <Box>
+                                            <Typography variant="subtitle2" fontWeight={900}>GST INFORMATION</Typography>
+                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Tax Portal Ledger</Typography>
+                                        </Box>
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+
+                            {/* Vehicle Information */}
+                            <Grid item xs={12} sm={6} md={3}>
+                                <Card sx={{
+                                    borderRadius: '20px', bgcolor: '#b45309', color: '#fff',
+                                    boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    cursor: 'pointer', transition: 'all 0.2s',
+                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
+                                }} onClick={() => setTruckManagerOpen(true)}>
+                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
+                                            <LocalShippingIcon sx={{ fontSize: 24 }} />
+                                        </Box>
+                                        <Box>
+                                            <Typography variant="subtitle2" fontWeight={900}>OWNER & VEHICLES</Typography>
+                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Fleet Directory</Typography>
+                                        </Box>
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+
+                            {/* Vouchers Block */}
+                            <Grid item xs={12} sm={6} md={3}>
+                                <Card sx={{
+                                    borderRadius: '20px', bgcolor: '#1e293b', color: '#fff',
+                                    boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    cursor: 'pointer', transition: 'all 0.2s',
+                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
+                                }} onClick={() => { setVoucherDialogTab(1); setVoucherDialogOpen(true); }}>
+                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
+                                            <HistoryIcon sx={{ fontSize: 24 }} />
+                                        </Box>
+                                        <Box>
+                                            <Typography variant="subtitle2" fontWeight={900}>VOUCHER HISTORY</Typography>
+                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Approved Payouts</Typography>
+                                        </Box>
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+
+                            {/* Fuel Rate Settings */}
+                            {user?.role === 'HEAD_OFFICE' && (
+                                <Grid item xs={12} sm={6} md={3}>
+                                    <Card sx={{
+                                        borderRadius: '20px', bgcolor: '#0f4c6e', color: '#fff',
+                                        boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
+                                        border: '1px solid rgba(255,255,255,0.1)',
+                                        cursor: 'pointer', transition: 'all 0.2s',
+                                        '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
+                                    }} onClick={onOpenFuelRateSettings}>
+                                        <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                            <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
+                                                <LocalGasStationIcon sx={{ fontSize: 24 }} />
+                                            </Box>
+                                            <Box>
+                                                <Typography variant="subtitle2" fontWeight={900}>FUEL RATES</Typography>
+                                                <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Admin Config</Typography>
+                                            </Box>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            )}
+                        </Grid>
+                    </Box>
+                </Box>
                     {/* ── Fuel Rate Update Dialog ──────────────────────────── */}
                     <Dialog
                         open={fuelRateModalOpen}

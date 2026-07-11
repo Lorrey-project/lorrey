@@ -60,12 +60,52 @@ router.get("/data", auth, async (req, res) => {
     // Fetch Advance Summary for the selected date
     let isoDateObj = new Date(date);
     let advanceSummary = null;
+    let invoiceStats = {
+      totalUploaded: 0,
+      successfullyProcessed: 0,
+      pendingInvoices: 0,
+      failedInvoices: 0,
+      lastUploadTime: null,
+      recentInvoices: []
+    };
+
     if (!isNaN(isoDateObj.getTime())) {
       const y = isoDateObj.getFullYear();
       const m = String(isoDateObj.getMonth() + 1).padStart(2, '0');
       const d = String(isoDateObj.getDate()).padStart(2, '0');
       const isoFmt = `${y}-${m}-${d}`;
       advanceSummary = await mongoose.connection.useDb("invoiceAI").collection("daily_advances").findOne({ date: isoFmt });
+      
+      // Calculate start and end of the day for Invoice query
+      const startOfDay = new Date(isoDateObj.setHours(0, 0, 0, 0));
+      const endOfDay = new Date(isoDateObj.setHours(23, 59, 59, 999));
+      
+      const invoicesToday = await Invoice.find({
+        created_at: { $gte: startOfDay, $lte: endOfDay }
+      }).sort({ created_at: -1 }).lean();
+
+      invoiceStats.totalUploaded = invoicesToday.length;
+      if (invoicesToday.length > 0) {
+        invoiceStats.lastUploadTime = invoicesToday[0].created_at;
+      }
+
+      invoicesToday.forEach(inv => {
+        const status = (inv.status || '').toLowerCase();
+        if (status === 'approved' || status === 'completed') {
+          invoiceStats.successfullyProcessed++;
+        } else if (status === 'failed' || status === 'error') {
+          invoiceStats.failedInvoices++;
+        } else {
+          invoiceStats.pendingInvoices++;
+        }
+      });
+
+      invoiceStats.recentInvoices = invoicesToday.slice(0, 5).map(inv => ({
+        _id: inv._id,
+        consignee_name: inv.consignee_name || (inv.human_verified_data?.consignee_details?.consignee_name) || (inv.ai_data?.consignee_details?.consignee_name) || "Unknown",
+        status: inv.status,
+        created_at: inv.created_at
+      }));
     }
 
     // Extract pump slips (entries from cement register with pump details)
@@ -77,7 +117,8 @@ router.get("/data", auth, async (req, res) => {
 
     res.json({
       success: true,
-      invoicesUploaded: cementEntries.length,
+      invoicesUploaded: cementEntries.length, // Keeping for backward compatibility with total cement entries
+      invoiceStats,
       cement: cementEntries,
       pumpSlips,
       cashbookEntry,
