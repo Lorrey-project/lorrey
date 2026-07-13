@@ -3,7 +3,7 @@ import {
     Container, Typography, Button, Box, Chip, IconButton, CircularProgress,
     Grid, Card, CardContent, Divider, Collapse, Dialog, DialogTitle,
     DialogContent, DialogContentText, DialogActions, Checkbox, Tooltip, TablePagination,
-    Snackbar, Alert, Badge
+    Snackbar, Alert, Badge, TextField
 } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -35,6 +35,9 @@ import VoucherDialog from './VoucherDialog';
 import TruckContactManager from './TruckContactManager';
 import AutoPdfRegenerator from './AutoPdfRegenerator';
 import { io } from 'socket.io-client';
+import html2pdf from 'html2pdf.js';
+import { toIndianWords } from '../utils/toIndianWords';
+import AdvanceFuelSlipDocument from './AdvanceFuelSlipDocument';
 
 const _dashSocket = io('/', { autoConnect: true });
 
@@ -42,6 +45,7 @@ const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet }) => {
     const { user, logout } = useAuth();
+    const advanceFuelSlipRef = React.useRef();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [expanded, setExpanded] = useState(null);
@@ -71,6 +75,21 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
     const [todayStats, setTodayStats] = useState(null);
 
     const [portalStatuses, setPortalStatuses] = useState([]);
+    const [createAdvanceFuelSlipOpen, setCreateAdvanceFuelSlipOpen] = useState(false);
+    const [advanceFuelSlipTarget, setAdvanceFuelSlipTarget] = useState(null);
+    const [advanceFuelFormData, setAdvanceFuelFormData] = useState({
+        stationName: 'SAS-1',
+        stationAddress: 'Panagarh',
+        hsdSlipNo: '',
+        vehicleNo: '',
+        driverName: '',
+        isDriverNameEditable: false,
+        fuelSlipNo: '',
+        qty: '',
+        loadingAdvance: '',
+        totalAdvance: 0
+    });
+    const [savingAdvanceSlip, setSavingAdvanceSlip] = useState(false);
 
     // Pagination states
     const [page, setPage] = useState(0);
@@ -225,6 +244,118 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
             console.error('Delete failed:', e);
         } finally {
             setDeleting(false);
+        }
+    };
+
+    const isDocReady = (inv, sel) => {
+        if (sel === 'invoice_hard') return !!inv.file_url;
+        if (sel === 'invoice_soft') return !!(inv.softcopy_url && inv.s3_exists);
+        if (sel === 'gcn_soft') return !!inv.gcn_url;
+        if (sel === 'lorry_soft') return !!inv.lorry_hire_slip_data?.lorry_hire_slip_url;
+        if (sel === 'fuel_soft') return !!inv.lorry_hire_slip_data?.fuel_slip_url;
+        if (sel === 'advance_fuel_slip') return !!inv.lorry_hire_slip_data?.advance_fuel_slip_url;
+        return false;
+    };
+
+    const handleOpenCreateAdvanceFuelSlip = (inv) => {
+        console.log('[ADVANCE_FUEL_SLIP FRONTEND] Opening modal. Incoming invoice data:', inv);
+        
+        const supplyDetails = inv.human_verified_data?.supply_details || inv.ai_data?.invoice_data?.supply_details || {};
+        const driverDetails = inv.human_verified_data?.driver_details || inv.ai_data?.invoice_data?.driver_details || {};
+        
+        console.log('[ADVANCE_FUEL_SLIP FRONTEND] Extraction sources:', {
+            'lorry_hire_slip_data': inv.lorry_hire_slip_data,
+            'driverDetails': driverDetails,
+            'supplyDetails': supplyDetails
+        });
+
+        const vehicleNo = inv.lorry_hire_slip_data?.vehicleNumber || inv.lorry_hire_slip_data?.vehicle_number || supplyDetails.vehicle_number || '';
+        const driverName = inv.lorry_hire_slip_data?.driverName || inv.lorry_hire_slip_data?.driver_name || inv.driverName || driverDetails.driver_name || '';
+        
+        console.log('[ADVANCE_FUEL_SLIP FRONTEND] Extracted values:', { vehicleNo, driverName });
+
+        const randomSlipNo = 'ADV-' + Math.floor(100000 + Math.random() * 900000);
+
+        const hasFuelSlip = !!(inv.lorry_hire_slip_data?.fuel_slip_url && inv.lorry_hire_slip_data?.fuel_slip_no);
+        const fuelSlipNoVal = inv.lorry_hire_slip_data?.fuel_slip_url
+            ? (inv.lorry_hire_slip_data?.fuel_slip_no || 'Not Available')
+            : 'Fuel Slip Not Generated';
+
+        const isDriverNameFetched = !!driverName && 
+            !['not available', 'n/a', 'not found', '---'].includes(driverName.toLowerCase().trim()) &&
+            !driverName.toLowerCase().includes('missing in') &&
+            !driverName.toLowerCase().includes('collection');
+        const driverNameVal = isDriverNameFetched ? driverName : '';
+
+        setAdvanceFuelFormData({
+            stationName: inv.lorry_hire_slip_data?.station_name || 'SAS-1',
+            stationAddress: inv.lorry_hire_slip_data?.station_address || 'Panagarh',
+            hsdSlipNo: randomSlipNo,
+            vehicleNo: vehicleNo,
+            driverName: driverNameVal,
+            isDriverNameEditable: !isDriverNameFetched,
+            fuelSlipNo: fuelSlipNoVal,
+            qty: '',
+            loadingAdvance: '',
+            totalAdvance: 0
+        });
+        setAdvanceFuelSlipTarget(inv);
+        setCreateAdvanceFuelSlipOpen(true);
+    };
+
+    const handleSaveAdvanceFuelSlip = async () => {
+        if (!advanceFuelSlipTarget) return;
+        setSavingAdvanceSlip(true);
+        try {
+            const opt = {
+                margin: 0,
+                filename: `advance_fuel_slip_${advanceFuelFormData.hsdSlipNo}.pdf`,
+                image: { type: 'jpeg', quality: 1.0 },
+                html2canvas: { scale: 3, useCORS: true, logging: false },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            const element = advanceFuelSlipRef.current;
+            if (!element) {
+                throw new Error("Print element reference not found");
+            }
+            
+            const blob = await html2pdf().set(opt).from(element).output('blob');
+
+            const formData = new FormData();
+            formData.append('invoice_id', advanceFuelSlipTarget._id);
+            formData.append('softcopy', blob, `advance_fuel_slip_${advanceFuelSlipTarget._id}.pdf`);
+            formData.append('driver_name', advanceFuelFormData.driverName);
+
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`${API_URL}/invoice/advance-fuel-slip-softcopy`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data', 'Authorization': `Bearer ${token}` }
+            });
+
+            // Update local invoices state
+            setInvoices(prev => prev.map(inv => {
+                if (inv._id === advanceFuelSlipTarget._id) {
+                    return {
+                        ...inv,
+                        lorry_hire_slip_data: {
+                            ...inv.lorry_hire_slip_data,
+                            advance_fuel_slip_url: res.data.url,
+                            driver_name: advanceFuelFormData.driverName
+                        }
+                    };
+                }
+                return inv;
+            }));
+
+            setSnack({ type: 'success', message: 'Advance Fuel Slip generated and saved successfully!' });
+            setCreateAdvanceFuelSlipOpen(false);
+            setAdvanceFuelSlipTarget(null);
+        } catch (error) {
+            console.error('Error saving advance fuel slip:', error);
+            const msg = error.response?.data?.error || error.message;
+            setSnack({ type: 'error', message: 'Failed to save Advance Fuel Slip: ' + msg });
+        } finally {
+            setSavingAdvanceSlip(false);
         }
     };
 
@@ -1108,7 +1239,8 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                                                     { id: 'invoice_soft', label: 'Invoice Softcopy', icon: <ReceiptLongIcon />, url: inv.softcopy_url, ready: inv.softcopy_url && inv.s3_exists },
                                                                     { id: 'gcn_soft', label: 'GCN Softcopy', icon: <AssignmentIcon />, url: inv.gcn_url, ready: !!inv.gcn_url },
                                                                     { id: 'lorry_soft', label: 'Lorry Slip Softcopy', icon: <ReceiptIcon />, url: inv.lorry_hire_slip_data?.lorry_hire_slip_url, ready: !!inv.lorry_hire_slip_data?.lorry_hire_slip_url },
-                                                                    { id: 'fuel_soft', label: 'Fuel Slip Softcopy', icon: <LocalGasStationIcon />, url: inv.lorry_hire_slip_data?.fuel_slip_url, ready: !!inv.lorry_hire_slip_data?.fuel_slip_url }
+                                                                    { id: 'fuel_soft', label: 'Fuel Slip Softcopy', icon: <LocalGasStationIcon />, url: inv.lorry_hire_slip_data?.fuel_slip_url, ready: !!inv.lorry_hire_slip_data?.fuel_slip_url },
+                                                                    { id: 'advance_fuel_slip', label: 'Advance Fuel Slip', icon: <LocalGasStationIcon />, url: inv.lorry_hire_slip_data?.advance_fuel_slip_url, ready: !!inv.lorry_hire_slip_data?.advance_fuel_slip_url }
                                                                 ].map((doc) => {
                                                                     const isActive = (selectedDocTypes[inv._id] || 'invoice_soft') === doc.id;
                                                                     return (
@@ -1140,7 +1272,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                                                                 <Chip label="Selected" size="small" sx={{ height: 16, fontSize: '9px', fontWeight: 900, bgcolor: '#1a73e8', color: '#fff' }} />
                                                                             )}
                                                                             {!doc.ready && (
-                                                                                <Chip label="Not Ready" size="small" variant="outlined" sx={{ height: 16, fontSize: '9px', fontWeight: 700 }} />
+                                                                                <Chip label={doc.id === 'advance_fuel_slip' ? 'Not Generated' : 'Not Ready'} size="small" variant="outlined" sx={{ height: 16, fontSize: '9px', fontWeight: 700 }} />
                                                                             )}
                                                                         </Box>
                                                                     );
@@ -1182,92 +1314,121 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                                                         </Button>
                                                                     )}
 
-                                                                    <Button
-                                                                        variant="contained"
-                                                                        startIcon={<VisibilityIcon />}
-                                                                        component="a"
-                                                                        target="_blank"
-                                                                        href={(() => {
-                                                                            const sel = selectedDocTypes[inv._id] || 'invoice_soft';
-                                                                            if (sel === 'invoice_hard') return inv.file_url;
-                                                                            if (sel === 'invoice_soft') return inv.softcopy_url;
-                                                                            if (sel === 'gcn_soft') return inv.gcn_url;
-                                                                            if (sel === 'lorry_soft') return inv.lorry_hire_slip_data?.lorry_hire_slip_url;
-                                                                            if (sel === 'fuel_soft') return inv.lorry_hire_slip_data?.fuel_slip_url;
-                                                                        })()}
-                                                                        sx={{ borderRadius: 2.5, px: 2.5, fontWeight: 700, flex: { xs: '1 1 100%', sm: '1 1 auto', md: 'none' }, py: 1, background: 'linear-gradient(45deg, #1a237e, #3949ab)', textTransform: 'none' }}
-                                                                    >
-                                                                        View
-                                                                    </Button>
+                                                                    {(() => {
+                                                                        const sel = selectedDocTypes[inv._id] || 'invoice_soft';
+                                                                        const isSelectedReady = isDocReady(inv, sel);
+                                                                        return (
+                                                                            <>
+                                                                                <Button
+                                                                                    disabled={!isSelectedReady}
+                                                                                    variant="contained"
+                                                                                    startIcon={<VisibilityIcon />}
+                                                                                    component="a"
+                                                                                    target="_blank"
+                                                                                    href={isSelectedReady ? (() => {
+                                                                                        if (sel === 'invoice_hard') return inv.file_url;
+                                                                                        if (sel === 'invoice_soft') return inv.softcopy_url;
+                                                                                        if (sel === 'gcn_soft') return inv.gcn_url;
+                                                                                        if (sel === 'lorry_soft') return inv.lorry_hire_slip_data?.lorry_hire_slip_url;
+                                                                                        if (sel === 'fuel_soft') return inv.lorry_hire_slip_data?.fuel_slip_url;
+                                                                                        if (sel === 'advance_fuel_slip') return inv.lorry_hire_slip_data?.advance_fuel_slip_url;
+                                                                                    })() : undefined}
+                                                                                    sx={{ borderRadius: 2.5, px: 2.5, fontWeight: 700, flex: { xs: '1 1 100%', sm: '1 1 auto', md: 'none' }, py: 1, background: 'linear-gradient(45deg, #1a237e, #3949ab)', textTransform: 'none' }}
+                                                                                >
+                                                                                    View
+                                                                                </Button>
 
-                                                                    <Button
-                                                                        variant="contained"
-                                                                        startIcon={<PrintIcon />}
-                                                                        onClick={() => {
-                                                                            const sel = selectedDocTypes[inv._id] || 'invoice_soft';
-                                                                            let url = '';
-                                                                            if (sel === 'invoice_hard') url = inv.file_url;
-                                                                            if (sel === 'invoice_soft') url = inv.softcopy_url;
-                                                                            if (sel === 'gcn_soft') url = inv.gcn_url;
-                                                                            if (sel === 'lorry_soft') url = inv.lorry_hire_slip_data?.lorry_hire_slip_url;
-                                                                            if (sel === 'fuel_soft') url = inv.lorry_hire_slip_data?.fuel_slip_url;
-                                                                            if (url) {
-                                                                                const printWin = window.open(url, '_blank');
-                                                                                printWin.onload = () => printWin.print();
-                                                                            }
-                                                                        }}
-                                                                        sx={{ borderRadius: 2.5, px: 2.5, fontWeight: 700, flex: { xs: '1 1 100%', sm: '1 1 auto', md: 'none' }, py: 1, background: 'linear-gradient(45deg, #455a64, #78909c)', textTransform: 'none' }}
-                                                                    >
-                                                                        Print
-                                                                    </Button>
+                                                                                {user?.role === 'HEAD_OFFICE' && (
+                                                                                    <Button
+                                                                                        variant="contained"
+                                                                                        startIcon={<AddIcon />}
+                                                                                        onClick={() => handleOpenCreateAdvanceFuelSlip(inv)}
+                                                                                        sx={{
+                                                                                            borderRadius: 2.5,
+                                                                                            px: 2.5,
+                                                                                            fontWeight: 700,
+                                                                                            flex: { xs: '1 1 100%', sm: '1 1 auto', md: 'none' },
+                                                                                            py: 1,
+                                                                                            background: 'linear-gradient(45deg, #1565c0, #1976d2)',
+                                                                                            textTransform: 'none'
+                                                                                        }}
+                                                                                    >
+                                                                                        Create Advance Fuel Slip
+                                                                                    </Button>
+                                                                                )}
 
-                                                                    <Button
-                                                                        variant="contained"
-                                                                        startIcon={<DownloadIcon />}
-                                                                        onClick={async () => {
-                                                                            const sel = selectedDocTypes[inv._id] || 'invoice_soft';
-                                                                            let url = '';
-                                                                            if (sel === 'invoice_hard') url = inv.file_url;
-                                                                            else if (sel === 'invoice_soft') url = inv.softcopy_url;
-                                                                            else if (sel === 'gcn_soft') url = inv.gcn_url;
-                                                                            else if (sel === 'lorry_soft') url = inv.lorry_hire_slip_data?.lorry_hire_slip_url;
-                                                                            else if (sel === 'fuel_soft') url = inv.lorry_hire_slip_data?.fuel_slip_url;
+                                                                                <Button
+                                                                                    disabled={!isSelectedReady}
+                                                                                    variant="contained"
+                                                                                    startIcon={<PrintIcon />}
+                                                                                    onClick={() => {
+                                                                                        let url = '';
+                                                                                        if (sel === 'invoice_hard') url = inv.file_url;
+                                                                                        if (sel === 'invoice_soft') url = inv.softcopy_url;
+                                                                                        if (sel === 'gcn_soft') url = inv.gcn_url;
+                                                                                        if (sel === 'lorry_soft') url = inv.lorry_hire_slip_data?.lorry_hire_slip_url;
+                                                                                        if (sel === 'fuel_soft') url = inv.lorry_hire_slip_data?.fuel_slip_url;
+                                                                                        if (sel === 'advance_fuel_slip') url = inv.lorry_hire_slip_data?.advance_fuel_slip_url;
+                                                                                        if (url) {
+                                                                                            const printWin = window.open(url, '_blank');
+                                                                                            printWin.onload = () => printWin.print();
+                                                                                        }
+                                                                                    }}
+                                                                                    sx={{ borderRadius: 2.5, px: 2.5, fontWeight: 700, flex: { xs: '1 1 100%', sm: '1 1 auto', md: 'none' }, py: 1, background: 'linear-gradient(45deg, #455a64, #78909c)', textTransform: 'none' }}
+                                                                                >
+                                                                                    Print
+                                                                                </Button>
 
-                                                                            if (!url) return;
-                                                                            const ext = url.split('?')[0].split('.').pop().toLowerCase() || 'pdf';
-                                                                            const fileName = `${sel}_${invNo}.${ext}`;
+                                                                                <Button
+                                                                                    disabled={!isSelectedReady}
+                                                                                    variant="contained"
+                                                                                    startIcon={<DownloadIcon />}
+                                                                                    onClick={async () => {
+                                                                                        let url = '';
+                                                                                        if (sel === 'invoice_hard') url = inv.file_url;
+                                                                                        else if (sel === 'invoice_soft') url = inv.softcopy_url;
+                                                                                        else if (sel === 'gcn_soft') url = inv.gcn_url;
+                                                                                        else if (sel === 'lorry_soft') url = inv.lorry_hire_slip_data?.lorry_hire_slip_url;
+                                                                                        else if (sel === 'fuel_soft') url = inv.lorry_hire_slip_data?.fuel_slip_url;
+                                                                                        else if (sel === 'advance_fuel_slip') url = inv.lorry_hire_slip_data?.advance_fuel_slip_url;
 
-                                                                            try {
-                                                                                // Use backend proxy to bypass CORS
-                                                                                const proxyUrl = `${API_URL}/invoice/download-proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`;
+                                                                                        if (!url) return;
+                                                                                        const ext = url.split('?')[0].split('.').pop().toLowerCase() || 'pdf';
+                                                                                        const fileName = `${sel}_${invNo}.${ext}`;
 
-                                                                                const token = localStorage.getItem('token');
-                                                                                const response = await axios({
-                                                                                    url: proxyUrl,
-                                                                                    method: 'GET',
-                                                                                    headers: { 'Authorization': `Bearer ${token}` },
-                                                                                    responseType: 'blob'
-                                                                                });
+                                                                                        try {
+                                                                                            const proxyUrl = `${API_URL}/invoice/download-proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`;
 
-                                                                                const blob = response.data;
-                                                                                const blobUrl = window.URL.createObjectURL(blob);
-                                                                                const link = document.createElement('a');
-                                                                                link.href = blobUrl;
-                                                                                link.download = fileName;
-                                                                                document.body.appendChild(link);
-                                                                                link.click();
-                                                                                document.body.removeChild(link);
-                                                                                window.URL.revokeObjectURL(blobUrl);
-                                                                            } catch (e) {
-                                                                                console.error('Download failed:', e);
-                                                                                const msg = e.response?.data?.error || e.message;
-                                                                                setSnack({ type: 'error', message: 'Download failed: ' + msg });
-                                                                            }
-                                                                        }}
-                                                                        sx={{ borderRadius: 2.5, px: 2.5, fontWeight: 800, flex: { xs: '1 1 100%', sm: '1 1 auto', md: 'none' }, py: 1, background: 'linear-gradient(45deg, #1a73e8, #4285f4)', textTransform: 'none' }}
-                                                                    >
-                                                                        Download
-                                                                    </Button>
+                                                                                            const token = localStorage.getItem('token');
+                                                                                            const response = await axios({
+                                                                                                url: proxyUrl,
+                                                                                                method: 'GET',
+                                                                                                headers: { 'Authorization': `Bearer ${token}` },
+                                                                                                responseType: 'blob'
+                                                                                            });
+
+                                                                                            const blob = response.data;
+                                                                                            const blobUrl = window.URL.createObjectURL(blob);
+                                                                                            const link = document.createElement('a');
+                                                                                            link.href = blobUrl;
+                                                                                            link.download = fileName;
+                                                                                            document.body.appendChild(link);
+                                                                                            link.click();
+                                                                                            link.remove();
+                                                                                            window.URL.revokeObjectURL(blobUrl);
+                                                                                        } catch (e) {
+                                                                                            console.error('Download failed:', e);
+                                                                                            const msg = e.response?.data?.error || e.message;
+                                                                                            setSnack({ type: 'error', message: 'Download failed: ' + msg });
+                                                                                        }
+                                                                                    }}
+                                                                                    sx={{ borderRadius: 2.5, px: 2.5, fontWeight: 800, flex: { xs: '1 1 100%', sm: '1 1 auto', md: 'none' }, py: 1, background: 'linear-gradient(45deg, #1a73e8, #4285f4)', textTransform: 'none' }}
+                                                                                >
+                                                                                    Download
+                                                                                </Button>
+                                                                            </>
+                                                                        );
+                                                                    })()}
 
                                                                     <IconButton color="error" onClick={() => setDeleteTarget(inv)}
                                                                         sx={{
@@ -1355,6 +1516,152 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                 open={truckManagerOpen}
                 onClose={() => setTruckManagerOpen(false)}
             />
+
+            {/* ── Create Advance Fuel Slip Dialog ── */}
+            <Dialog open={createAdvanceFuelSlipOpen} onClose={() => setCreateAdvanceFuelSlipOpen(false)} maxWidth="sm" fullWidth>
+                <DialogTitle sx={{ fontWeight: 800 }}>Create Advance Fuel Slip</DialogTitle>
+                <DialogContent dividers>
+                    <Grid container spacing={2}>
+                        <Grid item xs={12}>
+                            <Typography variant="subtitle2" color="text.secondary" gutterBottom>Manual Entry Details</Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            <TextField
+                                label="Address"
+                                fullWidth
+                                variant="outlined"
+                                InputProps={{ readOnly: true }}
+                                value={advanceFuelFormData.stationAddress}
+                            />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            {/* Empty Grid item to preserve layout spacing */}
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            <TextField
+                                label="Advance Slip No."
+                                fullWidth
+                                variant="outlined"
+                                value={advanceFuelFormData.hsdSlipNo}
+                                onChange={(e) => setAdvanceFuelFormData(prev => ({ ...prev, hsdSlipNo: e.target.value }))}
+                            />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            <TextField
+                                label="Fuel Slip No."
+                                fullWidth
+                                variant="outlined"
+                                InputProps={{ readOnly: true }}
+                                value={advanceFuelFormData.fuelSlipNo}
+                            />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            <TextField
+                                label="Vehicle No"
+                                fullWidth
+                                variant="outlined"
+                                InputProps={{ readOnly: true }}
+                                value={advanceFuelFormData.vehicleNo}
+                            />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            <TextField
+                                label="Driver Name"
+                                fullWidth
+                                variant="outlined"
+                                required={advanceFuelFormData.isDriverNameEditable}
+                                InputProps={{ readOnly: !advanceFuelFormData.isDriverNameEditable }}
+                                placeholder={advanceFuelFormData.isDriverNameEditable ? "Enter Driver Name" : undefined}
+                                value={advanceFuelFormData.driverName}
+                                onChange={advanceFuelFormData.isDriverNameEditable ? (e) => setAdvanceFuelFormData(prev => ({ ...prev, driverName: e.target.value })) : undefined}
+                                helperText={advanceFuelFormData.isDriverNameEditable ? "Driver Name not found. Please enter it manually." : undefined}
+                                FormHelperTextProps={{ style: { color: '#d32f2f' } }}
+                            />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            <TextField
+                                label="Diesel Qty (Litres)"
+                                fullWidth
+                                variant="outlined"
+                                type="number"
+                                value={advanceFuelFormData.qty}
+                                onChange={(e) => {
+                                    const qtyVal = e.target.value;
+                                    setAdvanceFuelFormData(prev => ({
+                                        ...prev,
+                                        qty: qtyVal
+                                    }));
+                                }}
+                            />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                            <TextField
+                                label="Loading Advance"
+                                fullWidth
+                                variant="outlined"
+                                type="number"
+                                value={advanceFuelFormData.loadingAdvance}
+                                onChange={(e) => {
+                                    const laVal = e.target.value;
+                                    setAdvanceFuelFormData(prev => {
+                                        const loadingAdv = parseFloat(laVal) || 0;
+                                        return {
+                                            ...prev,
+                                            loadingAdvance: laVal,
+                                            totalAdvance: loadingAdv
+                                        };
+                                    });
+                                }}
+                            />
+                        </Grid>
+                        <Grid item xs={12}>
+                            <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ bgcolor: 'rgba(26,115,232,0.04)', p: 2, borderRadius: 2, border: '1px solid rgba(26,115,232,0.08)' }}>
+                                <Typography variant="subtitle1" fontWeight="bold">Total Calculated Advance:</Typography>
+                                <Typography variant="h6" fontWeight="bold" color="primary">₹{Number(advanceFuelFormData.totalAdvance || 0).toFixed(2)}</Typography>
+                            </Box>
+                        </Grid>
+                    </Grid>
+                </DialogContent>
+                <DialogActions sx={{ p: 2, px: 3 }}>
+                    <Button onClick={() => setCreateAdvanceFuelSlipOpen(false)} variant="outlined" disabled={savingAdvanceSlip}>Cancel</Button>
+                    <Button
+                        onClick={handleSaveAdvanceFuelSlip}
+                        variant="contained"
+                        disabled={
+                            savingAdvanceSlip || 
+                            !advanceFuelFormData.qty || 
+                            !advanceFuelFormData.hsdSlipNo || 
+                            !advanceFuelFormData.fuelSlipNo || 
+                            advanceFuelFormData.fuelSlipNo === 'Fuel Slip Not Generated' || 
+                            advanceFuelFormData.fuelSlipNo === 'Not Available' ||
+                            (advanceFuelFormData.isDriverNameEditable && !advanceFuelFormData.driverName.trim())
+                        }
+                        startIcon={savingAdvanceSlip ? <CircularProgress size={16} color="inherit" /> : <AddIcon />}
+                    >
+                        {savingAdvanceSlip ? 'Generating...' : 'Save & Generate'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Hidden Advance Fuel Slip Document for PDF Generation */}
+            {createAdvanceFuelSlipOpen && advanceFuelSlipTarget && (
+                <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
+                    <AdvanceFuelSlipDocument
+                        ref={advanceFuelSlipRef}
+                        data={advanceFuelSlipTarget}
+                        fuelData={advanceFuelFormData}
+                        hsdSlipNo={advanceFuelFormData.hsdSlipNo}
+                        slipDate={new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                        amountWords={toIndianWords(Number(advanceFuelFormData.totalAdvance || 0))}
+                        qrPayload={JSON.stringify({
+                            slipNo: advanceFuelFormData.hsdSlipNo,
+                            invoiceId: advanceFuelSlipTarget._id,
+                            vehicleNo: advanceFuelFormData.vehicleNo,
+                            totalAdvance: advanceFuelFormData.totalAdvance
+                        })}
+                    />
+                </Box>
+            )}
 
             {/* ── Snackbar for Download Errors ── */}
             <Snackbar open={!!snack} autoHideDuration={5000} onClose={() => setSnack(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>

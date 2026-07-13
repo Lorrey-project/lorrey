@@ -387,7 +387,6 @@ export default function MainCashbook({ onBack }) {
     const file = e.target.files[0];
     if (!file) return;
     setImportFile(file);
-
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -395,7 +394,6 @@ export default function MainCashbook({ onBack }) {
         const workbook = XLSX.read(dataBytes, { type: 'array' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
-
         let headerRowIdx = 0;
         let maxMatches = 0;
         for (let i = 0; i < Math.min(15, aoa.length); i++) {
@@ -461,7 +459,6 @@ export default function MainCashbook({ onBack }) {
 
         const newEntries = [];
         let ignoredCount = 0;
-
         const fyStartYear = parseInt(String(importYear).split('-')[0], 10);
         const targetMonths = (importMonths || []).map(Number);
 
@@ -546,7 +543,6 @@ export default function MainCashbook({ onBack }) {
             ignoredCount++; // Missing date
           }
         });
-
         setImportPreview({ entries: newEntries, validCount: newEntries.length, ignoredCount });
       } catch (err) {
         setSnack({ severity: 'error', msg: 'Failed to parse Excel: ' + err.message });

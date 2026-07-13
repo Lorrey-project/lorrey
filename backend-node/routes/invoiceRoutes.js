@@ -16,6 +16,65 @@ function makeSpaceAgnosticRegex(str) {
     return new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
 }
 
+const populateDriverAndVehicle = async (inv) => {
+    if (!inv) return inv;
+    
+    const invoiceId = inv._id;
+    const lorrySlipNo = inv.lorry_hire_slip_data?.lorry_hire_slip_no || 'N/A';
+    const supplyDetails = inv.human_verified_data?.supply_details || inv.ai_data?.invoice_data?.supply_details || {};
+    const vehicleNo = inv.lorry_hire_slip_data?.vehicle_number || supplyDetails.vehicle_number || '';
+    
+    let driverName = '';
+    let dbQueryResult = null;
+    
+    if (vehicleNo) {
+        const regexSearchStr = makeSpaceAgnosticRegex(vehicleNo);
+        const contact = await TruckContact.findOne({
+            $or: [
+                { "Truck No": { $regex: regexSearchStr } },
+                { truck_no: { $regex: regexSearchStr } },
+                { "Contact No.(Truck No.)": { $regex: regexSearchStr } }
+            ]
+        }).lean();
+        
+        dbQueryResult = contact;
+        if (contact) {
+            driverName = contact.driver_name || contact["Driver Name"] || contact["DRIVER NAME"] || '';
+        }
+    }
+    
+    if (!driverName) {
+        const driverDetails = inv.human_verified_data?.driver_details || inv.ai_data?.invoice_data?.driver_details || {};
+        driverName = inv.lorry_hire_slip_data?.driver_name || driverDetails.driver_name || '';
+    }
+    
+    // Add requested temporary backend logs
+    console.log(`[ADVANCE_FUEL_SLIP] Vehicle Number: ${vehicleNo}`);
+    console.log(`[ADVANCE_FUEL_SLIP] Driver Name: ${driverName}`);
+    console.log(`[ADVANCE_FUEL_SLIP] MongoDB query result: ${JSON.stringify(dbQueryResult)}`);
+    
+    if (!inv.lorry_hire_slip_data) {
+        inv.lorry_hire_slip_data = {};
+    }
+    
+    inv.lorry_hire_slip_data.vehicleNumber = vehicleNo || '';
+    inv.lorry_hire_slip_data.vehicle_number = vehicleNo || '';
+    
+    if (driverName) {
+        inv.lorry_hire_slip_data.driverName = driverName;
+        inv.lorry_hire_slip_data.driver_name = driverName;
+    } else {
+        const reportMsg = `Missing in 'Truck Contact Number' collection for truck ${vehicleNo || 'N/A'}`;
+        inv.lorry_hire_slip_data.driverName = reportMsg;
+        inv.lorry_hire_slip_data.driver_name = reportMsg;
+    }
+    
+    inv.driverName = inv.lorry_hire_slip_data.driverName;
+    inv.vehicleNumber = inv.lorry_hire_slip_data.vehicleNumber;
+    
+    return inv;
+};
+
 // DOWNLOAD PROXY
 router.get("/download-proxy", async (req, res) => {
     const { url, filename } = req.query;
@@ -404,8 +463,13 @@ router.post("/process-ai", async (req, res) => {
 });
 
 router.get("/pending", async (req, res) => {
-    const invoices = await Invoice.find({ status: "pending" });
-    res.json(invoices);
+    try {
+        const invoices = await Invoice.find({ status: "pending" }).lean();
+        const populated = await Promise.all(invoices.map(inv => populateDriverAndVehicle(inv)));
+        res.json(populated);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
 router.get("/all", async (req, res) => {
@@ -414,9 +478,10 @@ router.get("/all", async (req, res) => {
 
         // Parallel check for S3 existence using SDK v3
         const verifiedInvoices = await Promise.all(invoices.map(async (inv) => {
-            if (inv.softcopy_url) {
+            const populatedInv = await populateDriverAndVehicle(inv);
+            if (populatedInv.softcopy_url) {
                 try {
-                    const url = new URL(inv.softcopy_url);
+                    const url = new URL(populatedInv.softcopy_url);
                     const key = decodeURIComponent(url.pathname.substring(1));
 
                     await s3.send(new HeadObjectCommand({
@@ -424,13 +489,13 @@ router.get("/all", async (req, res) => {
                         Key: key
                     }));
 
-                    return { ...inv, s3_exists: true };
+                    return { ...populatedInv, s3_exists: true };
                 } catch (err) {
-                    console.warn("S3 headObject failed for", inv._id, ":", err.name || err.message);
-                    return { ...inv, s3_exists: false };
+                    console.warn("S3 headObject failed for", populatedInv._id, ":", err.name || err.message);
+                    return { ...populatedInv, s3_exists: false };
                 }
             }
-            return { ...inv, s3_exists: false };
+            return { ...populatedInv, s3_exists: false };
         }));
 
         res.json(verifiedInvoices);
@@ -467,7 +532,8 @@ router.get("/lorry-data/:id", async (req, res) => {
     try {
         const invoice = await Invoice.findById(req.params.id).lean();
         if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-        res.json(invoice);
+        const populated = await populateDriverAndVehicle(invoice);
+        res.json(populated);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -729,6 +795,76 @@ router.post("/fuel-slip-softcopy", fuelSlipUpload.single("softcopy"), async (req
     }
 
     res.json({ message: "Fuel Slip saved successfully", url: req.file.location });
+});
+
+// POST — save Advance Fuel Slip PDF to S3 + persist data to MongoDB
+router.post("/advance-fuel-slip-softcopy", fuelSlipUpload.single("softcopy"), async (req, res) => {
+    console.log(">>> Advance Fuel Slip Upload Hit");
+    if (!req.file) {
+        console.error(">>> No file uploaded in Advance Fuel Slip request");
+        return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const { invoice_id, driver_name } = req.body;
+    console.log(">>> Received invoice_id:", invoice_id, "driver_name:", driver_name);
+
+    const updatePayload = {
+        "lorry_hire_slip_data.advance_fuel_slip_url": req.file.location,
+    };
+
+    if (driver_name) {
+        updatePayload["lorry_hire_slip_data.driver_name"] = driver_name;
+    }
+
+    if (invoice_id) {
+        try {
+            const updated = await Invoice.findByIdAndUpdate(
+                invoice_id,
+                { $set: updatePayload },
+                { returnDocument: 'after' }
+            );
+            if (updated) {
+                console.log(">>> DB Update Success for invoice (Advance Fuel Slip):", invoice_id);
+
+                if (driver_name) {
+                    const supplyDetails = updated.human_verified_data?.supply_details || updated.ai_data?.invoice_data?.supply_details || {};
+                    const vehicleNo = updated.lorry_hire_slip_data?.vehicle_number || supplyDetails.vehicle_number || '';
+                    if (vehicleNo) {
+                        const regexSearchStr = makeSpaceAgnosticRegex(vehicleNo);
+                        const filter = {
+                            $or: [
+                                { "Truck No": { $regex: regexSearchStr } },
+                                { truck_no: { $regex: regexSearchStr } },
+                                { "Contact No.(Truck No.)": { $regex: regexSearchStr } }
+                            ]
+                        };
+                        const existingContact = await TruckContact.findOne(filter);
+                        if (existingContact) {
+                            existingContact.driver_name = driver_name;
+                            if (existingContact["Driver Name"] !== undefined) existingContact["Driver Name"] = driver_name;
+                            if (existingContact["DRIVER NAME"] !== undefined) existingContact["DRIVER NAME"] = driver_name;
+                            await existingContact.save();
+                            console.log(">>> Updated driver_name in existing TruckContact:", vehicleNo);
+                        } else {
+                            await TruckContact.create({
+                                truck_no: vehicleNo,
+                                driver_name: driver_name
+                            });
+                            console.log(">>> Created new TruckContact for:", vehicleNo);
+                        }
+                    }
+                }
+            } else {
+                console.error(">>> DB Update Failed: Document not found for ID:", invoice_id);
+            }
+        } catch (dbErr) {
+            console.error(">>> DB Update Error:", dbErr.message);
+        }
+    } else {
+        console.error(">>> No invoice_id provided in request body");
+    }
+
+    res.json({ message: "Advance Fuel Slip saved successfully", url: req.file.location });
 });
 
 // DELETE invoice by ID (also removes S3 files if present)
