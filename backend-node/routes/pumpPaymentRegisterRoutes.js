@@ -58,8 +58,8 @@ router.put("/bulk-update", auth, async (req, res) => {
       const { _id, ...fields } = doc;
       
       // Attempt to parse payment date string to object for querying
-      if (fields["Payment Date"]) {
-        const dObj = parseDate(fields["Payment Date"]);
+      if (fields["LOADING DATE"]) {
+        const dObj = parseDate(fields["LOADING DATE"]);
         if (dObj) fields.paymentDateObj = dObj;
       }
 

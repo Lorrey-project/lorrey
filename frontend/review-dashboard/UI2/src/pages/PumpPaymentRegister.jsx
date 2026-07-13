@@ -20,13 +20,15 @@ const MONTH_NAMES = [
 ];
 
 const COLUMNS = [
-  { key: 'Payment Date', label: 'Payment Date', width: 150, type: 'date' },
-  { key: 'Pump Name', label: 'Pump Name', width: 180, type: 'text' },
-  { key: 'Invoice / Bill No', label: 'Invoice / Bill No', width: 150, type: 'text' },
-  { key: 'Amount Paid', label: 'Amount Paid', width: 150, type: 'number' },
-  { key: 'Payment Mode', label: 'Payment Mode', width: 150, type: 'select', options: ['Cash', 'Bank Transfer', 'Cheque', 'UPI', 'NEFT/RTGS'] },
-  { key: 'Reference No', label: 'Reference No', width: 180, type: 'text' },
-  { key: 'Remarks', label: 'Remarks', width: 300, type: 'text' }
+  { key: 'LOADING DATE', label: 'LOADING DATE', width: 150, type: 'date' },
+  { key: 'SITE', label: 'SITE', width: 150, type: 'text' },
+  { key: 'VEHICLE NUMBER', label: 'VEHICLE NUMBER', width: 150, type: 'text' },
+  { key: 'PUMP NAME', label: 'PUMP NAME', width: 180, type: 'text' },
+  { key: 'HSD SLIP NUMBER', label: 'HSD SLIP NUMBER', width: 180, type: 'text' },
+  { key: 'HSD BILL NUMBER', label: 'HSD BILL NUMBER', width: 180, type: 'text' },
+  { key: 'HSD (LITER)', label: 'HSD (LITER)', width: 120, type: 'number' },
+  { key: 'HSD RATE', label: 'HSD RATE', width: 120, type: 'number' },
+  { key: 'HSD AMOUNT', label: 'HSD AMOUNT', width: 150, type: 'number' }
 ];
 
 export default function PumpPaymentRegister({ onBack }) {
@@ -229,12 +231,9 @@ export default function PumpPaymentRegister({ onBack }) {
         </Box>
       </Box>
 
-      {/* ─── Data Table ─── */}
       <Box sx={{ width: '100%', overflowX: 'auto', bgcolor: 'white', borderRadius: 2, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
         {loading ? (
           <Box p={5} display="flex" justifyContent="center"><CircularProgress /></Box>
-        ) : rows.length === 0 ? (
-          <Box p={5} textAlign="center" color="text.secondary">No records found for this period. Click "Add Row" to start.</Box>
         ) : (
           <Box sx={{ minWidth: 1000 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontFamily: 'inherit' }}>
@@ -256,7 +255,13 @@ export default function PumpPaymentRegister({ onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, idx) => (
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={COLUMNS.length + 1} style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>
+                      No records found for this period. Click "Add Row" to start.
+                    </td>
+                  </tr>
+                ) : rows.map((row, idx) => (
                   <tr key={row._id} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
                     <td style={{ padding: '8px', textAlign: 'center' }}>
                       <input 
