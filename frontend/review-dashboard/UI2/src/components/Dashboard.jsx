@@ -257,7 +257,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
         return false;
     };
 
-    const handleOpenCreateAdvanceFuelSlip = (inv) => {
+    const handleOpenCreateAdvanceFuelSlip = async (inv) => {
         console.log('[ADVANCE_FUEL_SLIP FRONTEND] Opening modal. Incoming invoice data:', inv);
         
         const supplyDetails = inv.human_verified_data?.supply_details || inv.ai_data?.invoice_data?.supply_details || {};
@@ -270,9 +270,28 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
         });
 
         const vehicleNo = inv.lorry_hire_slip_data?.vehicleNumber || inv.lorry_hire_slip_data?.vehicle_number || supplyDetails.vehicle_number || '';
-        const driverName = inv.lorry_hire_slip_data?.driverName || inv.lorry_hire_slip_data?.driver_name || inv.driverName || driverDetails.driver_name || '';
+        let driverName = inv.lorry_hire_slip_data?.driverName || inv.lorry_hire_slip_data?.driver_name || inv.driverName || driverDetails.driver_name || '';
         
-        console.log('[ADVANCE_FUEL_SLIP FRONTEND] Extracted values:', { vehicleNo, driverName });
+        console.log('[ADVANCE_FUEL_SLIP FRONTEND] Initial Extracted values:', { vehicleNo, driverName });
+
+        // Auto-fetch Driver Name from Owner Details (TruckContacts)
+        if (vehicleNo) {
+            try {
+                const token = localStorage.getItem('token');
+                const res = await axios.get(`${API_URL}/truck-contacts/search/${encodeURIComponent(vehicleNo)}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (res.data && res.data.success && res.data.contact) {
+                    const fetchedDriverName = res.data.contact["Driver Name "] || res.data.contact.driver_name;
+                    if (fetchedDriverName) {
+                        driverName = fetchedDriverName;
+                        console.log('[ADVANCE_FUEL_SLIP FRONTEND] Successfully fetched Driver Name from Owner Details:', driverName);
+                    }
+                }
+            } catch (err) {
+                console.error('[ADVANCE_FUEL_SLIP FRONTEND] Error fetching driver details:', err);
+            }
+        }
 
         const randomSlipNo = 'ADV-' + Math.floor(100000 + Math.random() * 900000);
 
@@ -289,7 +308,8 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
 
         setAdvanceFuelFormData({
             stationName: inv.lorry_hire_slip_data?.station_name || 'SAS-1',
-            stationAddress: inv.lorry_hire_slip_data?.station_address || 'Panagarh',
+            stationAddress: 'Panagarh',
+            date: inv.lorry_hire_slip_data?.advance_fuel_slip_date || new Date().toISOString().split('T')[0],
             hsdSlipNo: randomSlipNo,
             vehicleNo: vehicleNo,
             driverName: driverNameVal,
@@ -326,6 +346,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
             formData.append('invoice_id', advanceFuelSlipTarget._id);
             formData.append('softcopy', blob, `advance_fuel_slip_${advanceFuelSlipTarget._id}.pdf`);
             formData.append('driver_name', advanceFuelFormData.driverName);
+            formData.append('date', advanceFuelFormData.date);
 
             const token = localStorage.getItem('token');
             const res = await axios.post(`${API_URL}/invoice/advance-fuel-slip-softcopy`, formData, {
@@ -340,7 +361,8 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                         lorry_hire_slip_data: {
                             ...inv.lorry_hire_slip_data,
                             advance_fuel_slip_url: res.data.url,
-                            driver_name: advanceFuelFormData.driverName
+                            driver_name: advanceFuelFormData.driverName,
+                            advance_fuel_slip_date: advanceFuelFormData.date
                         }
                     };
                 }
@@ -838,7 +860,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                                 <LocalGasStationIcon sx={{ fontSize: 24 }} />
                                             </Box>
                                             <Box>
-                                                <Typography variant="subtitle2" fontWeight={900}>FUEL RATES</Typography>
+                                                <Typography variant="subtitle2" fontWeight={900}>FUEL RATE AND CASH DISCOUNT SETTINGS</Typography>
                                                 <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Admin Config</Typography>
                                             </Box>
                                         </CardContent>
@@ -1522,20 +1544,25 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                 <DialogTitle sx={{ fontWeight: 800 }}>Create Advance Fuel Slip</DialogTitle>
                 <DialogContent dividers>
                     <Grid container spacing={2}>
-                        <Grid item xs={12}>
-                            <Typography variant="subtitle2" color="text.secondary" gutterBottom>Manual Entry Details</Typography>
-                        </Grid>
                         <Grid item xs={12} sm={6}>
                             <TextField
                                 label="Address"
                                 fullWidth
                                 variant="outlined"
                                 InputProps={{ readOnly: true }}
-                                value={advanceFuelFormData.stationAddress}
+                                value="Panagarh"
                             />
                         </Grid>
                         <Grid item xs={12} sm={6}>
-                            {/* Empty Grid item to preserve layout spacing */}
+                            <TextField
+                                label="Date"
+                                type="date"
+                                fullWidth
+                                variant="outlined"
+                                InputLabelProps={{ shrink: true }}
+                                value={advanceFuelFormData.date || ''}
+                                onChange={(e) => setAdvanceFuelFormData(prev => ({ ...prev, date: e.target.value }))}
+                            />
                         </Grid>
                         <Grid item xs={12} sm={6}>
                             <TextField
@@ -1651,7 +1678,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                         data={advanceFuelSlipTarget}
                         fuelData={advanceFuelFormData}
                         hsdSlipNo={advanceFuelFormData.hsdSlipNo}
-                        slipDate={new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                        slipDate={advanceFuelFormData.date ? advanceFuelFormData.date.split('-').reverse().join('/') : new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                         amountWords={toIndianWords(Number(advanceFuelFormData.totalAdvance || 0))}
                         qrPayload={JSON.stringify({
                             slipNo: advanceFuelFormData.hsdSlipNo,

@@ -2,28 +2,87 @@ import React, { useEffect, useState } from 'react';
 import {
     Box, Typography, Button, Card, CardContent,
     Snackbar, Alert, Divider, CircularProgress,
-    TextField, Paper, IconButton, Tooltip
+    TextField, Paper, Tabs, Tab, Grid, Select, MenuItem,
+    FormControl, InputLabel, Table, TableBody, TableCell,
+    TableContainer, TableHead, TableRow, IconButton, Chip
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import SaveIcon from '@mui/icons-material/Save';
-import HistoryIcon from '@mui/icons-material/History';
-import EventIcon from '@mui/icons-material/Event';
+import AddIcon from '@mui/icons-material/Add';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import EvStationIcon from '@mui/icons-material/EvStation';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
-
 const PUMPS = ['SAS-1', 'SAS-2'];
 
-export default function FuelRateSettings({ onBack }) {
+function TabPanel(props) {
+    const { children, value, index, ...other } = props;
+    return (
+        <div
+            role="tabpanel"
+            hidden={value !== index}
+            id={`settings-tabpanel-${index}`}
+            aria-labelledby={`settings-tab-${index}`}
+            style={{ display: value === index ? 'flex' : 'none', flex: 1, flexDirection: 'column' }}
+            {...other}
+        >
+            {value === index && (
+                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', pt: 3 }}>
+                    {children}
+                </Box>
+            )}
+        </div>
+    );
+}
+
+const StatCard = ({ title, value, icon, color }) => (
+    <Card sx={{ 
+        height: '100%', 
+        background: `linear-gradient(135deg, ${color}15 0%, ${color}05 100%)`,
+        border: `1px solid ${color}30`,
+        borderRadius: 3,
+        boxShadow: 'none'
+    }}>
+        <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
+            <Box sx={{ 
+                p: 1.5, 
+                borderRadius: 2, 
+                backgroundColor: `${color}20`,
+                color: color,
+                mr: 2
+            }}>
+                {icon}
+            </Box>
+            <Box>
+                <Typography variant="body2" color="text.secondary" fontWeight={600} gutterBottom>
+                    {title}
+                </Typography>
+                <Typography variant="h5" fontWeight={700} color="text.primary">
+                    {value}
+                </Typography>
+            </Box>
+        </CardContent>
+    </Card>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUEL RATE SETTINGS TAB
+// ─────────────────────────────────────────────────────────────────────────────
+function FuelRateTab({ snackHandler }) {
     const [history, setHistory] = useState({ 'SAS-1': [], 'SAS-2': [] });
     const [selectedPump, setSelectedPump] = useState('SAS-1');
     const [rateInput, setRateInput] = useState('');
     const [dateInput, setDateInput] = useState(new Date().toISOString().split('T')[0]);
+    const [statusInput, setStatusInput] = useState('Active');
     const [saving, setSaving] = useState(false);
     const [loading, setLoading] = useState(true);
-    const [snack, setSnack] = useState(null);
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         fetchRates();
     }, []);
@@ -37,32 +96,24 @@ export default function FuelRateSettings({ onBack }) {
             });
             if (res.data.success) {
                 setHistory(res.data.history);
-                // Pre-fill editor with latest rate if available
                 const latest = res.data.history[selectedPump]?.[0];
                 if (latest) setRateInput(String(latest.rate));
             }
         } catch (e) {
-            setSnack({ msg: 'Failed to load rates', sev: 'error' });
+            snackHandler({ msg: 'Failed to load rates', sev: 'error' });
         } finally {
             setLoading(false);
         }
     };
 
-    // Update rate input when pump changes
-    useEffect(() => {
-        const latest = history[selectedPump]?.[0];
-        if (latest) setRateInput(String(latest.rate));
-        else setRateInput('90');
-    }, [selectedPump, history]);
-
     const handleSave = async () => {
         const rateVal = parseFloat(rateInput);
         if (isNaN(rateVal) || rateVal <= 0) {
-            setSnack({ msg: 'Rate must be a positive number', sev: 'error' });
+            snackHandler({ msg: 'Rate must be a positive number', sev: 'error' });
             return;
         }
         if (!dateInput) {
-            setSnack({ msg: 'Effective date is required', sev: 'error' });
+            snackHandler({ msg: 'Effective date is required', sev: 'error' });
             return;
         }
 
@@ -75,319 +126,455 @@ export default function FuelRateSettings({ onBack }) {
             );
             
             if (res.data.success) {
-                setSnack({ 
-                    msg: `${selectedPump} rate updated to ₹${rateVal}/L from ${dateInput}. ${res.data.reSyncCount} invoices re-syncing.`, 
-                    sev: 'success' 
-                });
-                fetchRates(); // Refresh history
+                snackHandler({ msg: `${selectedPump} rate updated successfully!`, sev: 'success' });
+                fetchRates();
             }
-        } catch (e) {
-            setSnack({ msg: e.response?.data?.error || 'Failed to save rate', sev: 'error' });
+        } catch (error) {
+            snackHandler({ msg: error.response?.data?.error || 'Failed to update rate', sev: 'error' });
         } finally {
             setSaving(false);
         }
     };
 
-    const pumpHistory = history[selectedPump] || [];
-    const currentRate = pumpHistory[0]?.rate ?? 90;
-    const newRate = parseFloat(rateInput);
-    const diff = isNaN(newRate) ? 0 : newRate - currentRate;
-    const diffColor = diff > 0 ? '#f87171' : diff < 0 ? '#34d399' : 'rgba(255,255,255,0.35)';
+    const handleReset = () => {
+        const latest = history[selectedPump]?.[0];
+        setRateInput(latest ? String(latest.rate) : '');
+        setDateInput(new Date().toISOString().split('T')[0]);
+        setStatusInput('Active');
+    };
+
+    const handleAddNew = () => {
+        setRateInput('');
+        setDateInput(new Date().toISOString().split('T')[0]);
+        setStatusInput('Active');
+    };
+
+    // Calculate Summary Stats
+    const allHistory = [...history['SAS-1'], ...history['SAS-2']].sort((a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
+    const latestRates = PUMPS.map(p => history[p]?.[0]?.rate).filter(r => r);
+    const avgCurrentRate = latestRates.length ? (latestRates.reduce((a, b) => a + b, 0) / latestRates.length).toFixed(2) : 'N/A';
+    const lastUpdated = allHistory[0] ? new Date(allHistory[0].effectiveDate).toLocaleDateString() : 'N/A';
 
     return (
-        <Box sx={{
-            minHeight: '100vh',
-            background: 'linear-gradient(135deg, #0a1628 0%, #0f2347 50%, #0a1e3d 100%)',
-            color: '#fff',
-            display: 'flex',
-            flexDirection: 'column',
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {/* Summary Cards */}
+            <Grid container spacing={3}>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard title="Avg Current Rate" value={`₹${avgCurrentRate}/L`} icon={<AssessmentIcon />} color="#0ea5e9" />
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard title="Total Pumps" value="2" icon={<EvStationIcon />} color="#0ea5e9" />
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard title="Last Updated" value={lastUpdated} icon={<AccessTimeIcon />} color="#0ea5e9" />
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard title="Configured Fuel Types" value="1 (Diesel/HSD)" icon={<LocalGasStationIcon />} color="#0ea5e9" />
+                </Grid>
+            </Grid>
+
+            {/* Configuration & Table */}
+            <Grid container spacing={4}>
+                <Grid item xs={12} lg={4}>
+                    <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
+                        <Box sx={{ p: 3, borderBottom: '1px solid rgba(255,255,255,0.05)', bgcolor: 'rgba(255,255,255,0.02)' }}>
+                            <Typography variant="h6" fontWeight={600}>Fuel Rate Configuration</Typography>
+                            <Typography variant="body2" color="text.secondary">Add or update rates for a pump.</Typography>
+                        </Box>
+                        <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            <FormControl fullWidth>
+                                <InputLabel>Fuel Type</InputLabel>
+                                <Select value="HSD" label="Fuel Type" disabled>
+                                    <MenuItem value="HSD">Diesel (HSD)</MenuItem>
+                                </Select>
+                            </FormControl>
+                            <FormControl fullWidth>
+                                <InputLabel>Select Pump</InputLabel>
+                                <Select 
+                                    value={selectedPump} 
+                                    label="Select Pump"
+                                    onChange={(e) => {
+                                        setSelectedPump(e.target.value);
+                                        const latest = history[e.target.value]?.[0];
+                                        setRateInput(latest ? String(latest.rate) : '');
+                                    }}
+                                >
+                                    {PUMPS.map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
+                                </Select>
+                            </FormControl>
+                            <TextField 
+                                label="Fuel Rate (₹/Litre)" 
+                                type="number" 
+                                value={rateInput}
+                                onChange={(e) => setRateInput(e.target.value)}
+                                fullWidth
+                            />
+                            <TextField 
+                                label="Effective Date" 
+                                type="date" 
+                                value={dateInput}
+                                onChange={(e) => setDateInput(e.target.value)}
+                                InputLabelProps={{ shrink: true }}
+                                fullWidth
+                            />
+                            <FormControl fullWidth>
+                                <InputLabel>Status</InputLabel>
+                                <Select value={statusInput} label="Status" onChange={e => setStatusInput(e.target.value)}>
+                                    <MenuItem value="Active">Active</MenuItem>
+                                    <MenuItem value="Inactive">Inactive</MenuItem>
+                                </Select>
+                            </FormControl>
+                            <Divider sx={{ my: 1 }} />
+                            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                                <Button variant="contained" color="primary" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ flex: 1, borderRadius: 2 }}>
+                                    {saving ? 'Saving...' : 'Save'}
+                                </Button>
+                                <Button variant="outlined" color="primary" startIcon={<AddIcon />} onClick={handleAddNew} sx={{ flex: 1, borderRadius: 2 }}>
+                                    New
+                                </Button>
+                                <Button variant="text" color="inherit" startIcon={<RefreshIcon />} onClick={handleReset} sx={{ flex: 1, borderRadius: 2 }}>
+                                    Reset
+                                </Button>
+                            </Box>
+                        </CardContent>
+                    </Card>
+                </Grid>
+
+                <Grid item xs={12} lg={8}>
+                    <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.2)', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <Box sx={{ p: 3, borderBottom: '1px solid rgba(255,255,255,0.05)', bgcolor: 'rgba(255,255,255,0.02)' }}>
+                            <Typography variant="h6" fontWeight={600}>Fuel Rate History</Typography>
+                            <Typography variant="body2" color="text.secondary">All configured rates across pumps.</Typography>
+                        </Box>
+                        <TableContainer sx={{ flex: 1, maxHeight: 500 }}>
+                            <Table stickyHeader>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell sx={{ fontWeight: 600 }}>Pump Name</TableCell>
+                                        <TableCell sx={{ fontWeight: 600 }}>Rate (₹/L)</TableCell>
+                                        <TableCell sx={{ fontWeight: 600 }}>Effective Date</TableCell>
+                                        <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
+                                        <TableCell sx={{ fontWeight: 600 }}>Last Modified</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {loading ? (
+                                        <TableRow><TableCell colSpan={5} align="center"><CircularProgress size={24} sx={{ my: 3 }} /></TableCell></TableRow>
+                                    ) : allHistory.length === 0 ? (
+                                        <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>No rates found</TableCell></TableRow>
+                                    ) : (
+                                        allHistory.map((row, idx) => (
+                                            <TableRow key={row._id || idx} hover>
+                                                <TableCell sx={{ fontWeight: 500 }}>{row.pumpName}</TableCell>
+                                                <TableCell>₹{row.rate}</TableCell>
+                                                <TableCell>{new Date(row.effectiveDate).toLocaleDateString()}</TableCell>
+                                                <TableCell><Chip label="Active" size="small" color="success" variant="outlined" /></TableCell>
+                                                <TableCell>{row.updatedAt ? new Date(row.updatedAt).toLocaleString() : 'N/A'}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    </Card>
+                </Grid>
+            </Grid>
+        </Box>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUMP CASH DISCOUNT TAB
+// ─────────────────────────────────────────────────────────────────────────────
+function CashDiscountTab({ snackHandler }) {
+    const [history, setHistory] = useState({ 'SAS-1': [], 'SAS-2': [] });
+    const [selectedPump, setSelectedPump] = useState('SAS-1');
+    const [discountInput, setDiscountInput] = useState('');
+    const [dateInput, setDateInput] = useState(new Date().toISOString().split('T')[0]);
+    const [statusInput, setStatusInput] = useState('Active');
+    const [saving, setSaving] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
+        fetchDiscounts();
+    }, []);
+
+    const fetchDiscounts = async () => {
+        setLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`${API_URL}/pump-payment/cash-discounts`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.success) {
+                setHistory(res.data.history);
+                const latest = res.data.history[selectedPump]?.[0];
+                if (latest) setDiscountInput(String(latest.discount));
+            }
+        } catch (e) {
+            snackHandler({ msg: 'Failed to load cash discounts', sev: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        const discountVal = parseFloat(discountInput);
+        if (isNaN(discountVal) || discountVal < 0) {
+            snackHandler({ msg: 'Discount must be a positive number', sev: 'error' });
+            return;
+        }
+        if (!dateInput) {
+            snackHandler({ msg: 'Effective date is required', sev: 'error' });
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.put(`${API_URL}/pump-payment/cash-discounts`,
+                { pumpName: selectedPump, discount: discountVal, effectiveDate: dateInput },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            
+            if (res.data.success) {
+                snackHandler({ msg: `${selectedPump} cash discount updated successfully!`, sev: 'success' });
+                fetchDiscounts();
+            }
+        } catch (error) {
+            snackHandler({ msg: error.response?.data?.error || 'Failed to update cash discount', sev: 'error' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleReset = () => {
+        const latest = history[selectedPump]?.[0];
+        setDiscountInput(latest ? String(latest.discount) : '');
+        setDateInput(new Date().toISOString().split('T')[0]);
+        setStatusInput('Active');
+    };
+
+    // Calculate Summary Stats
+    const allHistory = [...history['SAS-1'], ...history['SAS-2']].sort((a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
+    const latestDiscounts = PUMPS.map(p => history[p]?.[0]?.discount).filter(d => d !== undefined);
+    const avgCurrentDiscount = latestDiscounts.length ? (latestDiscounts.reduce((a, b) => a + b, 0) / latestDiscounts.length).toFixed(2) : '0.00';
+    const lastUpdated = allHistory[0] ? new Date(allHistory[0].effectiveDate).toLocaleDateString() : 'N/A';
+
+    return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {/* Summary Cards */}
+            <Grid container spacing={3}>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard title="Total Pumps Configured" value="2" icon={<EvStationIcon />} color="#10b981" />
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard title="Avg Discount Rate" value={`₹${avgCurrentDiscount}/L`} icon={<AssessmentIcon />} color="#10b981" />
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard title="Active Discounts" value={latestDiscounts.length} icon={<LocalGasStationIcon />} color="#10b981" />
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard title="Last Updated" value={lastUpdated} icon={<AccessTimeIcon />} color="#10b981" />
+                </Grid>
+            </Grid>
+
+            {/* Configuration & Table */}
+            <Grid container spacing={4}>
+                <Grid item xs={12} lg={4}>
+                    <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
+                        <Box sx={{ p: 3, borderBottom: '1px solid rgba(255,255,255,0.05)', bgcolor: 'rgba(255,255,255,0.02)' }}>
+                            <Typography variant="h6" fontWeight={600}>Pump Configuration</Typography>
+                            <Typography variant="body2" color="text.secondary">Set cash discount per litre.</Typography>
+                        </Box>
+                        <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            <FormControl fullWidth>
+                                <InputLabel>Select Pump</InputLabel>
+                                <Select 
+                                    value={selectedPump} 
+                                    label="Select Pump"
+                                    onChange={(e) => {
+                                        setSelectedPump(e.target.value);
+                                        const latest = history[e.target.value]?.[0];
+                                        setDiscountInput(latest ? String(latest.discount) : '');
+                                    }}
+                                >
+                                    {PUMPS.map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
+                                </Select>
+                            </FormControl>
+                            <TextField 
+                                label="Cash Discount (₹/Litre)" 
+                                type="number" 
+                                value={discountInput}
+                                onChange={(e) => setDiscountInput(e.target.value)}
+                                fullWidth
+                            />
+                            <TextField 
+                                label="Effective Date" 
+                                type="date" 
+                                value={dateInput}
+                                onChange={(e) => setDateInput(e.target.value)}
+                                InputLabelProps={{ shrink: true }}
+                                fullWidth
+                            />
+                            <FormControl fullWidth>
+                                <InputLabel>Status</InputLabel>
+                                <Select value={statusInput} label="Status" onChange={e => setStatusInput(e.target.value)}>
+                                    <MenuItem value="Active">Active</MenuItem>
+                                    <MenuItem value="Inactive">Inactive</MenuItem>
+                                </Select>
+                            </FormControl>
+                            <Divider sx={{ my: 1 }} />
+                            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                                <Button variant="contained" color="success" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ flex: 1, borderRadius: 2 }}>
+                                    {saving ? 'Saving...' : 'Save'}
+                                </Button>
+                                <Button variant="text" color="inherit" startIcon={<RefreshIcon />} onClick={handleReset} sx={{ flex: 1, borderRadius: 2 }}>
+                                    Reset
+                                </Button>
+                            </Box>
+                        </CardContent>
+                    </Card>
+                </Grid>
+
+                <Grid item xs={12} lg={8}>
+                    <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.2)', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <Box sx={{ p: 3, borderBottom: '1px solid rgba(255,255,255,0.05)', bgcolor: 'rgba(255,255,255,0.02)' }}>
+                            <Typography variant="h6" fontWeight={600}>Discount Table</Typography>
+                            <Typography variant="body2" color="text.secondary">All configured discounts across pumps.</Typography>
+                        </Box>
+                        <TableContainer sx={{ flex: 1, maxHeight: 500 }}>
+                            <Table stickyHeader>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell sx={{ fontWeight: 600 }}>Pump Name</TableCell>
+                                        <TableCell sx={{ fontWeight: 600 }}>Discount (₹/L)</TableCell>
+                                        <TableCell sx={{ fontWeight: 600 }}>Effective Date</TableCell>
+                                        <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
+                                        <TableCell sx={{ fontWeight: 600 }}>Last Modified</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {loading ? (
+                                        <TableRow><TableCell colSpan={5} align="center"><CircularProgress size={24} sx={{ my: 3 }} /></TableCell></TableRow>
+                                    ) : allHistory.length === 0 ? (
+                                        <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>No discounts found</TableCell></TableRow>
+                                    ) : (
+                                        allHistory.map((row, idx) => (
+                                            <TableRow key={row._id || idx} hover>
+                                                <TableCell sx={{ fontWeight: 500 }}>{row.pumpName}</TableCell>
+                                                <TableCell>₹{row.discount}</TableCell>
+                                                <TableCell>{new Date(row.effectiveDate).toLocaleDateString()}</TableCell>
+                                                <TableCell><Chip label="Active" size="small" color="success" variant="outlined" /></TableCell>
+                                                <TableCell>{row.updatedAt ? new Date(row.updatedAt).toLocaleString() : 'N/A'}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    </Card>
+                </Grid>
+            </Grid>
+        </Box>
+    );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN PAGE COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────
+export default function FuelRateSettings({ onBack }) {
+    const [tabIndex, setTabIndex] = useState(0);
+    const [snack, setSnack] = useState({ open: false, msg: '', sev: 'info' });
+
+    const snackHandler = ({ msg, sev }) => setSnack({ open: true, msg, sev });
+
+    return (
+        <Box sx={{ 
+            height: '100%', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            bgcolor: 'background.default',
+            overflow: 'auto',
+            p: { xs: 2, md: 4 }
         }}>
-            {/* ── Header ────────────────────────────────────────────────── */}
-            <Box sx={{
-                display: 'flex', alignItems: 'center', gap: 2,
-                px: { xs: 2, md: 5 }, py: 2.5,
-                borderBottom: '1px solid rgba(255,255,255,0.08)',
-                backdropFilter: 'blur(10px)',
-                background: 'rgba(10,22,40,0.6)',
-                position: 'sticky', top: 0, zIndex: 10,
+            {/* Page Header */}
+            <Box sx={{ 
+                display: 'flex', 
+                flexDirection: { xs: 'column', md: 'row' },
+                alignItems: { xs: 'flex-start', md: 'center' }, 
+                justifyContent: 'space-between',
+                mb: 4,
+                gap: 2
             }}>
-                <Button
-                    startIcon={<ArrowBackIcon />}
-                    onClick={onBack}
-                    sx={{
-                        color: 'rgba(255,255,255,0.7)', fontWeight: 700, borderRadius: '10px',
-                        '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.08)' },
-                    }}
-                >
-                    Back
-                </Button>
-                <Divider orientation="vertical" flexItem sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
-                <Box sx={{ p: 0.8, bgcolor: 'rgba(25,118,210,0.3)', borderRadius: '10px', border: '1px solid rgba(25,118,210,0.4)' }}>
-                    <LocalGasStationIcon sx={{ fontSize: 20, color: '#60a5fa' }} />
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <IconButton onClick={onBack} sx={{ bgcolor: 'rgba(255,255,255,0.05)' }}>
+                        <ArrowBackIcon />
+                    </IconButton>
+                    <Box>
+                        <Typography variant="h5" fontWeight={700}>
+                            Settings & Configurations
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                            Manage Fuel Rates and Pump Cash Discounts efficiently.
+                        </Typography>
+                    </Box>
                 </Box>
-                <Box>
-                    <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.2 }}>
-                        Fuel Rate Settings
-                    </Typography>
-                    <Typography variant="caption" sx={{ opacity: 0.5 }}>
-                        Head Office — Pricing History Control
-                    </Typography>
-                </Box>
+                
+                {/* Tabs */}
+                <Paper sx={{ 
+                    borderRadius: 3, 
+                    bgcolor: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    p: 0.5
+                }}>
+                    <Tabs 
+                        value={tabIndex} 
+                        onChange={(e, nv) => setTabIndex(nv)}
+                        TabIndicatorProps={{ style: { display: 'none' } }}
+                        sx={{
+                            minHeight: 40,
+                            '& .MuiTab-root': {
+                                minHeight: 40,
+                                borderRadius: 2,
+                                textTransform: 'none',
+                                fontWeight: 600,
+                                px: 3,
+                                transition: 'all 0.3s ease'
+                            },
+                            '& .Mui-selected': {
+                                bgcolor: tabIndex === 0 ? 'primary.main' : 'success.main',
+                                color: '#fff !important',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                            }
+                        }}
+                    >
+                        <Tab label="Fuel Rate Settings" />
+                        <Tab label="Pump Cash Discount" />
+                    </Tabs>
+                </Paper>
             </Box>
 
-            {loading ? (
-                <Box display="flex" justifyContent="center" alignItems="center" flex={1} pt={10}>
-                    <CircularProgress sx={{ color: '#60a5fa' }} />
-                </Box>
-            ) : (
-                <Box sx={{
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: { xs: 'column', lg: 'row' },
-                    gap: 4,
-                    px: { xs: 2, md: 5 },
-                    py: 4,
-                    maxWidth: 1400,
-                    width: '100%',
-                    mx: 'auto',
-                }}>
-                    {/* ── Left: Current Rates Summary ─────────────────────── */}
-                    <Box sx={{ width: { xs: '100%', lg: 320 }, flexShrink: 0 }}>
-                        <Typography variant="caption" fontWeight={800} sx={{ opacity: 0.5, letterSpacing: 1, mb: 1.5, display: 'block' }}>
-                            SELECT PUMP
-                        </Typography>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            {PUMPS.map(pump => {
-                                const isSelected = pump === selectedPump;
-                                const latest = history[pump]?.[0];
-                                return (
-                                    <Card
-                                        key={pump}
-                                        onClick={() => setSelectedPump(pump)}
-                                        sx={{
-                                            cursor: 'pointer',
-                                            borderRadius: '18px',
-                                            background: isSelected
-                                                ? 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)'
-                                                : 'rgba(255,255,255,0.05)',
-                                            border: isSelected
-                                                ? '1px solid rgba(96,165,250,0.5)'
-                                                : '1px solid rgba(255,255,255,0.08)',
-                                            transition: 'all 0.2s ease',
-                                            '&:hover': !isSelected ? {
-                                                background: 'rgba(255,255,255,0.08)',
-                                                border: '1px solid rgba(255,255,255,0.15)',
-                                            } : {},
-                                        }}
-                                    >
-                                        <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
-                                            <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-                                                <Box>
-                                                    <Typography variant="caption" fontWeight={800} sx={{
-                                                        opacity: isSelected ? 0.9 : 0.6,
-                                                        letterSpacing: 0.5, color: '#fff',
-                                                    }}>
-                                                        {pump}
-                                                    </Typography>
-                                                    <Box display="flex" alignItems="baseline" gap={0.5} mt={0.5}>
-                                                        <Typography sx={{ fontSize: 13, opacity: 0.7, color: '#fff', fontWeight: 700 }}>₹</Typography>
-                                                        <Typography variant="h3" fontWeight={900} sx={{ color: '#fff', lineHeight: 1 }}>
-                                                            {latest?.rate ?? 90}
-                                                        </Typography>
-                                                        <Typography sx={{ fontSize: 14, opacity: 0.6, color: '#fff', fontWeight: 700 }}>/L</Typography>
-                                                    </Box>
-                                                </Box>
-                                                <Box sx={{
-                                                    p: 1, borderRadius: '10px',
-                                                    bgcolor: isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.07)',
-                                                }}>
-                                                    <LocalGasStationIcon sx={{ fontSize: 20, color: isSelected ? '#fff' : 'rgba(255,255,255,0.4)' }} />
-                                                </Box>
-                                            </Box>
-                                            {latest && (
-                                                <Typography variant="caption" sx={{ opacity: 0.5, fontSize: '10px', mt: 1, display: 'block', color: '#fff' }}>
-                                                    Effective from {new Date(latest.effectiveDate).toLocaleDateString('en-IN')}
-                                                </Typography>
-                                            )}
-                                        </CardContent>
-                                    </Card>
-                                );
-                            })}
-                        </Box>
+            {/* Tab Contents */}
+            <TabPanel value={tabIndex} index={0}>
+                <FuelRateTab snackHandler={snackHandler} />
+            </TabPanel>
+            <TabPanel value={tabIndex} index={1}>
+                <CashDiscountTab snackHandler={snackHandler} />
+            </TabPanel>
 
-                        {/* ── History List (Embedded in left col) ── */}
-                        <Box sx={{ mt: 5 }}>
-                             <Box display="flex" alignItems="center" gap={1} mb={2}>
-                                <HistoryIcon sx={{ fontSize: 18, opacity: 0.5 }} />
-                                <Typography variant="caption" fontWeight={800} sx={{ opacity: 0.5, letterSpacing: 1 }}>
-                                    HISTORY — {selectedPump}
-                                </Typography>
-                            </Box>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                                {pumpHistory.length === 0 ? (
-                                    <Typography variant="caption" sx={{ opacity: 0.3, fontStyle: 'italic' }}>No history found</Typography>
-                                ) : pumpHistory.map((item, idx) => (
-                                    <Box key={item._id || idx} sx={{
-                                        p: 1.5, borderRadius: '12px',
-                                        bgcolor: 'rgba(255,255,255,0.03)',
-                                        border: '1px solid rgba(255,255,255,0.05)',
-                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                                    }}>
-                                        <Box>
-                                            <Typography variant="body2" fontWeight={800}>₹{item.rate}</Typography>
-                                            <Typography variant="caption" sx={{ opacity: 0.5 }}>
-                                                {new Date(item.effectiveDate).toLocaleDateString('en-IN')}
-                                            </Typography>
-                                        </Box>
-                                        {idx === 0 && (
-                                            <Chip label="Active" size="small" sx={{ height: 18, fontSize: '9px', fontWeight: 900, bgcolor: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.2)' }} />
-                                        )}
-                                    </Box>
-                                ))}
-                            </Box>
-                        </Box>
-                    </Box>
-
-                    {/* ── Middle: Rate Editor ──────────────────────────────── */}
-                    <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption" fontWeight={800} sx={{ opacity: 0.5, letterSpacing: 1, mb: 1.5, display: 'block' }}>
-                            UPDATE PRICE SCHEDULER
-                        </Typography>
-
-                        <Paper sx={{
-                            bgcolor: 'rgba(255,255,255,0.05)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            borderRadius: '24px',
-                            p: 4,
-                            mb: 3,
-                            backgroundImage: 'none'
-                        }}>
-                            {/* Pump Indicator */}
-                            <Box display="flex" alignItems="center" gap={1.5} mb={4}>
-                                <Box sx={{ width: 40, height: 40, borderRadius: '12px', bgcolor: 'rgba(96,165,250,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(96,165,250,0.2)' }}>
-                                    <LocalGasStationIcon sx={{ color: '#60a5fa' }} />
-                                </Box>
-                                <Box>
-                                    <Typography variant="h6" fontWeight={900}>{selectedPump}</Typography>
-                                    <Typography variant="caption" sx={{ opacity: 0.5 }}>Configuring rate schedule</Typography>
-                                </Box>
-                            </Box>
-
-                            {/* Date Selection */}
-                            <Box sx={{ mb: 4 }}>
-                                <Typography variant="caption" fontWeight={800} sx={{ opacity: 0.5, letterSpacing: 1, mb: 1, display: 'block' }}>
-                                    EFFECTIVE DATE
-                                </Typography>
-                                <TextField
-                                    fullWidth
-                                    type="date"
-                                    value={dateInput}
-                                    onChange={e => setDateInput(e.target.value)}
-                                    InputProps={{
-                                        startAdornment: <EventIcon sx={{ color: '#60a5fa', mr: 1, fontSize: 20 }} />,
-                                        sx: {
-                                            color: '#fff',
-                                            fontWeight: 800,
-                                            borderRadius: '16px',
-                                            bgcolor: 'rgba(255,255,255,0.05)',
-                                            '& input::-webkit-calendar-picker-indicator': { filter: 'invert(1)' }
-                                        }
-                                    }}
-                                />
-                                <Typography variant="caption" sx={{ mt: 1, display: 'block', opacity: 0.4, fontStyle: 'italic' }}>
-                                    The rate will apply to all slips on or after this date.
-                                </Typography>
-                            </Box>
-
-                            {/* Rate Input */}
-                            <Box sx={{ mb: 4 }}>
-                                <Typography variant="caption" fontWeight={800} sx={{ opacity: 0.5, letterSpacing: 1, mb: 1, display: 'block' }}>
-                                    DIESEL RATE (₹ per Litre)
-                                </Typography>
-                                <Box sx={{
-                                    display: 'flex', alignItems: 'center',
-                                    bgcolor: 'rgba(255,255,255,0.08)',
-                                    borderRadius: '20px',
-                                    border: '2px solid rgba(96,165,250,0.3)',
-                                    px: 3, py: 1,
-                                    '&:focus-within': { borderColor: 'rgba(96,165,250,0.7)' },
-                                }}>
-                                    <Typography sx={{ fontSize: 32, fontWeight: 900, opacity: 0.6, mr: 1.5 }}>₹</Typography>
-                                    <input
-                                        type="number"
-                                        value={rateInput}
-                                        onChange={e => setRateInput(e.target.value)}
-                                        style={{
-                                            background: 'transparent', border: 'none', outline: 'none',
-                                            color: '#fff', fontSize: '64px', fontWeight: 900,
-                                            width: '100%', lineHeight: 1,
-                                        }}
-                                        placeholder="0"
-                                        step="0.01"
-                                    />
-                                    <Typography sx={{ fontSize: 24, fontWeight: 700, opacity: 0.5, ml: 1 }}>/L</Typography>
-                                </Box>
-                            </Box>
-
-                            {/* Impact Warning */}
-                            <Box sx={{
-                                p: 2, borderRadius: '16px',
-                                bgcolor: 'rgba(245,158,11,0.05)',
-                                border: '1px solid rgba(245,158,11,0.15)',
-                                mb: 4
-                            }}>
-                                <Typography variant="caption" sx={{ color: '#fbbf24', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    ⚠️ SYSTEM IMPACT
-                                </Typography>
-                                <Typography variant="caption" sx={{ color: '#fbbf24', opacity: 0.8, display: 'block', mt: 0.5 }}>
-                                    Changing the rate for a date will automatically update all HSD calculations in the Cement Register from that date onwards.
-                                </Typography>
-                            </Box>
-
-                            {/* Save button */}
-                            <Button
-                                fullWidth
-                                variant="contained"
-                                size="large"
-                                startIcon={saving ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : <SaveIcon />}
-                                disabled={saving || isNaN(newRate) || newRate <= 0}
-                                onClick={handleSave}
-                                sx={{
-                                    py: 2, borderRadius: '18px', fontWeight: 900, fontSize: 16,
-                                    background: 'linear-gradient(45deg, #1565c0 0%, #1976d2 100%)',
-                                    boxShadow: '0 8px 24px rgba(25,118,210,0.4)',
-                                    '&:hover': { boxShadow: '0 12px 32px rgba(25,118,210,0.55)', transform: 'translateY(-1px)' },
-                                    '&:disabled': { opacity: 0.4 },
-                                    transition: 'all 0.2s',
-                                }}
-                            >
-                                {saving ? 'Scheduling Update...' : `Apply New Rate`}
-                            </Button>
-                        </Paper>
-                    </Box>
-                </Box>
-            )}
-
-            <Snackbar
-                open={!!snack}
-                autoHideDuration={4500}
-                onClose={() => setSnack(null)}
+            <Snackbar 
+                open={snack.open} 
+                autoHideDuration={6000} 
+                onClose={() => setSnack(p => ({ ...p, open: false }))}
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
             >
-                <Alert severity={snack?.sev || 'info'} onClose={() => setSnack(null)} sx={{ fontWeight: 700 }}>
-                    {snack?.msg}
+                <Alert severity={snack.sev} variant="filled" sx={{ width: '100%', borderRadius: 2, boxShadow: 3 }}>
+                    {snack.msg}
                 </Alert>
             </Snackbar>
         </Box>
     );
 }
-
-const Chip = ({ label, size, sx }) => (
-    <Box sx={{
-        px: 1, py: 0.2, borderRadius: '6px',
-        display: 'inline-flex', alignItems: 'center',
-        ...sx
-    }}>
-        <Typography sx={{ fontSize: 'inherit', fontWeight: 'inherit' }}>{label}</Typography>
-    </Box>
-);

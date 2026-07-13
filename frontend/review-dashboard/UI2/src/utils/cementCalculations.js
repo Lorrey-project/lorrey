@@ -137,6 +137,7 @@ export const COLUMNS = [
   },
   { key: 'HSD RATE', label: 'HSD RATE', width: 100, type: 'auto', group: 'hsd' },
   { key: 'HSD AMOUNT', label: 'HSD AMOUNT', width: 110, type: 'auto', group: 'hsd' },
+  { key: 'CASH DISCOUNT', label: 'CASH DISCOUNT', width: 130, type: 'auto', group: 'hsd' },
   {
     key: '% OF ADV', label: '% OF ADV', width: 100, type: 'calc', group: 'hsd',
     formula: r => {

@@ -109,6 +109,29 @@ router.put("/approvals/:id", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GET /truck-contacts — Fetch all contacts (newest first)
+
+// GET /truck-contacts/search/:truckNo - Fetch by truck number
+router.get("/search/:truckNo", async (req, res) => {
+  try {
+    const col = getCollection();
+    const truckNo = req.params.truckNo;
+    const contact = await col.findOne({
+      $or: [
+        { "Truck No ": truckNo },
+        { "truck_no": truckNo }
+      ]
+    });
+    
+    if (contact) {
+      res.json({ success: true, contact });
+    } else {
+      res.json({ success: false, message: 'Truck not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.get("/", async (req, res) => {
   try {
     const col = getCollection();

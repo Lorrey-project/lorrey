@@ -220,6 +220,27 @@ async function getFuelRate(pumpName, dateVal) {
   }
 }
 
+async function getCashDiscountRate(pumpName, dateVal) {
+  try {
+    const col = mongoose.connection.useDb("pump_payment").collection("cash_discounts");
+    const d = new Date(dateVal);
+    if (!pumpName || isNaN(d.getTime())) return 0.80; // default cash discount
+
+    // Find latest discount effective on or before this date
+    const record = await col.find({
+      pumpName: { $regex: new RegExp(`^${pumpName.trim().split(/[-\s]/)[0]}`, "i") },
+      effectiveDate: { $lte: d }
+    })
+      .sort({ effectiveDate: -1 })
+      .limit(1)
+      .toArray();
+
+    return record[0] ? num(record[0].discount) : 0.80;
+  } catch (e) {
+    return 0.80;
+  }
+}
+
 function makeSpaceAgnosticRegex(str) {
   if (!str) return /^$/;
   const stripped = str.replace(/[^a-zA-Z0-9]/g, '');
@@ -397,6 +418,10 @@ async function pushToRegister(invoiceId, overrides) {
     // HSD AMOUNT is always LTR * RATE as per user request for automatic updates
     const hsdAmount = fmt2(hsdLtr * hsdRate);
 
+    // Fetch cash discount rate based on pump and loading date
+    const cashDiscountRate = await getCashDiscountRate(pumpName, loadingDate);
+    const cashDiscountAmount = fmt2(hsdLtr * cashDiscountRate);
+
     const advance = num(slip.total_advance || slip.loading_advance);
     const hsdBillNo = await generateHsdBillNo(pumpName, loadingDate, invoiceId);
 
@@ -500,6 +525,8 @@ async function pushToRegister(invoiceId, overrides) {
       "BALANCE": balance,
       "HSD RATE": hsdRate || "",
       "HSD AMOUNT": hsdAmount || "",
+      "CASH DISCOUNT RATE": cashDiscountRate || "",
+      "CASH DISCOUNT": cashDiscountAmount || "",
       "% OF ADV": pctAdv || "",
       "DEDICATED": dedicated || "",
       "10W EXTRA 8.5%": tenWExtra || "",

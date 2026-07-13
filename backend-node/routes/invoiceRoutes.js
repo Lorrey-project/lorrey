@@ -805,7 +805,7 @@ router.post("/advance-fuel-slip-softcopy", fuelSlipUpload.single("softcopy"), as
         return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const { invoice_id, driver_name } = req.body;
+    const { invoice_id, driver_name, date } = req.body;
     console.log(">>> Received invoice_id:", invoice_id, "driver_name:", driver_name);
 
     const updatePayload = {
@@ -814,6 +814,9 @@ router.post("/advance-fuel-slip-softcopy", fuelSlipUpload.single("softcopy"), as
 
     if (driver_name) {
         updatePayload["lorry_hire_slip_data.driver_name"] = driver_name;
+    }
+    if (date) {
+        updatePayload["lorry_hire_slip_data.advance_fuel_slip_date"] = date;
     }
 
     if (invoice_id) {
