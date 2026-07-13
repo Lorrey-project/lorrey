@@ -27,6 +27,7 @@ const invoiceSchema = new mongoose.Schema({
         station_name: String,
         station_address: String,
         fuel_slip_url: String,
+        advance_fuel_slip_url: String,
         created_at: { type: Date, default: Date.now }
     },
 
