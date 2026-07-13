@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
-  Autocomplete, TextField, Divider, LinearProgress
+  Autocomplete, TextField, Divider, LinearProgress,
+  TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Checkbox
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -195,10 +196,10 @@ export default function AccountDetails({ onBack }) {
   const [unsavedImportRows, setUnsavedImportRows] = useState([]);
   const wizardFileRef = useRef(null);
 
-  const [pendingBillsModal, setPendingBillsModal] = useState({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [] });
+  const [pendingBillsModal, setPendingBillsModal] = useState({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [], allocations: {} });
 
   const openPendingBillsModal = async (rowId, party) => {
-    setPendingBillsModal({ open: true, rowId, party, bills: [], loading: true, selectedBills: [] });
+    setPendingBillsModal({ open: true, rowId, party, bills: [], loading: true, selectedBills: [], allocations: {} });
     try {
       const token = localStorage.getItem('token');
       const res = await axios.get(`${API_URL}/fy-details/pending-bills?party=${party}`, {
@@ -215,30 +216,48 @@ export default function AccountDetails({ onBack }) {
     setPendingBillsModal(prev => {
       const isSelected = prev.selectedBills.some(b => b.rawBillNumber === bill.rawBillNumber);
       let newSelected;
+      let newAllocations = { ...prev.allocations };
       if (isSelected) {
         newSelected = prev.selectedBills.filter(b => b.rawBillNumber !== bill.rawBillNumber);
+        delete newAllocations[bill.rawBillNumber];
       } else {
         newSelected = [...prev.selectedBills, bill];
+        newAllocations[bill.rawBillNumber] = bill.pendingAmount;
       }
-      return { ...prev, selectedBills: newSelected };
+      return { ...prev, selectedBills: newSelected, allocations: newAllocations };
     });
   };
 
+  const handleAllocationChange = (rawBillNumber, val) => {
+    setPendingBillsModal(prev => ({
+      ...prev,
+      allocations: { ...prev.allocations, [rawBillNumber]: num(val) }
+    }));
+  };
+
   const handlePendingBillsApply = () => {
-    const totalAmount = pendingBillsModal.selectedBills.reduce((sum, b) => sum + (b.pendingAmount || 0), 0);
-    const billsStr = pendingBillsModal.selectedBills.map(b => b.billNumber).join(', ');
+    const allocs = pendingBillsModal.allocations;
+    const totalAmount = pendingBillsModal.selectedBills.reduce((sum, b) => sum + num(allocs[b.rawBillNumber]), 0);
+    const billsStr = pendingBillsModal.selectedBills.map(b => `${b.billNumber}(₹${num(allocs[b.rawBillNumber])})`).join(', ');
     const existingRemarks = localData[pendingBillsModal.rowId]?.['Remarks'] || entries.find(e => e._id === pendingBillsModal.rowId)?.['Remarks'] || '';
     
+    // Pass allocations payload
+    const allocPayload = pendingBillsModal.selectedBills.map(b => ({
+      rawBillNumber: b.rawBillNumber,
+      allocatedAmount: num(allocs[b.rawBillNumber])
+    }));
+
     setLocalData(prev => ({
       ...prev,
       [pendingBillsModal.rowId]: {
         ...(prev[pendingBillsModal.rowId] || {}),
-        'Deposit': totalAmount.toFixed(2),
+        'Withdraw': totalAmount.toFixed(2),
         'Names': pendingBillsModal.party,
-        'Remarks': billsStr ? `${existingRemarks} [Auto-Allocated: ${billsStr}]`.trim() : existingRemarks
+        'Remarks': billsStr ? `${existingRemarks} [Allocations: ${billsStr}]`.trim() : existingRemarks,
+        '_allocations': allocPayload
       }
     }));
-    setPendingBillsModal({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [] });
+    setPendingBillsModal({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [], allocations: {} });
   };
 
   const dirtyCount = Object.keys(localData).length;
@@ -1062,7 +1081,11 @@ export default function AccountDetails({ onBack }) {
                             if (col.key === 'Names') {
                               if (newValue === 'NVL' || newValue === 'NVCL') {
                                 const ledger = localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '';
-                                if (ledger.toLowerCase().includes('payment') && ledger.toLowerCase().includes('receiv')) {
+                                const ledgerLower = ledger.toLowerCase();
+                                if (
+                                    (ledgerLower.includes('payment') && ledgerLower.includes('receiv')) ||
+                                    (ledgerLower.includes('freight') && ledgerLower.includes('payment'))
+                                ) {
                                     openPendingBillsModal(row._id, newValue);
                                 }
                               }
@@ -1447,8 +1470,13 @@ export default function AccountDetails({ onBack }) {
                         indeterminate={pendingBillsModal.selectedBills.length > 0 && pendingBillsModal.selectedBills.length < pendingBillsModal.bills.length}
                         checked={pendingBillsModal.bills.length > 0 && pendingBillsModal.selectedBills.length === pendingBillsModal.bills.length}
                         onChange={(e) => {
-                          if (e.target.checked) setPendingBillsModal(prev => ({ ...prev, selectedBills: [...prev.bills] }));
-                          else setPendingBillsModal(prev => ({ ...prev, selectedBills: [] }));
+                          if (e.target.checked) {
+                            const newAllocations = {};
+                            pendingBillsModal.bills.forEach(b => newAllocations[b.rawBillNumber] = b.pendingAmount);
+                            setPendingBillsModal(prev => ({ ...prev, selectedBills: [...prev.bills], allocations: newAllocations }));
+                          } else {
+                            setPendingBillsModal(prev => ({ ...prev, selectedBills: [], allocations: {} }));
+                          }
                         }}
                       />
                     </TableCell>
@@ -1459,6 +1487,7 @@ export default function AccountDetails({ onBack }) {
                     <TableCell sx={{ fontWeight: 700 }} align="right">Bill Amt</TableCell>
                     <TableCell sx={{ fontWeight: 700 }} align="right">Paid Amt</TableCell>
                     <TableCell sx={{ fontWeight: 700 }} align="right">Pending</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="right">Allocate (₹)</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1477,6 +1506,17 @@ export default function AccountDetails({ onBack }) {
                       <TableCell align="right">₹{b.billAmount.toLocaleString('en-IN')}</TableCell>
                       <TableCell align="right" sx={{ color: 'success.main' }}>₹{b.amountPaid.toLocaleString('en-IN')}</TableCell>
                       <TableCell align="right" sx={{ color: 'error.main', fontWeight: 600 }}>₹{b.pendingAmount.toLocaleString('en-IN')}</TableCell>
+                      <TableCell align="right">
+                        <TextField
+                          size="small"
+                          type="number"
+                          value={pendingBillsModal.allocations[b.rawBillNumber] !== undefined ? pendingBillsModal.allocations[b.rawBillNumber] : ''}
+                          onChange={(e) => handleAllocationChange(b.rawBillNumber, e.target.value)}
+                          disabled={!pendingBillsModal.selectedBills.some(s => s.rawBillNumber === b.rawBillNumber)}
+                          sx={{ width: 100 }}
+                          inputProps={{ style: { textAlign: 'right', padding: '4px 8px' } }}
+                        />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1486,7 +1526,7 @@ export default function AccountDetails({ onBack }) {
         </DialogContent>
         <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
           <Typography sx={{ mr: 'auto', fontWeight: 600 }}>
-            {pendingBillsModal.selectedBills.length} bills selected (Total Pending: ₹{pendingBillsModal.selectedBills.reduce((s, b) => s + (b.pendingAmount || 0), 0).toLocaleString('en-IN')})
+            {pendingBillsModal.selectedBills.length} bills selected (Total Allocated: ₹{pendingBillsModal.selectedBills.reduce((s, b) => s + num(pendingBillsModal.allocations[b.rawBillNumber]), 0).toLocaleString('en-IN')})
           </Typography>
           <Button onClick={() => setPendingBillsModal(prev => ({ ...prev, open: false }))} color="inherit">Cancel</Button>
           <Button onClick={handlePendingBillsApply} variant="contained" disabled={pendingBillsModal.selectedBills.length === 0}>

@@ -326,6 +326,7 @@ router.put('/bulk-update', async (req, res) => {
               'Withdraw': saved.withdraw || '',
               'Deposit': saved.deposit || '',
               'Closing Balance': saved.closingBalance || '',
+              '_allocations': item.changes._allocations
             };
           }
         }

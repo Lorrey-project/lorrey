@@ -2,9 +2,10 @@ import SearchableSelect from '../components/SearchableSelect';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box, Typography, Button, IconButton, CircularProgress,
-  Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Chip
+  Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Chip, Tooltip
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import LockIcon from '@mui/icons-material/Lock';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -147,32 +148,54 @@ export default function FinancialYearDetails({ onBack }) {
   const [dashboardM, setDashboardM] = useState(new Date().getMonth() + 1); // Defaults to current calendar month
 
   const handleAddRow = () => {
-    if (selectedIds.length !== 1) {
-      setSnack({ severity: 'warning', msg: 'Please select exactly one row using the checkbox first to insert a new row below it.' });
+    if (selectedIds.length > 1) {
+      setSnack({ severity: 'warning', msg: 'Please select at most one row to insert below, or clear selection to add at the end.' });
       return;
     }
 
-    const selId = selectedIds[0];
-    const selIdx = rows.findIndex(x => x.invoiceNumber === selId);
-    if (selIdx === -1) return;
+    let selIdx = -1;
+    let selRow = null;
+    let newSlNo = 1;
 
-    const selRow = rows[selIdx];
-
-    // Find the next row in computed/filtered order to calculate the fractional slNo
-    const sortedIdx = computedRows.findIndex(x => x.invoiceNumber === selId);
-    let newSlNo = (selRow.slNo || 0) + 1;
-    if (sortedIdx !== -1 && sortedIdx < computedRows.length - 1) {
-      const nextRow = computedRows[sortedIdx + 1];
-      newSlNo = ((selRow.slNo || 0) + (nextRow.slNo || 0)) / 2;
+    if (selectedIds.length === 1) {
+      const selId = selectedIds[0];
+      selIdx = rows.findIndex(x => x.invoiceNumber === selId);
+      if (selIdx !== -1) {
+        selRow = rows[selIdx];
+        const sortedIdx = computedRows.findIndex(x => x.invoiceNumber === selId);
+        newSlNo = (selRow.slNo || 0) + 1;
+        if (sortedIdx !== -1 && sortedIdx < computedRows.length - 1) {
+          const nextRow = computedRows[sortedIdx + 1];
+          newSlNo = ((selRow.slNo || 0) + (nextRow.slNo || 0)) / 2;
+        }
+      }
+    } else {
+      // No selection: append to end of current view
+      if (computedRows.length > 0) {
+        selRow = computedRows[computedRows.length - 1];
+        newSlNo = (selRow.slNo || 0) + 1;
+      }
+      selIdx = rows.length - 1;
     }
 
     const tempId = `TEMP-${Date.now()}`;
+    
+    // Determine default month
+    let defaultMonthStr = '';
+    if (selRow && selRow.month) {
+      defaultMonthStr = selRow.month;
+    } else {
+      let mIdx = selectedMonth !== '' ? Number(selectedMonth) : new Date().getMonth();
+      let yStr = selYear ? selYear.split('-')[0] : new Date().getFullYear();
+      defaultMonthStr = `${MONTHS[mIdx]}-${yStr}`;
+    }
+
     const newRow = {
       invoiceNumber: tempId,
       displayInvoiceNumber: '',
-      invoiceDate: selRow.invoiceDate || new Date().toISOString().split('T')[0],
-      month: selRow.month || `${MONTHS[new Date().getMonth()]}-${new Date().getFullYear()}`,
-      site: selRow.site || 'NVCL',
+      invoiceDate: selRow?.invoiceDate || new Date().toISOString().split('T')[0],
+      month: defaultMonthStr,
+      site: selRow?.site || 'NVCL',
       billType: 'FREIGHT',
       amount: 0,
       cgst: 0,
@@ -191,7 +214,10 @@ export default function FinancialYearDetails({ onBack }) {
     setRows(newRows);
 
     setDirtyRows(prev => new Set(prev).add(tempId));
-    setSnack({ severity: 'success', msg: 'New blank row inserted below selection. Click Save Details to persist.' });
+    const msg = selectedIds.length === 1 
+      ? 'New blank row inserted below selection. Click Save Details to persist.'
+      : 'New blank row added to the end. Click Save Details to persist.';
+    setSnack({ severity: 'success', msg });
   };
 
   const fetchData = useCallback(async () => {
@@ -755,8 +781,8 @@ export default function FinancialYearDetails({ onBack }) {
       setSnack({ severity: 'success', msg: `${selectedIds.length} bill(s) deleted successfully` });
       setSelectedIds([]);
       fetchData();
-    } catch {
-      setSnack({ severity: 'error', msg: 'Delete failed' });
+    } catch (err) {
+      setSnack({ severity: 'error', msg: err.response?.data?.error || 'Delete failed' });
     } finally { setLoading(false); }
   };
 
@@ -847,7 +873,19 @@ export default function FinancialYearDetails({ onBack }) {
 
           {/* Select */}
           <td style={td({ textAlign: 'center' })}>
-            <input type="checkbox" checked={selectedIds.includes(r.invoiceNumber)} onChange={() => toggleSelect(r.invoiceNumber)} style={{ cursor: 'pointer', width: 14, height: 14 }} />
+            <Tooltip title={r.isLocked ? "Auto-generated bills cannot be deleted here" : ""}>
+              <span>
+                <input 
+                  type="checkbox" 
+                  checked={selectedIds.includes(r.invoiceNumber)} 
+                  onChange={() => {
+                    if (!r.isLocked) toggleSelect(r.invoiceNumber);
+                  }} 
+                  disabled={r.isLocked}
+                  style={{ cursor: r.isLocked ? 'not-allowed' : 'pointer', width: 14, height: 14, opacity: r.isLocked ? 0.5 : 1 }} 
+                />
+              </span>
+            </Tooltip>
           </td>
 
           {/* Invoice Date */}
@@ -856,13 +894,26 @@ export default function FinancialYearDetails({ onBack }) {
               type="date"
               value={formatDateForInput(r.invoiceDate)}
               onChange={e => handleRowEdit(r.invoiceNumber, 'invoiceDate', e.target.value)}
-              style={{ ...iStyle, width: 110, textAlign: 'center', fontWeight: 600 }}
+              disabled={r.isLocked}
+              style={{ ...iStyle, width: 110, textAlign: 'center', fontWeight: 600, color: r.isLocked ? '#94a3b8' : 'inherit' }}
             />
           </td>
 
           {/* Invoice Number */}
           <td style={td({ textAlign: 'left', position: 'sticky', left: 0, background: bg, zIndex: 4 })}>
-            <input value={r.displayInvoiceNumber || ''} onChange={e => handleRowEdit(r.invoiceNumber, 'displayInvoiceNumber', e.target.value)} style={{ ...iStyle, fontWeight: 700 }} />
+            <Box display="flex" alignItems="center" gap={0.5}>
+              {r.isLocked && (
+                <Tooltip title="Generated from Cement Register - Read Only">
+                  <LockIcon sx={{ fontSize: 14, color: '#94a3b8' }} />
+                </Tooltip>
+              )}
+              <input 
+                value={r.displayInvoiceNumber || ''} 
+                onChange={e => handleRowEdit(r.invoiceNumber, 'displayInvoiceNumber', e.target.value)} 
+                disabled={r.isLocked}
+                style={{ ...iStyle, fontWeight: 700, width: '100%', color: r.isLocked ? '#94a3b8' : 'inherit' }} 
+              />
+            </Box>
           </td>
 
           {/* Shipment Number */}
@@ -873,11 +924,11 @@ export default function FinancialYearDetails({ onBack }) {
           {/* Month */}
           <td style={td({ textAlign: 'center' })}>
             <div style={{ display: 'flex', gap: 2 }}>
-              <SearchableSelect variant="standard" value={curM} onChange={e => handleMonthYearChange('M', e.target.value)} style={selStyle}>
+              <SearchableSelect variant="standard" value={curM} onChange={e => handleMonthYearChange('M', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#94a3b8' : 'inherit', minWidth: 110 }} disabled={r.isLocked}>
                 <option value="">Month</option>
                 {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
               </SearchableSelect>
-              <SearchableSelect variant="standard" value={curY} onChange={e => handleMonthYearChange('Y', e.target.value)} style={selStyle}>
+              <SearchableSelect variant="standard" value={curY} onChange={e => handleMonthYearChange('Y', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#94a3b8' : 'inherit', minWidth: 80 }} disabled={r.isLocked}>
                 <option value="">Year</option>
                 {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
               </SearchableSelect>
@@ -889,7 +940,8 @@ export default function FinancialYearDetails({ onBack }) {
             <SearchableSelect variant="standard"
               value={r.site || 'NVCL'}
               onChange={e => handleRowEdit(r.invoiceNumber, 'site', e.target.value)}
-              style={{ ...selStyle, fontWeight: 600, textAlign: 'center' }}
+              disabled={r.isLocked}
+              style={{ ...selStyle, fontWeight: 600, textAlign: 'center', color: r.isLocked ? '#94a3b8' : 'inherit', minWidth: 100 }}
             >
               <option value="NVCL">NVCL</option>
               <option value="NVL">NVL</option>
@@ -898,7 +950,7 @@ export default function FinancialYearDetails({ onBack }) {
 
           {/* Bill Type */}
           <td style={td()}>
-            <SearchableSelect variant="standard" value={r.billType || 'FREIGHT'} onChange={e => handleRowEdit(r.invoiceNumber, 'billType', e.target.value)} style={selStyle}>
+            <SearchableSelect variant="standard" value={r.billType || 'FREIGHT'} onChange={e => handleRowEdit(r.invoiceNumber, 'billType', e.target.value)} disabled={r.isLocked} style={{ ...selStyle, color: r.isLocked ? '#94a3b8' : 'inherit', minWidth: 130 }}>
               {BILL_TYPES.map(b => <option key={b} value={b}>{b}</option>)}
             </SearchableSelect>
           </td>
@@ -909,7 +961,8 @@ export default function FinancialYearDetails({ onBack }) {
               type="number"
               value={r.amount || ''}
               onChange={e => handleRowEdit(r.invoiceNumber, 'amount', e.target.value)}
-              style={{ ...iStyle, textAlign: 'right', fontWeight: 600 }}
+              disabled={r.isLocked}
+              style={{ ...iStyle, textAlign: 'right', fontWeight: 600, color: r.isLocked ? '#94a3b8' : 'inherit' }}
               placeholder="0"
             />
           </td>
@@ -993,7 +1046,7 @@ export default function FinancialYearDetails({ onBack }) {
 
           {/* Debit Reasons (per row) */}
           <td style={td()}>
-            <SearchableSelect variant="standard" value={r.debitReason || 'None'} onChange={e => handleRowEdit(r.invoiceNumber, 'debitReason', e.target.value)} style={selStyle}>
+            <SearchableSelect variant="standard" value={r.debitReason || 'None'} onChange={e => handleRowEdit(r.invoiceNumber, 'debitReason', e.target.value)} style={{ ...selStyle, minWidth: 200 }}>
               {DEBIT_REASONS.map(d => <option key={d} value={d}>{d}</option>)}
             </SearchableSelect>
           </td>
@@ -1019,7 +1072,7 @@ export default function FinancialYearDetails({ onBack }) {
   });
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f4f7f9', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f4f7f9',  }}>
 
       {/* Header */}
       <Box sx={{ p: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1166,7 +1219,7 @@ export default function FinancialYearDetails({ onBack }) {
         {loading
           ? <Box p={4} display="flex" justifyContent="center"><CircularProgress /></Box>
           : (
-            <table style={{ borderCollapse: 'collapse', whiteSpace: 'nowrap', fontFamily: 'Inter,sans-serif', fontSize: 12, width: 'max-content' }}>
+            <table style={{ borderCollapse: 'collapse', whiteSpace: 'normal', fontFamily: 'Inter,sans-serif', fontSize: 12, width: 'max-content' }}>
               <thead>
                 <tr>
                   <th style={thStyle({ minWidth: 40 })}>Sl No</th>
@@ -1174,9 +1227,9 @@ export default function FinancialYearDetails({ onBack }) {
                   <th style={thStyle({ minWidth: 120 })}>Invoice Date</th>
                   <th style={thStyle({ minWidth: 170, position: 'sticky', left: 0, zIndex: 12 })}>Invoice Number</th>
                   <th style={thStyle({ minWidth: 150 })}>Shipment Number</th>
-                  <th style={thStyle({ minWidth: 150 })}>Month</th>
-                  <th style={thStyle({ minWidth: 120 })}>SITE</th>
-                  <th style={thStyle({ minWidth: 120 })}>BILL</th>
+                  <th style={thStyle({ minWidth: 220 })}>Month</th>
+                  <th style={thStyle({ minWidth: 140 })}>SITE</th>
+                  <th style={thStyle({ minWidth: 160 })}>BILL</th>
                   <th style={thStyle({ minWidth: 100 })}>Amount</th>
                   <th style={thStyle({ minWidth: 80, background: '#92400e' })}>CGST</th>
                   <th style={thStyle({ minWidth: 80, background: '#92400e' })}>SGST</th>
@@ -1189,7 +1242,7 @@ export default function FinancialYearDetails({ onBack }) {
                   <th style={thStyle({ minWidth: 130, background: '#6b21a8' })}>Payment Date</th>
                   <th style={thStyle({ minWidth: 100, background: '#6b21a8' })}>Reference No</th>
                   <th style={thStyle({ minWidth: 110, background: '#6b21a8' })}>Debit Amount</th>
-                  <th style={thStyle({ minWidth: 140 })}>Debit Reasons(Deduction)</th>
+                  <th style={thStyle({ minWidth: 240 })}>Debit Reasons(Deduction)</th>
                   <th style={thStyle({ minWidth: 350, background: '#6b21a8' })}>Remarks</th>
                 </tr>
               </thead>
@@ -1440,7 +1493,7 @@ export default function FinancialYearDetails({ onBack }) {
                                 <td style={{ padding: '5px 8px', textAlign: 'center', borderBottom: '1px solid #f1f5f9' }}>
                                   <input type="checkbox" checked={selected} readOnly style={{ cursor: 'pointer', accentColor: '#4f46e5' }} />
                                 </td>
-                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, color: '#1e293b', whiteSpace: 'nowrap' }}>
+                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, color: '#1e293b', whiteSpace: 'normal' }}>
                                   {t.vehicle}
                                 </td>
                                 <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', textAlign: 'center' }}>
@@ -1451,7 +1504,7 @@ export default function FinancialYearDetails({ onBack }) {
                                 <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#4f46e5', fontFamily: 'monospace', fontSize: 10.5, fontWeight: 500 }}>
                                   {t.invoiceNo}
                                 </td>
-                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#334155', fontWeight: 600, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#334155', fontWeight: 600, maxWidth: 180 , whiteSpace: 'normal' }}>
                                   <span style={{ color: '#94a3b8', fontWeight: 400 }}>{t.plant} </span>
                                   <span style={{ color: '#cbd5e1' }}>→ </span>
                                   {t.destination}
@@ -1503,7 +1556,7 @@ export default function FinancialYearDetails({ onBack }) {
               </Box>
 
               {/* Per-trip-row amount table */}
-              <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
+              <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2,  }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: '#f8fafc' }}>
@@ -1773,7 +1826,7 @@ export default function FinancialYearDetails({ onBack }) {
 
           {/* List Table Container */}
           <Box sx={{
-            border: '1px solid #e2e8f0', borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            border: '1px solid #e2e8f0', borderRadius: '16px', display: 'flex', flexDirection: 'column',
             boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)'
           }}>
             <Box sx={{ maxHeight: '480px', overflow: 'auto' }}>
@@ -1809,7 +1862,7 @@ export default function FinancialYearDetails({ onBack }) {
                         }}
                       >
                         <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{b.billNo}</td>
-                        <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.invoiceNo}>{b.invoiceNo}</td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155', maxWidth: '200px' , whiteSpace: 'normal' }} title={b.invoiceNo}>{b.invoiceNo}</td>
                         <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
                           {b.invoiceDate ? (() => {
                             const p = b.invoiceDate.split('-');

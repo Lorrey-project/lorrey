@@ -93,6 +93,7 @@ const DB_KEYS = {
   basicFreightComm: 'basic_freight_commission',
   incentiveCommVal: 'incentive_commission',
   gstDocs: 'gst_documents',
+  wheelType: 'wheel_type',
 };
 
 const getStr = (...candidates) => {
@@ -249,6 +250,7 @@ export default function TruckContactManager({ open, onClose }) {
         driverPanAadharLink: form.driverPanAadharLink,
         basicFreightComm: form.basicFreightComm,
         incentiveCommVal: form.incentiveCommVal,
+        wheelType: form.wheelType,
         gstDocs: form.gstDocs,
       };
 
@@ -355,6 +357,7 @@ export default function TruckContactManager({ open, onClose }) {
       driverPanAadharLink: getStr(c["Driver PAN Aadhar Link "], c.driver_pan_aadhar_link),
       basicFreightComm: getStr(c.basic_freight_commission, c["basic_freight_commission "]),
       incentiveCommVal: getStr(c.incentive_commission, c["incentive_commission "]),
+      wheelType: getStr(c.wheel_type, c["Wheel Type "]),
       gstDocs: Array.isArray(c.gst_documents) ? c.gst_documents : [],
     });
     setEditId(c._id);
@@ -388,6 +391,24 @@ export default function TruckContactManager({ open, onClose }) {
   };
 
   const handleChange = (field, val) => {
+    // Auto-fetch logic for existing vehicles
+    if (field === 'truckNo' && !editId) {
+      const formattedVal = val.replace(/\s+/g, '').toLowerCase();
+      // Only search if length is reasonable to prevent premature matching on short strings (though exact match handles this)
+      if (formattedVal.length >= 4) {
+        const existing = contacts.find(c => {
+          const dbVal = getStr(c["Truck No "], c["Truck No"], c.truck_no) || '';
+          return dbVal.replace(/\s+/g, '').toLowerCase() === formattedVal;
+        });
+        
+        if (existing) {
+          handleEdit(existing);
+          setSnack({ type: 'success', message: 'Vehicle found! Details auto-filled from database.' });
+          return;
+        }
+      }
+    }
+
     setForm(p => {
       const updated = { ...p, [field]: val };
       if (field === 'nilTds' && val === 'Yes') {
@@ -793,12 +814,34 @@ export default function TruckContactManager({ open, onClose }) {
 
                 {/* ─── FIXED PRIMARY HEADER ─── */}
                 <Box sx={{ bgcolor: '#faf5ff', p: 2.5, borderRadius: '20px', mb: 3, border: '1px solid #ede7f6', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
-                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr' }, gap: 3, alignItems: 'center' }}>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr 1fr' }, gap: 3, alignItems: 'center' }}>
                     <Box>
                       <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
                         Vehicle Primary ID
                       </Typography>
                       {tf('Truck Number *', 'truckNo', LocalShippingIcon)}
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
+                        Wheel Type
+                      </Typography>
+                      <TextField
+                        select
+                        fullWidth
+                        label="Wheel Type"
+                        value={form.wheelType || ''}
+                        onChange={(e) => handleChange('wheelType', e.target.value)}
+                        variant="outlined"
+                        InputProps={{
+                          sx: inputSx,
+                        }}
+                      >
+                        <MenuItem value=""><em>None</em></MenuItem>
+                        <MenuItem value="6WH">6WH</MenuItem>
+                        <MenuItem value="10WH">10WH</MenuItem>
+                        <MenuItem value="12WH">12WH</MenuItem>
+                        <MenuItem value="14WH">14WH</MenuItem>
+                      </TextField>
                     </Box>
                     <Box>
                       <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>

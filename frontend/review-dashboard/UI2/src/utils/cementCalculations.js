@@ -303,14 +303,14 @@ export function parseToDate(dStr) {
 export function formatDateToDDMMYY(dStr) {
   if (!dStr) return '';
   const clean = String(dStr).trim();
-  if (/^\d{2}\.\d{2}\.\d{2}$/.test(clean)) return clean;
+  if (/^\d{2}\.\d{2}\.\d{4}$/.test(clean)) return clean;
 
   const date = parseToDate(clean);
   if (isNaN(date.getTime()) || date.getTime() === 0) return dStr;
 
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = String(date.getFullYear()).slice(-2);
+  const year = String(date.getFullYear());
   return `${day}.${month}.${year}`;
 }
 

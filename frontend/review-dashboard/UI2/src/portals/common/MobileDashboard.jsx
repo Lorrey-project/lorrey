@@ -93,15 +93,19 @@ const MobileDashboard = ({
         const fetchPending = async () => {
             try {
                 const token = localStorage.getItem('token');
-                const res = await axios.get(`${API_URL}/auth/admin/pending-registrations`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (res.data.success) setPendingApprovals(res.data.users.length);
+                const [authRes, truckRes] = await Promise.all([
+                    axios.get(`${API_URL}/auth/admin/pending-registrations`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } })),
+                    axios.get(`${API_URL}/truck-contacts/approvals`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } }))
+                ]);
+                let count = 0;
+                if (authRes.data?.success && authRes.data.users) count += authRes.data.users.length;
+                if (truckRes.data?.success && truckRes.data.requests) count += truckRes.data.requests.length;
+                setPendingApprovals(count);
             } catch (e) { /* silent */ }
         };
         fetchPending();
-        const id = setInterval(fetchPending, 60000);
-        return () => clearInterval(id);
+        const interval = setInterval(fetchPending, 30000);
+        return () => clearInterval(interval);
     }, [user?.role]);
 
     // Port-based Auto Detection
@@ -559,7 +563,7 @@ const MobileDashboard = ({
                                 <Typography sx={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 600, mt: 0.4 }}>
                                     {pendingApprovals > 0
                                         ? `${pendingApprovals} request${pendingApprovals !== 1 ? 's' : ''} waiting for review`
-                                        : 'No pending registrations'}
+                                        : 'No pending approvals'}
                                 </Typography>
                             </Box>
                         </Box>

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, MenuItem,
-  Dialog, DialogTitle, DialogContent, DialogActions
+  Dialog, DialogTitle, DialogContent, DialogActions, TablePagination
 } from '@mui/material';
 import SearchableSelect from '../components/SearchableSelect';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -387,6 +387,19 @@ export default function CementRegister({ onBack }) {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+
+  // Pagination state
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
+
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
   const [syncing, setSyncing] = useState(false);
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
   const [bulkBillInput, setBulkBillInput] = useState({ billDate: '', billType: '' });
@@ -399,10 +412,11 @@ export default function CementRegister({ onBack }) {
   const fetchData = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
+      const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
       const res = await axios.get(`${API_URL}/cement-register`, {
         params: {
           month: selectedMonth,
-          year: selectedYear
+          year: calendarYear
         }
       });
       if (res.data.success) {
@@ -568,12 +582,13 @@ export default function CementRegister({ onBack }) {
     try {
       const token = localStorage.getItem('token');
       const dataToSave = overrideData || localData;
+      const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
 
       if (isOverwrite) {
         // Delete existing entries for this period
         await axios.delete(`${API_URL}/cement-register/by-period`, {
           headers: { Authorization: `Bearer ${token}` },
-          params: { month: selectedMonth, year: selectedYear }
+          params: { month: selectedMonth, year: calendarYear }
         });
       } else {
         // Perform normal DB updates if any (only when not overwriting the entire period)
@@ -625,7 +640,8 @@ export default function CementRegister({ onBack }) {
           const compRow = computedRows.find(cr => cr._id === row._id);
           const finalSlNo = compRow ? compRow['SL NO'] : row['SL NO'];
           // Strip temporary React metadata
-          const cleaned = { ...calculated, 'SL NO': finalSlNo, month: selectedMonth, year: selectedYear };
+          const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
+          const cleaned = { ...calculated, 'SL NO': finalSlNo, month: selectedMonth, year: calendarYear };
           delete cleaned._id;
           delete cleaned.isUnsavedImport;
           return cleaned;
@@ -831,7 +847,8 @@ export default function CementRegister({ onBack }) {
             const rawVal = rowArr[colIdx];
             let val = String(rawVal ?? '').trim();
             if (dateCols.has(internalKey)) {
-              val = normalizeDateStr(val, wizardMonth, wizardYear);
+              const wizardCalendarYear = wizardMonth <= 3 ? wizardYear + 1 : wizardYear;
+              val = normalizeDateStr(val, wizardMonth, wizardCalendarYear);
             }
             rowObj[internalKey] = val;
           });
@@ -1037,12 +1054,12 @@ export default function CementRegister({ onBack }) {
                     '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
                       borderColor: '#7c3aed',
                     },
-                    minWidth: 130,
+                    minWidth: 160,
                   }}
                 >
                   {years.map(yr => (
                     <MenuItem key={yr} value={yr} sx={{ fontSize: '11px', fontWeight: 600 }}>
-                      {yr}
+                      {yr}-{yr + 1}
                     </MenuItem>
                   ))}
                 </SearchableSelect>
@@ -1257,7 +1274,8 @@ export default function CementRegister({ onBack }) {
                 </td>
               </tr>
             )}
-            {filteredRows.map((row, ri) => {
+            {filteredRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((row, index) => {
+              const ri = page * rowsPerPage + index;
               const hasDraft = !!localData[row._id];
               const isSelected = selectedIds.has(row._id);
 
@@ -1377,6 +1395,20 @@ export default function CementRegister({ onBack }) {
           </tbody>
         </table>
       </Box>
+      <TablePagination
+        component="div"
+        count={filteredRows.length}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[50, 100, 250, 500]}
+        sx={{
+          borderTop: '1px solid #e2e8f0',
+          '.MuiTablePagination-toolbar': { minHeight: 40, py: 0 },
+          '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': { fontSize: '12px', color: '#64748b' }
+        }}
+      />
 
       {/* ══════════════════════════════════════════════════════════════════════
            Excel Import Wizard Modal
@@ -1466,7 +1498,7 @@ export default function CementRegister({ onBack }) {
                             color: wizardYear === yr ? '#5b21b6' : '#475569',
                             transition: 'all 0.15s',
                             '&:hover': { borderColor: '#c4b5fd', bgcolor: '#f5f3ff' },
-                          }}>{yr}</Box>
+                          }}>{yr}-{yr + 1}</Box>
                       ))}
                     </Box>
                   </Box>
@@ -1478,7 +1510,7 @@ export default function CementRegister({ onBack }) {
                   <Box>
                     <Typography fontSize="11px" color="#6d28d9" fontWeight={700}>Selected Period</Typography>
                     <Typography fontSize="15px" fontWeight={800} color="#4c1d95">
-                      {MONTHS[wizardMonth - 1]} {wizardYear}
+                      {MONTHS[wizardMonth - 1]} {wizardYear}-{wizardYear + 1}
                     </Typography>
                   </Box>
                 </Box>
@@ -1576,7 +1608,7 @@ export default function CementRegister({ onBack }) {
                   </Box>
                   <Box sx={{ bgcolor: '#ede9fe', border: '1px solid #c4b5fd', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
                     <Typography variant="h5" fontWeight={800} color="#7c3aed">{wizardPreview.filteredRows.length}</Typography>
-                    <Typography fontSize="11px" color="#6d28d9" fontWeight={600}>{MONTHS[wizardMonth - 1]} {wizardYear}</Typography>
+                    <Typography fontSize="11px" color="#6d28d9" fontWeight={600}>{MONTHS[wizardMonth - 1]} {wizardYear}-{wizardYear + 1}</Typography>
                   </Box>
                   <Box sx={{ bgcolor: '#dbeafe', border: '1px solid #93c5fd', borderRadius: '10px', px: 2, py: 1.2, flex: 1, minWidth: 100, textAlign: 'center' }}>
                     <Typography variant="h5" fontWeight={800} color="#1d4ed8">{wizardPreview.mappedCount}</Typography>
@@ -1622,11 +1654,11 @@ export default function CementRegister({ onBack }) {
                 {/* Data preview table */}
                 <Box>
                   <Typography fontSize="11px" fontWeight={700} color="#475569" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.75 }}>
-                    Data Preview — {wizardPreview.filteredRows.length} rows for {MONTHS[wizardMonth - 1]} {wizardYear}
+                    Data Preview — {wizardPreview.filteredRows.length} rows for {MONTHS[wizardMonth - 1]} {wizardYear}-{wizardYear + 1}
                   </Typography>
                   {wizardPreview.filteredRows.length === 0 ? (
                     <Box sx={{ bgcolor: '#fef3c7', border: '1.5px solid #fcd34d', borderRadius: '10px', p: 2.5, textAlign: 'center' }}>
-                      <Typography fontSize="13px" fontWeight={700} color="#d97706">⚠️ No rows found for {MONTHS[wizardMonth - 1]} {wizardYear}</Typography>
+                      <Typography fontSize="13px" fontWeight={700} color="#d97706">⚠️ No rows found for {MONTHS[wizardMonth - 1]} {wizardYear}-{wizardYear + 1}</Typography>
                       <Typography fontSize="12px" color="#92400e" mt={0.5}>
                         {wizardPreview.filterApplied
                           ? 'The date column in your Excel does not contain entries for this period. Try a different month/year.'

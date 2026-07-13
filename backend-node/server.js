@@ -179,6 +179,18 @@ const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("Connected to MongoDB Atlas");
+    
+    // Create indexes for optimized queries
+    try {
+      const db = mongoose.connection.db;
+      await db.collection("cement_register").createIndex({ month: 1, year: 1 });
+      await db.collection("cement_register").createIndex({ "LOADING DATE": 1 });
+      await db.collection("cement_register").createIndex({ SITE: 1, month: 1, year: 1 });
+      await db.collection("cement_register").createIndex({ "OWNER NAME": 1, month: 1, year: 1 });
+      console.log("Ensured indexes for cement_register");
+    } catch (idxErr) {
+      console.error("Index creation error:", idxErr);
+    }
   } catch (err) {
     console.error("MongoDB connection error:", err.message);
     console.log("Retrying MongoDB connection in 5 seconds...");

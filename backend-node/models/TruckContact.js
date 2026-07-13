@@ -28,6 +28,10 @@ const truckContactSchema = new mongoose.Schema({
     driver_name:                        String,
     license_no:                         String,
     license_validity:                   String,
+    wheel_type:                         String,
+    status:                             { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    requestedBy:                        String,
+    requestDate:                        { type: Date, default: Date.now },
     // strict: false allows reading old legacy documents that may still have
     // space-padded keys like "Truck No ", "Owner Name ", etc.
 }, { collection: "Truck Contact Number", strict: false });

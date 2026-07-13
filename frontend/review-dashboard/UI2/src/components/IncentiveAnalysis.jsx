@@ -1788,7 +1788,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
                   borderColor: '#7c3aed',
                 },
-                minWidth: 105,
+                minWidth: 120,
               }}
             >
               {MONTH_NAMES.map((m, i) => (
@@ -1823,7 +1823,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
                   borderColor: '#7c3aed',
                 },
-                minWidth: 75,
+                minWidth: 100,
               }}
             >
               {years.map(y => (

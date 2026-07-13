@@ -105,8 +105,8 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
         // Portal status poller for Head Office
         if (user?.role === 'HEAD_OFFICE') {
             fetchPortalStatuses();
-            fetchPendingCount();
-            const intervalId = setInterval(() => { fetchPortalStatuses(); fetchPendingCount(); }, 30000);
+            fetchPending();
+            const intervalId = setInterval(() => { fetchPortalStatuses(); fetchPending(); }, 30000);
             return () => clearInterval(intervalId);
         }
     }, [user?.role]);
@@ -126,13 +126,18 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
         return () => _dashSocket.off('fuelRateApplied', handler);
     }, []);
 
-    const fetchPendingCount = async () => {
+    const fetchPending = async () => {
+        if (user?.role !== 'HEAD_OFFICE') return;
         try {
             const token = localStorage.getItem('token');
-            const res = await axios.get(`${API_URL}/auth/admin/pending-registrations`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (res.data.success) setPendingCount(res.data.users.length);
+            const [authRes, truckRes] = await Promise.all([
+                axios.get(`${API_URL}/auth/admin/pending-registrations`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } })),
+                axios.get(`${API_URL}/truck-contacts/approvals`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } }))
+            ]);
+            let count = 0;
+            if (authRes.data?.success && authRes.data.users) count += authRes.data.users.length;
+            if (truckRes.data?.success && truckRes.data.requests) count += truckRes.data.requests.length;
+            setPendingCount(count);
         } catch (e) { /* silently ignore */ }
     };
 
@@ -368,11 +373,11 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
 
                         {/* ── Pending Approvals Bell (HEAD_OFFICE only) ── */}
                         {user?.role === 'HEAD_OFFICE' && (
-                            <Tooltip title={pendingCount > 0 ? `${pendingCount} pending registration request${pendingCount !== 1 ? 's' : ''}` : 'No pending registrations'}>
+                            <Tooltip title={pendingCount > 0 ? `${pendingCount} pending approval request${pendingCount !== 1 ? 's' : ''}` : 'No pending approvals'}>
                                 <Badge badgeContent={pendingCount} color="error" max={99}
                                     sx={{ '& .MuiBadge-badge': { fontWeight: 900, fontSize: 10 } }}>
                                     <IconButton
-                                        onClick={() => document.getElementById('account-approvals-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                                        onClick={onOpenAccountApprovals}
                                         sx={{
                                             bgcolor: pendingCount > 0 ? '#ede9fe' : '#f1f5f9',
                                             border: pendingCount > 0 ? '2px solid #7c3aed' : '2px solid #e2e8f0',

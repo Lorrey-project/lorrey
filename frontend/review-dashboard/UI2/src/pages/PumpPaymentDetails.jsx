@@ -718,36 +718,32 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
               <Typography sx={{ fontSize: 12, fontWeight: 900, color: '#0c4a6e' }}>⛽ {effectiveLockedPump}</Typography>
             </Box>
           ) : (
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <InputLabel sx={{ fontSize: 12 }}>Pump</InputLabel>
+            <Box sx={{ minWidth: 160 }}>
               <SearchableSelect value={selPump} label="Pump" onChange={e => setSelPump(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
                 {pumps.map(p => <MenuItem key={p} value={p} sx={{ fontSize: 12 }}>{p}</MenuItem>)}
               </SearchableSelect>
-            </FormControl>
+            </Box>
           )}
 
           {/* Month */}
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel sx={{ fontSize: 12 }}>Month</InputLabel>
+          <Box sx={{ minWidth: 140 }}>
             <SearchableSelect value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
               {MONTH_NAMES.map((m, i) => <MenuItem key={i + 1} value={i + 1} sx={{ fontSize: 12 }}>{m}</MenuItem>)}
             </SearchableSelect>
-          </FormControl>
+          </Box>
 
-          <FormControl size="small" sx={{ minWidth: 100 }}>
-            <InputLabel sx={{ fontSize: 12 }}>Financial Year</InputLabel>
+          <Box sx={{ minWidth: 140 }}>
             <SearchableSelect value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)} sx={{ fontSize: 12, fontWeight: 700 }}>
               {yearOptions.map(y => <MenuItem key={y} value={y} sx={{ fontSize: 12 }}>{y}</MenuItem>)}
             </SearchableSelect>
-          </FormControl>
+          </Box>
 
           {/* Period */}
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel sx={{ fontSize: 12 }}>Period</InputLabel>
+          <Box sx={{ minWidth: 220 }}>
             <SearchableSelect value={selPeriod} label="Period" onChange={e => setSelPeriod(parseInt(e.target.value))} sx={{ fontSize: 12, fontWeight: 700 }}>
               {PERIODS.map(p => <MenuItem key={p.value} value={p.value} sx={{ fontSize: 12 }}>{p.label}</MenuItem>)}
             </SearchableSelect>
-          </FormControl>
+          </Box>
 
           {isOfficeAdmin && dirtyCount > 0 && <Chip label="Unsaved changes" size="small" color="warning" sx={{ fontWeight: 700 }} />}
           <Chip label={`${activeRows.length} entries`} size="small" sx={{ bgcolor: '#e0f7fa', fontWeight: 700, color: '#0891b2' }} />

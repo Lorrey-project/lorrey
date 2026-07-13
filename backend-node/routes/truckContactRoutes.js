@@ -123,6 +123,16 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const col = getCollection();
+    const truckNo = req.body["Truck No "];
+    
+    // Prevent duplicates
+    if (truckNo) {
+      const existing = await col.findOne({ "Truck No ": truckNo });
+      if (existing) {
+        return res.status(400).json({ success: false, error: "A truck with this number already exists. Please update the existing record instead." });
+      }
+    }
+
     const result = await col.insertOne(req.body);
     res.status(201).json({ success: true, contact: { _id: result.insertedId, ...req.body } });
   } catch (error) {

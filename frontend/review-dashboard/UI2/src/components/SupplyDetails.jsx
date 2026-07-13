@@ -54,6 +54,9 @@ export default function SupplyDetails({ data, errors, onChange }) {
             if (contact.driver_name && !data?.driver_name) {
               onChange('supply_details', 'driver_name', contact.driver_name);
             }
+            if (contact.wheel_type && !data?.wheel_type) {
+              onChange('supply_details', 'wheel_type', contact.wheel_type);
+            }
           }
         } catch (e) {
           console.error("Error fetching truck contact:", e);
@@ -136,7 +139,26 @@ export default function SupplyDetails({ data, errors, onChange }) {
 
           {/* ── Mode / Vehicle ── */}
           <TextField fullWidth label="Mode of Transport" name="mode_of_transport" value="Road" variant="outlined" InputProps={{ readOnly: true }} sx={frozenSx} />
-          <TextField fullWidth label="Vehicle Number" name="vehicle_number" value={data?.vehicle_number || ''} onChange={handleChange} variant="outlined" />
+          
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+            <TextField fullWidth label="Vehicle Number" name="vehicle_number" value={data?.vehicle_number || ''} onChange={handleChange} variant="outlined" />
+            <TextField 
+              select 
+              fullWidth 
+              label="Wheel" 
+              name="wheel_type" 
+              value={data?.wheel_type || ''} 
+              onChange={handleChange} 
+              variant="outlined"
+            >
+              <MenuItem value=""><em>None</em></MenuItem>
+              <MenuItem value="6WH">6WH</MenuItem>
+              <MenuItem value="10WH">10WH</MenuItem>
+              <MenuItem value="12WH">12WH</MenuItem>
+              <MenuItem value="14WH">14WH</MenuItem>
+            </TextField>
+          </Box>
+
           <TextField fullWidth label="Challan Number" name="challan_number" value={data?.challan_number || ''} onChange={handleChange} variant="outlined" />
 
           {/* ── Shipment No ── */}

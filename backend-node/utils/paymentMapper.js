@@ -15,6 +15,7 @@
 'use strict';
 
 const mongoose = require('mongoose');
+const FinancialYearPayment = require('../models/FinancialYearPayment');
 
 function safeGetIO() {
   try { const { getIO } = require('../socket'); return getIO(); }
@@ -229,17 +230,102 @@ async function matchBillForSite(site, amount, referenceNo, particulars, remarks)
 async function allocatePaymentToBills(paymentRow) {
   const allocated = [];
   const errors = [];
+  const col = getCementCol();
+  const { ObjectId } = require('mongodb');
+
+  const referenceNo = String(paymentRow['Reference No'] || paymentRow.referenceNo || '');
+  const chequeNo = String(paymentRow['Cheque No'] || paymentRow.chequeNo || '');
+  const transactionDate = String(paymentRow['Transaction Date'] || paymentRow.transactionDate || '');
+  const paymentRef = referenceNo || chequeNo || '';
+
+  // Explicit mapping from UI open bills selection
+  if (paymentRow._allocations && Array.isArray(paymentRow._allocations)) {
+    for (const alloc of paymentRow._allocations) {
+      if (alloc.allocatedAmount <= 0) continue;
+      
+      try {
+        const matchedBill = await col.findOne({ 'INVOICE NO': alloc.rawBillNumber });
+        if (!matchedBill) {
+          errors.push(`No unpaid bill found with INVOICE NO: ${alloc.rawBillNumber}`);
+          continue;
+        }
+
+        const site = matchedBill['SITE'] || 'UNKNOWN';
+        const netAmt = num(matchedBill['NET AMOUNT'] || matchedBill['GROSS AMOUNT']);
+        const existingBankTf = num(matchedBill['Bank TF']);
+        const newBankTf = existingBankTf + alloc.allocatedAmount;
+        
+        let paymentStatus = 'Paid';
+        if (netAmt > 0 && newBankTf < netAmt - 1) {
+          paymentStatus = 'Partial';
+        }
+
+        const difference = netAmt > 0 ? (alloc.allocatedAmount - netAmt).toFixed(2) : '0.00';
+
+        await col.updateOne(
+          { _id: matchedBill._id },
+          {
+            $set: {
+              'Bank TF': newBankTf,
+              'PAYMENT STATUS': paymentStatus,
+              'PAYMENT DATE': transactionDate,
+              'PAYMENT REF': paymentRef,
+              'DIFFERENCE': difference,
+            }
+          }
+        );
+
+        // Map it to FinancialYearPayment for Bill Register display
+        const fyPayId = `AUTO-${alloc.rawBillNumber}`;
+        const existingFyPay = await FinancialYearPayment.findOne({ id: fyPayId });
+        const newFyAmt = (existingFyPay?.paymentAmount || 0) + alloc.allocatedAmount;
+
+        await FinancialYearPayment.findOneAndUpdate(
+          { id: fyPayId },
+          {
+            billNos: [alloc.rawBillNumber],
+            paymentAmount: newFyAmt,
+            paymentDate: transactionDate,
+            referenceNo: paymentRef
+          },
+          { upsert: true }
+        );
+
+        allocated.push({
+          site,
+          amount: alloc.allocatedAmount,
+          billNo: matchedBill['BILL NO'] || '',
+          invoiceNo: matchedBill['INVOICE NO'] || '',
+          vehicleNo: matchedBill['VEHICLE NUMBER'] || '',
+          paymentStatus,
+          rowId: matchedBill._id.toString()
+        });
+
+        console.log(`[paymentMapper] Explicitly allocated ₹${alloc.allocatedAmount} to INVOICE NO: ${alloc.rawBillNumber} (STATUS: ${paymentStatus})`);
+      } catch (err) {
+        errors.push(`Error allocating explicit INVOICE NO ${alloc.rawBillNumber}: ${err.message}`);
+      }
+    }
+
+    if (allocated.length > 0) {
+      try {
+        const io = safeGetIO();
+        if (io) {
+          io.emit('cementUpdates', { action: 'paymentMapped', allocated });
+          io.emit('accountDetailsUpdate', { action: 'paymentMapped' });
+        }
+      } catch (_) {}
+    }
+    
+    return { allocated, unmapped: errors.length, errors };
+  }
 
   const detection = detectPaymentRow(paymentRow);
   if (!detection) return { allocated, unmapped: 0, errors };
 
   const { sites, totalDeposit } = detection;
-  const referenceNo = String(paymentRow['Reference No'] || paymentRow.referenceNo || '');
-  const chequeNo = String(paymentRow['Cheque No'] || paymentRow.chequeNo || '');
   const particulars = String(paymentRow['Particulars'] || paymentRow.particulars || '');
   const remarks = String(paymentRow['Remarks'] || paymentRow.remarks || '');
-  const transactionDate = String(paymentRow['Transaction Date'] || paymentRow.transactionDate || '');
-  const paymentRef = referenceNo || chequeNo || '';
 
   // Determine split amounts
   const splitAmounts = parseSplitAmounts(particulars, remarks, totalDeposit, sites);
@@ -264,9 +350,6 @@ async function allocatePaymentToBills(paymentRow) {
       splitAmounts.NVL = totalDeposit - half;
     }
   }
-
-  const col = getCementCol();
-  const { ObjectId } = require('mongodb');
 
   // Allocate for each site
   for (const site of sites) {

@@ -185,6 +185,7 @@ router.get("/truck-contact/:truck_no", async (req, res) => {
             aadhar_no: record.aadhar_no || record["Aadhar No."] || "",
             driver_name: record.driver_name || record["Driver Name"] || record["DRIVER NAME"] || "",
             license_no: record.license_no || record["License No."] || record["Driver License No."] || record["DRIVER LICENSE"] || record["License No"] || "",
+            wheel_type: record.wheel_type || record["Wheel Type "] || record["Wheel Type"] || "",
             address: record.address || record["Address"] || "",
             // Include other fields just in case they are needed later
             type: record.type || "",

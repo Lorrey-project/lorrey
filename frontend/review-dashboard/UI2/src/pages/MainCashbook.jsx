@@ -693,24 +693,22 @@ export default function MainCashbook({ onBack }) {
         </Typography>
 
         {/* Month selector */}
-        <FormControl size="small" sx={{ minWidth: 130 }}>
-          <InputLabel sx={{ fontSize: 12 }}>Month</InputLabel>
+        <Box sx={{ minWidth: 130 }}>
           <SearchableSelect value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}
             sx={{ fontSize: 12, fontWeight: 700 }}>
             {MONTH_NAMES.map((m, i) => (
               <MenuItem key={i + 1} value={i + 1} sx={{ fontSize: 12 }}>{m}</MenuItem>
             ))}
           </SearchableSelect>
-        </FormControl>
+        </Box>
 
         {/* Year selector */}
-        <FormControl size="small" sx={{ minWidth: 100 }}>
-          <InputLabel sx={{ fontSize: 12 }}>Financial Year</InputLabel>
+        <Box sx={{ minWidth: 140 }}>
           <SearchableSelect value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}
             sx={{ fontSize: 12, fontWeight: 700 }}>
             {yearOptions.map(y => <MenuItem key={y} value={y} sx={{ fontSize: 12 }}>{y}</MenuItem>)}
           </SearchableSelect>
-        </FormControl>
+        </Box>
 
         <Chip label={`${MONTH_NAMES[selMonth - 1]} ${selMonth >= 4 ? selYear.split('-')[0] : parseInt(selYear.split('-')[0], 10) + 1}`}
           size="small" sx={{ fontWeight: 800, bgcolor: '#f0e6ff', color: '#6d28d9' }} />
@@ -1006,8 +1004,7 @@ export default function MainCashbook({ onBack }) {
           Import Excel (Multi-Month)
         </DialogTitle>
         <DialogContent sx={{ py: 3, display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-          <FormControl fullWidth size="small">
-            <InputLabel>Financial Year</InputLabel>
+          <Box sx={{ width: '100%' }}>
             <SearchableSelect value={importYear} label="Financial Year" onChange={e => {
               setImportYear(e.target.value);
               setImportPreview(null); // Reset preview on criteria change
@@ -1015,9 +1012,8 @@ export default function MainCashbook({ onBack }) {
             }}>
               {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
             </SearchableSelect>
-          </FormControl>
-          <FormControl fullWidth size="small">
-            <InputLabel>Select Months</InputLabel>
+          </Box>
+          <Box sx={{ width: '100%' }}>
             <SearchableSelect
               multiple
               value={importMonths}
@@ -1036,7 +1032,7 @@ export default function MainCashbook({ onBack }) {
                 </MenuItem>
               ))}
             </SearchableSelect>
-          </FormControl>
+          </Box>
 
           <Button variant="outlined" component="label" sx={{ py: 3, borderStyle: 'dashed' }}>
             {importFile ? importFile.name : 'Click to Select Excel File'}
