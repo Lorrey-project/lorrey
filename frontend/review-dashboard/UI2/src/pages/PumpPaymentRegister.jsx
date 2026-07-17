@@ -4,7 +4,7 @@ import {
   Snackbar, Alert, Select, MenuItem, FormControl, InputLabel,
   Card, CardContent, Grid, InputAdornment, TextField,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, TableSortLabel,
-  Checkbox
+  Checkbox, Tooltip
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -37,7 +37,7 @@ const COLUMNS = [
   { key: 'CD', label: 'CD', width: 110, type: 'number', align: 'right', readOnly: true, calc: true, bg: '#ffe4e6' },
   { key: 'PAYABLE AMOUNT', label: 'PAYABLE AMOUNT (BA − CD)', width: 230, type: 'number', readOnly: true, align: 'right', bg: '#e0f2fe' },
   { key: 'PAYMENT AMOUNT', label: 'PAYMENT AMOUNT', width: 150, type: 'number', align: 'right' },
-  { key: 'REF. NO', label: 'REF. NO', width: 130, type: 'text', align: 'center' },
+  { key: 'REF. NO', label: 'REF. NO', width: 220, type: 'text', align: 'center' },
   { key: 'DATE', label: 'DATE', width: 150, type: 'date', align: 'center' },
   { key: 'DUE AMOUNT', label: 'DUE AMOUNT', width: 160, type: 'number', readOnly: true, align: 'right' }
 ];
@@ -674,7 +674,7 @@ export default function PumpPaymentRegister({ onBack }) {
                               let isDisabled = false;
                               let displayValue = val;
 
-                              if (c.readOnly) {
+                              if (c.readOnly || (c.key === 'REF. NO' && row.isBankBookPumpPayment)) {
                                 isDisabled = true;
                               }
                               // Dynamically render SL NO based on sorted/filtered rows index
@@ -715,6 +715,32 @@ export default function PumpPaymentRegister({ onBack }) {
                                       className="premium-input"
                                       style={{ textAlign: c.align || 'left', resize: 'vertical', minHeight: '40px', paddingTop: '8px', paddingBottom: '8px', whiteSpace: 'pre-line', overflow: 'hidden', backgroundColor: c.bg || '#ffffff' }}
                                     />
+                                  ) : c.key === 'REF. NO' ? (
+                                    <Tooltip title={displayValue || ''} arrow enterDelay={300}>
+                                      <div style={{ width: '100%' }}>
+                                        <textarea
+                                          value={displayValue || ''}
+                                          disabled={isDisabled}
+                                          onChange={e => handleEdit(row._id, c.key, e.target.value)}
+                                          className="premium-input"
+                                          style={{
+                                            textAlign: c.align || 'left',
+                                            resize: 'vertical',
+                                            minHeight: '40px',
+                                            paddingTop: '8px',
+                                            paddingBottom: '8px',
+                                            wordBreak: 'break-all',
+                                            whiteSpace: 'pre-wrap',
+                                            overflow: 'hidden',
+                                            backgroundColor: c.bg || '#ffffff',
+                                            fontFamily: 'inherit',
+                                            fontSize: 'inherit',
+                                            width: '100%',
+                                            display: 'block'
+                                          }}
+                                        />
+                                      </div>
+                                    </Tooltip>
                                   ) : (
                                     <input
                                       type={c.type === 'date' ? 'text' : (c.type === 'number' ? 'number' : 'text')}

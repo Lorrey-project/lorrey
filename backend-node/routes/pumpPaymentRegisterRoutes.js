@@ -39,6 +39,36 @@ router.get("/", auth, async (req, res) => {
       paymentDateObj: { $gte: start, $lte: end }
     }).toArray();
 
+    // Fetch Remarks from Bank Book (AccountDetails) dynamically if linked via bankBookId
+    const bankBookIds = records.filter(r => r.bankBookId).map(r => r.bankBookId);
+    let bankBookMap = {};
+    if (bankBookIds.length > 0) {
+      try {
+        const AccountDetail = require("../models/AccountDetail");
+        const validObjectIds = bankBookIds
+          .filter(id => mongoose.Types.ObjectId.isValid(id))
+          .map(id => new mongoose.Types.ObjectId(id));
+        if (validObjectIds.length > 0) {
+          const details = await AccountDetail.find({ _id: { $in: validObjectIds } }).lean();
+          details.forEach(d => {
+            if (d.ledgerName && d.ledgerName.trim().toLowerCase() === "pump payment") {
+              bankBookMap[d._id.toString()] = d.remarks || "";
+            }
+          });
+        }
+      } catch (err) {
+        console.error("[pumpPaymentRegisterRoutes] Error fetching AccountDetails for sync:", err.message);
+      }
+    }
+
+    // Populate "REF. NO" dynamically from Bank Book Remarks if linked
+    for (let r of records) {
+      if (r.bankBookId && bankBookMap[r.bankBookId] !== undefined) {
+        r["REF. NO"] = bankBookMap[r.bankBookId];
+        r["isBankBookPumpPayment"] = true;
+      }
+    }
+
     const colDiscounts = mongoose.connection.useDb("pump_payment").collection("cash_discounts");
     for (let r of records) {
       const pumpName = r['PUMP NAME'];

@@ -189,7 +189,7 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
   }
 };
 
-const syncPumpPayments = async (allocations, manualWithdrawAmount) => {
+const syncPumpPayments = async (allocations, manualWithdrawAmount, bankBookId, remarks, ledgerName) => {
   if (!allocations || !Array.isArray(allocations) || allocations.length === 0) return;
   const mongoose = require('mongoose');
   const pumpCol = mongoose.connection.useDb('pump_payment_register').collection('records');
@@ -219,10 +219,28 @@ const syncPumpPayments = async (allocations, manualWithdrawAmount) => {
           "PAYMENT AMOUNT": newPaid,
           "DUE AMOUNT": newDue,
           "paymentStatus": newStatus,
-          "updatedAt": new Date()
+          "updatedAt": new Date(),
+          "bankBookId": bankBookId || null
         }
       }
     );
+
+    if (ledgerName && ledgerName.trim().toLowerCase() === "pump payment") {
+      await pumpCol.updateOne(
+        { _id: bill._id },
+        [
+          {
+            $replaceWith: {
+              $setField: {
+                field: "REF. NO",
+                input: "$$ROOT",
+                value: remarks || ""
+              }
+            }
+          }
+        ]
+      );
+    }
   }
 };
 // ────────────────────────────────────────────────────────────────────────────
@@ -293,6 +311,9 @@ router.put('/bulk-update', async (req, res) => {
   try {
     const { updates } = req.body;
     const affectedDocsForSync = [];
+    const createdDocs = {};
+    const updatedDocs = {};
+
     for (const item of updates) {
       if (item.isNewRow) {
         const newDoc = {};
@@ -301,6 +322,7 @@ router.put('/bulk-update', async (req, res) => {
         }
         const createdDoc = await AccountDetail.create(newDoc);
         affectedDocsForSync.push(createdDoc);
+        createdDocs[item.id || 'new'] = createdDoc;
       } else if (item.id) {
         const updateDoc = {};
         for (const [lbl, val] of Object.entries(item.changes)) {
@@ -309,7 +331,10 @@ router.put('/bulk-update', async (req, res) => {
         const oldDoc = await AccountDetail.findById(item.id);
         if (oldDoc) affectedDocsForSync.push(oldDoc);
         const updatedDoc = await AccountDetail.findByIdAndUpdate(item.id, updateDoc, { new: true });
-        if (updatedDoc) affectedDocsForSync.push(updatedDoc);
+        if (updatedDoc) {
+          affectedDocsForSync.push(updatedDoc);
+          updatedDocs[item.id] = updatedDoc;
+        }
       }
     }
 
@@ -345,24 +370,26 @@ router.put('/bulk-update', async (req, res) => {
       for (const item of updates) {
         // Build the merged row to check for payment
         let merged = {};
+        let dbDoc = null;
         if (item.isNewRow) {
           // New row — changes IS the full row
           merged = { ...item.changes };
+          dbDoc = createdDocs[item.id || 'new'];
         } else if (item.id) {
-          const saved = docMap[item.id];
-          if (saved) {
+          dbDoc = updatedDocs[item.id] || docMap[item.id];
+          if (dbDoc) {
             // Map DB fields back to frontend keys for the detector
             merged = {
-              'Transaction Date': saved.transactionDate || '',
-              'Ledger Name': saved.ledgerName || '',
-              'Names': saved.names || '',
-              'Particulars': saved.particulars || '',
-              'Remarks': saved.remarks || '',
-              'Reference No': saved.referenceNo || '',
-              'Cheque No': saved.chequeNo || '',
-              'Withdraw': saved.withdraw || '',
-              'Deposit': saved.deposit || '',
-              'Closing Balance': saved.closingBalance || '',
+              'Transaction Date': dbDoc.transactionDate || '',
+              'Ledger Name': dbDoc.ledgerName || '',
+              'Names': dbDoc.names || '',
+              'Particulars': dbDoc.particulars || '',
+              'Remarks': dbDoc.remarks || '',
+              'Reference No': dbDoc.referenceNo || '',
+              'Cheque No': dbDoc.chequeNo || '',
+              'Withdraw': dbDoc.withdraw || '',
+              'Deposit': dbDoc.deposit || '',
+              'Closing Balance': dbDoc.closingBalance || '',
               '_allocations': item.changes._allocations,
               '_pumpAllocations': item.changes._pumpAllocations
             };
@@ -377,13 +404,42 @@ router.put('/bulk-update', async (req, res) => {
         }
 
         if (merged._pumpAllocations && Array.isArray(merged._pumpAllocations)) {
-          await syncPumpPayments(merged._pumpAllocations, merged['Withdraw']);
+          const bankBookId = dbDoc ? dbDoc._id.toString() : item.id;
+          const remarks = dbDoc ? dbDoc.remarks : '';
+          const ledgerName = dbDoc ? dbDoc.ledgerName : '';
+          await syncPumpPayments(merged._pumpAllocations, merged['Withdraw'], bankBookId, remarks, ledgerName);
         }
       }
     } catch (mapErr) {
       console.error('[accountDetailRoutes] Payment mapping error:', mapErr.message);
     }
     // ─────────────────────────────────────────────────────────────────────────
+
+    // Sync Remarks updates to already linked pump payment register records
+    try {
+      const pumpCol = mongoose.connection.useDb('pump_payment_register').collection('records');
+      for (const item of updates) {
+        const dbDoc = item.isNewRow ? createdDocs[item.id || 'new'] : updatedDocs[item.id];
+        if (dbDoc && dbDoc.ledgerName && dbDoc.ledgerName.trim().toLowerCase() === "pump payment") {
+          await pumpCol.updateMany(
+            { bankBookId: dbDoc._id.toString() },
+            [
+              {
+                $replaceWith: {
+                  $setField: {
+                    field: "REF. NO",
+                    input: "$$ROOT",
+                    value: dbDoc.remarks || ""
+                  }
+                }
+              }
+            ]
+          );
+        }
+      }
+    } catch (syncRemarksErr) {
+      console.error('[accountDetailRoutes] sync Remarks to pump payment register error:', syncRemarksErr.message);
+    }
 
     res.json({ success: true, paymentResults });
   } catch (error) {
@@ -399,6 +455,32 @@ router.delete('/bulk-delete', async (req, res) => {
     if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids array required' });
     const docsToDelete = await AccountDetail.find({ _id: { $in: ids } });
     await AccountDetail.deleteMany({ _id: { $in: ids } });
+
+    try {
+      const pumpCol = mongoose.connection.useDb('pump_payment_register').collection('records');
+      await pumpCol.updateMany(
+        { bankBookId: { $in: ids } },
+        [
+          {
+            $replaceWith: {
+              $setField: {
+                field: "REF. NO",
+                input: {
+                  $setField: {
+                    field: "bankBookId",
+                    input: "$$ROOT",
+                    value: null
+                  }
+                },
+                value: ""
+              }
+            }
+          }
+        ]
+      );
+    } catch (syncDeleteErr) {
+      console.error('[accountDetailRoutes] sync delete to pump payment register error:', syncDeleteErr.message);
+    }
 
     try {
       await syncPartyPayments(docsToDelete);
