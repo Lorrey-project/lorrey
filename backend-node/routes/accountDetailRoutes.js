@@ -20,20 +20,20 @@ const syncPartyPayments = async (affectedDocs) => {
     if (ledger !== 'freight payment' && ledger !== 'toll payment') return null;
     const v = (doc.vehicle || '').trim();
     if (!v) return null;
-    
+
     const docMonthStr = (doc.month || doc.selectedMonth || '').trim();
     const m = monthNameToNumber(docMonthStr);
     if (m < 1 || m > 12) return null;
-    
+
     let fyStart = parseInt(doc.selectedYear, 10);
     if (isNaN(fyStart)) return null;
-    
+
     const y = (m >= 4) ? fyStart : fyStart + 1;
     return { vehicleNo: v, month: m, year: y };
   };
 
   const combinationsToUpdate = new Set();
-  
+
   affectedDocs.forEach(doc => {
     const combo = getCombo(doc);
     if (combo) combinationsToUpdate.add(JSON.stringify(combo));
@@ -41,7 +41,7 @@ const syncPartyPayments = async (affectedDocs) => {
 
   for (const comboStr of combinationsToUpdate) {
     const combo = JSON.parse(comboStr);
-    
+
     const relatedDocs = await AccountDetail.find({
       vehicle: combo.vehicleNo,
       ledgerName: { $regex: /^(freight payment|toll payment)$/i }
@@ -103,20 +103,20 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
     const v = (doc.vehicle || '').trim();
     const owner = (doc.names || '').trim();
     if (!v || !owner) return null;
-    
+
     const docMonthStr = (doc.month || doc.selectedMonth || '').trim();
     const m = monthNameToNumber(docMonthStr);
     if (m < 1 || m > 12) return null;
-    
+
     let fyStart = parseInt(doc.selectedYear, 10);
     if (isNaN(fyStart)) return null;
-    
+
     const y = (m >= 4) ? fyStart : fyStart + 1;
     return { vehicleNo: v, month: m, year: y, ownerName: owner };
   };
 
   const combinationsToUpdate = new Set();
-  
+
   affectedDocs.forEach(doc => {
     const combo = getCombo(doc);
     if (combo) combinationsToUpdate.add(JSON.stringify(combo));
@@ -130,7 +130,7 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
 
   for (const comboStr of combinationsToUpdate) {
     const combo = JSON.parse(comboStr);
-    
+
     // Find all 'freight advance' documents for this vehicle/owner in the Bank Book
     const relatedDocs = await AccountDetail.find({
       vehicle: combo.vehicleNo,
@@ -180,12 +180,49 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
       );
     }
   }
-  
+
   try {
     const io = getIO();
     if (io) io.emit('cementUpdates', { action: 'bulkUpdate' });
   } catch (e) {
     console.warn('Socket emit failed:', e.message);
+  }
+};
+
+const syncPumpPayments = async (allocations, manualWithdrawAmount) => {
+  if (!allocations || !Array.isArray(allocations) || allocations.length === 0) return;
+  const mongoose = require('mongoose');
+  const pumpCol = mongoose.connection.useDb('pump_payment_register').collection('records');
+
+  for (const alloc of allocations) {
+    const { rawBillNumber } = alloc;
+    if (!rawBillNumber) continue;
+
+    const bill = await pumpCol.findOne({ "BILL NO": rawBillNumber });
+    if (!bill) continue;
+
+    const allocatedAmount = Number(manualWithdrawAmount) || 0;
+
+    const currentPaid = Number(bill["PAYMENT AMOUNT"]) || 0;
+    const payable = Number(bill["PAYABLE AMOUNT"]) || 0;
+    const newPaid = currentPaid + allocatedAmount;
+    const newDue = payable - newPaid;
+
+    let newStatus = "Pending";
+    if (newDue <= 0) newStatus = "Paid";
+    else if (newPaid > 0) newStatus = "Partially Paid";
+
+    await pumpCol.updateOne(
+      { _id: bill._id },
+      {
+        $set: {
+          "PAYMENT AMOUNT": newPaid,
+          "DUE AMOUNT": newDue,
+          "paymentStatus": newStatus,
+          "updatedAt": new Date()
+        }
+      }
+    );
   }
 };
 // ────────────────────────────────────────────────────────────────────────────
@@ -326,7 +363,8 @@ router.put('/bulk-update', async (req, res) => {
               'Withdraw': saved.withdraw || '',
               'Deposit': saved.deposit || '',
               'Closing Balance': saved.closingBalance || '',
-              '_allocations': item.changes._allocations
+              '_allocations': item.changes._allocations,
+              '_pumpAllocations': item.changes._pumpAllocations
             };
           }
         }
@@ -336,6 +374,10 @@ router.put('/bulk-update', async (req, res) => {
           if (result.allocated.length > 0 || result.errors.length > 0) {
             paymentResults.push(result);
           }
+        }
+
+        if (merged._pumpAllocations && Array.isArray(merged._pumpAllocations)) {
+          await syncPumpPayments(merged._pumpAllocations, merged['Withdraw']);
         }
       }
     } catch (mapErr) {

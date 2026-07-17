@@ -20,6 +20,8 @@ import { exportToCsv } from '../utils/exportCsv';
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || '/';
 
+const num = (val) => Number(String(val || 0).replace(/,/g, '')) || 0;
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const currentYear = new Date().getFullYear();
 const YEARS = Array.from({length: 10}, (_, i) => String(currentYear - 5 + i));
@@ -197,6 +199,7 @@ export default function AccountDetails({ onBack }) {
   const wizardFileRef = useRef(null);
 
   const [pendingBillsModal, setPendingBillsModal] = useState({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [], allocations: {} });
+  const [pumpPaymentModal, setPumpPaymentModal] = useState({ open: false, rowId: null, month: null, bills: [], loading: false, selectedBills: [], allocations: {} });
 
   const openPendingBillsModal = async (rowId, party) => {
     setPendingBillsModal({ open: true, rowId, party, bills: [], loading: true, selectedBills: [], allocations: {} });
@@ -209,6 +212,20 @@ export default function AccountDetails({ onBack }) {
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Failed to fetch pending bills' });
       setPendingBillsModal(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const openPumpPaymentModal = async (rowId, month) => {
+    setPumpPaymentModal({ open: true, rowId, month, bills: [], loading: true, selectedBills: [], allocations: {} });
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/pump-payment-register/pending-bills?month=${month}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPumpPaymentModal(prev => ({ ...prev, loading: false, bills: res.data.pendingBills }));
+    } catch (err) {
+      setSnack({ severity: 'error', msg: 'Failed to fetch pending pump bills' });
+      setPumpPaymentModal(prev => ({ ...prev, loading: false }));
     }
   };
 
@@ -228,8 +245,30 @@ export default function AccountDetails({ onBack }) {
     });
   };
 
+  const handlePumpPaymentToggleSelect = (bill) => {
+    setPumpPaymentModal(prev => {
+      const isSelected = prev.selectedBills.some(b => b["BILL NO"] === bill["BILL NO"]);
+      if (isSelected) {
+        return { ...prev, selectedBills: [], allocations: {} };
+      } else {
+        return { 
+          ...prev, 
+          selectedBills: [bill], 
+          allocations: { [bill["BILL NO"]]: bill["DUE AMOUNT"] } 
+        };
+      }
+    });
+  };
+
   const handleAllocationChange = (rawBillNumber, val) => {
     setPendingBillsModal(prev => ({
+      ...prev,
+      allocations: { ...prev.allocations, [rawBillNumber]: num(val) }
+    }));
+  };
+
+  const handlePumpAllocationChange = (rawBillNumber, val) => {
+    setPumpPaymentModal(prev => ({
       ...prev,
       allocations: { ...prev.allocations, [rawBillNumber]: num(val) }
     }));
@@ -258,6 +297,23 @@ export default function AccountDetails({ onBack }) {
       }
     }));
     setPendingBillsModal({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [], allocations: {} });
+  };
+
+  const handlePumpPaymentApply = () => {
+    const existingRemarks = localData[pumpPaymentModal.rowId]?.['Remarks'] || entries.find(e => e._id === pumpPaymentModal.rowId)?.['Remarks'] || '';
+    
+    const allocPayload = pumpPaymentModal.selectedBills.map(b => ({
+      rawBillNumber: b["BILL NO"]
+    }));
+
+    setLocalData(prev => ({
+      ...prev,
+      [pumpPaymentModal.rowId]: {
+        ...(prev[pumpPaymentModal.rowId] || {}),
+        '_pumpAllocations': allocPayload
+      }
+    }));
+    setPumpPaymentModal({ open: false, rowId: null, month: null, bills: [], loading: false, selectedBills: [], allocations: {} });
   };
 
   const dirtyCount = Object.keys(localData).length;
@@ -1104,6 +1160,14 @@ export default function AccountDetails({ onBack }) {
                                 }
                               }
                             }
+                            
+                            if (col.key === 'Ledger Name' || col.key === 'Month') {
+                              const currentLedger = (col.key === 'Ledger Name' ? newValue : (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || ''));
+                              const currentMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
+                              if (String(currentLedger).toLowerCase() === 'pump payment' && currentMonth) {
+                                openPumpPaymentModal(row._id, currentMonth);
+                              }
+                            }
                           }}
                           onInputChange={(e, newInputValue) => handleCellEdit(row._id, col.key, newInputValue)}
                           ListboxProps={{
@@ -1531,6 +1595,70 @@ export default function AccountDetails({ onBack }) {
           <Button onClick={() => setPendingBillsModal(prev => ({ ...prev, open: false }))} color="inherit">Cancel</Button>
           <Button onClick={handlePendingBillsApply} variant="contained" disabled={pendingBillsModal.selectedBills.length === 0}>
             Apply Total to Deposit
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={pumpPaymentModal.open} onClose={() => setPumpPaymentModal(prev => ({ ...prev, open: false }))} maxWidth="lg" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+          Select Pending Pump Bills for {pumpPaymentModal.month}
+        </DialogTitle>
+        <DialogContent sx={{ p: 0, bgcolor: '#fff' }}>
+          {pumpPaymentModal.loading ? (
+            <Box p={4} display="flex" justifyContent="center"><Typography>Loading pending bills...</Typography></Box>
+          ) : pumpPaymentModal.bills.length === 0 ? (
+            <Box p={4} display="flex" justifyContent="center"><Typography>No pending bills found for {pumpPaymentModal.month}.</Typography></Box>
+          ) : (
+            <TableContainer sx={{ maxHeight: 400 }}>
+              <Table stickyHeader size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell padding="checkbox" sx={{ bgcolor: '#f8fafc' }}></TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>BILL NO</TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>PERIOD/DATE</TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>PUMP NAME</TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>LITRE</TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>BILL AMT</TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>CD</TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>PAYABLE AMT</TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>DUE AMT</TableCell>
+                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>STATUS</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pumpPaymentModal.bills.map(b => (
+                    <TableRow key={b["BILL NO"]} hover selected={pumpPaymentModal.selectedBills.some(s => s["BILL NO"] === b["BILL NO"])}>
+                      <TableCell padding="checkbox">
+                        <Checkbox 
+                          checked={pumpPaymentModal.selectedBills.some(s => s["BILL NO"] === b["BILL NO"])}
+                          onChange={() => handlePumpPaymentToggleSelect(b)}
+                        />
+                      </TableCell>
+                      <TableCell>{b["BILL NO"]}</TableCell>
+                      <TableCell sx={{ whiteSpace: 'pre-wrap' }}>{b["PERIOD"]}</TableCell>
+                      <TableCell>{b["PUMP NAME"]}</TableCell>
+                      <TableCell>{b["LITRE"]}</TableCell>
+                      <TableCell>₹{num(b["BILL AMOUNT"]).toLocaleString('en-IN')}</TableCell>
+                      <TableCell>₹{num(b["CD"]).toLocaleString('en-IN')}</TableCell>
+                      <TableCell>₹{num(b["PAYABLE AMOUNT"]).toLocaleString('en-IN')}</TableCell>
+                      <TableCell sx={{ color: 'error.main', fontWeight: 600 }}>₹{num(b["DUE AMOUNT"]).toLocaleString('en-IN')}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={b.paymentStatus || 'Pending'} color={b.paymentStatus === 'Paid' ? 'success' : b.paymentStatus === 'Partially Paid' ? 'warning' : 'default'} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+          <Typography sx={{ mr: 'auto', fontWeight: 600 }}>
+            {pumpPaymentModal.selectedBills.length} bill(s) selected
+          </Typography>
+          <Button onClick={() => setPumpPaymentModal(prev => ({ ...prev, open: false }))} color="inherit">Cancel</Button>
+          <Button onClick={handlePumpPaymentApply} variant="contained" disabled={pumpPaymentModal.selectedBills.length === 0}>
+            Link Selected Bill
           </Button>
         </DialogActions>
       </Dialog>

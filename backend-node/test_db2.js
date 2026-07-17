@@ -1,13 +1,8 @@
-const mongoose = require("mongoose");
-require("dotenv").config();
-
-mongoose.connect(process.env.MONGO_URI)
-.then(async () => {
-  const invoiceSystemDb = mongoose.connection.useDb("invoice_system");
-  const TruckContact = invoiceSystemDb.collection("Truck Contact Number");
-  const doc = await TruckContact.findOne({});
-  const keys = Object.keys(doc);
-  console.log("Keys are:", keys.map(k => `"${k}"`).join(", "));
+const mongoose = require('mongoose');
+mongoose.connect('mongodb+srv://lorrey0004:lorrey0004@cluster0.pqbigfd.mongodb.net/invoiceAI?retryWrites=true&w=majority').then(async () => {
+  const db = mongoose.connection.useDb('lorrey_db');
+  const cementCol = db.collection('cement_registers');
+  const record = await cementCol.findOne();
+  console.log(record);
   process.exit(0);
-})
-.catch(console.error);
+}).catch(console.error);

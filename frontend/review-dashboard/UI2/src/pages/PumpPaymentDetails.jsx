@@ -3,7 +3,8 @@ import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Select, MenuItem, FormControl,
-  InputLabel, TextField, Divider, Card, CardContent, useMediaQuery, Grid, Paper
+  InputLabel, TextField, Divider, Card, CardContent, useMediaQuery, Grid, Paper,
+  Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, Table, TableBody, TableCell, TableContainer, TableHead, TableRow
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -92,7 +93,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
   const isMobile = useMediaQuery('(max-width:960px)');
   const isPumpAdmin = user?.role === 'PETROL PUMP';
   const isOfficeAdmin = user?.role === 'OFFICE' || user?.role === 'HEAD_OFFICE';
-  
+
   // Port-based Auto Detection
   const autoPump = window.location.port === '5175' ? 'SAS-1' : window.location.port === '5176' ? 'SAS-2' : null;
   const effectiveLockedPump = autoPump || lockedPump;
@@ -130,6 +131,26 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
   // partitioning for pump admin
   const [pumpTab, setPumpTab] = useState('today'); // 'today', 'expired' or 'all'
 
+  // Batch Billing State
+  const [selectedRowIds, setSelectedRowIds] = useState([]);
+  const [batchDialogOpen, setBatchDialogOpen] = useState(false);
+  const [batchBillingSaving, setBatchBillingSaving] = useState(false);
+  const [batchBillDate, setBatchBillDate] = useState(new Date().toISOString().split('T')[0]);
+  const [nextBillNumber, setNextBillNumber] = useState('');
+
+  useEffect(() => {
+    if (batchDialogOpen && batchBillDate && selPump) {
+      axios.get(`${API_URL}/pump-payment/next-batch-bill-number`, {
+        params: { pumpName: selPump, billDate: batchBillDate },
+        headers: { Authorization: `Bearer ${token()}` }
+      }).then(r => {
+        if (r.data.success) {
+          setNextBillNumber(r.data.nextBillNumber);
+        }
+      }).catch(console.error);
+    }
+  }, [batchDialogOpen, batchBillDate, selPump]);
+
   const yearOptions = [];
   for (let y = currentFyStart - 2; y <= currentFyStart + 1; y++) yearOptions.push(`${y}-${y + 1}`);
 
@@ -162,10 +183,10 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       .then(r => {
         if (r.data.success) {
           setPumps(r.data.pumps);
-          
+
           // Port-based Auto Detection
           const autoPump = window.location.port === '5175' ? 'SAS-1' : window.location.port === '5176' ? 'SAS-2' : null;
-          
+
           if (autoPump && r.data.pumps.includes(autoPump)) {
             setSelPump(autoPump);
           } else if (lockedPump) {
@@ -242,6 +263,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
           'VERIFICATION STATUS': vStatus,
           'PAYMENT STATUS': saved?.paymentStatus || 'Unpaid',
           'PAYMENT PROOF URL': saved?.paymentProofUrl || '',
+          'CHALLAN STATUS': entry['CHALLAN STATUS'] || '',
         };
       });
       // For pump admins: hide rows that have no vehicle number AND no HSD litres
@@ -288,7 +310,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         setPeriodPaymentStatus(data.status || 'Unpaid');
         setPeriodProofUrls(data.proofUrls || []);
       }
-    } catch (_) {}
+    } catch (_) { }
   }, [selPump, selMonth, selYear, selPeriod]);
 
   useEffect(() => { fetchPeriodPaymentStatus(); }, [fetchPeriodPaymentStatus]);
@@ -301,7 +323,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         headers: { Authorization: `Bearer ${token()}` }
       });
       if (data.success) setAllNotifications(data.notifications || []);
-    } catch (_) {}
+    } catch (_) { }
   }, [isOfficeAdmin]);
 
   useEffect(() => { fetchAllNotifications(); }, [fetchAllNotifications]);
@@ -409,7 +431,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       if (data.success) {
         setPeriodProofUrls(data.proofUrls || []);
         setPeriodPaymentStatus(data.status || 'Unpaid');
-        setSnack({ severity: 'info', msg: 'Proof removed' + (data.status === 'Unpaid' && (data.proofUrls||[]).length === 0 ? ' — status reset to Unpaid' : '') });
+        setSnack({ severity: 'info', msg: 'Proof removed' + (data.status === 'Unpaid' && (data.proofUrls || []).length === 0 ? ' — status reset to Unpaid' : '') });
       }
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Remove failed: ' + (err.response?.data?.error || err.message) });
@@ -512,7 +534,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       return merged;
     });
   }, [rows, localEdits]);
-  
+
   // Partition for Pump Admin
   const { todayRows, expiredRows } = useMemo(() => {
     if (!isPumpAdmin) return { todayRows: [], expiredRows: [] };
@@ -522,19 +544,19 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
 
     const f = (d) => `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
     const f2 = (d) => `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getFullYear()).slice(2)}`;
-    
+
     const todayS1 = f(today);
     const todayS2 = f2(today);
     const yestS1 = f(yesterday);
     const yestS2 = f2(yesterday);
-    
+
     return {
       todayRows: computedRows.filter(r => r['LOADING DATE'] === todayS1 || r['LOADING DATE'] === todayS2),
       expiredRows: computedRows.filter(r => r['LOADING DATE'] === yestS1 || r['LOADING DATE'] === yestS2)
     };
   }, [computedRows, isPumpAdmin]);
 
-  const activeRows = isPumpAdmin 
+  const activeRows = isPumpAdmin
     ? (pumpTab === 'today' ? todayRows : pumpTab === 'expired' ? expiredRows : computedRows)
     : computedRows;
 
@@ -587,21 +609,21 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     if (!file) return;
     const formData = new FormData();
     formData.append('proof', file);
-    
+
     setLocalEdits(prev => ({ ...prev, [ri]: { ...(prev[ri] || {}), _uploading: true } }));
-    
+
     try {
       const { data } = await axios.post(`${API_URL}/pump-payment/upload-payment-proof`, formData, {
         headers: { Authorization: `Bearer ${token()}` }
       });
       if (data.success) {
-        setLocalEdits(prev => ({ 
-          ...prev, 
-          [ri]: { 
-            ...(prev[ri] || {}), 
+        setLocalEdits(prev => ({
+          ...prev,
+          [ri]: {
+            ...(prev[ri] || {}),
             'PAYMENT PROOF URL': data.url,
-            _uploading: false 
-          } 
+            _uploading: false
+          }
         }));
         setSnack({ severity: 'success', msg: 'Proof uploaded successfully!' });
       }
@@ -653,19 +675,19 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
 
   const visibleCols = isPumpAdmin
     ? COLUMNS.filter(c => ['LOADING DATE', 'VEHICLE NUMBER', 'HSD (LTR)', 'VERIFICATION CODE'].includes(c.key))
-             .map(c => ({
-                ...c,
-                label: c.key === 'LOADING DATE' ? 'Date'
-                     : c.key === 'VEHICLE NUMBER' ? 'Vehicle No'
-                     : c.key === 'HSD (LTR)' ? 'Litre'
-                     : c.key === 'VERIFICATION CODE' ? 'Verify'
-                     : c.label,
-                width: c.key === 'LOADING DATE' ? 90 
-                     : c.key === 'VEHICLE NUMBER' ? 95 
-                     : c.key === 'HSD (LTR)' ? 60 
-                     : c.key === 'VERIFICATION CODE' ? 100 
-                     : c.width
-             }))
+      .map(c => ({
+        ...c,
+        label: c.key === 'LOADING DATE' ? 'Date'
+          : c.key === 'VEHICLE NUMBER' ? 'Vehicle No'
+            : c.key === 'HSD (LTR)' ? 'Litre'
+              : c.key === 'VERIFICATION CODE' ? 'Verify'
+                : c.label,
+        width: c.key === 'LOADING DATE' ? 90
+          : c.key === 'VEHICLE NUMBER' ? 95
+            : c.key === 'HSD (LTR)' ? 60
+              : c.key === 'VERIFICATION CODE' ? 100
+                : c.width
+      }))
     : COLUMNS.filter(c => c.key !== 'VERIFICATION CODE');
 
   if (loadingPumps) return (
@@ -683,18 +705,20 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     </Box>
   );
 
+  const billableRows = activeRows.filter(r => r['VERIFICATION STATUS'] === 'Verified' && !r.isBilled && r['CHALLAN STATUS'] !== 'BILLED');
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f0fdfa', overflow: 'hidden' }}>
       {regeneratingInvoiceId && (
-          <AutoPdfRegenerator 
-              invoiceId={regeneratingInvoiceId} 
-              onComplete={(success) => {
-                  setRegeneratingInvoiceId(null);
-                  if (success) setSnack({ severity: 'success', msg: 'Softcopies fully rebuilt and synced to S3 limitlessly.' });
-              }} 
-          />
+        <AutoPdfRegenerator
+          invoiceId={regeneratingInvoiceId}
+          onComplete={(success) => {
+            setRegeneratingInvoiceId(null);
+            if (success) setSnack({ severity: 'success', msg: 'Softcopies fully rebuilt and synced to S3 limitlessly.' });
+          }}
+        />
       )}
-      
+
       {/* ── Toolbar ── */}
       <Box sx={{
         px: 2, py: 1, bgcolor: '#fff', borderBottom: '2px solid #0891b2',
@@ -771,6 +795,23 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                 {saving ? 'Saving...' : 'Save'}
               </Button>
             )}
+            {!isPumpAdmin && (
+              <Button size="small" variant="contained"
+                onClick={() => {
+                  if (selectedRowIds.length === 0) {
+                    setSnack({ severity: 'warning', msg: 'Please select at least one record before running Batch Billing.' });
+                    return;
+                  }
+
+                  setBatchDialogOpen(true);
+                }}
+                sx={{
+                  fontWeight: 800, borderRadius: 2, px: 2,
+                  background: 'linear-gradient(135deg,#10b981,#047857)',
+                }}>
+                Run Batch Billing ({selectedRowIds.length})
+              </Button>
+            )}
           </Box>
         </Box>
 
@@ -789,7 +830,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
           )}
         </Box>
       </Box>
-      
+
       {/* ── Pump Admin Tabs ── */}
       {isPumpAdmin && (
         <Box sx={{ px: 2, py: 1.5, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: 2 }}>
@@ -850,7 +891,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
             {allNotifications.map((notif, i) => {
               const PERIOD_LABELS = { 0: 'Full Month', 1: '1–10', 2: '11–20', 3: '21–End' };
-              const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
               const label = `${notif.pumpName} · ${monthNames[(notif.month || 1) - 1]} ${notif.year} · Period ${PERIOD_LABELS[notif.period] || notif.period}`;
               return (
                 <Chip
@@ -894,7 +935,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
             {activeRows.map((row, i) => {
               const ri = row.originalIndex;
               return (
-                <Card key={i} sx={{ 
+                <Card key={i} sx={{
                   borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
                   overflow: 'visible', position: 'relative'
                 }}>
@@ -925,15 +966,15 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
 
                     {isPumpAdmin && row['VERIFICATION STATUS'] !== 'Verified' && (
                       <Box sx={{ mt: 1, pt: 1.5, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 1 }}>
-                        <TextField 
-                          size="small" 
+                        <TextField
+                          size="small"
                           placeholder="Code"
                           type="number"
                           value={verificationCodes[ri] || ''}
                           onChange={e => setVerificationCodes(prev => ({ ...prev, [ri]: e.target.value }))}
                           sx={{ flex: 1, '& .MuiInputBase-input': { p: 1, fontSize: 13, fontWeight: 700 } }}
                         />
-                        <Button 
+                        <Button
                           variant="contained" color="success" size="small"
                           onClick={() => handleVerifyCode(ri, row)}
                           sx={{ fontWeight: 800, px: 2, borderRadius: 2 }}
@@ -946,7 +987,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                 </Card>
               );
             })}
-            
+
             {/* Mobile Footer Total (Office Admin Only) */}
             {activeRows.length > 0 && isOfficeAdmin && (
               <Paper sx={{ p: 2, borderRadius: 3, bgcolor: '#0c4a6e', color: '#fff', mt: 2 }}>
@@ -955,8 +996,8 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                   <Typography variant="h5" fontWeight={900}>₹{totals['HSD AMOUNT'].toLocaleString('en-IN')}</Typography>
                 </Box>
                 <Box display="flex" justifyContent="space-between" mt={1}>
-                   <Typography variant="caption" sx={{ opacity: 0.8 }}>Total Quantity</Typography>
-                   <Typography variant="caption" fontWeight={800}>{totals['HSD (LTR)']} Ltrs</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>Total Quantity</Typography>
+                  <Typography variant="caption" fontWeight={800}>{totals['HSD (LTR)']} Ltrs</Typography>
                 </Box>
               </Paper>
             )}
@@ -973,6 +1014,27 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
 
             <thead>
               <tr>
+                {!isPumpAdmin && (
+                  <th style={{
+                    position: 'sticky', top: 0, zIndex: 3, background: '#0891b2', color: '#fff',
+                    minWidth: 40, padding: '10px 4px', textAlign: 'center', border: '1px solid #0e7490'
+                  }}>
+                    <Checkbox
+                      size="small"
+                      sx={{ color: '#fff', '&.Mui-checked': { color: '#fff' }, p: 0 }}
+                      checked={billableRows.length > 0 && selectedRowIds.length > 0 && selectedRowIds.length === billableRows.length}
+                      indeterminate={selectedRowIds.length > 0 && selectedRowIds.length < billableRows.length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          const allIds = billableRows.map(r => String(r._cementId));
+                          setSelectedRowIds(allIds);
+                        } else {
+                          setSelectedRowIds([]);
+                        }
+                      }}
+                    />
+                  </th>
+                )}
                 <th style={{
                   position: 'sticky', top: 0, zIndex: 3, background: '#0891b2', color: '#fff',
                   minWidth: isPumpAdmin ? 35 : 50,
@@ -999,7 +1061,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
             <tbody>
               {activeRows.length === 0 && (
                 <tr><td colSpan={visibleCols.length + 1} style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>
-                  {isPumpAdmin 
+                  {isPumpAdmin
                     ? (pumpTab === 'today' ? "No vehicles pending for today." : "No expired pending vehicles.")
                     : `No cement register entries found for ${selPump} in ${MONTH_NAMES[selMonth - 1]} ${selYear} — ${PERIODS.find(p => p.value === selPeriod)?.label || 'selected period'}.`}
                   <br />Check that pump name matches exactly or verify entries exist in the cement register.
@@ -1008,8 +1070,27 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
               {activeRows.map((row, i) => {
                 const ri = row.originalIndex;
                 const hasEdits = !!localEdits[ri];
+                const isBilled = row.isBilled || row['VERIFICATION STATUS'] === 'Billed' || row['CHALLAN STATUS'] === 'BILLED';
                 return (
-                  <tr key={i} style={{ background: i % 2 === 0 ? '#f0fdfa' : '#fff' }}>
+                  <tr key={i} style={{ 
+                    background: selectedRowIds.includes(String(row._cementId)) ? '#e0f2fe' : (i % 2 === 0 ? '#f0fdfa' : '#fff'),
+                    opacity: isBilled ? 0.6 : 1,
+                    transition: 'opacity 0.2s'
+                  }}>
+                    {!isPumpAdmin && (
+                      <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', padding: 0 }}>
+                        <Checkbox
+                          size="small"
+                          sx={{ p: 0.5 }}
+                          disabled={isBilled || row['VERIFICATION STATUS'] !== 'Verified'}
+                          checked={selectedRowIds.includes(String(row._cementId))}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedRowIds(prev => [...prev, String(row._cementId)]);
+                            else setSelectedRowIds(prev => prev.filter(id => id !== String(row._cementId)));
+                          }}
+                        />
+                      </td>
+                    )}
                     <td style={{
                       textAlign: 'center', border: '1px solid #e2e8f0', fontWeight: 700,
                       color: '#475569', padding: isPumpAdmin ? '16px 6px' : '4px', background: '#e0f7fa'
@@ -1067,9 +1148,9 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                                       border: '1px solid #cbd5e1', borderRadius: '4px', outline: 'none'
                                     }}
                                   />
-                                  <Button 
-                                    size="small" 
-                                    variant="contained" 
+                                  <Button
+                                    size="small"
+                                    variant="contained"
                                     color="success"
                                     sx={{ minWidth: 0, px: isPumpAdmin ? 1.5 : 0.5, py: isPumpAdmin ? 0.8 : 0.3, fontSize: isPumpAdmin ? '11px' : '9px', fontWeight: 800, borderRadius: '4px' }}
                                     onClick={() => handleVerifyCode(ri, row)}
@@ -1086,6 +1167,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                           ) : col.editable ? (
                             <input
                               type="text" value={display}
+                              disabled={isBilled}
                               onChange={e => handleEdit(ri, col.key, e.target.value)}
                               style={{
                                 width: '100%', padding: '5px 6px', border: 'none',
@@ -1163,10 +1245,10 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                             <option value="Unpaid">Unpaid Period</option>
                             <option value="Paid">Paid Period</option>
                           </SearchableSelect>
-                          <Button 
-                            component="label" 
-                            variant="outlined" 
-                            size="small" 
+                          <Button
+                            component="label"
+                            variant="outlined"
+                            size="small"
                             disabled={periodUploading}
                             sx={{ fontSize: 10, py: 0, px: 1, borderColor: '#ca8a04', color: '#ca8a04', '&:hover': { borderColor: '#a16207', bgcolor: '#fefce8' } }}
                           >
@@ -1178,10 +1260,12 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                               {periodProofUrls.map((url, idx) => (
                                 <Box key={idx} display="flex" alignItems="center" gap={0.5}>
                                   <a href={url} target="_blank" rel="noreferrer"
-                                    style={{ flex: 1, fontSize: 9, fontWeight: 700, color: '#0891b2',
+                                    style={{
+                                      flex: 1, fontSize: 9, fontWeight: 700, color: '#0891b2',
                                       textDecoration: 'none', background: '#cffafe', borderRadius: 3,
-                                      padding: '2px 4px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                                    📄 Proof {idx+1}
+                                      padding: '2px 4px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis'
+                                    }}>
+                                    📄 Proof {idx + 1}
                                   </a>
                                   <Tooltip title="Remove proof">
                                     <IconButton size="small" sx={{ p: 0, color: '#ef4444' }} onClick={() => handleRemovePeriodProof(url)}>
@@ -1211,10 +1295,12 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
                             <Box display="flex" flexDirection="column" gap={0.5}>
                               {periodProofUrls.map((url, idx) => (
                                 <a key={idx} href={url} target="_blank" rel="noreferrer"
-                                  style={{ fontSize: 9, fontWeight: 700, color: '#0891b2',
+                                  style={{
+                                    fontSize: 9, fontWeight: 700, color: '#0891b2',
                                     textDecoration: 'none', background: '#cffafe',
-                                    borderRadius: 3, padding: '2px 5px' }}>
-                                  📄 View {idx+1}
+                                    borderRadius: 3, padding: '2px 5px'
+                                  }}>
+                                  📄 View {idx + 1}
                                 </a>
                               ))}
                             </Box>
@@ -1233,8 +1319,145 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       </Box>
 
       <Snackbar open={!!snack} autoHideDuration={4500} onClose={() => setSnack(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-        {snack && <Alert severity={snack.severity} variant="filled">{snack.msg}</Alert>}
+        {snack && <Alert severity={snack.severity || 'info'} variant="filled">{snack.msg}</Alert>}
       </Snackbar>
+
+      {/* ── Batch Billing Dialog ── */}
+      <Dialog
+        open={batchDialogOpen}
+        onClose={() => !batchBillingSaving && setBatchDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ bgcolor: '#0891b2', color: '#fff', fontWeight: 900 }}>
+          Batch Billing Verification
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 2 }}>
+          <Box sx={{ display: 'flex', gap: 3, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>Financial Year</Typography>
+              <Typography variant="subtitle1" fontWeight={900} color="#0c4a6e">{selYear}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>Month</Typography>
+              <Typography variant="subtitle1" fontWeight={900} color="#0c4a6e">{MONTH_NAMES[selMonth - 1]}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>Total Records</Typography>
+              <Typography variant="subtitle1" fontWeight={900} color="#0c4a6e">{selectedRowIds.length}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>Total Billing Amount</Typography>
+              <Typography variant="subtitle1" fontWeight={900} color="#059669">
+                ₹{activeRows
+                  .filter(r => selectedRowIds.includes(String(r._cementId)))
+                  .reduce((acc, r) => acc + (round2(num(r['HSD (LTR)']) * num(r['HSD RATE'])) || 0), 0)
+                  .toLocaleString('en-IN')
+                }
+              </Typography>
+            </Box>
+            <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+            <Box>
+              <TextField
+                label="Bill Date"
+                type="date"
+                size="small"
+                value={batchBillDate}
+                onChange={(e) => setBatchBillDate(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                sx={{ minWidth: 150, '& .MuiInputBase-input': { fontWeight: 700, color: '#0f172a' } }}
+              />
+            </Box>
+            <Box sx={{ ml: 2, px: 2, py: 0.5, bgcolor: '#e0f2fe', borderRadius: 2, border: '1px dashed #38bdf8' }}>
+              <Typography variant="caption" sx={{ color: '#0284c7', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5 }}>Auto-Generated Bill No</Typography>
+              <Typography variant="subtitle1" fontWeight={900} color="#0369a1" sx={{ fontFamily: 'monospace', letterSpacing: 1 }}>{nextBillNumber || '...'}</Typography>
+            </Box>
+            <Box sx={{ ml: 1, px: 2, py: 0.5, bgcolor: '#fef3c7', borderRadius: 2, border: '1px dashed #fbbf24' }}>
+              <Typography variant="caption" sx={{ color: '#d97706', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5 }}>Total HSD Litre</Typography>
+              <Typography variant="subtitle1" fontWeight={900} color="#b45309" sx={{ fontFamily: 'monospace', letterSpacing: 1 }}>
+                {activeRows
+                  .filter(r => selectedRowIds.includes(String(r._cementId)))
+                  .reduce((acc, r) => acc + (num(r['HSD (LTR)']) || 0), 0)
+                  .toLocaleString('en-IN')
+                } Ltr
+              </Typography>
+            </Box>
+          </Box>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead sx={{ bgcolor: '#f1f5f9' }}>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>SL No</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Pump Name</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Vehicle No</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Owner Name</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Driver Name</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Fuel Date</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Invoice No</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11, textAlign: 'right' }}>Fuel (Ltr)</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11, textAlign: 'right' }}>Fuel Amt</TableCell>
+                  <TableCell sx={{ fontWeight: 800, fontSize: 11, textAlign: 'right' }}>Payment Amt</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {activeRows.filter(r => selectedRowIds.includes(String(r._cementId))).map((r, i) => (
+                  <TableRow key={i}>
+                    <TableCell sx={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>{r.originalIndex + 1}</TableCell>
+                    <TableCell sx={{ fontSize: 11 }}>{r['PUMP NAME']}</TableCell>
+                    <TableCell sx={{ fontSize: 11, fontWeight: 700 }}>{r['VEHICLE NUMBER']}</TableCell>
+                    <TableCell sx={{ fontSize: 11 }}>{r['OWNER NAME'] || '-'}</TableCell>
+                    <TableCell sx={{ fontSize: 11 }}>{r['DRIVER NAME'] || '-'}</TableCell>
+                    <TableCell sx={{ fontSize: 11 }}>{r['LOADING DATE']}</TableCell>
+                    <TableCell sx={{ fontSize: 11 }}>{r['_invoiceId'] || '-'}</TableCell>
+                    <TableCell sx={{ fontSize: 11, textAlign: 'right' }}>{r['HSD (LTR)']}</TableCell>
+                    <TableCell sx={{ fontSize: 11, textAlign: 'right', fontWeight: 700 }}>₹{round2(num(r['HSD (LTR)']) * num(r['HSD RATE']))}</TableCell>
+                    <TableCell sx={{ fontSize: 11, textAlign: 'right', fontWeight: 700 }}>₹{round2(num(r['HSD (LTR)']) * num(r['HSD RATE']))}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc' }}>
+          <Button
+            onClick={() => setBatchDialogOpen(false)}
+            disabled={batchBillingSaving}
+            sx={{ fontWeight: 700 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={async () => {
+              setBatchBillingSaving(true);
+              try {
+                const res = await axios.post(`${API_URL}/pump-payment/generate-batch-bills`, {
+                  recordIds: selectedRowIds,
+                  pumpName: selPump,
+                  billDate: batchBillDate
+                }, { headers: { Authorization: `Bearer ${token()}` } });
+                if (res.data.success) {
+                  setSnack({ severity: 'success', msg: `Batch Bill ${res.data.billNumber} generated successfully!` });
+                  setBatchDialogOpen(false);
+                  setSelectedRowIds([]);
+                  fetchData(); // Reload table
+                } else {
+                  setSnack({ severity: 'error', msg: res.data.error || 'Failed to generate bills' });
+                }
+              } catch (e) {
+                setSnack({ severity: 'error', msg: e.response?.data?.error || e.message });
+              } finally {
+                setBatchBillingSaving(false);
+              }
+            }}
+            disabled={batchBillingSaving || selectedRowIds.length === 0 || !batchBillDate}
+            sx={{ fontWeight: 800, bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' } }}
+          >
+            {batchBillingSaving ? 'Generating...' : 'Generate Bill'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

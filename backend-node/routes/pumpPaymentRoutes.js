@@ -57,7 +57,7 @@ router.get("/debug", auth, async (req, res) => {
     const { pumpName } = req.query;
     const filter = pumpName ? { "PUMP NAME": pumpName } : {};
     const sample = await getCementCol().find(filter).limit(5).toArray();
-    const pumps  = await getCementCol().distinct("PUMP NAME");
+    const pumps = await getCementCol().distinct("PUMP NAME");
     res.json({
       success: true,
       pumpNames: pumps,
@@ -87,14 +87,14 @@ router.get("/cement-data", auth, async (req, res) => {
     }
     const m = parseInt(month), y = parseInt(year), p = parseInt(period);
     const lastDay = new Date(y, m, 0).getDate();
-    const startDay = p === 0 ? 1 : p === 1 ? 1  : p === 2 ? 11 : 21;
-    const endDay   = p === 0 ? lastDay : p === 1 ? 10 : p === 2 ? 20 : lastDay;
+    const startDay = p === 0 ? 1 : p === 1 ? 1 : p === 2 ? 11 : 21;
+    const endDay = p === 0 ? lastDay : p === 1 ? 10 : p === 2 ? 20 : lastDay;
 
     let query = { "PUMP NAME": pumpName };
     if (pumpName.toUpperCase().match(/^SAS-?\d*$/)) {
       if (req.user && req.user.role === 'PETROL PUMP') {
         // Petrol Pump admin is locked to their own pumpName (e.g. "SAS-1")
-        query = { 
+        query = {
           $or: [
             { "PUMP NAME": pumpName },
             { "PUMP NAME": "SAS" },
@@ -277,7 +277,7 @@ router.post("/notify", auth, async (req, res) => {
     try {
       const { getIO } = require("../socket");
       getIO().emit("paymentNotification", { pumpName, month: parseInt(month), year: parseInt(year), period: parseInt(period), notifiedAt });
-    } catch (_) {}
+    } catch (_) { }
 
     res.json({ success: true, notifiedAt });
   } catch (err) {
@@ -345,7 +345,7 @@ router.put("/save-period-payment", auth, async (req, res) => {
         pumpName, month: parseInt(month), year: parseInt(year), period: parseInt(period),
         status, proofUrls: urls
       });
-    } catch (_) {}
+    } catch (_) { }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -375,7 +375,7 @@ router.put("/remove-period-proof", auth, async (req, res) => {
         pumpName, month: parseInt(month), year: parseInt(year), period: parseInt(period),
         status: newStatus, proofUrls: urls
       });
-    } catch (_) {}
+    } catch (_) { }
     res.json({ success: true, proofUrls: urls, status: newStatus });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -388,7 +388,7 @@ router.get("/fuel-rates", auth, async (req, res) => {
   try {
     const col = mongoose.connection.useDb("pump_payment").collection("fuel_rates");
     const history = await col.find({}).sort({ effectiveDate: -1 }).toArray();
-    
+
     // Group by pumpName for easier UI consumption
     const grouped = {};
     const latestRates = {};
@@ -398,7 +398,7 @@ router.get("/fuel-rates", auth, async (req, res) => {
       grouped[p] = pumpHistory;
       latestRates[p] = pumpHistory.length > 0 ? pumpHistory[0].rate : 90;
     });
-    
+
     res.json({ success: true, history: grouped, rates: latestRates });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -419,7 +419,7 @@ router.put("/fuel-rates", auth, async (req, res) => {
     }
     const numRate = parseFloat(rate);
     const date = new Date(effectiveDate);
-    date.setHours(0,0,0,0); // normalize to start of day
+    date.setHours(0, 0, 0, 0); // normalize to start of day
 
     if (isNaN(numRate) || numRate <= 0) {
       return res.status(400).json({ success: false, error: "Rate must be a positive number." });
@@ -429,7 +429,7 @@ router.put("/fuel-rates", auth, async (req, res) => {
     }
 
     const col = mongoose.connection.useDb("pump_payment").collection("fuel_rates");
-    
+
     // Upsert by pump + exact effective date
     await col.updateOne(
       { pumpName, effectiveDate: date },
@@ -441,7 +441,7 @@ router.put("/fuel-rates", auth, async (req, res) => {
     // Find all invoices from this date onwards and re-sync them to apply the new rate
     const Invoice = require("../models/Invoice");
     const { pushToRegister } = require("../utils/syncManager");
-    
+
     // Match invoices whose station_name starts with the pump prefix (SAS, SAS-1, SAS-2 etc.)
     const pumpPrefix = pumpName.split('-')[0]; // "SAS-1" → "SAS"
     const affectedInvoices = await Invoice.find({
@@ -459,18 +459,20 @@ router.put("/fuel-rates", auth, async (req, res) => {
     const bulkOps = affectedInvoices
       .filter(inv => inv.lorry_hire_slip_data?.diesel_litres != null)
       .map(inv => {
-        const litres  = Number(inv.lorry_hire_slip_data.diesel_litres) || 0;
+        const litres = Number(inv.lorry_hire_slip_data.diesel_litres) || 0;
         const loadAdv = Number(inv.lorry_hire_slip_data.loading_advance) || 0;
         const newDieselAdv = parseFloat((litres * numRate).toFixed(2));
-        const newTotalAdv  = parseFloat((loadAdv + newDieselAdv).toFixed(2));
+        const newTotalAdv = parseFloat((loadAdv + newDieselAdv).toFixed(2));
         return {
           updateOne: {
             filter: { _id: inv._id },
-            update: { $set: {
-              "lorry_hire_slip_data.diesel_rate":     numRate,
-              "lorry_hire_slip_data.diesel_advance":  newDieselAdv,
-              "lorry_hire_slip_data.total_advance":   newTotalAdv,
-            }}
+            update: {
+              $set: {
+                "lorry_hire_slip_data.diesel_rate": numRate,
+                "lorry_hire_slip_data.diesel_advance": newDieselAdv,
+                "lorry_hire_slip_data.total_advance": newTotalAdv,
+              }
+            }
           }
         };
       });
@@ -501,9 +503,43 @@ router.put("/fuel-rates", auth, async (req, res) => {
           invoiceIds: affectedIds.slice(i, i + 10)
         });
       }
-    } catch (_) {}
+    } catch (_) { }
 
     res.json({ success: true, pumpName, rate: numRate, effectiveDate: date, reSyncCount: affectedInvoices.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── GET /pump-payment/next-batch-bill-number ──────────────────────────────────
+router.get("/next-batch-bill-number", auth, async (req, res) => {
+  try {
+    if (req.user.role !== "OFFICE" && req.user.role !== "HEAD_OFFICE") {
+      return res.status(403).json({ success: false, error: "Only Office Admin can preview batch bills" });
+    }
+    const { pumpName, billDate } = req.query;
+    if (!pumpName || !billDate) {
+      return res.status(400).json({ success: false, error: "Missing pumpName or billDate" });
+    }
+
+    const dObj = new Date(billDate);
+    const year = dObj.getFullYear();
+    const month = dObj.getMonth() + 1;
+    const currentFy = (month >= 4) ? `${String(year).slice(-2)}-${String(year + 1).slice(-2)}` : `${String(year - 1).slice(-2)}-${String(year).slice(-2)}`;
+
+    const db = mongoose.connection.useDb("pump_payment");
+    const countersCol = db.collection("bill_counters");
+
+    const pumpPrefix = String(pumpName).split('-')[0].toUpperCase();
+    const counterId = `PUMP_BILL_${pumpPrefix}_${currentFy}`;
+
+    const sequenceDoc = await countersCol.findOne({ _id: counterId });
+    const nextSeq = sequenceDoc ? sequenceDoc.seq + 1 : 1;
+    const nextSerial = String(nextSeq).padStart(3, '0');
+
+    const nextBillNumber = `${pumpPrefix}/${currentFy}/${nextSerial}`;
+
+    res.json({ success: true, nextBillNumber });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -517,19 +553,247 @@ async function getRateForDate(pumpName, dateVal) {
     if (isNaN(d.getTime())) return 90;
 
     // Find the latest rate that is effective on or before this date
-    const record = await col.find({ 
+    const record = await col.find({
       pumpName: { $regex: new RegExp(`^${pumpName.split('-')[0]}`, 'i') },
-      effectiveDate: { $lte: d } 
+      effectiveDate: { $lte: d }
     })
-    .sort({ effectiveDate: -1 })
-    .limit(1)
-    .toArray();
+      .sort({ effectiveDate: -1 })
+      .limit(1)
+      .toArray();
 
     return record[0] ? record[0].rate : 90;
   } catch (e) {
     return 90;
   }
 }
+
+// ── POST /pump-payment/generate-batch-bills ──────────────────────────────────
+router.post("/generate-batch-bills", auth, async (req, res) => {
+  try {
+    if (req.user.role !== "OFFICE" && req.user.role !== "HEAD_OFFICE") {
+      return res.status(403).json({ success: false, error: "Only Office Admin can generate batch bills" });
+    }
+    const { recordIds, pumpName, billDate } = req.body;
+    if (!recordIds || !Array.isArray(recordIds) || recordIds.length === 0) {
+      return res.status(400).json({ success: false, error: "No records provided" });
+    }
+    if (!pumpName || !billDate) {
+      return res.status(400).json({ success: false, error: "Missing pumpName or billDate" });
+    }
+
+    const { ObjectId } = mongoose.Types;
+    const objectIds = recordIds.map(id => new ObjectId(id));
+
+    // Parse FY from billDate (YYYY-MM-DD)
+    const dObj = new Date(billDate);
+    const year = dObj.getFullYear();
+    const month = dObj.getMonth() + 1;
+    const currentFy = (month >= 4) ? `${String(year).slice(-2)}-${String(year + 1).slice(-2)}` : `${String(year - 1).slice(-2)}-${String(year).slice(-2)}`;
+
+    const parts = billDate.split('-');
+    const formattedBillDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+    const cementCol = getCementCol();
+    const records = await cementCol.find({ _id: { $in: objectIds } }).toArray();
+
+    // Validation removed so user can test generating bills for already billed records
+
+    const db = mongoose.connection.useDb("pump_payment");
+    const countersCol = db.collection("bill_counters");
+    const billsCol = db.collection("generated_bills");
+
+    const pumpPrefix = String(pumpName).split('-')[0].toUpperCase();
+    const counterId = `PUMP_BILL_${pumpPrefix}_${currentFy}`;
+
+    const sequenceDoc = await countersCol.findOneAndUpdate(
+      { _id: counterId },
+      { $inc: { seq: 1 } },
+      { returnDocument: 'after', upsert: true }
+    );
+    const seqValue = sequenceDoc?.value?.seq || sequenceDoc?.seq || 1;
+    const currentSerial = String(seqValue).padStart(3, '0');
+
+    // Format e.g., SAS/25-26/001
+    const billNumber = `${pumpPrefix}/${currentFy}/${currentSerial}`;
+
+    let totalFuelQuantity = 0;
+    let totalBillingAmount = 0;
+
+    const detailedRecords = records.map(r => {
+      const fuelLtr = parseFloat(String(r['HSD (LTR)'] || r['HSD (Ltr)'] || '0').replace(/,/g, '')) || 0;
+      const fuelAmt = parseFloat(String(r['HSD AMOUNT'] || '0').replace(/,/g, '')) || 0;
+      const paymentAmt = parseFloat(String(r['PAYMENT AMOUNT'] || '0').replace(/,/g, '')) || 0;
+
+      totalFuelQuantity += fuelLtr;
+      totalBillingAmount += fuelAmt;
+
+      return {
+        cementId: r._id,
+        vehicleNo: r['VEHICLE NUMBER'],
+        ownerName: r['OWNER NAME'],
+        driverName: r['DRIVER NAME'],
+        fuelDate: r['LOADING DATE'],
+        invoiceNo: r['INVOICE NUMBER'],
+        fuelLtr,
+        fuelAmt,
+        paymentAmt
+      };
+    });
+
+    // Save summary to generated_bills
+    await billsCol.insertOne({
+      billNumber,
+      billDate: formattedBillDate,
+      financialYear: currentFy,
+      month: String(month),
+      pumpName,
+      totalRecords: records.length,
+      totalFuelQuantity,
+      totalBillingAmount,
+      records: detailedRecords,
+      cementRegisterRecordIds: records.map(r => r._id),
+      createdAt: new Date(),
+      createdBy: req.user.userId || req.user.id
+    });
+
+    const bulkOps = [];
+    for (const record of records) {
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: record._id },
+          update: {
+            $set: {
+              'HSD BILL NO': billNumber,
+              'HSD BILL DATE': formattedBillDate,
+              'CHALLAN STATUS': 'BILLED'
+            }
+          }
+        }
+      });
+    }
+
+    if (bulkOps.length > 0) {
+      await cementCol.bulkWrite(bulkOps);
+    }
+
+    // Auto-sync to Pump Payment Register
+    try {
+      const registerCol = mongoose.connection.useDb("pump_payment_register").collection("records");
+      const existingRegister = await registerCol.findOne({ 'BILL NO': billNumber });
+
+      if (!existingRegister) {
+        let periodNumStr = '';
+        let minDate = null;
+        let maxDate = null;
+
+        const parseToDate = (rawDate) => {
+          if (!rawDate) return null;
+          if (rawDate instanceof Date && !isNaN(rawDate)) return rawDate;
+          const str = String(rawDate).trim();
+          const match = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+          if (match) {
+            const d = parseInt(match[1]), m = parseInt(match[2]);
+            let y = parseInt(match[3]);
+            if (y < 100) y += 2000;
+            return new Date(y, m - 1, d);
+          }
+          const iso = new Date(str);
+          if (!isNaN(iso.getTime())) return iso;
+          return null;
+        };
+
+        for (const r of records) {
+          const raw = r['LOADING DT'] || r['LOADING DATE'] || r['DATE'];
+          const dObj = parseToDate(raw);
+          if (dObj) {
+            if (!minDate || dObj < minDate) minDate = dObj;
+            if (!maxDate || dObj > maxDate) maxDate = dObj;
+            
+            if (!periodNumStr) {
+              const d = dObj.getDate();
+              if (d >= 1 && d <= 10) periodNumStr = `Period 1`;
+              else if (d >= 11 && d <= 20) periodNumStr = `Period 2`;
+              else periodNumStr = `Period 3`;
+            }
+          }
+        }
+
+        if (!periodNumStr) {
+          const fyEnd = currentFy.split('-')[1];
+          const mm = String(month).padStart(2, '0');
+          periodNumStr = `${mm}/${fyEnd}`;
+        }
+
+        let period = periodNumStr;
+        if (minDate && maxDate) {
+          const formatDDMMYY = (dt) => {
+            const d = String(dt.getDate()).padStart(2, '0');
+            const m = String(dt.getMonth() + 1).padStart(2, '0');
+            const y = String(dt.getFullYear()).slice(-2);
+            return `${d}.${m}.${y}`;
+          };
+          period = `${periodNumStr}\n${formatDDMMYY(minDate)} - ${formatDDMMYY(maxDate)}`;
+        }
+
+        // Fetch cash discount rate to calculate CD
+        const colDiscounts = mongoose.connection.useDb("pump_payment").collection("cash_discounts");
+        let cdAmount = 0;
+        if (pumpName && dObj && !isNaN(dObj.getTime())) {
+          const discountRec = await colDiscounts.find({
+            pumpName: { $regex: new RegExp(`^${String(pumpName).trim().split(/[-\s]/)[0]}`, "i") },
+            effectiveDate: { $lte: dObj }
+          }).sort({ effectiveDate: -1 }).limit(1).toArray();
+          const rate = discountRec.length > 0 ? Number(discountRec[0].discount) || 0 : 0;
+          cdAmount = totalFuelQuantity * rate;
+        }
+
+        await registerCol.insertOne({
+          'SL NO': '',
+          'PUMP NAME': pumpName,
+          'PERIOD': period,
+          'BILL NO': billNumber,
+          'BILL AMOUNT': totalBillingAmount,
+          'LITRE': totalFuelQuantity,
+          'CD': cdAmount,
+          'PAYABLE AMOUNT': totalBillingAmount,
+          'PAYMENT AMOUNT': 0,
+          'REF. NO': '',
+          'DATE': formattedBillDate,
+          'DUE AMOUNT': totalBillingAmount,
+          paymentDateObj: dObj,
+          // Extra mapped fields as requested
+          financialYear: currentFy,
+          month: String(month),
+          billDate: formattedBillDate,
+          vehicleNumbers: detailedRecords.map(r => r.vehicleNo).join(', '),
+          ownerNames: detailedRecords.map(r => r.ownerName).join(', '),
+          driverNames: detailedRecords.map(r => r.driverName).join(', '),
+          invoiceNumbers: detailedRecords.map(r => r.invoiceNo).join(', '),
+          fuelQuantityLiters: totalFuelQuantity,
+          fuelAmount: totalBillingAmount,
+          billingAmount: totalBillingAmount,
+          paymentStatus: 'Pending',
+          remarks: '',
+          createdAt: new Date(),
+          createdBy: req.user.username || req.user.id
+        });
+      }
+    } catch (regErr) {
+      console.error("Error syncing to pump payment register:", regErr);
+      // Not failing the whole request if sync fails, but it's logged
+    }
+
+    try {
+      const { getIO } = require("../socket");
+      getIO().emit('cementUpdates', { action: 'batchPumpBillsGenerated' });
+    } catch (_) { }
+
+    res.json({ success: true, billNumber, recordCount: records.length });
+  } catch (err) {
+    console.error("Error generating batch pump bills:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 module.exports = router;
 module.exports.getRateForDate = getRateForDate;
@@ -543,7 +807,7 @@ router.get("/cash-discounts", auth, async (req, res) => {
   try {
     const col = mongoose.connection.useDb("pump_payment").collection("cash_discounts");
     const history = await col.find({}).sort({ effectiveDate: -1 }).toArray();
-    
+
     // Group by pumpName for easier UI consumption
     const grouped = {};
     const latestDiscounts = {};
@@ -553,7 +817,7 @@ router.get("/cash-discounts", auth, async (req, res) => {
       grouped[p] = pumpHistory;
       latestDiscounts[p] = pumpHistory.length > 0 ? pumpHistory[0].discount : 0;
     });
-    
+
     res.json({ success: true, history: grouped, discounts: latestDiscounts });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -574,7 +838,7 @@ router.put("/cash-discounts", auth, async (req, res) => {
     }
     const numDiscount = parseFloat(discount);
     const date = new Date(effectiveDate);
-    date.setHours(0,0,0,0); // normalize to start of day
+    date.setHours(0, 0, 0, 0); // normalize to start of day
 
     if (isNaN(numDiscount) || numDiscount < 0) {
       return res.status(400).json({ success: false, error: "Discount must be a positive number." });

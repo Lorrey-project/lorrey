@@ -39,7 +39,55 @@ router.get("/", auth, async (req, res) => {
       paymentDateObj: { $gte: start, $lte: end }
     }).toArray();
 
+    const colDiscounts = mongoose.connection.useDb("pump_payment").collection("cash_discounts");
+    for (let r of records) {
+      const pumpName = r['PUMP NAME'];
+      const dObj = r.paymentDateObj || new Date(r['DATE'] || r.createdAt);
+      if (pumpName && dObj && !isNaN(dObj.getTime())) {
+        const discountRec = await colDiscounts.find({
+          pumpName: { $regex: new RegExp(`^${String(pumpName).trim().split(/[-\s]/)[0]}`, "i") },
+          effectiveDate: { $lte: dObj }
+        }).sort({ effectiveDate: -1 }).limit(1).toArray();
+        
+        const rate = discountRec.length > 0 ? Number(discountRec[0].discount) || 0 : 0;
+        const litre = Number(r['LITRE']) || 0;
+        const newCD = litre * rate;
+        
+        if (Number(r['CD']) !== newCD) {
+          r['CD'] = newCD;
+          await getCollection().updateOne({ _id: r._id }, { $set: { CD: newCD } });
+        }
+      }
+    }
+
     res.json({ success: true, records });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET pending bills for a specific month name (e.g., "July")
+router.get("/pending-bills", auth, async (req, res) => {
+  try {
+    const { month } = req.query;
+    if (!month) {
+      return res.status(400).json({ success: false, error: "Month is required" });
+    }
+    
+    const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const monthIndex = MONTHS.indexOf(month);
+    if (monthIndex === -1) {
+      return res.status(400).json({ success: false, error: "Invalid month name" });
+    }
+    const monthStrRegex = String(monthIndex + 1).padStart(2, '0');
+
+    const records = await getCollection().find({
+      "PERIOD": { $regex: "\\." + monthStrRegex + "\\." },
+      "PAYMENT AMOUNT": { $in: [0, "0", "", null] },
+      "REF. NO": { $in: [0, "0", "", null] }
+    }).sort({ _id: 1 }).toArray();
+
+    res.json({ success: true, pendingBills: records });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
