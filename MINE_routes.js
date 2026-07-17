@@ -54,120 +54,6 @@ function normalizeSite(site) {
   return site.trim();
 }
 
-router.post('/validate-deduction', async (req, res) => {
-  try {
-    const { reasons, year, month, trips, currentBillNo } = req.body;
-    
-    if (!reasons || reasons.length === 0) return res.json({ valid: true });
-
-    const cementCol = getCementCol();
-
-    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const monthIdx = MONTHS.findIndex(m => month.startsWith(m)) + 1;
-    let yearRegexPart = '';
-    if (year) {
-      const parts = year.split('-');
-      if (parts.length === 2) {
-        let startY = parseInt(parts[0]);
-        let endY = parseInt(parts[1]);
-        if (startY < 100) startY += 2000;
-        if (endY < 100) endY += 2000;
-        const calendarYear = (monthIdx >= 4) ? startY : endY;
-        const yrStr = String(calendarYear);
-        const yr2 = yrStr.slice(-2);
-        yearRegexPart = `(${yrStr}|${yr2})`;
-      }
-    }
-    const monthStr = String(monthIdx).padStart(2, '0');
-    const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.]${yearRegexPart}`);
-
-    for (const t of trips) {
-      const tripsQuery = {
-        $or: [{ 'VEHICLE NUMBER': t.vehicle }, { 'VEHICLE NO': t.vehicle }],
-        $and: [
-          {
-            $or: [
-              { "LOADING DT": dateRegex },
-              { "LOADING DATE": dateRegex },
-              { "BILL DATE": dateRegex }
-            ]
-          }
-        ]
-      };
-
-      const dbTrips = await cementCol.find(tripsQuery).toArray();
-
-      const parseCustomDate = (dStr) => {
-        if (!dStr) return 0;
-        const parts = String(dStr).split(/[-/\\.]/);
-        if (parts.length >= 3) {
-          const [day, m, y] = parts;
-          let yr = parseInt(y);
-          if (yr < 100) yr += 2000;
-          return new Date(yr, parseInt(m) - 1, parseInt(day)).getTime();
-        }
-        return 0;
-      };
-
-      dbTrips.sort((a, b) => {
-        const dateA = parseCustomDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || 'Unknown');
-        const dateB = parseCustomDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || 'Unknown');
-        return dateA - dateB;
-      });
-
-      let dbTrip = null;
-      if (t.tripNumber && dbTrips[t.tripNumber - 1]) {
-        dbTrip = dbTrips[t.tripNumber - 1];
-      } else {
-        const query = {
-          $and: [
-            { $or: [{ 'VEHICLE NUMBER': t.vehicle }, { 'VEHICLE NO': t.vehicle }] },
-            {
-              $or: [
-                { 'LOADING DT': t.tripDate }, { 'LOADING DATE': t.tripDate },
-                { 'BILL DATE': t.tripDate }, { 'RECEIVING DATE': t.tripDate },
-                { 'DATE': t.tripDate }, { 'INVOICE DATE': t.tripDate }
-              ]
-            }
-          ]
-        };
-        dbTrip = await cementCol.findOne(query);
-      }
-
-      if (dbTrip) {
-        for (const reason of reasons) {
-          let projectedCol = '';
-          if (reason === 'Damage / Shortage') projectedCol = 'SHORTAGE (AMOUNT)';
-          else if (reason === 'GPS Trip Charges') projectedCol = 'GPS Trip Charges';
-          else if (reason === 'GPS Deviation Charges') projectedCol = 'GPS Deviation Charges';
-          else if (reason === 'Device Installation Charges') projectedCol = 'Give GPS DEVICE';
-          else if (reason === 'RFID Deduction / Charges') projectedCol = 'Give RFID TAG';
-          else if (reason === 'Suspense') projectedCol = 'Suspense';
-
-          if (!projectedCol) continue;
-
-          const override = dbTrip.deductionsOverride && dbTrip.deductionsOverride[reason];
-          if (override) {
-            if (override.billRegisterRef !== currentBillNo) {
-              return res.json({ valid: false, message: `Trip ${t.tripNumber || ''} (${t.vehicle}) already has a deduction for "${reason}" in another invoice (${override.billRegisterRef}).` });
-            }
-          } else {
-            const val = parseFloat(String(dbTrip[projectedCol] || '0').replace(/,/g, '')) || 0;
-            if (val > 0) {
-              return res.json({ valid: false, message: `Trip ${t.tripNumber || ''} (${t.vehicle}) already has a manual deduction for "${reason}" in the Cement Register.` });
-            }
-          }
-        }
-      }
-    }
-
-    return res.json({ valid: true });
-  } catch (err) {
-    console.error("Validation error:", err);
-    res.status(500).json({ valid: false, message: "Server error validating deduction." });
-  }
-});
-
 router.get('/data', async (req, res) => {
   try {
     const { fy } = req.query;
@@ -205,15 +91,23 @@ router.get('/data', async (req, res) => {
       _id: 0
     };
 
+    console.log('pending-bills party:', party);
     const [allCement, rowOverrides, payments] = await Promise.all([
       getCementCol().find({}, { projection: CEMENT_PROJECTION }).toArray(),
       FinancialYearRow.find({}).lean(),
       FinancialYearPayment.find({}).lean()
     ]);
 
-    // Filter cement entries by financial year based strictly on Bill Date
+    // Filter cement entries by financial year
     const filteredCement = allCement.filter(row => {
       if (String(row['CHALLAN STATUS']).toUpperCase().trim() !== 'BILLED') return false;
+
+      const invNo = row['BILL NO'] || row['INVOICE NO'];
+      const uInvNo = row['UNLOADING BILL NO'];
+
+      const hasShortCode = (invNo && String(invNo).includes(shortCode)) || (uInvNo && String(uInvNo).includes(shortCode));
+
+      if (hasShortCode) return true;
 
       const fInvDate = row['BILL DATE'] || row['LOADING DT'] || row['LOADING DATE'] || '';
       const uInvDate = row['UNLOADING BILL DATE'] || '';
@@ -224,12 +118,17 @@ router.get('/data', async (req, res) => {
         if (dObj) {
           const y = dObj.getFullYear();
           const m = dObj.getMonth() + 1;
-          // Financial year: April 1 to March 31
           if (m >= 4 && y === startYear) return true;
           if (m <= 3 && y === startYear + 1) return true;
         }
       }
       return false;
+    });
+
+    // Filter payments by financial year (checking if any associated bill matches shortCode)
+    const filteredPayments = payments.filter(p => {
+      if (!p.billNos || p.billNos.length === 0) return false;
+      return p.billNos.some(b => String(b).includes(shortCode));
     });
 
     // ── Aggregate cement rows by invoice number AND site ──────────────
@@ -245,19 +144,6 @@ router.get('/data', async (req, res) => {
       const prefix = rawSite === 'NVCL' ? 'NVCL/' : 'DAC/';
       const cleanInvNo = invNo.replace(/^(DAC|NVCL)\//i, '');
       const finalInvNo = `${prefix}${cleanInvNo}`;
-
-      // Strictly check if THIS specific bill's date falls in the financial year
-      if (startYear) {
-        let matchYear = false;
-        const dObj = parseDate(invDate);
-        if (dObj) {
-          const y = dObj.getFullYear();
-          const m = dObj.getMonth() + 1;
-          if (m >= 4 && y === startYear) matchYear = true;
-          if (m <= 3 && y === startYear + 1) matchYear = true;
-        }
-        if (!matchYear) return;
-      }
 
       if (!aggregated[finalInvNo]) {
         let monthStr = '';
@@ -335,7 +221,6 @@ router.get('/data', async (req, res) => {
         site: normalizeSite(ov.editedSite ?? r.site),
         amount: ov.editedAmount ?? r.amount,
         debitReason: ov.debitReason ?? 'None',
-        debitReasons: ov.debitReasons || (ov.debitReason && ov.debitReason !== 'None' ? [ov.debitReason] : []),
         // Damage / Shortage modal fields
         damageYear: ov.damageYear,
         damageMonth: ov.damageMonth,
@@ -360,8 +245,8 @@ router.get('/data', async (req, res) => {
       if (processedBillNos.has(ov.billNo)) continue;
       if (ov.hidden) continue; // soft-deleted
 
-      // Filter manual rows by financial year strictly based on Bill Date
-      if (startYear) {
+      // Filter manual rows by financial year if a filter is active
+      if (shortCode) {
         let matchYear = false;
         const invDate = ov.editedInvoiceDate || '';
         const dObj = parseDate(invDate);
@@ -370,6 +255,8 @@ router.get('/data', async (req, res) => {
           const m = dObj.getMonth() + 1;
           if (m >= 4 && y === startYear) matchYear = true;
           if (m <= 3 && y === startYear + 1) matchYear = true;
+        } else if (ov.billNo.includes(shortCode)) {
+          matchYear = true;
         }
         if (!matchYear) continue; // Skip if it doesn't match the selected financial year
       }
@@ -383,7 +270,6 @@ router.get('/data', async (req, res) => {
         amount: ov.editedAmount || 0,
         billType: ov.billType ?? 'FREIGHT',
         debitReason: ov.debitReason ?? 'None',
-        debitReasons: ov.debitReasons || (ov.debitReason && ov.debitReason !== 'None' ? [ov.debitReason] : []),
         damageYear: ov.damageYear,
         damageMonth: ov.damageMonth,
         damageVehicles: ov.damageVehicles || [],
@@ -416,13 +302,6 @@ router.get('/data', async (req, res) => {
 
     // 5. Final sort by slNo
     finalRows.sort((a, b) => a.slNo - b.slNo);
-
-    // 6. Filter payments based on whether they belong to the rows generated for this FY
-    const finalInvNos = new Set(finalRows.map(r => String(r.invoiceNumber)));
-    const filteredPayments = payments.filter(p => {
-      if (!p.billNos || p.billNos.length === 0) return false;
-      return p.billNos.some(b => finalInvNos.has(String(b)));
-    });
 
     res.json({ rows: finalRows, payments: filteredPayments });
   } catch (err) {
@@ -829,7 +708,7 @@ router.post('/save-row', async (req, res) => {
   try {
     const {
       billNo, billType, editedInvoiceDate, editedInvoiceNumber, editedMonth,
-      editedSite, editedAmount, debitReason, debitReasons, damageYear, damageMonth,
+      editedSite, editedAmount, debitReason, damageYear, damageMonth,
       damageVehicles, damageTrips, damageVehicleAmounts, slNo
     } = req.body;
     let updateObj = {};
@@ -853,7 +732,6 @@ router.post('/save-row', async (req, res) => {
     }
 
     if (debitReason !== undefined) updateObj.debitReason = debitReason;
-    if (debitReasons !== undefined) updateObj.debitReasons = debitReasons;
     if (damageYear !== undefined) updateObj.damageYear = damageYear;
     if (damageMonth !== undefined) updateObj.damageMonth = damageMonth;
     if (damageVehicles !== undefined) updateObj.damageVehicles = damageVehicles;
@@ -868,12 +746,11 @@ router.post('/save-row', async (req, res) => {
     );
 
     // --- Cement Register Deductions Override Logic ---
-    if ((debitReason || (debitReasons && debitReasons.length > 0)) && damageTrips && damageVehicleAmounts) {
-      const reasonsToProcess = debitReasons && debitReasons.length > 0 ? debitReasons : (debitReason && debitReason !== 'None' ? [debitReason] : []);
+    if (debitReason && damageTrips && damageVehicleAmounts) {
       const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
 
       // 1. Clear any existing overrides in cement register for this bill across all possible reasons to avoid stale data
-      const ALL_REASONS = ['Damage / Shortage', 'GPS Trip Charges', 'GPS Deviation Charges', 'Device Installation Charges', 'RFID Deduction / Charges', 'Suspense'];
+      const ALL_REASONS = ['Damage / Shortage', 'GPS Trip Charges', 'GPS Deviation Charges', 'Device Installation Charges', 'RFID Deduction / Charges', 'Substance'];
       for (const reason of ALL_REASONS) {
         const overridePath = `deductionsOverride.${reason}`;
         await cementCol.updateMany(
@@ -882,13 +759,24 @@ router.post('/save-row', async (req, res) => {
         );
       }
 
-      if (reasonsToProcess.length > 0) {
+      // Determine projected column based on debit reason
+      let projectedCol = '';
+      if (debitReason === 'Damage / Shortage') projectedCol = 'SHORTAGE (AMOUNT)';
+      else if (debitReason === 'GPS Trip Charges') projectedCol = 'GPS Monitoring Charge';
+      else if (debitReason === 'GPS Deviation Charges') projectedCol = 'GPS Deviation Charges';
+      else if (debitReason === 'Device Installation Charges') projectedCol = 'Give GPS DEVICE';
+      else if (debitReason === 'RFID Deduction / Charges') projectedCol = 'Give RFID TAG';
+      else if (debitReason === 'Substance') projectedCol = 'Others deduction';
+
+      if (projectedCol) {
         // 2. Set new overrides for the selected trips
         for (const t of damageTrips) {
+          const amountVal = damageVehicleAmounts[t.invoiceNo];
+          const manualAmt = parseFloat(String(amountVal).replace(/,/g, '')) || 0;
 
           // Find the exact trip in the cement register using Month, FY, Vehicle, and Trip Number
-          const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const monthIdx = MONTHS.findIndex(m => damageMonth.startsWith(m)) + 1;
+          const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+          const monthIdx = MONTHS.indexOf(damageMonth) + 1;
           let yearRegexPart = '';
           if (damageYear) {
             const parts = damageYear.split('-');
@@ -944,63 +832,40 @@ router.post('/save-row', async (req, res) => {
             dbTrip = dbTrips[t.tripNumber - 1];
           } else {
             // Fallback
-            // Fallback
             const query = {
-              $and: [
-                {
-                  $or: [
-                    { 'VEHICLE NUMBER': t.vehicle },
-                    { 'VEHICLE NO': t.vehicle }
-                  ]
-                },
-                {
-                  $or: [
-                    { 'LOADING DT': t.tripDate },
-                    { 'LOADING DATE': t.tripDate },
-                    { 'BILL DATE': t.tripDate },
-                    { 'RECEIVING DATE': t.tripDate },
-                    { 'DATE': t.tripDate },
-                    { 'INVOICE DATE': t.tripDate }
-                  ]
-                }
+              $or: [
+                { 'VEHICLE NUMBER': t.vehicle },
+                { 'VEHICLE NO': t.vehicle }
+              ],
+              $or: [
+                { 'LOADING DT': t.tripDate },
+                { 'LOADING DATE': t.tripDate },
+                { 'BILL DATE': t.tripDate },
+                { 'RECEIVING DATE': t.tripDate },
+                { 'DATE': t.tripDate },
+                { 'INVOICE DATE': t.tripDate }
               ]
             };
             dbTrip = await cementCol.findOne(query);
           }
           if (dbTrip) {
-            for (const reason of reasonsToProcess) {
-              const amountVal = damageVehicleAmounts[t.invoiceNo] && typeof damageVehicleAmounts[t.invoiceNo] === 'object'
-                ? damageVehicleAmounts[t.invoiceNo][reason]
-                : damageVehicleAmounts[t.invoiceNo]; // Backwards compatibility if it's a flat object
-              
-              const manualAmt = parseFloat(String(amountVal || '0').replace(/,/g, '')) || 0;
-              
-              let projectedCol = '';
-              if (reason === 'Damage / Shortage') projectedCol = 'SHORTAGE (AMOUNT)';
-              else if (reason === 'GPS Trip Charges') projectedCol = 'GPS Trip Charges';
-              else if (reason === 'GPS Deviation Charges') projectedCol = 'GPS Deviation Charges';
-              else if (reason === 'Device Installation Charges') projectedCol = 'Give GPS DEVICE';
-              else if (reason === 'RFID Deduction / Charges') projectedCol = 'Give RFID TAG';
-              else if (reason === 'Suspense') projectedCol = 'Suspense';
+            const projVal = parseFloat(String(dbTrip[projectedCol] || '0').replace(/,/g, '')) || 0;
 
-              if (projectedCol) {
-                const projVal = parseFloat(String(dbTrip[projectedCol] || '0').replace(/,/g, '')) || 0;
-
-                const overridePath = `deductionsOverride.${reason}`;
-                const updateDoc = {
-                  $set: {
-                    [overridePath]: {
-                      projected: projVal,
-                      actual: manualAmt,
-                      billRegisterRef: billNo,
-                      timestamp: new Date()
-                    },
-                    [projectedCol]: manualAmt,
-                    'DEDICATED': 'Actual'
-                  }
-                };
-                await cementCol.updateOne({ _id: dbTrip._id }, updateDoc);
-              }
+            if (true) {
+              const overridePath = `deductionsOverride.${debitReason}`;
+              const updateDoc = {
+                $set: {
+                  [overridePath]: {
+                    projected: projVal,
+                    actual: manualAmt,
+                    billRegisterRef: billNo,
+                    timestamp: new Date()
+                  },
+                  [projectedCol]: manualAmt,
+                  'DEDICATED': 'Actual'
+                }
+              };
+              await cementCol.updateOne({ _id: dbTrip._id }, updateDoc);
             }
           }
         }

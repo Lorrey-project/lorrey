@@ -134,6 +134,8 @@ const RAW_EXCEL_HEADER_MAP = {
   'gps monitoring charge': 'GPS Monitoring Charge', 'gps charge': 'GPS Monitoring Charge', 'gps': 'GPS Monitoring Charge', 'gps monitaring charge': 'GPS Monitoring Charge',
   'gps device': 'Give GPS DEVICE',
   'gps deviation charges': 'GPS Deviation Charges', 'gps deviation': 'GPS Deviation Charges',
+  'gps trip charges': 'GPS Trip Charges', 'gps trip': 'GPS Trip Charges',
+  'suspense': 'Suspense',
   'rfid tag': 'Give RFID TAG', 'rfid': 'Give RFID TAG',
 
   'fastag': 'FASTAG', 'fas tag': 'FASTAG',
@@ -405,6 +407,8 @@ export default function CementRegister({ onBack }) {
   const [bulkBillInput, setBulkBillInput] = useState({ billDate: '', billType: '' });
   const [activeRowId, setActiveRowId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterBillingStatus, setFilterBillingStatus] = useState('All');
+  const [filterChallanStatus, setFilterChallanStatus] = useState('All');
 
 
 
@@ -496,10 +500,21 @@ export default function CementRegister({ onBack }) {
   }, [entries, unsavedImportRows, localData]);
 
   const filteredRows = useMemo(() => {
-    if (!searchQuery) return computedRows;
+    let result = computedRows;
+    if (filterBillingStatus !== 'All') {
+      if (filterBillingStatus === 'Billed') result = result.filter(r => r['Billing Completed'] === 'Yes');
+      if (filterBillingStatus === 'Pending') result = result.filter(r => r['Billing Completed'] !== 'Yes');
+    }
+    if (filterChallanStatus !== 'All') {
+      if (filterChallanStatus === 'Stamped') result = result.filter(r => String(r['CHALLAN STATUS']).toUpperCase() === 'STAMP');
+      if (filterChallanStatus === 'Non-Stamped') result = result.filter(r => String(r['CHALLAN STATUS']).toUpperCase() === 'NON STAMP');
+      if (filterChallanStatus === 'Empty') result = result.filter(r => !r['CHALLAN STATUS']);
+    }
+
+    if (!searchQuery) return result;
     const q = searchQuery.toLowerCase();
-    return computedRows.filter(row => Object.values(row).some(val => String(val || '').toLowerCase().includes(q)));
-  }, [computedRows, searchQuery]);
+    return result.filter(row => Object.values(row).some(val => String(val || '').toLowerCase().includes(q)));
+  }, [computedRows, searchQuery, filterBillingStatus, filterChallanStatus]);
 
   const monthlyTotals = useMemo(() => {
     const totals = {};
@@ -512,6 +527,9 @@ export default function CementRegister({ onBack }) {
     });
     return totals;
   }, [filteredRows]);
+
+
+
   const unbilledRows = computedRows.filter(r => String(r['CHALLAN STATUS']).toUpperCase().trim() !== 'BILLED');
   const allSelected = unbilledRows.length > 0 && selectedIds.size === unbilledRows.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -980,199 +998,191 @@ export default function CementRegister({ onBack }) {
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
 
-      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
+      {/* ── Premium Header ───────────────────────────────────────────── */}
       <Box sx={{
-        px: { xs: 1.5, md: 3 }, py: 1.5,
+        px: { xs: 2, md: 4 }, py: 2,
+        background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.03)', flexShrink: 0,
-        gap: 2, flexWrap: 'wrap'
+        flexWrap: 'wrap', gap: 2, borderBottom: '1px solid rgba(255,255,255,0.1)',
       }}>
         <Box display="flex" alignItems="center" gap={2}>
-          <IconButton onClick={onBack} sx={{ bgcolor: '#f8fafc', '&:hover': { bgcolor: '#f1f5f9' }, p: 1 }}>
-            <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
+          <IconButton onClick={onBack} sx={{ bgcolor: 'rgba(255,255,255,0.05)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }, p: 1, borderRadius: '12px' }}>
+            <ArrowBackIcon fontSize="small" sx={{ color: '#f8fafc' }} />
           </IconButton>
           <Box>
-            <Box display="flex" alignItems="center" gap={1.5} flexWrap="wrap">
-              <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
-                Cement Register
+            <Typography variant="h5" fontWeight={800} sx={{ color: '#fff', letterSpacing: '-0.5px' }}>
+              Cement Register
+            </Typography>
+            <Box display="flex" alignItems="center" gap={1.5} mt={0.5}>
+              <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                Total Records: <span style={{ color: '#e2e8f0' }}>{filteredRows.length}</span>
               </Typography>
-
-              {/* Month & Year Selectors */}
-              <Box display="flex" alignItems="center" gap={1}>
-                <SearchableSelect
-                  value={selectedMonth}
-                  onChange={(e) => {
-                    setSelectedMonth(Number(e.target.value));
-                    setUnsavedImportRows([]); // Clear unsaved imports on period change
-                  }}
-                  size="small"
-                  sx={{
-                    borderRadius: '8px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    color: '#0f172a',
-                    bgcolor: '#f8fafc',
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#e2e8f0',
-                    },
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#cbd5e1',
-                    },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#7c3aed',
-                    },
-                    minWidth: 130,
-                  }}
-                >
-                  {MONTHS.map((mo, idx) => (
-                    <MenuItem key={mo} value={idx + 1} sx={{ fontSize: '11px', fontWeight: 600 }}>
-                      {mo}
-                    </MenuItem>
-                  ))}
-                </SearchableSelect>
-
-                <SearchableSelect
-                  value={selectedYear}
-                  onChange={(e) => {
-                    setSelectedYear(Number(e.target.value));
-                    setUnsavedImportRows([]); // Clear unsaved imports on period change
-                  }}
-                  size="small"
-                  sx={{
-                    borderRadius: '8px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    color: '#0f172a',
-                    bgcolor: '#f8fafc',
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#e2e8f0',
-                    },
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#cbd5e1',
-                    },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#7c3aed',
-                    },
-                    minWidth: 160,
-                  }}
-                >
-                  {years.map(yr => (
-                    <MenuItem key={yr} value={yr} sx={{ fontSize: '11px', fontWeight: 600 }}>
-                      {yr}-{yr + 1}
-                    </MenuItem>
-                  ))}
-                </SearchableSelect>
-              </Box>
-
-              {/* Search Bar */}
-              <Box display="flex" alignItems="center" sx={{
-                bgcolor: '#f1f5f9', borderRadius: '8px', px: 1.5, py: 0.5, ml: 1, border: '1px solid #e2e8f0',
-                '&:focus-within': { borderColor: '#7c3aed', boxShadow: '0 0 0 1px #7c3aed' }, width: 220
-              }}>
-                <input
-                  type="text"
-                  placeholder="Search Vehicle, Inv, GCN..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', width: '100%', color: '#0f172a' }}
-                />
-                {searchQuery && (
-                  <div onClick={() => setSearchQuery('')} style={{ cursor: 'pointer', color: '#94a3b8', fontSize: '14px', marginLeft: '4px', fontWeight: 'bold' }}>
-                    ✕
-                  </div>
-                )}
-              </Box>
-
-              {searchQuery && !computedRows.some(r => Object.values(r).some(v => String(v || '').toLowerCase().includes(searchQuery.toLowerCase()))) && (
-                <Typography variant="caption" sx={{ color: '#dc2626', fontWeight: 600, ml: 1 }}>
-                  No matching records found
-                </Typography>
-              )}
-
-              {/* Status Chip */}
-              {getStatusChip()}
-            </Box>
-            <Box display="flex" gap={1} mt={0.5} alignItems="center">
-              {dirtyCount > 0 && (
-                <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' }} />
-              )}
-              {selectedIds.size > 0 && (
-                <Chip label={`${selectedIds.size} selected`} size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' }} />
-              )}
-              {dirtyCount === 0 && selectedIds.size === 0 && (
-                <Typography variant="caption" color="text.secondary" fontWeight={500}>Central Database</Typography>
-              )}
+              <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: '#475569' }} />
+              <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                Period: <span style={{ color: '#e2e8f0' }}>{MONTHS[selectedMonth - 1]} {selectedYear}</span>
+              </Typography>
             </Box>
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', ml: 'auto' }}>
+        <Box display="flex" alignItems="center" gap={1.5}>
+          <SearchableSelect
+            value={selectedMonth}
+            onChange={(e) => {
+              setSelectedMonth(Number(e.target.value));
+              setUnsavedImportRows([]);
+            }}
+            size="small"
+            sx={{
+              borderRadius: '10px', fontSize: '12px', fontWeight: 700,
+              color: '#fff', bgcolor: 'rgba(255,255,255,0.05)',
+              '& .MuiInputBase-input': { color: '#fff' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#a78bfa' },
+              '.MuiSvgIcon-root': { color: '#94a3b8' },
+              minWidth: 120,
+            }}
+          >
+            {MONTHS.map((mo, idx) => (
+              <MenuItem key={mo} value={idx + 1} sx={{ fontSize: '12px', fontWeight: 600 }}>{mo}</MenuItem>
+            ))}
+          </SearchableSelect>
+
+          <SearchableSelect
+            value={selectedYear}
+            onChange={(e) => {
+              setSelectedYear(Number(e.target.value));
+              setUnsavedImportRows([]);
+            }}
+            size="small"
+            sx={{
+              borderRadius: '10px', fontSize: '12px', fontWeight: 700,
+              color: '#fff', bgcolor: 'rgba(255,255,255,0.05)',
+              '& .MuiInputBase-input': { color: '#fff' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#a78bfa' },
+              '.MuiSvgIcon-root': { color: '#94a3b8' },
+              minWidth: 140,
+            }}
+          >
+            {years.map(yr => (
+              <MenuItem key={yr} value={yr} sx={{ fontSize: '12px', fontWeight: 600 }}>{yr}-{yr + 1}</MenuItem>
+            ))}
+          </SearchableSelect>
+        </Box>
+      </Box>
 
 
+
+      {/* ── Toolbar & Quick Filters ────────────────────────────────────── */}
+      <Box sx={{
+        px: { xs: 2, md: 4 }, py: 2,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0',
+        gap: 2, flexWrap: 'wrap'
+      }}>
+        {/* Filters Left Side */}
+        <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+          <Box display="flex" alignItems="center" sx={{
+            bgcolor: '#f1f5f9', borderRadius: '12px', px: 2, py: 1, border: '1px solid #e2e8f0',
+            '&:focus-within': { borderColor: '#7c3aed', boxShadow: '0 0 0 2px rgba(124,58,237,0.1)' }, width: 260
+          }}>
+            <span style={{ marginRight: 8, opacity: 0.5 }}>🔍</span>
+            <input
+              type="text"
+              placeholder="Search Vehicle, Inv, GCN..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', width: '100%', color: '#0f172a', fontWeight: 500 }}
+            />
+            {searchQuery && (
+              <div onClick={() => setSearchQuery('')} style={{ cursor: 'pointer', color: '#94a3b8', fontSize: '14px', marginLeft: '4px', fontWeight: 'bold' }}>✕</div>
+            )}
+          </Box>
+
+          <Box display="flex" alignItems="center" gap={1}>
+            <SearchableSelect
+              value={filterBillingStatus}
+              onChange={(e) => setFilterBillingStatus(e.target.value)}
+              size="small"
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: '#f8fafc', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
+            >
+              <MenuItem value="All" sx={{ fontSize: '12px' }}>All Billing Status</MenuItem>
+              <MenuItem value="Billed" sx={{ fontSize: '12px' }}>Billed Only</MenuItem>
+              <MenuItem value="Pending" sx={{ fontSize: '12px' }}>Pending Only</MenuItem>
+            </SearchableSelect>
+
+            <SearchableSelect
+              value={filterChallanStatus}
+              onChange={(e) => setFilterChallanStatus(e.target.value)}
+              size="small"
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: '#f8fafc', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
+            >
+              <MenuItem value="All" sx={{ fontSize: '12px' }}>All Challan Status</MenuItem>
+              <MenuItem value="Stamped" sx={{ fontSize: '12px' }}>Stamped Only</MenuItem>
+              <MenuItem value="Non-Stamped" sx={{ fontSize: '12px' }}>Non-Stamped Only</MenuItem>
+              <MenuItem value="Empty" sx={{ fontSize: '12px' }}>Empty Only</MenuItem>
+            </SearchableSelect>
+          </Box>
+          {getStatusChip()}
+          <Box display="flex" gap={1} alignItems="center">
+            {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700, bgcolor: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' }} />}
+            {selectedIds.size > 0 && <Chip label={`${selectedIds.size} selected`} size="small" sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700, bgcolor: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' }} />}
+          </Box>
+        </Box>
+
+        {/* Actions Right Side */}
+        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
           {selectedIds.size > 0 && (
             <Button size="small" variant="outlined"
-              onClick={() => {
-                setIsBillingModalOpen(true);
-              }}
+              onClick={() => setIsBillingModalOpen(true)}
               sx={{
                 fontWeight: 700, borderRadius: '10px', px: 2, fontSize: '0.8rem',
-                color: '#334155', borderColor: '#cbd5e1',
+                color: '#4f46e5', borderColor: '#c7d2fe', bgcolor: '#eef2ff',
                 textTransform: 'none',
-                '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' },
+                '&:hover': { bgcolor: '#e0e7ff', borderColor: '#a5b4fc' },
               }}>
               Run Batch Billing
             </Button>
           )}
 
-          <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
-
           {selectedIds.size > 0 && (
             <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }} />}
               onClick={() => setConfirmDel(true)}
               sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', boxShadow: 'none' }}>
-              Delete Selected
+              Delete
             </Button>
           )}
 
+          <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
+
           <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
-            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>Export XLS</Button>
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+            Export
+          </Button>
 
           {saveCompleted && (
             <Button
-              size="small"
-              variant="contained"
-              startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
+              size="small" variant="outlined" startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
               onClick={() => { setShowExcelWizard(true); setWizardStep(1); setWizardPreview(null); setValidationResult({ errors: [], warnings: [] }); setAcceptWarnings(false); }}
-              sx={{
-                fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem',
-                textTransform: 'none', boxShadow: 'none',
-                background: 'linear-gradient(135deg,#7c3aed,#6d28d9)',
-                color: '#fff',
-                '&:hover': { background: 'linear-gradient(135deg,#6d28d9,#5b21b6)', boxShadow: '0 4px 14px rgba(124,58,237,0.35)' },
-              }}
+              sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', color: '#6d28d9', borderColor: '#c4b5fd', '&:hover': { bgcolor: '#f5f3ff', borderColor: '#a78bfa' } }}
             >
               Upload New
             </Button>
           )}
 
           <Button
-            size="small"
-            variant="contained"
-            startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
+            size="small" variant="contained" startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />}
             onClick={() => { setShowExcelWizard(true); setWizardStep(1); setWizardPreview(null); setValidationResult({ errors: [], warnings: [] }); setAcceptWarnings(false); }}
             disabled={saveCompleted}
             sx={{
-              fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem',
-              textTransform: 'none', boxShadow: 'none',
+              fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', boxShadow: 'none',
               background: saveCompleted ? '#f1f5f9' : 'linear-gradient(135deg,#7c3aed,#6d28d9)',
               color: saveCompleted ? '#94a3b8' : '#fff',
-              border: saveCompleted ? '1px solid #e2e8f0' : 'none',
-              '&:hover': {
-                background: saveCompleted ? '#f1f5f9' : 'linear-gradient(135deg,#6d28d9,#5b21b6)',
-                boxShadow: saveCompleted ? 'none' : '0 4px 14px rgba(124,58,237,0.35)'
-              },
-              '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' },
+              '&:hover': { background: saveCompleted ? '#f1f5f9' : 'linear-gradient(135deg,#6d28d9,#5b21b6)' },
+              '&:disabled': { background: '#f1f5f9', color: '#94a3b8' },
             }}
           >
             Import Excel
@@ -1184,13 +1194,12 @@ export default function CementRegister({ onBack }) {
             onClick={handleSave} disabled={(dirtyCount === 0 && unsavedImportRows.length === 0) || saving}
             sx={{
               fontWeight: 700, borderRadius: '10px', px: 2.5, fontSize: '0.85rem', textTransform: 'none',
-              background: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#10b981' : '#f1f5f9',
+              background: (dirtyCount > 0 || unsavedImportRows.length > 0) ? 'linear-gradient(135deg,#10b981,#059669)' : '#f1f5f9',
               color: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#fff' : '#94a3b8',
               boxShadow: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'none',
-              '&:hover': { background: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#059669' : '#f1f5f9' },
-              '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' },
+              '&:hover': { background: (dirtyCount > 0 || unsavedImportRows.length > 0) ? 'linear-gradient(135deg,#059669,#047857)' : '#f1f5f9' },
             }}>
-            {saving ? 'Saving…' : `Save Changes${(dirtyCount + unsavedImportRows.length) > 0 ? ` (${dirtyCount + unsavedImportRows.length})` : ''}`}
+            {saving ? 'Saving…' : `Save${(dirtyCount + unsavedImportRows.length) > 0 ? ` (${dirtyCount + unsavedImportRows.length})` : ''}`}
           </Button>
 
           <Tooltip title="Refresh Data">
@@ -1202,7 +1211,7 @@ export default function CementRegister({ onBack }) {
       </Box>
 
       {/* ── Group header row ─────────────────────────────────────────────── */}
-      <Box sx={{ overflow: 'auto', flex: 1 }}>
+      <Box sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: '#fff' }}>
         <table style={{
           borderCollapse: 'collapse', minWidth: '100%',
           tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
@@ -1219,10 +1228,10 @@ export default function CementRegister({ onBack }) {
               {/* Select-all checkbox */}
               <th style={{
                 position: 'sticky', top: 0, zIndex: 3, width: 40, minWidth: 40,
-                background: 'linear-gradient(135deg,#1e293b,#0f172a)',
-                textAlign: 'center', padding: '7px 4px',
-                borderRight: '1px solid rgba(255,255,255,0.12)',
-                borderBottom: '2px solid rgba(255,255,255,0.2)',
+                background: '#0f172a',
+                textAlign: 'center', padding: '10px 4px',
+                borderRight: '1px solid rgba(255,255,255,0.1)',
+                borderBottom: '1px solid rgba(255,255,255,0.2)',
               }}>
                 <input
                   type="checkbox"
@@ -1233,31 +1242,31 @@ export default function CementRegister({ onBack }) {
                 />
               </th>
               {VISIBLE_COLS.map((col) => {
-                const gc = GROUP_COLORS[col.group] || GROUP_COLORS.id;
+                // Refined premium header colors
                 const typeStyle = col.type === 'auto'
-                  ? { background: 'linear-gradient(135deg,#312e81,#1e1b4b)', color: '#c7d2fe' }
+                  ? { background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', color: '#e2e8f0' } // Slate
                   : col.type === 'calc'
-                    ? { background: 'linear-gradient(135deg,#065f46,#047857)', color: '#a7f3d0' }
+                    ? { background: 'linear-gradient(180deg, #064e3b 0%, #022c22 100%)', color: '#a7f3d0' } // Emerald
                     : col.type === 'dropdown'
-                      ? { background: 'linear-gradient(135deg,#7c2d12,#9a3412)', color: '#fed7aa' }
-                      : { background: 'linear-gradient(135deg,#1e40af,#1d4ed8)', color: '#bfdbfe' };
+                      ? { background: 'linear-gradient(180deg, #7c2d12 0%, #431407 100%)', color: '#fed7aa' } // Orange
+                      : { background: 'linear-gradient(180deg, #1e3a8a 0%, #172554 100%)', color: '#bfdbfe' }; // Blue (Manual)
                 return (
                   <th key={col.key}
                     title={col.hint || col.label}
                     style={{
                       position: 'sticky', top: 0, zIndex: 2,
                       ...typeStyle,
-                      padding: '7px 5px',
+                      padding: '10px 6px',
                       textAlign: 'center',
-                      fontSize: '9.5px', fontWeight: 700,
-                      letterSpacing: '0.3px',
-                      whiteSpace: 'pre-line', lineHeight: 1.3,
-                      borderRight: '1px solid rgba(255,255,255,0.12)',
-                      borderBottom: '2px solid rgba(255,255,255,0.2)',
+                      fontSize: '10px', fontWeight: 700,
+                      letterSpacing: '0.5px',
+                      whiteSpace: 'pre-line', lineHeight: 1.2,
+                      borderRight: '1px solid rgba(255,255,255,0.05)',
+                      borderBottom: '1px solid rgba(255,255,255,0.1)',
                     }}>
                     {col.label}
-                    {col.type === 'auto' && <div style={{ fontSize: '7px', opacity: 0.7, marginTop: 2 }}>🔒 AUTO</div>}
-                    {col.type === 'calc' && <div style={{ fontSize: '7px', opacity: 0.8, marginTop: 2 }}>= CALC</div>}
+                    {col.type === 'auto' && <div style={{ fontSize: '7px', opacity: 0.6, marginTop: 4, letterSpacing: '1px' }}>AUTO</div>}
+                    {col.type === 'calc' && <div style={{ fontSize: '7px', opacity: 0.7, marginTop: 4, letterSpacing: '1px' }}>CALC</div>}
                   </th>
                 );
               })}
@@ -1285,18 +1294,19 @@ export default function CementRegister({ onBack }) {
 
               return (
                 <tr key={row._id} style={{
-                  background: isLocked ? '#e2e8f0' : isMatch
-                    ? '#f1f5f9' // Light grey background for highlighted search results
+                  background: isLocked ? '#f8fafc' : isMatch
+                    ? '#f1f5f9'
                     : isSelected
-                      ? 'rgba(124,58,237,0.08)'
+                      ? '#f5f3ff'
                       : row.isUnsavedImport
-                        ? '#f3e8ff'
+                        ? '#fdf4ff'
                         : hasDraft ? '#fffbeb'
-                          : ri % 2 === 0 ? '#fff' : '#f8fafc',
+                          : ri % 2 === 0 ? '#ffffff' : '#fafafa',
                   outline: isMatch ? '2px solid #cbd5e1' : (isSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'),
-                  transition: 'background 0.2s',
-                  opacity: isLocked ? 0.6 : 1,
-                }}>
+                  transition: 'background 0.2s, opacity 0.2s',
+                  opacity: isLocked ? 0.85 : 1,
+                  boxShadow: isLocked ? 'inset 0 0 0 9999px rgba(226,232,240,0.3)' : 'none'
+                }} className="table-row-hover">
                   {/* Row checkbox */}
                   <td style={{
                     width: 40, minWidth: 40, textAlign: 'center',
@@ -1934,13 +1944,13 @@ export default function CementRegister({ onBack }) {
 // ─── Cell Renderer: decides how to render based on column type ────────────────
 function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSaved }) {
   const cellStyle = {
-    padding: '4px 5px',
+    padding: '6px 8px',
     border: '1px solid #e2e8f0',
     fontSize: '11px',
     color: '#1e293b',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+    lineHeight: 1.4,
     borderRight: isDirty ? '2px solid #f59e0b' : '1px solid #e2e8f0',
     background: isDirty ? 'rgba(254,243,199,0.6)' : 'inherit',
     width: col.width,
@@ -1953,15 +1963,15 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
   // ── Auto / Calc (may have hasAttach for Site Cash or Bill PDF) ────────────────
   if (col.type === 'auto' || col.type === 'calc') {
     const bg = cellColor ? cellColor : (col.type === 'auto'
-      ? (isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(237,233,254,0.18)')
-      : (isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(209,250,229,0.25)'));
+      ? (isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(241,245,249,0.7)') // Premium Light Sky Blue/Slate for Auto
+      : (isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(220,252,231,0.5)')); // Premium Light Emerald for Calc
 
     if (col.hasAttach === 'bill_pdf_auto') {
       const attachUrl = row?.['BILL_PDF_URL'];
       return (
         <td style={{ ...cellStyle, background: bg, padding: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', padding: '4px 5px', color: '#1e293b' }}>{value || ''}</span>
+          <div style={{ display: 'flex', alignItems: 'center', height: '100%', minHeight: '26px' }}>
+            <span style={{ flex: 1, whiteSpace: 'normal', wordBreak: 'break-word', padding: '4px 5px', color: '#1e293b' }}>{value || ''}</span>
             <AttachButton rowId={row?._id} attachType="bill_pdf" existingUrl={attachUrl} onSaved={onAttachSaved} />
           </div>
         </td>
@@ -1973,8 +1983,8 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
       const voucherPdfUrl = col.hasAttach === 'site_cash_auto' ? row?.['SITE_CASH_PROOF_URL'] : row?.['OFFICE_CASH_PROOF_URL'];
       return (
         <td style={{ ...cellStyle, background: bg, padding: '2px 4px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value || ''}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, minHeight: '26px' }}>
+            <span style={{ flex: 1, whiteSpace: 'normal', wordBreak: 'break-word' }}>{value || ''}</span>
             {voucherPdfUrl ? (
               <a
                 href={voucherPdfUrl}

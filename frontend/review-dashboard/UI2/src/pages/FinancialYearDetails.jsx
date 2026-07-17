@@ -1,21 +1,30 @@
 import SearchableSelect from '../components/SearchableSelect';
+import MultiSelectSearchable from '../components/MultiSelectSearchable';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box, Typography, Button, IconButton, CircularProgress,
-  Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Chip, Tooltip
+  Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Chip, Tooltip, MenuItem
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LockIcon from '@mui/icons-material/Lock';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import SearchIcon from '@mui/icons-material/Search';
+import PrintIcon from '@mui/icons-material/Print';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import AddIcon from '@mui/icons-material/Add';
+import UploadIcon from '@mui/icons-material/Upload';
 
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
+const socket = io(SOCKET_URL, { autoConnect: true });
 const PAGE_SIZE = 100;
 
 const num = (v) => {
@@ -62,18 +71,21 @@ const MONTHS_LIST = [
 
 const getMonthIndexFromDate = (dateStr) => {
   if (!dateStr) return 99;
-  const parts = String(dateStr).split('-');
-  if (parts.length === 3) {
-    if (parts[0].length === 4) {
-      const m = parseInt(parts[1], 10);
-      if (!isNaN(m) && m >= 1 && m <= 12) return m;
-    } else if (parts[2].length === 4) {
-      const m = parseInt(parts[1], 10);
-      if (!isNaN(m) && m >= 1 && m <= 12) return m;
-    }
+  const str = String(dateStr).trim();
+  // Match DD-MM-YYYY or DD/MM/YYYY
+  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (ddmmyyyy) {
+    const m = parseInt(ddmmyyyy[2], 10);
+    if (m >= 1 && m <= 12) return m;
+  }
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  const yyyymmdd = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (yyyymmdd) {
+    const m = parseInt(yyyymmdd[2], 10);
+    if (m >= 1 && m <= 12) return m;
   }
   try {
-    const d = new Date(dateStr);
+    const d = new Date(str);
     if (!isNaN(d.getTime())) return d.getMonth() + 1;
   } catch (_) { }
   return 99;
@@ -91,13 +103,12 @@ const formatDateForInput = (dateStr) => {
 };
 
 const DEBIT_REASONS = [
-  'None',
   'Damage / Shortage',
   'GPS Deviation Charges',
   'GPS Trip Charges',
   'Device Installation Charges',
   'RFID Deduction / Charges',
-  'Substance',
+  'Suspense',
   'TDS Provision'
 ];
 const SITES = ['NVL', 'NVCL'];
@@ -140,8 +151,14 @@ export default function FinancialYearDetails({ onBack }) {
   const [dirtyGroups, setDirtyGroups] = useState(new Set());
   const [page, setPage] = useState(0);
   const [siteFilter, setSiteFilter] = useState('All'); // 'All' | 'NVCL' | 'NVL'
-  const [selectedMonth, setSelectedMonth] = useState('All'); // 'All' | '1' | '2' etc
-  const [selYear, setSelYear] = useState('2025-2026');
+  
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterBillType, setFilterBillType] = useState('All');
+  const [filterPartyName, setFilterPartyName] = useState('All');
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState('All');
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  const [selYear, setSelYear] = useState('2026-2027');
 
   // Payment Status Dashboard States
   const [dashboardOpen, setDashboardOpen] = useState(false);
@@ -185,7 +202,7 @@ export default function FinancialYearDetails({ onBack }) {
     if (selRow && selRow.month) {
       defaultMonthStr = selRow.month;
     } else {
-      let mIdx = selectedMonth !== '' ? Number(selectedMonth) : new Date().getMonth();
+      let mIdx = new Date().getMonth();
       let yStr = selYear ? selYear.split('-')[0] : new Date().getFullYear();
       defaultMonthStr = `${MONTHS[mIdx]}-${yStr}`;
     }
@@ -203,7 +220,7 @@ export default function FinancialYearDetails({ onBack }) {
       totalAmount: 0,
       tds: 0,
       receivable: 0,
-      debitReason: 'None',
+      debitReasons: [],
       isNewRow: true,
       slNo: newSlNo
     };
@@ -238,6 +255,29 @@ export default function FinancialYearDetails({ onBack }) {
       setSnack({ severity: 'error', msg: 'Failed to load details' });
     } finally { setLoading(false); }
   }, [selYear]);
+
+  // Listen to WebSocket events (e.g. batch bills generated)
+  useEffect(() => {
+    socket.on('cementUpdates', (data) => {
+      console.log('socket event cementUpdates', data);
+      if (data?.action === 'batchBillsGenerated') {
+        setPage(0);
+        if (data.financialYear) {
+          const newFy = `20${data.financialYear.split('-')[0]}-${data.financialYear.split('-')[1]}`;
+          if (newFy !== selYear) {
+            setSelYear(newFy);
+          } else {
+            fetchData();
+          }
+        } else {
+          fetchData();
+        }
+      }
+    });
+    return () => {
+      socket.off('cementUpdates');
+    };
+  }, [fetchData, selYear]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -313,23 +353,44 @@ export default function FinancialYearDetails({ onBack }) {
     const allocatedAmt = damageSelectedTrips.reduce((sum, t) => sum + num(damageVehicleAmounts[t.invoiceNo] || 0), 0);
     // Amount matching validation removed as per user request
 
+    try {
+      const valRes = await axios.post(`${API_URL}/fy-details/validate-deduction`, {
+        reasons: damageTarget.reasons,
+        year: damageYear,
+        month: damageMonth,
+        trips: damageSelectedTrips,
+        currentBillNo: inv
+      });
+      if (!valRes.data.valid) {
+        setSnack({ severity: 'error', msg: valRes.data.message });
+        return;
+      }
+    } catch (err) {
+      setSnack({ severity: 'error', msg: 'Failed to validate deduction reason uniqueness.' });
+      return;
+    }
+
     // Auto-populate group remarks – one line per trip-row (vehicle + trip + amount)
-    let suffix = damageTarget.reason;
-    if (suffix === 'Damage / Shortage') suffix = 'Damage/Shortage';
-    else if (suffix === 'RFID Deduction / Charges') suffix = 'RFID Deduction';
-
-    const suffixStr = suffix ? `-${suffix}` : '';
-    const monthCap = damageMonth.charAt(0).toUpperCase() + damageMonth.slice(1).toLowerCase();
-
     const sortedSelectedTrips = [...damageSelectedTrips].sort((a, b) => {
       if (a.vehicle !== b.vehicle) return a.vehicle.localeCompare(b.vehicle);
       return a.tripNumber - b.tripNumber;
     });
 
-    // One remark line per trip-row: Month-Vehicle-Trip N (date)-Reason-₹amount
+    const monthCap = damageMonth.charAt(0).toUpperCase() + damageMonth.slice(1).toLowerCase();
+
+    // One remark line per trip-row: Month-Vehicle-Trip N (date) - Reason1: ₹amt1, Reason2: ₹amt2
     const newRemarks = sortedSelectedTrips.map(t => {
-      const amt = damageVehicleAmounts[t.invoiceNo] || 0;
-      return `${monthCap}-${t.vehicle}-Trip No. ${t.tripNumber} (${t.tripDate})${suffixStr}-₹${amt}`;
+      const parts = (damageTarget.reasons || []).map(reason => {
+        const amt = (damageVehicleAmounts[t.invoiceNo] && damageVehicleAmounts[t.invoiceNo][reason]) || 0;
+        if (num(amt) === 0) return null;
+        let suffix = reason;
+        if (suffix === 'Damage / Shortage') suffix = 'Damage/Shortage';
+        else if (suffix === 'RFID Deduction / Charges') suffix = 'RFID Deduction';
+        return `${suffix}: ₹${amt}`;
+      }).filter(Boolean);
+      
+      const reasonStr = parts.length > 0 ? ` - ${parts.join(', ')}` : '';
+      return `${monthCap}-${t.vehicle}-Trip No. ${t.tripNumber} (${t.tripDate})${reasonStr}`;
     }).join('\n');
 
     // Build the combined remarks:
@@ -374,7 +435,7 @@ export default function FinancialYearDetails({ onBack }) {
         editedMonth: rowData.month,
         editedSite: rowData.site,
         editedAmount: rowData.amount,
-        debitReason: damageTarget.reason,
+        debitReasons: damageTarget.reasons,
         damageYear,
         damageMonth,
         damageVehicles: damageSelectedVehicles,
@@ -443,10 +504,9 @@ export default function FinancialYearDetails({ onBack }) {
         groupData: paymentObj || { id: `AUTO-${r.invoiceNumber}`, billNos: [r.invoiceNumber], paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: '', paymentProofUrl: '' }
       };
     }).sort((a, b) => {
-      const mA = getMonthIndexFromDate(a.invoiceDate);
-      const mB = getMonthIndexFromDate(b.invoiceDate);
-      if (mA !== mB) return mA - mB;
-      return (a.invoiceDate || '').localeCompare(b.invoiceDate || '') || (a.invoiceNumber || '').localeCompare(b.invoiceNumber || '');
+      // Backend already assigns slNo chronologically across the entire financial year based on accurate date parsing.
+      // We rely on slNo to maintain the true sequence of bills.
+      return (a.slNo || 0) - (b.slNo || 0);
     });
   }, [rows, payments]);
 
@@ -458,19 +518,8 @@ export default function FinancialYearDetails({ onBack }) {
     if (siteFilter === 'NVL') result = result.filter(r => isNVL(r.site));
     if (siteFilter === 'NVCL') result = result.filter(r => isNVCL(r.site));
 
-    if (selectedMonth !== 'All') {
-      const mTarget = parseInt(selectedMonth, 10);
-      result = result.filter(r => {
-        let mIdx = getMonthIndexFromDate(r.invoiceDate);
-        if (mIdx === 99 && r.month) {
-          const found = MONTHS_LIST.find(m => m.label.toUpperCase() === String(r.month).toUpperCase());
-          if (found) mIdx = found.value;
-        }
-        return mIdx === mTarget;
-      });
-    }
     return result;
-  }, [computedRows, siteFilter, selectedMonth, isNVL, isNVCL]);
+  }, [computedRows, siteFilter, isNVL, isNVCL]);
 
   const groupSpanMap = useMemo(() => {
     const map = {};
@@ -570,14 +619,39 @@ export default function FinancialYearDetails({ onBack }) {
       'GPS Trip Charges',
       'Device Installation Charges',
       'RFID Deduction / Charges',
-      'Substance'
+      'Suspense'
     ];
 
-    if (field === 'debitReason' && WORKFLOW_REASONS.includes(value)) {
+    if (field === 'debitReasons') {
       const r = rows.find(x => x.invoiceNumber === invoiceNumber);
       const computedR = computedRows.find(x => x.invoiceNumber === invoiceNumber);
-      if (r && computedR) {
-        setDamageTarget({ invoiceNumber: invoiceNumber, groupId: computedR.groupId, reason: value, debitAmount: computedR.groupData?.debitAmount });
+      const oldReasons = r?.debitReasons || [];
+      const newReasons = value || [];
+      const addedReasons = newReasons.filter(x => !oldReasons.includes(x));
+      const hasWorkflowReason = newReasons.some(v => WORKFLOW_REASONS.includes(v));
+
+      if (r && computedR && hasWorkflowReason && addedReasons.length > 0) {
+        setDamageTarget({ invoiceNumber: invoiceNumber, groupId: computedR.groupId, reasons: newReasons, debitAmount: computedR.groupData?.debitAmount });
+        
+        // Pre-fill modal state if there are existing deductions
+        setDamageYear(r.damageYear || selYear);
+        setDamageMonth(r.damageMonth || '');
+        setDamageSelectedVehicles(r.damageVehicles || []);
+        
+        // If we have an existing month, fetch vehicles for that month
+        if (r.damageMonth && (r.damageYear || selYear)) {
+          const monthIdx = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].findIndex(m => r.damageMonth.startsWith(m)) + 1;
+          axios.get(`${API_URL}/fy-details/vehicles?month=${monthIdx}&fy=${r.damageYear || selYear}`)
+            .then(res => setDamageVehicles(res.data || []))
+            .catch(() => {});
+        } else {
+          setDamageVehicles([]);
+        }
+
+        setDamageTrips(r.damageTrips || []);
+        setDamageSelectedTrips(r.damageTrips || []);
+        setDamageVehicleAmounts(r.damageVehicleAmounts || {});
+
         setDamageModalOpen(true);
         // Pre-load any existing manual remarks from the payment record
         // Strip out the auto-generated trip lines (everything before the '---' separator)
@@ -735,7 +809,7 @@ export default function FinancialYearDetails({ onBack }) {
           editedSite: r.site,
           editedAmount: r.amount,
           billType: r.billType,
-          debitReason: r.debitReason,
+          debitReasons: r.debitReasons,
           damageYear: r.damageYear,
           damageMonth: r.damageMonth,
           damageVehicles: r.damageVehicles || [],
@@ -792,9 +866,10 @@ export default function FinancialYearDetails({ onBack }) {
       const groupTotalRecv = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((s, x) => s + (x.receivable || 0), 0) : 0;
       const calcDebit = g.id ? num(g.debitAmount) : 0;
       const diff = g.id ? groupTotalRecv - num(g.paymentAmount) - calcDebit - num(g.tdsProvision) : 0;
-      return { 'Invoice Date': r.invoiceDate, 'Invoice Number': r.invoiceNumber, 'Shipment Number': r.shipmentNos?.join(', ') || '', 'Month': r.month, 'SITE': r.site, 'BILL': r.billType, 'Amount': r.amount, 'CGST': r.cgst, 'SGST': r.sgst, 'Total Amount': r.totalAmount, 'Tds @2%': r.tds, 'Receivable': r.receivable, 'Payment Amount': g.paymentAmount || 0, 'TDS Provision': g.tdsProvision || 0, 'Difference': diff, 'Payment Date': g.paymentDate || '', 'Reference No': g.referenceNo || '', 'Debit Amount': calcDebit, 'Debit Reasons(Deduction)': r.debitReason || 'None', 'Remarks': g.remarks || '' };
+      return { 'Invoice Date': r.invoiceDate, 'Invoice Number': r.invoiceNumber, 'Shipment Number': r.shipmentNos?.join(', ') || '', 'Month': r.month, 'SITE': r.site, 'BILL': r.billType, 'Amount': r.amount, 'CGST': r.cgst, 'SGST': r.sgst, 'Total Amount': r.totalAmount, 'Tds @2%': r.tds, 'Receivable': r.receivable, 'Payment Amount': g.paymentAmount || 0, 'TDS Provision': g.tdsProvision || 0, 'Difference': diff, 'Payment Date': g.paymentDate || '', 'Reference No': g.referenceNo || '', 'Debit Amount': calcDebit, 'Debit Reasons(Deduction)': (r.debitReasons || []).join(', ') || 'None', 'Remarks': g.remarks || '' };
     }));
   };
+
 
   // ── Render a single row (native HTML only — no MUI inside cells) ──
   const renderRow = (r, ri) => {
@@ -810,8 +885,32 @@ export default function FinancialYearDetails({ onBack }) {
     const calcDebit = isGroupStart ? num(gd.debitAmount) : 0;
     const groupDiff = isGroupStart ? groupTotalRecv - num(gd.paymentAmount) - calcDebit - num(gd.tdsProvision) : 0;
 
-    const bg = ri % 2 ? '#f8fafc' : '#fff';
-    const td = (extra = {}) => ({ padding: '5px 6px', borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0', fontSize: 12, verticalAlign: 'middle', background: bg, ...extra });
+    // Row styling logic matched perfectly to Cement Register
+    const hasDraft = dirtyRows.has(r.invoiceNumber) || (gid && dirtyGroups.has(gid));
+    const isSelected = selectedIds.includes(r.invoiceNumber);
+    const isMatch = !!searchQuery;
+    
+    let baseBg = r.isLocked ? '#f8fafc' : isMatch
+      ? '#f1f5f9'
+      : isSelected
+        ? '#f5f3ff'
+        : hasDraft ? '#fffbeb'
+          : ri % 2 === 0 ? '#ffffff' : '#fafafa';
+
+    let paymentBg = baseBg;
+    const autoGenBg = baseBg;
+    const calcBg = baseBg;
+    const financeBg = baseBg;
+
+    const td = (extra = {}) => {
+      return { 
+        padding: '10px 6px', borderRight: '1px solid rgba(0,0,0,0.05)', borderBottom: '1px solid #e2e8f0', 
+        fontSize: 11, verticalAlign: 'middle', background: baseBg, 
+        color: '#1e293b',
+        ...extra 
+      };
+    };
+
 
     // Parse month/year for the monthYear column
     const rawMonth = String(r.month || '').toUpperCase();
@@ -830,7 +929,7 @@ export default function FinancialYearDetails({ onBack }) {
 
       const mIndex = MONTHS.indexOf(newM);
       const now = new Date();
-      const curMonthIndex = now.getMonth(); // 0-11
+      const curMonthIndex = now.getMonth(); 
       const curYear = now.getFullYear();
 
       if (parseInt(newY) > curYear) {
@@ -843,36 +942,20 @@ export default function FinancialYearDetails({ onBack }) {
       handleRowEdit(r.invoiceNumber, 'month', `${newM}-${newY}`);
     };
 
-    const curMonthIndex = getMonthIndexFromDate(r.invoiceDate);
-    const prevMonthIndex = ri > 0 ? getMonthIndexFromDate(visibleRows[ri - 1].invoiceDate) : null;
-    const showHeader = (ri === 0) || (curMonthIndex !== prevMonthIndex);
-    const monthName = MONTH_NAMES_FULL[curMonthIndex] || "Other / Date Unspecified";
-
     return (
       <React.Fragment key={ri}>
-        {showHeader && (
-          <tr key={`month-header-${curMonthIndex}-${ri}`}>
-            <td colSpan={21} style={{
-              background: 'linear-gradient(90deg, #3730a3, #4338ca)',
-              color: '#ffffff',
-              padding: '10px 16px',
-              fontSize: '13px',
-              fontWeight: 800,
-              fontFamily: 'Inter, sans-serif',
-              textAlign: 'left',
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase'
-            }}>
-              📅 {monthName}
-            </td>
-          </tr>
-        )}
-        <tr>
+        <tr style={{
+          background: baseBg,
+          outline: isMatch ? '2px solid #cbd5e1' : (isSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'),
+          transition: 'background 0.2s, opacity 0.2s',
+          opacity: r.isLocked ? 0.85 : 1,
+          boxShadow: r.isLocked ? 'inset 0 0 0 9999px rgba(226,232,240,0.3)' : 'none'
+        }} className="table-row-hover">
           {/* Sl No */}
-          <td style={td({ textAlign: 'center', color: '#64748b', fontWeight: 600 })}>{page * PAGE_SIZE + ri + 1}</td>
+          <td style={td({ textAlign: 'center', color: '#64748b', fontWeight: 600, position: 'sticky', left: 0, zIndex: 4, background: baseBg, borderRight: '1px solid #cbd5e1' })}>{page * PAGE_SIZE + ri + 1}</td>
 
           {/* Select */}
-          <td style={td({ textAlign: 'center' })}>
+          <td style={td({ textAlign: 'center', position: 'sticky', left: 50, zIndex: 4, background: baseBg, borderRight: '1px solid #cbd5e1' })}>
             <Tooltip title={r.isLocked ? "Auto-generated bills cannot be deleted here" : ""}>
               <span>
                 <input 
@@ -888,47 +971,47 @@ export default function FinancialYearDetails({ onBack }) {
             </Tooltip>
           </td>
 
-          {/* Invoice Date */}
-          <td style={td({ textAlign: 'center' })}>
-            <input
-              type="date"
-              value={formatDateForInput(r.invoiceDate)}
-              onChange={e => handleRowEdit(r.invoiceNumber, 'invoiceDate', e.target.value)}
-              disabled={r.isLocked}
-              style={{ ...iStyle, width: 110, textAlign: 'center', fontWeight: 600, color: r.isLocked ? '#94a3b8' : 'inherit' }}
-            />
-          </td>
-
           {/* Invoice Number */}
-          <td style={td({ textAlign: 'left', position: 'sticky', left: 0, background: bg, zIndex: 4 })}>
+          <td style={td({ textAlign: 'left', position: 'sticky', left: 100, zIndex: 4, background: r.isLocked ? autoGenBg : baseBg, borderRight: '1px solid #cbd5e1' })}>
             <Box display="flex" alignItems="center" gap={0.5}>
               {r.isLocked && (
                 <Tooltip title="Generated from Cement Register - Read Only">
-                  <LockIcon sx={{ fontSize: 14, color: '#94a3b8' }} />
+                  <LockIcon sx={{ fontSize: 14, color: '#0284c7' }} />
                 </Tooltip>
               )}
               <input 
                 value={r.displayInvoiceNumber || ''} 
                 onChange={e => handleRowEdit(r.invoiceNumber, 'displayInvoiceNumber', e.target.value)} 
                 disabled={r.isLocked}
-                style={{ ...iStyle, fontWeight: 700, width: '100%', color: r.isLocked ? '#94a3b8' : 'inherit' }} 
+                style={{ ...iStyle, fontWeight: 700, width: '100%', color: r.isLocked ? '#0369a1' : 'inherit' }} 
               />
             </Box>
           </td>
 
+          {/* Invoice Date */}
+          <td style={td({ textAlign: 'center', background: r.isLocked ? autoGenBg : baseBg })}>
+            <input
+              type="date"
+              value={formatDateForInput(r.invoiceDate)}
+              onChange={e => handleRowEdit(r.invoiceNumber, 'invoiceDate', e.target.value)}
+              disabled={r.isLocked}
+              style={{ ...iStyle, width: 110, textAlign: 'center', fontWeight: 600, color: r.isLocked ? '#0369a1' : 'inherit' }}
+            />
+          </td>
+
           {/* Shipment Number */}
-          <td style={td({ textAlign: 'left', whiteSpace: 'normal', maxWidth: 120 })}>
+          <td style={td({ textAlign: 'left', whiteSpace: 'normal', maxWidth: 120, background: r.isLocked ? autoGenBg : baseBg, color: r.isLocked ? '#0369a1' : 'inherit' })}>
             {r.shipmentNos?.join(', ') || ''}
           </td>
 
           {/* Month */}
-          <td style={td({ textAlign: 'center' })}>
+          <td style={td({ textAlign: 'center', background: r.isLocked ? autoGenBg : baseBg })}>
             <div style={{ display: 'flex', gap: 2 }}>
-              <SearchableSelect variant="standard" value={curM} onChange={e => handleMonthYearChange('M', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#94a3b8' : 'inherit', minWidth: 110 }} disabled={r.isLocked}>
+              <SearchableSelect variant="standard" value={curM} onChange={e => handleMonthYearChange('M', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#0369a1' : 'inherit', minWidth: 110 }} disabled={r.isLocked}>
                 <option value="">Month</option>
                 {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
               </SearchableSelect>
-              <SearchableSelect variant="standard" value={curY} onChange={e => handleMonthYearChange('Y', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#94a3b8' : 'inherit', minWidth: 80 }} disabled={r.isLocked}>
+              <SearchableSelect variant="standard" value={curY} onChange={e => handleMonthYearChange('Y', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#0369a1' : 'inherit', minWidth: 80 }} disabled={r.isLocked}>
                 <option value="">Year</option>
                 {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
               </SearchableSelect>
@@ -936,12 +1019,12 @@ export default function FinancialYearDetails({ onBack }) {
           </td>
 
           {/* Site */}
-          <td style={td({ textAlign: 'center' })}>
+          <td style={td({ textAlign: 'center', background: r.isLocked ? autoGenBg : baseBg })}>
             <SearchableSelect variant="standard"
               value={r.site || 'NVCL'}
               onChange={e => handleRowEdit(r.invoiceNumber, 'site', e.target.value)}
               disabled={r.isLocked}
-              style={{ ...selStyle, fontWeight: 600, textAlign: 'center', color: r.isLocked ? '#94a3b8' : 'inherit', minWidth: 100 }}
+              style={{ ...selStyle, fontWeight: 600, textAlign: 'center', color: r.isLocked ? '#0369a1' : 'inherit', minWidth: 100 }}
             >
               <option value="NVCL">NVCL</option>
               <option value="NVL">NVL</option>
@@ -949,74 +1032,74 @@ export default function FinancialYearDetails({ onBack }) {
           </td>
 
           {/* Bill Type */}
-          <td style={td()}>
-            <SearchableSelect variant="standard" value={r.billType || 'FREIGHT'} onChange={e => handleRowEdit(r.invoiceNumber, 'billType', e.target.value)} disabled={r.isLocked} style={{ ...selStyle, color: r.isLocked ? '#94a3b8' : 'inherit', minWidth: 130 }}>
+          <td style={td({ background: r.isLocked ? autoGenBg : baseBg })}>
+            <SearchableSelect variant="standard" value={r.billType || 'FREIGHT'} onChange={e => handleRowEdit(r.invoiceNumber, 'billType', e.target.value)} disabled={r.isLocked} style={{ ...selStyle, color: r.isLocked ? '#0369a1' : 'inherit', minWidth: 130 }}>
               {BILL_TYPES.map(b => <option key={b} value={b}>{b}</option>)}
             </SearchableSelect>
           </td>
 
           {/* Amount */}
-          <td style={td({ textAlign: 'right' })}>
+          <td style={td({ textAlign: 'right', background: r.isLocked ? autoGenBg : baseBg })}>
             <input
               type="number"
               value={r.amount || ''}
               onChange={e => handleRowEdit(r.invoiceNumber, 'amount', e.target.value)}
               disabled={r.isLocked}
-              style={{ ...iStyle, textAlign: 'right', fontWeight: 600, color: r.isLocked ? '#94a3b8' : 'inherit' }}
+              style={{ ...iStyle, textAlign: 'right', fontWeight: 600, color: r.isLocked ? '#0369a1' : 'inherit' }}
               placeholder="0"
             />
           </td>
 
           {/* CGST */}
-          <td style={td({ textAlign: 'right', background: '#fef9e7' })}>₹{r.cgst?.toLocaleString('en-IN')}</td>
+          <td style={td({ textAlign: 'right', background: calcBg })}>₹{r.cgst?.toLocaleString('en-IN')}</td>
           {/* SGST */}
-          <td style={td({ textAlign: 'right', background: '#fef9e7' })}>₹{r.sgst?.toLocaleString('en-IN')}</td>
+          <td style={td({ textAlign: 'right', background: calcBg })}>₹{r.sgst?.toLocaleString('en-IN')}</td>
           {/* Total Amount */}
-          <td style={td({ textAlign: 'right', background: '#eef2ff', fontWeight: 700 })}>₹{r.totalAmount?.toLocaleString('en-IN')}</td>
+          <td style={td({ textAlign: 'right', background: calcBg, fontWeight: 700 })}>₹{r.totalAmount?.toLocaleString('en-IN')}</td>
           {/* TDS */}
-          <td style={td({ textAlign: 'right', background: '#ecfeff', fontWeight: 600 })}>₹{r.tds?.toLocaleString('en-IN')}</td>
+          <td style={td({ textAlign: 'right', background: calcBg, fontWeight: 600 })}>₹{r.tds?.toLocaleString('en-IN')}</td>
           {/* Receivable */}
-          <td style={td({ textAlign: 'right', background: '#f0fdf4', fontWeight: 700 })}>₹{r.receivable?.toLocaleString('en-IN')}</td>
+          <td style={td({ textAlign: 'right', background: financeBg, fontWeight: 800 })}>₹{r.receivable?.toLocaleString('en-IN')}</td>
 
           {/* Payment Amount — grouped cell */}
           {(!gid || isGroupStart) && (
-            <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
+            <td style={td({ background: paymentBg })} rowSpan={rowSpan}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <input
                   type="number"
                   value={gd.paymentAmount || ''}
                   onChange={e => handleInlineEdit(gid, 'paymentAmount', e.target.value, gd)}
-                  style={{ ...iStyle, textAlign: 'right', fontWeight: 700, color: '#1e293b' }}
+                  style={{ ...iStyle, textAlign: 'right', fontWeight: 800, color: '#1e293b' }}
                   placeholder="0"
                 />
                 <label style={{ cursor: 'pointer', textAlign: 'right' }}>
-                  <span style={{ fontSize: 9, color: '#6b7280', border: '1px solid #d1d5db', borderRadius: 3, padding: '1px 4px' }}>
+                  <span style={{ fontSize: 10, color: '#4f46e5', fontWeight: 600, border: '1px solid #818cf8', borderRadius: 4, padding: '2px 6px', background: '#fff' }}>
                     {uploadingGroup === gid ? 'Uploading…' : gd.paymentProofUrl ? 'Change Proof' : 'Upload Proof'}
                   </span>
                   <input type="file" hidden accept=".pdf,image/*" onChange={e => { if (e.target.files[0]) handleFileUpload(gid, e.target.files[0], gd); }} />
                 </label>
-                {gd.paymentProofUrl && <a href={gd.paymentProofUrl} target="_blank" rel="noreferrer" style={{ fontSize: 9, color: '#3b82f6', textAlign: 'right' }}>View Proof</a>}
+                {gd.paymentProofUrl && <a href={gd.paymentProofUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#3b82f6', textAlign: 'right', fontWeight: 600 }}>View Proof</a>}
               </div>
             </td>
           )}
 
           {/* TDS Provision */}
           {(!gid || isGroupStart) && (
-            <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
+            <td style={td({ background: paymentBg })} rowSpan={rowSpan}>
               <input type="number" value={gd.tdsProvision || ''} onChange={e => handleInlineEdit(gid, 'tdsProvision', e.target.value, gd)} style={{ ...iStyle, textAlign: 'right', fontWeight: 700, color: '#0f172a' }} placeholder="0" />
             </td>
           )}
 
           {/* Difference */}
           {(!gid || isGroupStart) && (
-            <td style={td({ textAlign: 'right', background: '#fdf2f8', fontWeight: 700, color: groupDiff < 0 ? '#dc2626' : '#166534' })} rowSpan={rowSpan}>
+            <td style={td({ textAlign: 'right', background: paymentBg, fontWeight: 800 })} rowSpan={rowSpan}>
               {isGroupStart ? `₹${groupDiff.toLocaleString('en-IN')}` : ''}
             </td>
           )}
 
           {/* Payment Date */}
           {(!gid || isGroupStart) && (
-            <td style={td({ textAlign: 'center', background: '#fdf2f8', fontWeight: 600, color: '#334155' })} rowSpan={rowSpan}>
+            <td style={td({ textAlign: 'center', background: paymentBg, fontWeight: 600, color: '#334155' })} rowSpan={rowSpan}>
               {gd.paymentDate ? (() => {
                 const p = gd.paymentDate.split('-');
                 return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : gd.paymentDate;
@@ -1026,14 +1109,14 @@ export default function FinancialYearDetails({ onBack }) {
 
           {/* Reference No */}
           {(!gid || isGroupStart) && (
-            <td style={td({ background: '#fdf2f8', fontWeight: 600, color: '#334155' })} rowSpan={rowSpan}>
+            <td style={td({ background: paymentBg, fontWeight: 600, color: '#334155' })} rowSpan={rowSpan}>
               {gd.referenceNo || ''}
             </td>
           )}
 
           {/* Debit Amount */}
           {(!gid || isGroupStart) && (
-            <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
+            <td style={td({ background: paymentBg })} rowSpan={rowSpan}>
               <input
                 type="number"
                 value={gd.debitAmount || ''}
@@ -1045,225 +1128,266 @@ export default function FinancialYearDetails({ onBack }) {
           )}
 
           {/* Debit Reasons (per row) */}
-          <td style={td()}>
-            <SearchableSelect variant="standard" value={r.debitReason || 'None'} onChange={e => handleRowEdit(r.invoiceNumber, 'debitReason', e.target.value)} style={{ ...selStyle, minWidth: 200 }}>
-              {DEBIT_REASONS.map(d => <option key={d} value={d}>{d}</option>)}
-            </SearchableSelect>
+          <td style={td({ background: paymentBg })}>
+            <MultiSelectSearchable variant="standard" value={r.debitReasons || []} onChange={e => handleRowEdit(r.invoiceNumber, 'debitReasons', e.target.value)} options={DEBIT_REASONS} style={{ ...selStyle, minWidth: 200, fontWeight: 600, color: '#334155' }} />
           </td>
 
           {/* Remarks */}
           {(!gid || isGroupStart) && (
-            <td style={td({ background: '#fdf2f8' })} rowSpan={rowSpan}>
-              <textarea value={gd.remarks || ''} onChange={e => handleInlineEdit(gid, 'remarks', e.target.value, gd)} style={{ ...iStyle, resize: 'vertical', minHeight: '36px', fontFamily: 'inherit' }} />
+            <td style={td({ background: paymentBg })} rowSpan={rowSpan}>
+              <textarea value={gd.remarks || ''} onChange={e => handleInlineEdit(gid, 'remarks', e.target.value, gd)} style={{ ...iStyle, resize: 'vertical', minHeight: '36px', fontFamily: 'inherit', color: '#334155' }} />
             </td>
           )}
         </tr>
       </React.Fragment>
     );
   };
-
   const thStyle = (extra = {}) => ({
     position: 'sticky', top: 0, zIndex: 10,
-    background: '#1e293b', color: '#fff',
-    padding: '8px 6px', whiteSpace: 'pre-line',
-    fontSize: 11, fontWeight: 700, textAlign: 'center',
-    borderRight: '1px solid #334155',
+    background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', color: '#e2e8f0',
+    padding: '10px 6px', whiteSpace: 'pre-line',
+    fontSize: 10, fontWeight: 700, textAlign: 'center', letterSpacing: '0.5px',
+    borderRight: '1px solid rgba(255,255,255,0.05)',
+    borderBottom: '1px solid rgba(255,255,255,0.1)',
     ...extra
   });
 
+  
+
+  const finalFilteredRows = computedRows.filter(r => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const match = Object.values(r).some(v => String(v || '').toLowerCase().includes(q));
+      if (!match) return false;
+    }
+    if (filterBillType !== 'All' && String(r.billType || '') !== filterBillType) return false;
+    if (filterPartyName !== 'All' && String(r.partyName || '') !== filterPartyName) return false;
+    if (filterPaymentStatus !== 'All') {
+      const isPaid = num(r.paymentAmount) >= num(r.receivable) && num(r.receivable) > 0;
+      if (filterPaymentStatus === 'Paid' && !isPaid) return false;
+      if (filterPaymentStatus === 'Pending' && isPaid) return false;
+    }
+    return true;
+  });
+
+  const totalBills = finalFilteredRows.length;
+  const freightBills = finalFilteredRows.filter(r => String(r.billType).toUpperCase() === 'FREIGHT').length;
+  const unloadingBills = finalFilteredRows.filter(r => String(r.billType).toUpperCase() === 'UNLOADING').length;
+  const totalBillAmount = finalFilteredRows.reduce((sum, r) => sum + num(r.totalAmount), 0);
+  const totalPaidAmount = finalFilteredRows.reduce((sum, r) => sum + num(r.paymentAmount), 0);
+  const totalDueAmount = totalBillAmount - totalPaidAmount;
+  const pendingBills = finalFilteredRows.filter(r => num(r.paymentAmount) < num(r.receivable)).length;
+  const paidBills = finalFilteredRows.filter(r => num(r.paymentAmount) >= num(r.receivable) && num(r.receivable) > 0).length;
+
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f4f7f9',  }}>
-
-      {/* Header */}
-      <Box sx={{ p: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-        <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#ede9fe' }}>
-          <ArrowBackIcon fontSize="small" sx={{ color: '#6d28d9' }} />
-        </IconButton>
-        <Box>
-          <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
-            Bill Register
-          </Typography>
-          <Typography variant="caption" sx={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            FY
-            <SearchableSelect variant="standard"
-              value={selYear}
-              onChange={e => setSelYear(e.target.value)}
-              sx={{ minWidth: 120 }}
-              style={{
-                border: 'none', outline: 'none', background: '#f1f5f9',
-                fontWeight: 700, color: '#4f46e5', cursor: 'pointer',
-                fontFamily: 'Inter, sans-serif', fontSize: '12px',
-                borderRadius: '4px', marginLeft: '4px'
-              }}
-            >
-              <option value="2024-2025">2024-25</option>
-              <option value="2025-2026">2025-26</option>
-              <option value="2026-2027">2026-27</option>
-              <option value="2027-2028">2027-28</option>
-              <option value="2028-2029">2028-29</option>
-            </SearchableSelect>
-          </Typography>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
+      
+      {/* ── Premium Header ───────────────────────────────────────────── */}
+      <Box sx={{
+        px: { xs: 2, md: 4 }, py: 2,
+        background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexWrap: 'wrap', gap: 2, borderBottom: '1px solid rgba(255,255,255,0.1)',
+      }}>
+        <Box display="flex" alignItems="center" gap={2}>
+          <IconButton onClick={onBack} sx={{ bgcolor: 'rgba(255,255,255,0.05)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }, p: 1, borderRadius: '12px' }}>
+            <ArrowBackIcon fontSize="small" sx={{ color: '#f8fafc' }} />
+          </IconButton>
+          <Box>
+            <Typography variant="h5" fontWeight={800} sx={{ color: '#fff', letterSpacing: '-0.5px' }}>
+              Bill Register
+            </Typography>
+            <Box display="flex" alignItems="center" gap={1.5} mt={0.5}>
+              <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                Total Records: <span style={{ color: '#e2e8f0' }}>{filteredRows.length}</span>
+              </Typography>
+              <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: '#475569' }} />
+              <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                Period: <span style={{ color: '#e2e8f0' }}>FY {selYear}</span>
+              </Typography>
+            </Box>
+          </Box>
         </Box>
 
-        {/* ── Site Filter Tabs ── */}
-        <Box sx={{ display: 'flex', gap: 0.5, bgcolor: '#f1f5f9', borderRadius: '10px', p: '3px' }}>
-          {['All', 'NVCL', 'NVL'].map(tab => (
-            <button key={tab} onClick={() => handleSiteFilter(tab)} style={{
-              border: 'none', cursor: 'pointer', borderRadius: '8px', padding: '4px 14px',
-              fontWeight: 700, fontSize: 13, fontFamily: 'Inter,sans-serif',
-              background: siteFilter === tab ? '#4f46e5' : 'transparent',
-              color: siteFilter === tab ? '#fff' : '#64748b',
-              transition: 'all 0.15s'
-            }}>
-              {tab}
-              <span style={{ marginLeft: 5, fontSize: 10, opacity: 0.75 }}>
-                ({tab === 'All' ? computedRows.length
-                  : tab === 'NVL' ? computedRows.filter(r => isNVL(r.site)).length
-                    : computedRows.filter(r => isNVCL(r.site)).length})
-              </span>
-            </button>
-          ))}
-        </Box>
-
-        {/* ── Month Filter Tabs ── */}
-        <Box sx={{ display: 'flex', gap: 0.5, bgcolor: '#f1f5f9', borderRadius: '10px', p: '3px' }}>
-          <SearchableSelect variant="standard"
-            value={selectedMonth}
-            onChange={e => { setSelectedMonth(e.target.value); setPage(0); }}
-            style={{
-              minWidth: '120px',
-              border: 'none', cursor: 'pointer',
-              fontWeight: 700, fontSize: 13, fontFamily: 'Inter,sans-serif',
-              background: selectedMonth !== 'All' ? '#4f46e5' : 'transparent',
-              color: selectedMonth !== 'All' ? '#fff' : '#64748b',
-              outline: 'none', appearance: 'none'
+        <Box display="flex" alignItems="center" gap={1.5}>
+          <SearchableSelect
+            value={selYear}
+            onChange={e => setSelYear(e.target.value)}
+            size="small"
+            sx={{
+              borderRadius: '10px', fontSize: '12px', fontWeight: 700,
+              color: '#fff', bgcolor: 'rgba(255,255,255,0.05)',
+              '& .MuiInputBase-input': { color: '#fff' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#a78bfa' },
+              '.MuiSvgIcon-root': { color: '#94a3b8' },
+              minWidth: 140,
             }}
           >
-            <option value="All" style={{ color: '#000' }}>All Months</option>
-            {MONTHS_LIST.map(m => (
-              <option key={m.value} value={String(m.value)} style={{ color: '#000' }}>{m.label}</option>
+            {FY_OPTIONS.map(y => (
+              <MenuItem key={y} value={y} sx={{ fontSize: '12px', fontWeight: 600 }}>{y}</MenuItem>
             ))}
           </SearchableSelect>
         </Box>
-
-        <Box sx={{ ml: 'auto', display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Typography variant="caption" color="text.secondary">{filteredRows.length} records</Typography>
-
-          <Button variant="outlined" color="primary" size="small" onClick={handleAddRow} sx={{ fontWeight: 'bold', borderRadius: 2, px: 2 }}>
-            + Add Row
-          </Button>
-
-          <Button
-            variant="contained"
-            size="small"
-            onClick={() => setDashboardOpen(true)}
-            sx={{
-              fontWeight: 800,
-              borderRadius: 2,
-              px: 2,
-              background: 'linear-gradient(135deg, #4f46e5, #4338ca)',
-              color: '#ffffff',
-              boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.2)',
-              '&:hover': {
-                background: 'linear-gradient(135deg, #4338ca, #3730a3)'
-              }
-            }}
-          >
-            💳 Payment Status Dashboard
-          </Button>
-
-          <Button variant="outlined" color="primary" size="small" onClick={() => setDocModalOpen(true)} sx={{ fontWeight: 'bold' }}>
-            Upload PDF {pageDocuments.length > 0 && `(${pageDocuments.length})`}
-          </Button>
-
-          <Button
-            variant="contained"
-            startIcon={loading ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
-            onClick={saveAllChanges}
-            disabled={(dirtyRows.size === 0 && dirtyGroups.size === 0) || loading}
-            sx={{
-              fontWeight: 800,
-              borderRadius: 2,
-              px: 2.5,
-              background: (dirtyRows.size > 0 || dirtyGroups.size > 0)
-                ? 'linear-gradient(135deg,#10b981,#059669)'
-                : '#cbd5e1',
-              opacity: (dirtyRows.size === 0 && dirtyGroups.size === 0) ? 0.5 : 1,
-              filter: (dirtyRows.size === 0 && dirtyGroups.size === 0) ? 'blur(0.5px)' : 'none',
-              transition: 'all 0.2s ease-in-out',
-              '&:hover': {
-                background: (dirtyRows.size > 0 || dirtyGroups.size > 0)
-                  ? 'linear-gradient(135deg,#059669,#047857)'
-                  : '#cbd5e1'
-              }
-            }}
-          >
-            {loading ? 'Saving...' : `Save Details${(dirtyRows.size + dirtyGroups.size) > 0 ? ` (${dirtyRows.size + dirtyGroups.size})` : ''}`}
-          </Button>
-          <IconButton onClick={fetchData}><RefreshIcon /></IconButton>
-          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}>XLS</Button>
-          <Button variant="contained" startIcon={<EditIcon />} disabled={!selectedIds.length} onClick={openPaymentModal}
-            sx={{ bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' } }}>
-            Group Payment ({selectedIds.length})
-          </Button>
-          <Button variant="contained" color="error" startIcon={<DeleteIcon />}
-            disabled={!selectedIds.length} onClick={handleDeleteRows}
-            sx={{ fontWeight: 700 }}>
-            Delete ({selectedIds.length})
-          </Button>
-        </Box>
       </Box>
 
-      {/* Table */}
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
-        {loading
-          ? <Box p={4} display="flex" justifyContent="center"><CircularProgress /></Box>
-          : (
-            <table style={{ borderCollapse: 'collapse', whiteSpace: 'normal', fontFamily: 'Inter,sans-serif', fontSize: 12, width: 'max-content' }}>
+
+
+      {/* ── Toolbar & Quick Filters ────────────────────────────────────── */}
+      <Box sx={{
+        px: { xs: 2, md: 4 }, py: 2,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0',
+        gap: 2, flexWrap: 'wrap'
+      }}>
+        {/* Filters Left Side */}
+        <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+          <Box display="flex" alignItems="center" sx={{
+            bgcolor: '#f1f5f9', borderRadius: '12px', px: 2, py: 1, border: '1px solid #e2e8f0',
+            '&:focus-within': { borderColor: '#7c3aed', boxShadow: '0 0 0 2px rgba(124,58,237,0.1)' }, width: 260
+          }}>
+            <span style={{ marginRight: 8, opacity: 0.5 }}>🔍</span>
+            <input
+              type="text"
+              placeholder="Search invoice, party, vehicle..."
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(0); }}
+              style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', width: '100%', color: '#0f172a', fontWeight: 500 }}
+            />
+            {searchQuery && (
+              <div onClick={() => { setSearchQuery(''); setPage(0); }} style={{ cursor: 'pointer', color: '#94a3b8', fontSize: '14px', marginLeft: '4px', fontWeight: 'bold' }}>✕</div>
+            )}
+          </Box>
+
+          <Box display="flex" alignItems="center" gap={1}>
+            <SearchableSelect
+              value={siteFilter}
+              onChange={(e) => handleSiteFilter(e.target.value)}
+              size="small"
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: '#f8fafc', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
+            >
+              <MenuItem value="All" sx={{ fontSize: '12px' }}>All Sites ({computedRows.length})</MenuItem>
+              <MenuItem value="NVCL" sx={{ fontSize: '12px' }}>NVCL ({computedRows.filter(r => isNVCL(r.site)).length})</MenuItem>
+              <MenuItem value="NVL" sx={{ fontSize: '12px' }}>NVL ({computedRows.filter(r => isNVL(r.site)).length})</MenuItem>
+            </SearchableSelect>
+          </Box>
+        </Box>
+
+        {/* Action Buttons Right Side */}
+        <Box display="flex" gap={1} alignItems="center">
+          {selectedIds.length > 0 && (
+            <Button size="small" variant="contained" color="error" startIcon={<DeleteIcon sx={{ fontSize: '1rem' }} />}
+              onClick={handleDeleteRows}
+              sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', textTransform: 'none', boxShadow: 'none', mr: 1 }}>
+              Delete
+            </Button>
+          )}
+
+          <Button size="small" variant="outlined" startIcon={<AddIcon sx={{ fontSize: '1rem' }} />} onClick={handleAddRow}
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+            Add Row
+          </Button>
+
+          <Button size="small" variant="outlined" startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />} onClick={() => setDocModalOpen(true)}
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+            PDF Docs ({pageDocuments.length})
+          </Button>
+
+          <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
+
+          {selectedIds.length > 0 && (
+             <Button variant="contained" size="small" onClick={openPaymentModal}
+               sx={{ fontWeight: 700, borderRadius: '10px', bgcolor: '#3b82f6', color: '#fff', textTransform: 'none', boxShadow: '0 4px 10px rgba(59,130,246,0.3)', '&:hover': { bgcolor: '#2563eb' } }}>
+               Group Payment
+             </Button>
+          )}
+
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+            Export
+          </Button>
+
+          <Button
+            size="small" variant="contained"
+            startIcon={loading ? <CircularProgress size={14} color="inherit" /> : <SaveIcon sx={{ fontSize: '1.1rem' }} />}
+            onClick={saveAllChanges} disabled={(dirtyRows.size === 0 && dirtyGroups.size === 0) || loading}
+            sx={{
+              fontWeight: 700, borderRadius: '10px', px: 2.5, fontSize: '0.85rem', textTransform: 'none',
+              background: (dirtyRows.size > 0 || dirtyGroups.size > 0) ? 'linear-gradient(135deg,#10b981,#059669)' : '#f1f5f9',
+              color: (dirtyRows.size > 0 || dirtyGroups.size > 0) ? '#fff' : '#94a3b8',
+              boxShadow: (dirtyRows.size > 0 || dirtyGroups.size > 0) ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'none',
+              '&:hover': { background: (dirtyRows.size > 0 || dirtyGroups.size > 0) ? 'linear-gradient(135deg,#059669,#047857)' : '#f1f5f9' },
+            }}>
+            {loading ? 'Saving...' : `Save${(dirtyRows.size + dirtyGroups.size) > 0 ? ` (${dirtyRows.size + dirtyGroups.size})` : ''}`}
+          </Button>
+
+          <Tooltip title="Print Register">
+            <IconButton size="small" onClick={() => window.print()} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', '&:hover': { bgcolor: '#f1f5f9' }, p: 0.75, borderRadius: '10px' }}>
+              <PrintIcon sx={{ fontSize: '1.1rem', color: '#475569' }} />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Refresh Data">
+            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', '&:hover': { bgcolor: '#f1f5f9' }, p: 0.75, borderRadius: '10px' }}>
+              <RefreshIcon sx={{ fontSize: '1.1rem', color: '#475569' }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+      
+      {/* 4. Table Container */}
+      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', p: { xs: 1, md: 2 } }}>
+        <Box sx={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'auto', bgcolor: '#fff', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+          <table style={{ borderCollapse: 'collapse', whiteSpace: 'normal', fontFamily: 'Inter,sans-serif', fontSize: 13, width: 'max-content', minWidth: '100%' }}>
               <thead>
                 <tr>
-                  <th style={thStyle({ minWidth: 40 })}>Sl No</th>
-                  <th style={thStyle({ minWidth: 50 })}>Select</th>
+                  <th style={thStyle({ minWidth: 50, position: 'sticky', left: 0, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Sl No</th>
+                  <th style={thStyle({ minWidth: 50, position: 'sticky', left: 50, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Select</th>
+                  <th style={thStyle({ minWidth: 170, position: 'sticky', left: 100, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Invoice Number</th>
                   <th style={thStyle({ minWidth: 120 })}>Invoice Date</th>
-                  <th style={thStyle({ minWidth: 170, position: 'sticky', left: 0, zIndex: 12 })}>Invoice Number</th>
                   <th style={thStyle({ minWidth: 150 })}>Shipment Number</th>
                   <th style={thStyle({ minWidth: 220 })}>Month</th>
                   <th style={thStyle({ minWidth: 140 })}>SITE</th>
                   <th style={thStyle({ minWidth: 160 })}>BILL</th>
                   <th style={thStyle({ minWidth: 100 })}>Amount</th>
-                  <th style={thStyle({ minWidth: 80, background: '#92400e' })}>CGST</th>
-                  <th style={thStyle({ minWidth: 80, background: '#92400e' })}>SGST</th>
-                  <th style={thStyle({ minWidth: 110, background: '#3730a3' })}>Total Amount</th>
-                  <th style={thStyle({ minWidth: 90, background: '#0e7490' })}>TDS @2%</th>
-                  <th style={thStyle({ minWidth: 130, background: '#166534' })}>Receivable</th>
-                  <th style={thStyle({ minWidth: 150, background: '#6b21a8' })}>Payment Amount{'\n'}(Paid)</th>
-                  <th style={thStyle({ minWidth: 100, background: '#6b21a8' })}>TDS Provision</th>
-                  <th style={thStyle({ minWidth: 100, background: '#6b21a8' })}>Difference</th>
-                  <th style={thStyle({ minWidth: 130, background: '#6b21a8' })}>Payment Date</th>
-                  <th style={thStyle({ minWidth: 100, background: '#6b21a8' })}>Reference No</th>
-                  <th style={thStyle({ minWidth: 110, background: '#6b21a8' })}>Debit Amount</th>
+                  <th style={thStyle({ minWidth: 80 })}>CGST</th>
+                  <th style={thStyle({ minWidth: 80 })}>SGST</th>
+                  <th style={thStyle({ minWidth: 110 })}>Total Amount</th>
+                  <th style={thStyle({ minWidth: 90 })}>TDS @2%</th>
+                  <th style={thStyle({ minWidth: 130 })}>Receivable</th>
+                  <th style={thStyle({ minWidth: 150 })}>Payment Amount<br/>(Paid)</th>
+                  <th style={thStyle({ minWidth: 100 })}>TDS Provision</th>
+                  <th style={thStyle({ minWidth: 100 })}>Difference</th>
+                  <th style={thStyle({ minWidth: 130 })}>Payment Date</th>
+                  <th style={thStyle({ minWidth: 100 })}>Reference No</th>
+                  <th style={thStyle({ minWidth: 110 })}>Debit Amount</th>
                   <th style={thStyle({ minWidth: 240 })}>Debit Reasons(Deduction)</th>
-                  <th style={thStyle({ minWidth: 350, background: '#6b21a8' })}>Remarks</th>
+                  <th style={thStyle({ minWidth: 350, borderRight: 'none' })}>Remarks</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody style={{ '& > tr:hover': { background: '#f8fafc' } }}>
                 {visibleRows.map((r, ri) => renderRow(r, ri))}
               </tbody>
             </table>
-          )
-        }
+          </Box>
       </Box>
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <Box sx={{ p: 1.5, bgcolor: '#fff', borderTop: '1px solid #e2e8f0', display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Button size="small" variant="outlined" disabled={page === 0} onClick={() => setPage(p => p - 1)}>← Prev</Button>
-          <Typography variant="body2" fontWeight={700}>Page {page + 1} / {totalPages} &nbsp;·&nbsp; rows {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filteredRows.length)} of {filteredRows.length}</Typography>
-          <Button size="small" variant="outlined" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next →</Button>
+        <Box sx={{ p: 2, bgcolor: '#fff', borderTop: '1px solid #e2e8f0', display: 'flex', gap: 2, alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
+            Showing {page * PAGE_SIZE + 1} – {Math.min((page + 1) * PAGE_SIZE, filteredRows.length)} of {filteredRows.length} records
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button size="small" variant="outlined" disabled={page === 0} onClick={() => setPage(p => p - 1)} sx={{ borderRadius: 1.5, fontWeight: 700, textTransform: 'none' }}>Previous</Button>
+            <Button size="small" variant="outlined" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)} sx={{ borderRadius: 1.5, fontWeight: 700, textTransform: 'none' }}>Next</Button>
+          </Box>
         </Box>
       )}
 
       {/* Payment Modal */}
+{/* Payment Modal */}
       <Dialog open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 800 }}>Group Payment Details</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
@@ -1331,7 +1455,7 @@ export default function FinancialYearDetails({ onBack }) {
       </Dialog>
 
       <Dialog open={damageModalOpen} onClose={() => setDamageModalOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 'bold' }}>{damageTarget?.reason || 'Damage / Shortage'} Details</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 'bold' }}>{damageTarget?.reasons?.join(' & ') || 'Deduction'} Details</DialogTitle>
         <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Box>
             <Typography variant="body2" fontWeight={600} mb={1}>1. Select Financial Year</Typography>
@@ -1544,7 +1668,11 @@ export default function FinancialYearDetails({ onBack }) {
                 </Typography>
                 {(() => {
                   const target = Math.abs(num(damageTarget?.debitAmount || 0));
-                  const alloc = damageSelectedTrips.reduce((s, t) => s + num(damageVehicleAmounts[t.invoiceNo] || 0), 0);
+                  const alloc = damageSelectedTrips.reduce((s, t) => {
+                    const rowAmounts = damageVehicleAmounts[t.invoiceNo] || {};
+                    const rowTotal = Object.values(rowAmounts).reduce((rs, val) => rs + num(val || 0), 0);
+                    return s + rowTotal;
+                  }, 0);
                   if (target === 0) return null;
                   const remaining = target - alloc;
                   return (
@@ -1560,9 +1688,11 @@ export default function FinancialYearDetails({ onBack }) {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: '#f8fafc' }}>
-                      <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '30%' }}>Vehicle No.</th>
-                      <th style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '30%' }}>Trip Details</th>
-                      <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '40%' }}>Allocate Amount (₹)</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '25%' }}>Vehicle No.</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '25%' }}>Trip Details</th>
+                      {(damageTarget?.reasons || []).map(reason => (
+                        <th key={reason} style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0' }}>{reason} (₹)</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
@@ -1581,23 +1711,31 @@ export default function FinancialYearDetails({ onBack }) {
                               <span style={{ fontSize: 9.5, color: '#94a3b8', fontFamily: 'monospace' }}>{t.tripDate}</span>
                             </Box>
                           </td>
-                          <td style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="0"
-                              value={damageVehicleAmounts[t.invoiceNo] || ''}
-                              onChange={e => setDamageVehicleAmounts(prev => ({ ...prev, [t.invoiceNo]: e.target.value }))}
-                              style={{
-                                width: 110, padding: '4px 8px', fontSize: 12, textAlign: 'right',
-                                border: '1.5px solid #e2e8f0', borderRadius: 6, outline: 'none',
-                                fontFamily: 'monospace', fontWeight: 600, color: '#1e293b',
-                                background: damageVehicleAmounts[t.invoiceNo] ? '#f0f9ff' : '#fff',
-                              }}
-                              onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.15)'; }}
-                              onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; }}
-                            />
-                          </td>
+                          {(damageTarget?.reasons || []).map(reason => (
+                            <td key={reason} style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="0"
+                                value={(damageVehicleAmounts[t.invoiceNo] && damageVehicleAmounts[t.invoiceNo][reason]) || ''}
+                                onChange={e => setDamageVehicleAmounts(prev => ({
+                                  ...prev,
+                                  [t.invoiceNo]: {
+                                    ...(prev[t.invoiceNo] || {}),
+                                    [reason]: e.target.value
+                                  }
+                                }))}
+                                style={{
+                                  width: 100, padding: '4px 8px', fontSize: 12, textAlign: 'right',
+                                  border: '1.5px solid #e2e8f0', borderRadius: 6, outline: 'none',
+                                  fontFamily: 'monospace', fontWeight: 600, color: '#1e293b',
+                                  background: damageVehicleAmounts[t.invoiceNo]?.[reason] ? '#f0f9ff' : '#fff',
+                                }}
+                                onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.15)'; }}
+                                onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; }}
+                              />
+                            </td>
+                          ))}
                         </tr>
                       ))}
                   </tbody>

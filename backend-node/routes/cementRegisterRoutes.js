@@ -490,7 +490,7 @@ router.post("/generate-batch-bills", auth, async (req, res) => {
 
     res.json({ success: true, summary: generatedBillsSummary });
     const io = getIO();
-    io.emit('cementUpdates', { action: 'batchBillsGenerated' });
+    io.emit('cementUpdates', { action: 'batchBillsGenerated', financialYear: currentFy });
 
   } catch (error) {
     console.error("Error generating batch bills:", error);

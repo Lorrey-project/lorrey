@@ -105,6 +105,8 @@ export const COLUMNS = [
   { key: 'GPS Monitoring Charge', label: 'GPS MONITORING\nCHARGE', width: 150, type: 'manual', group: 'deductions' },
   { key: 'Give GPS DEVICE', label: 'GIVE GPS DEVICE', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
   { key: 'GPS Deviation Charges', label: 'GPS DEVIATION\nCHARGES', width: 150, type: 'manual', group: 'deductions' },
+  { key: 'GPS Trip Charges', label: 'GPS TRIP\nCHARGES', width: 140, type: 'manual', group: 'deductions' },
+  { key: 'Suspense', label: 'SUSPENSE', width: 120, type: 'manual', group: 'deductions' },
   { key: 'Give RFID TAG', label: 'GIVE RFID TAG', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
 
   { key: 'FASTAG', label: 'FASTAG', width: 100, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
@@ -180,6 +182,8 @@ export const COLUMNS = [
         - num(r['GPS Monitoring Charge'])
         - num(r['Give GPS DEVICE'])
         - num(r['GPS Deviation Charges'])
+        - num(r['GPS Trip Charges'])
+        - num(r['Suspense'])
         - num(r['Give RFID TAG'])
         - num(r['RFID REASSURANCE'])
         - num(r['FASTAG'])
@@ -346,7 +350,7 @@ export const VISIBLE_COLS = COLUMNS.filter((c, i, arr) =>
 export const NUMERIC_KEYS = new Set([
   'MT', 'Billing Amount', 'BILLING ER 95%', 'BILLING ER VAR', 'PROFIT', 'TDS',
   'ADVANCE', 'Site Cash', 'OFFICE CASH', 'Bank TF', 'Others deduction', 'Other',
-  'GPS Monitoring Charge', 'Give GPS DEVICE', 'GPS Deviation Charges', 'Give RFID TAG', 'RFID REASSURANCE', 'FASTAG',
+  'GPS Monitoring Charge', 'Give GPS DEVICE', 'GPS Deviation Charges', 'GPS Trip Charges', 'Suspense', 'Give RFID TAG', 'RFID REASSURANCE', 'FASTAG',
   'FUEL REQUIRED', 'HSD (LTR)', 'ACTUAL EXTRA', 'HSD AMOUNT', 'TRAVELLING EXP',
   'SHORTAGE (BAG)', 'SHORTAGE (AMOUNT)', 'NET AMOUNT', 'UP TOLL', 'DOWN TOLL',
   'EXTRA UNLOADING', 'DEDICATED', '10W EXTRA 8.5%', 'GROSS AMOUNT', 'AMOUNT'

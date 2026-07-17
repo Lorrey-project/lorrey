@@ -9,6 +9,7 @@ const fyRowSchema = new mongoose.Schema({
   editedSite: { type: String },
   editedAmount: { type: Number },
   debitReason: { type: String, default: 'None' },
+  debitReasons: { type: [String], default: [] },
   // Legacy singular fields (kept for backward compat)
   damageVehicle: { type: String },
   damageTrip: { type: Object },
