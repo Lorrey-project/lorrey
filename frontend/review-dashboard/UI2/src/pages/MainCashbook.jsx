@@ -11,6 +11,11 @@ import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import TodayIcon from '@mui/icons-material/Today';
+import SavingsIcon from '@mui/icons-material/Savings';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
@@ -135,12 +140,12 @@ function applyCalcs(row) {
 }
 
 const GROUP_COLORS = {
-  global: { bg: '#f1f5f9', title: 'Global', titleBg: '#e2e8f0' },
-  pump: { bg: '#f3e8ff', title: 'Pump cash details', titleBg: '#d8b4fe' },
-  site: { bg: '#dcfce7', title: 'Site cash', titleBg: '#86efac' },
-  office: { bg: '#dbeafe', title: 'Office Cash', titleBg: '#93c5fd' },
-  diff: { bg: '#fee2e2', title: 'Reconciliation', titleBg: '#fca5a5' },
-  remarks: { bg: '#fef08a', title: 'Remarks', titleBg: '#fde047' },
+  global: { bg: '#f8fafc', title: 'Global', titleBg: '#f1f5f9' },
+  pump: { bg: '#faf5ff', title: 'Pump cash details', titleBg: '#f3e8ff' },
+  site: { bg: '#f0fdf4', title: 'Site cash', titleBg: '#dcfce7' },
+  office: { bg: '#eff6ff', title: 'Office Cash', titleBg: '#dbeafe' },
+  diff: { bg: '#fef2f2', title: 'Reconciliation', titleBg: '#fee2e2' },
+  remarks: { bg: '#fef9c3', title: 'Remarks', titleBg: '#fef08a' },
 };
 
 const OPENING_KEYS = ['P_OPENING', 'S_OPENING', 'O_OPENING'];
@@ -354,6 +359,44 @@ export default function MainCashbook({ onBack }) {
       }
     }
     return s;
+  }, [computedRows]);
+
+  // ── KPI Metrics ─────────────────────────────────────────────────────────────
+  const kpiMetrics = useMemo(() => {
+    let openingBalance = 0;
+    let totalReceipts = 0;
+    let totalPayments = 0;
+    let closingBalance = 0;
+    let todaysTransactions = 0;
+
+    const todayStr = new Date().toLocaleDateString('en-IN').replace(/\//g, '-');
+    const todayParts = todayStr.split('-');
+    const todayYYYYMMDD = `${todayParts[2]}-${todayParts[1]?.padStart(2, '0')}-${todayParts[0]?.padStart(2, '0')}`;
+    const todayDDMMYYYY = `${todayParts[0]?.padStart(2, '0')}-${todayParts[1]?.padStart(2, '0')}-${todayParts[2]}`;
+
+    if (computedRows.length > 0) {
+      openingBalance = num(computedRows[0].P_OPENING) + num(computedRows[0].S_OPENING) + num(computedRows[0].O_OPENING);
+      closingBalance = num(computedRows[computedRows.length - 1].P_CLOSING) + num(computedRows[computedRows.length - 1].S_CLOSING) + num(computedRows[computedRows.length - 1].O_CLOSING);
+    }
+
+    computedRows.forEach(r => {
+      totalPayments += num(r.S_EXPENSE) + num(r.O_EXPENSE) + num(r.P_OTHERS);
+      const rDate = r.DATE || '';
+      if (rDate === todayStr || rDate === todayYYYYMMDD || rDate === todayDDMMYYYY) {
+        todaysTransactions += 1;
+      }
+    });
+    
+    totalReceipts = closingBalance - openingBalance + totalPayments;
+
+    return {
+      openingBalance,
+      totalReceipts,
+      totalPayments,
+      closingBalance,
+      todaysTransactions,
+      currentBalance: closingBalance
+    };
   }, [computedRows]);
 
   const handleCellEdit = useCallback((rowId, field, value) => {
@@ -676,40 +719,50 @@ export default function MainCashbook({ onBack }) {
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
 
+      {/* ── Header ── */}
+      <Box sx={{ p: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 2, zIndex: 10 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+              <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
+            </IconButton>
+            <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
+              Main Cashbook
+            </Typography>
+            <Chip label={`${MONTH_NAMES[selMonth - 1]} ${selMonth >= 4 ? selYear.split('-')[0] : parseInt(selYear.split('-')[0], 10) + 1}`}
+              size="small" sx={{ fontWeight: 800, bgcolor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }} />
+          </Box>
+        </Box>
+
+
+      </Box>
+
       {/* ── Toolbar ── */}
       <Box sx={{
-        px: 2, py: 1, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flexShrink: 0
+        px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
+        bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', flexShrink: 0, zIndex: 9
       }}>
-        <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
-          <ArrowBackIcon fontSize="small" />
-        </IconButton>
-        <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-          Main Cashbook
-        </Typography>
-
         {/* Month selector */}
-        <Box sx={{ minWidth: 130 }}>
-          <SearchableSelect value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}
-            sx={{ fontSize: 12, fontWeight: 700 }}>
-            {MONTH_NAMES.map((m, i) => (
-              <MenuItem key={i + 1} value={i + 1} sx={{ fontSize: 12 }}>{m}</MenuItem>
-            ))}
+        <Box sx={{ minWidth: 140 }}>
+          <SearchableSelect sx={{ minWidth: 140 }} value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}>
+            {MONTH_NAMES.map((m, i) => <MenuItem key={i + 1} value={i + 1}>{m}</MenuItem>)}
           </SearchableSelect>
         </Box>
 
         {/* Year selector */}
         <Box sx={{ minWidth: 140 }}>
-          <SearchableSelect value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}
-            sx={{ fontSize: 12, fontWeight: 700 }}>
-            {yearOptions.map(y => <MenuItem key={y} value={y} sx={{ fontSize: 12 }}>{y}</MenuItem>)}
+          <SearchableSelect sx={{ minWidth: 120 }} value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}>
+            {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
           </SearchableSelect>
         </Box>
 
-        <Chip label={`${MONTH_NAMES[selMonth - 1]} ${selMonth >= 4 ? selYear.split('-')[0] : parseInt(selYear.split('-')[0], 10) + 1}`}
-          size="small" sx={{ fontWeight: 800, bgcolor: '#f0e6ff', color: '#6d28d9' }} />
+        <Chip
+          label={`${computedRows.length} entries`}
+          size="small"
+          sx={{ bgcolor: '#f1f5f9', fontWeight: 700, color: '#475569' }}
+        />
 
-        {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" color="warning" sx={{ fontWeight: 700 }} />}
+        {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ fontWeight: 700, bgcolor: '#fef08a', color: '#854d0e' }} />}
         {selectedIds.size > 0 && <Chip label={`${selectedIds.size} selected`} size="small" sx={{ fontWeight: 700, bgcolor: '#fee2e2', color: '#b91c1c' }} />}
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -740,23 +793,18 @@ export default function MainCashbook({ onBack }) {
             + Add Row
           </Button>
           <Tooltip title="Discard & reload">
-            <IconButton size="small" onClick={() => fetchData(selMonth, selYear)} sx={{ bgcolor: '#f1f5f9' }}>
-              <RefreshIcon fontSize="small" />
+            <IconButton size="small" onClick={() => fetchData(selMonth, selYear)} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+              <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
             </IconButton>
           </Tooltip>
           <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
-            sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>XLS</Button>
+            sx={{ fontWeight: 700, borderRadius: 2, color: '#475569', borderColor: '#cbd5e1' }}>XLS</Button>
           <Button size="small" variant="contained"
             startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
             onClick={handleSave}
             disabled={(dirtyCount === 0 && importedEntries.length === 0) || saving}
             sx={{
-              fontWeight: 800, borderRadius: 2, px: 2.5,
-              background: importedEntries.length > 0
-                ? 'linear-gradient(135deg, #22c55e, #16a34a)'
-                : (dirtyCount > 0 ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#cbd5e1'),
-              opacity: (dirtyCount === 0 && importedEntries.length === 0) ? 0.5 : 1,
-              filter: (dirtyCount === 0 && importedEntries.length === 0) ? 'blur(0.5px)' : 'none',
+              fontWeight: 700, borderRadius: 2, bgcolor: (dirtyCount + importedEntries.length) > 0 ? '#3b82f6' : '#cbd5e1', '&:hover': { bgcolor: '#2563eb' }, px: 3,
               transition: 'all 0.2s ease-in-out'
             }}>
             {saving ? 'Saving...' : `Save${(dirtyCount + importedEntries.length) > 0 ? ` (${dirtyCount + importedEntries.length})` : ''}`}
@@ -781,12 +829,12 @@ export default function MainCashbook({ onBack }) {
           <thead>
             {/* Super-group headers */}
             <tr>
-              <th rowSpan={3} style={{ position: 'sticky', top: 0, zIndex: 4, width: 40, background: '#1e293b', borderRight: '1px solid #334155' }}>
-                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ accentColor: '#7c3aed' }} />
+              <th rowSpan={3} style={{ position: 'sticky', top: 0, zIndex: 4, width: 40, background: '#f8fafc', borderRight: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8' }}>
+                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ accentColor: '#3b82f6' }} />
               </th>
               <th rowSpan={3} style={{
-                position: 'sticky', top: 0, zIndex: 4, background: '#334155', color: '#fff',
-                fontSize: 11, fontWeight: 900, border: '1px solid #475569'
+                position: 'sticky', top: 0, zIndex: 4, background: '#f8fafc', color: '#334155',
+                fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8'
               }}>
                 SL No
               </th>
@@ -797,8 +845,8 @@ export default function MainCashbook({ onBack }) {
                 return (
                   <th key={grp} colSpan={colCount} style={{
                     position: 'sticky', top: 0, zIndex: 3,
-                    background: gc.titleBg, color: '#000', padding: '6px',
-                    textAlign: 'center', fontSize: '14px', fontWeight: 900,
+                    background: gc.titleBg, color: '#0f172a', padding: '6px',
+                    textAlign: 'center', fontSize: '12px', fontWeight: 800,
                     border: '1px solid #cbd5e1'
                   }}>
                     {gc.title}
@@ -821,9 +869,9 @@ export default function MainCashbook({ onBack }) {
                       const subGroupCols = COLUMNS.filter(c => c.subGroup === col.subGroup);
                       cols.push(
                         <th key={`subGroup-${col.subGroup}`} colSpan={subGroupCols.length} style={{
-                          position: 'sticky', top: '33px', zIndex: 3,
-                          background: gc.bg, color: '#1e293b', padding: '4px',
-                          textAlign: 'center', fontSize: '11px', fontWeight: 900,
+                          position: 'sticky', top: '30px', zIndex: 3,
+                          background: gc.bg, color: '#334155', padding: '4px',
+                          textAlign: 'center', fontSize: '11px', fontWeight: 800,
                           border: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8'
                         }}>
                           {col.subGroup}
@@ -833,9 +881,9 @@ export default function MainCashbook({ onBack }) {
                   } else {
                     cols.push(
                       <th key={col.key} rowSpan={2} style={{
-                        position: 'sticky', top: '33px', zIndex: 3,
-                        background: gc.bg, color: '#1e293b', padding: '8px 4px',
-                        textAlign: 'center', fontSize: '11px', fontWeight: 800,
+                        position: 'sticky', top: '30px', zIndex: 3,
+                        background: gc.bg, color: '#334155', padding: '8px 4px',
+                        textAlign: 'center', fontSize: '11px', fontWeight: 700,
                         border: '1px solid #cbd5e1', whiteSpace: 'pre-line'
                       }}>
                         {col.label}
@@ -852,9 +900,9 @@ export default function MainCashbook({ onBack }) {
                 const gc = GROUP_COLORS[col.group];
                 return (
                   <th key={col.key} style={{
-                    position: 'sticky', top: '56px', zIndex: 3,
-                    background: gc.bg, color: '#1e293b', padding: '4px',
-                    textAlign: 'center', fontSize: '11px', fontWeight: 800,
+                    position: 'sticky', top: '53px', zIndex: 3,
+                    background: gc.bg, color: '#334155', padding: '4px',
+                    textAlign: 'center', fontSize: '11px', fontWeight: 700,
                     border: '1px solid #cbd5e1', whiteSpace: 'pre-line'
                   }}>
                     {col.label}
@@ -879,8 +927,8 @@ export default function MainCashbook({ onBack }) {
               const sourceYellow = othersVal > 0; // yellow Cash Source when Others > 0
 
               return (
-                <tr key={row._id} style={{ background: isSelected ? 'rgba(124,58,237,0.08)' : '#fff' }}>
-                  <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', background: isSelected ? 'rgba(124,58,237,0.06)' : 'transparent' }}>
+                <tr key={row._id} style={{ background: isSelected ? 'rgba(59,130,246,0.08)' : (ri % 2 === 0 ? '#fff' : '#fafafa'), transition: 'background 0.15s ease' }}>
+                  <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', background: isSelected ? 'rgba(59,130,246,0.06)' : 'transparent' }}>
                     <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(row._id)} />
                   </td>
                   {/* SL No */}
@@ -921,7 +969,7 @@ export default function MainCashbook({ onBack }) {
                     } else if (isDirty) {
                       cellBg = '#fff3cd'; // dirty edits
                     } else if (isCalcLike) {
-                      cellBg = '#f8fafc'; // calc / auto-filled
+                      cellBg = 'transparent'; // Let row background show through
                     } else {
                       cellBg = gc.bg;
                     }
@@ -957,7 +1005,8 @@ export default function MainCashbook({ onBack }) {
                               width: '100%', height: '100%', padding: '6px',
                               border: dateError ? '2px solid #dc2626' : 'none',
                               background: 'transparent', textAlign: 'center',
-                              fontSize: '12px', fontWeight: isDirty ? 700 : 400, outline: 'none'
+                              fontSize: '12px', fontWeight: isDirty ? 700 : 400, outline: 'none',
+                              color: isDirty ? '#92400e' : '#334155'
                             }}
                           />
                         )}
@@ -970,10 +1019,10 @@ export default function MainCashbook({ onBack }) {
 
             {/* ── Monthly Summary Row (green) ── */}
             {computedRows.length > 0 && (
-              <tr style={{ background: '#16a34a' }}>
+              <tr style={{ background: '#f0fdf4' }}>
                 <td colSpan={2} style={{
-                  padding: '8px', border: '1px solid #15803d',
-                  fontWeight: 900, textAlign: 'center', color: '#fff', fontSize: 13
+                  padding: '8px', border: '1px solid #bbf7d0', borderTop: '2px solid #86efac',
+                  fontWeight: 800, textAlign: 'center', color: '#166534', fontSize: 13
                 }}>
                   {MONTH_NAMES[selMonth - 1].toUpperCase()} {selYear} TOTAL
                 </td>
@@ -981,8 +1030,8 @@ export default function MainCashbook({ onBack }) {
                   const val = NUMERIC_COLS.find(c => c.key === col.key) ? monthSums[col.key] : '—';
                   return (
                     <td key={col.key} style={{
-                      padding: '8px 4px', border: '1px solid #15803d',
-                      fontWeight: 900, textAlign: 'center', color: '#fff', fontSize: 12
+                      padding: '8px 4px', border: '1px solid #bbf7d0', borderTop: '2px solid #86efac',
+                      fontWeight: 800, textAlign: 'center', color: '#166534', fontSize: 12
                     }}>
                       {val}
                     </td>

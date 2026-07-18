@@ -45,13 +45,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Async request logger — writes OUTSIDE backend-node/ so nodemon never watches it
-const _reqLogStream = require('fs').createWriteStream(
-  require('path').join(__dirname, '..', 'request_log.txt'), { flags: 'a' }
-);
+// Async request logger -> Replaced with console.log for Render compatibility
 const { triggerRecalculateAdvances } = require("./utils/advanceCalculator");
 
 app.use((req, res, next) => {
-  _reqLogStream.write(`[${new Date().toISOString()}] ${req.method} ${req.url}\n`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   
   // Hook into response finish to trigger recalculation if data was modified
   res.on('finish', () => {
@@ -202,6 +200,7 @@ connectDB();
 
 app.use("/invoice", auth, invoiceRoutes);
 
-server.listen(3000, '0.0.0.0', () => {
-  console.log("Server is running on port 3000 (0.0.0.0)");
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
 });

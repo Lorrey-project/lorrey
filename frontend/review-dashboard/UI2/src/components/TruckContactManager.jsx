@@ -3,7 +3,7 @@ import {
   Dialog, DialogTitle, DialogContent, Box, Typography, TextField,
   Button, IconButton, CircularProgress, Snackbar, Alert,
   Tabs, Tab, Divider, Backdrop, MenuItem, Chip, Autocomplete,
-  useTheme, useMediaQuery
+  useTheme, useMediaQuery, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
@@ -35,13 +35,13 @@ function TabPanel({ value, index, children }) {
 function SectionLabel({ icon: Icon, label }) {
   return (
     <Box display="flex" alignItems="center" gap={1} mb={2} mt={1}>
-      <Box sx={{ p: 0.75, bgcolor: '#f3e5f5', borderRadius: '8px', display: 'flex', alignItems: 'center' }}>
-        <Icon sx={{ fontSize: 16, color: '#7b1fa2' }} />
+      <Box sx={{ p: 0.75, bgcolor: '#f1f5f9', borderRadius: '8px', display: 'flex', alignItems: 'center' }}>
+        <Icon sx={{ fontSize: 16, color: '#475569' }} />
       </Box>
-      <Typography variant="caption" fontWeight={800} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase' }}>
+      <Typography variant="caption" fontWeight={800} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase' }}>
         {label}
       </Typography>
-      <Box flex={1} sx={{ height: '1px', bgcolor: 'rgba(123,31,162,0.12)', ml: 1 }} />
+      <Box flex={1} sx={{ height: '1px', bgcolor: '#e2e8f0', ml: 1 }} />
     </Box>
   );
 }
@@ -435,7 +435,7 @@ export default function TruckContactManager({ open, onClose }) {
         InputProps={{
           sx: inputSx,
           startAdornment: Icon ? (
-            <Icon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} />
+            <Icon sx={{ color: '#64748b', mr: 1, fontSize: 18 }} />
           ) : null
         }}
         {...extra}
@@ -454,7 +454,7 @@ export default function TruckContactManager({ open, onClose }) {
         InputProps={{
           sx: inputSx,
           startAdornment: Icon ? (
-            <Icon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} />
+            <Icon sx={{ color: '#64748b', mr: 1, fontSize: 18 }} />
           ) : null
         }}
       >
@@ -477,7 +477,7 @@ export default function TruckContactManager({ open, onClose }) {
           InputProps={{
             sx: inputSx,
             startAdornment: Icon ? (
-              <Icon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} />
+              <Icon sx={{ color: '#64748b', mr: 1, fontSize: 18 }} />
             ) : null,
             endAdornment: (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -490,9 +490,9 @@ export default function TruckContactManager({ open, onClose }) {
                     textTransform: 'none',
                     fontWeight: 800,
                     fontSize: '11px',
-                    color: doc?.status === 'Uploaded' ? '#16a34a' : '#7b1fa2',
+                    color: doc?.status === 'Uploaded' ? '#16a34a' : '#1a73e8',
                     bgcolor: doc?.status === 'Uploaded' ? '#f0fdf4' : 'transparent',
-                    '&:hover': { bgcolor: doc?.status === 'Uploaded' ? '#dcfce7' : '#f3e5f5' }
+                    '&:hover': { bgcolor: doc?.status === 'Uploaded' ? '#dcfce7' : '#f1f5f9' }
                   }}
                 >
                   {doc?.status === 'Uploaded' ? 'Uploaded' : 'Upload PDF'}
@@ -563,7 +563,7 @@ export default function TruckContactManager({ open, onClose }) {
     return (
       <Box sx={{ mt: 3, pt: 3, borderTop: '1px dashed #e2e8f0' }}>
         <SectionLabel icon={CloudUploadIcon} label={label} />
-        <Box sx={{ border: '1px solid #f3e5f5', borderRadius: '16px', overflow: 'hidden' }}>
+        <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '16px', overflow: 'hidden' }}>
           {filteredDocs.map((doc, idx) => {
             const globalIdx = docs.findIndex(d => d.id === doc.id);
             return (
@@ -610,7 +610,7 @@ export default function TruckContactManager({ open, onClose }) {
                 {!doc.url && (
                   <Button
                     component="label" size="small" variant="text"
-                    sx={{ textTransform: 'none', fontWeight: 800, color: '#7b1fa2' }}
+                    sx={{ textTransform: 'none', fontWeight: 800, color: '#1a73e8' }}
                   >
                     Upload PDF
                     <input type="file" hidden accept="application/pdf,image/jpeg,image/png" onChange={(e) => handleDocUpload(e, globalIdx)} />
@@ -663,7 +663,7 @@ export default function TruckContactManager({ open, onClose }) {
     return (
       <Box sx={{ mt: 3, pt: 3, borderTop: '1px dashed #e2e8f0' }}>
         <SectionLabel icon={CloudUploadIcon} label="GST Documents" />
-        <Box sx={{ border: '1px solid #f3e5f5', borderRadius: '16px', overflow: 'hidden' }}>
+        <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '16px', overflow: 'hidden' }}>
           {currentGstDocs.length === 0 && (
             <Box sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="body2" color="text.secondary">No GST documents uploaded.</Typography>
@@ -708,7 +708,7 @@ export default function TruckContactManager({ open, onClose }) {
           <Box sx={{ p: 1.5, borderTop: currentGstDocs.length > 0 ? '1px solid #f1f5f9' : 'none', bgcolor: '#fafafa', textAlign: 'center' }}>
             <Button
               component="label" size="small" variant="contained"
-              sx={{ textTransform: 'none', fontWeight: 700, bgcolor: '#7b1fa2', '&:hover': { bgcolor: '#6a1b9a' } }}
+              sx={{ textTransform: 'none', fontWeight: 700, bgcolor: '#1a73e8', '&:hover': { bgcolor: '#0d47a1' } }}
             >
               Upload GST Document
               <input type="file" hidden accept="application/pdf,image/jpeg,image/png" onChange={handleGstUpload} />
@@ -724,67 +724,56 @@ export default function TruckContactManager({ open, onClose }) {
       <Dialog
         open={open}
         onClose={onClose}
-        maxWidth="md"
-        fullWidth
-        fullScreen={isMobile}
+        fullScreen={true}
         PaperProps={{
           sx: {
-            borderRadius: isMobile ? 0 : '24px',
-            overflow: 'hidden',
-            background: '#ffffff',
-            maxHeight: isMobile ? '100dvh' : '92vh',
+            background: '#f8fafc',
           }
         }}
       >
-        {/* ── Header — matches VoucherDialog purple gradient ── */}
-        <DialogTitle sx={{ p: 0 }}>
-          <Box sx={{
-            display: 'flex', alignItems: 'center', gap: 2,
-            px: 3, py: 2,
-            background: 'linear-gradient(135deg, #4a148c 0%, #7b1fa2 50%, #9c27b0 100%)',
-            color: '#fff',
-          }}>
-            <Box sx={{ width: 40, height: 40, borderRadius: '10px', bgcolor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <LocalShippingIcon />
-            </Box>
-            <Box flex={1}>
-              <Typography variant="h6" fontWeight={900}>Truck & Driver Manager</Typography>
-              <Typography variant="caption" sx={{ opacity: 0.75 }}>DIPALI ASSOCIATES & CO.</Typography>
-            </Box>
-            <IconButton onClick={onClose} sx={{ color: '#fff' }}><CloseIcon /></IconButton>
+        {/* ── Header — matches Modern ERP style ── */}
+        <Box sx={{
+          display: 'flex', alignItems: 'center', gap: 2,
+          px: 3, py: 2,
+          bgcolor: '#fff',
+          borderBottom: '1px solid #e2e8f0',
+        }}>
+          <Box sx={{ width: 40, height: 40, borderRadius: '10px', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <LocalShippingIcon sx={{ color: '#475569' }} />
           </Box>
+          <Box flex={1}>
+            <Typography variant="h6" fontWeight={800} color="#0f172a">Owner & Vehicle Directory</Typography>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>DIPALI ASSOCIATES & CO.</Typography>
+          </Box>
+          <IconButton onClick={onClose} sx={{ color: '#64748b' }}><CloseIcon /></IconButton>
+        </Box>
 
-          {/* ── Tabs — matches VoucherDialog #faf5ff style ── */}
-          <Box sx={{ bgcolor: '#faf5ff', borderBottom: '1px solid #ede7f6' }}>
-            <Tabs
-              value={tab}
-              onChange={(_, v) => {
-                setTab(v);
-                if (v === 0 && !editId) setForm({});
-              }}
-              sx={{
-                px: 2,
-                '& .MuiTab-root': { fontWeight: 800, fontSize: '13px', minHeight: 48, textTransform: 'none' },
-                '& .Mui-selected': { color: '#7b1fa2 !important' },
-                '& .MuiTabs-indicator': { backgroundColor: '#7b1fa2' },
-              }}
-            >
-              <Tab icon={<AddCircleOutlineIcon sx={{ fontSize: 18 }} />} iconPosition="start"
-                label={editId ? 'Edit Contact' : 'Add New Contact'} />
-              <Tab icon={<BadgeIcon sx={{ fontSize: 18 }} />} iconPosition="start"
-                label="Temp Driver Assign" />
-              <Tab icon={<ListAltIcon sx={{ fontSize: 18 }} />} iconPosition="start"
-                label={`Existing Contacts (${contacts.length})`} />
-              {userRole === 'Head-office' && (
-                <Tab
-                  icon={<ReceiptIcon sx={{ fontSize: 18 }} />} iconPosition="start"
-                  label={`Approvals (${approvals.length})`}
-                  sx={{ color: approvals.length > 0 ? '#d32f2f !important' : 'inherit' }}
-                />
-              )}
-            </Tabs>
-          </Box>
-        </DialogTitle>
+        {/* ── Tabs — matches Modern ERP style ── */}
+        <Box sx={{ bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', px: 3 }}>
+          <Tabs
+            value={tab}
+            onChange={(_, v) => {
+              setTab(v);
+              if (v === 0 && !editId) setForm({});
+            }}
+            sx={{
+              '& .MuiTab-root': { fontWeight: 700, fontSize: '13px', minHeight: 48, textTransform: 'none', color: '#64748b' },
+              '& .Mui-selected': { color: '#0f172a !important' },
+              '& .MuiTabs-indicator': { backgroundColor: '#0f172a' },
+            }}
+          >
+            <Tab icon={<AddCircleOutlineIcon sx={{ fontSize: 18 }} />} iconPosition="start" label={editId ? 'Edit Contact' : 'Add New Contact'} />
+            <Tab icon={<BadgeIcon sx={{ fontSize: 18 }} />} iconPosition="start" label="Temp Driver Assign" />
+            <Tab icon={<ListAltIcon sx={{ fontSize: 18 }} />} iconPosition="start" label={`Existing Contacts (${contacts.length})`} />
+            {userRole === 'Head-office' && (
+              <Tab
+                icon={<ReceiptIcon sx={{ fontSize: 18 }} />} iconPosition="start"
+                label={`Approvals (${approvals.length})`}
+                sx={{ color: approvals.length > 0 ? '#d32f2f !important' : 'inherit' }}
+              />
+            )}
+          </Tabs>
+        </Box>
 
         <DialogContent sx={{ p: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
@@ -796,7 +785,7 @@ export default function TruckContactManager({ open, onClose }) {
                 {/* Title row */}
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
                   <Box>
-                    <Typography variant="h6" fontWeight={900} color="#4a148c">
+                    <Typography variant="h6" fontWeight={900} color="#0f172a">
                       {editId ? 'Modify Profile' : 'Register New Profile'}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
@@ -805,7 +794,7 @@ export default function TruckContactManager({ open, onClose }) {
                   </Box>
                   {editId && (
                     <Button size="small" variant="outlined"
-                      sx={{ borderRadius: '10px', borderColor: '#7b1fa2', color: '#7b1fa2', fontWeight: 700 }}
+                      sx={{ borderRadius: '10px', borderColor: '#e2e8f0', color: '#475569', fontWeight: 700 }}
                       onClick={() => { setEditId(null); setForm({}); }}>
                       Cancel Edit
                     </Button>
@@ -813,16 +802,16 @@ export default function TruckContactManager({ open, onClose }) {
                 </Box>
 
                 {/* ─── FIXED PRIMARY HEADER ─── */}
-                <Box sx={{ bgcolor: '#faf5ff', p: 2.5, borderRadius: '20px', mb: 3, border: '1px solid #ede7f6', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
+                <Box sx={{ bgcolor: '#f8fafc', p: 2.5, borderRadius: '20px', mb: 3, border: '1px solid #e2e8f0', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr 1fr' }, gap: 3, alignItems: 'center' }}>
                     <Box>
-                      <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
+                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
                         Vehicle Primary ID
                       </Typography>
                       {tf('Truck Number *', 'truckNo', LocalShippingIcon)}
                     </Box>
                     <Box>
-                      <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
+                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
                         Wheel Type
                       </Typography>
                       <TextField
@@ -844,7 +833,7 @@ export default function TruckContactManager({ open, onClose }) {
                       </TextField>
                     </Box>
                     <Box>
-                      <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
+                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
                         Relationship Type
                       </Typography>
                       {tf('ATOA / MKT / Site', 'custType', ArticleIcon)}
@@ -853,16 +842,16 @@ export default function TruckContactManager({ open, onClose }) {
                 </Box>
 
                 {/* ─── NESTED FORM TABS ─── */}
-                <Box sx={{ bgcolor: '#fff', borderRadius: '16px', border: '1px solid #f3e5f5', overflow: 'hidden', boxShadow: '0 4px 20px rgba(123,31,162,0.05)' }}>
+                <Box sx={{ bgcolor: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.02)' }}>
                   <Tabs
                     value={formTab}
                     onChange={(_, v) => setFormTab(v)}
                     variant="fullWidth"
                     sx={{
-                      bgcolor: '#faf5ff',
+                      bgcolor: '#f8fafc',
                       '& .MuiTab-root': { fontWeight: 900, fontSize: '13px', py: 2, minHeight: 60, textTransform: 'none', color: '#64748b' },
-                      '& .Mui-selected': { color: '#4a148c !important', bgcolor: '#fff' },
-                      '& .MuiTabs-indicator': { backgroundColor: '#4a148c', height: 4, borderRadius: '4px 4px 0 0' }
+                      '& .Mui-selected': { color: '#0f172a !important', bgcolor: '#fff' },
+                      '& .MuiTabs-indicator': { backgroundColor: '#0f172a', height: 4, borderRadius: '4px 4px 0 0' }
                     }}
                   >
                     <Tab label="Truck Owner" icon={<PersonIcon sx={{ fontSize: 20 }} />} iconPosition="start" />
@@ -893,7 +882,7 @@ export default function TruckContactManager({ open, onClose }) {
                                   sx: inputSx,
                                   startAdornment: (
                                     <>
-                                      <PersonIcon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} />
+                                      <PersonIcon sx={{ color: '#64748b', mr: 1, fontSize: 18 }} />
                                       {params.InputProps.startAdornment}
                                     </>
                                   ),
@@ -1025,9 +1014,9 @@ export default function TruckContactManager({ open, onClose }) {
                   disabled={saving}
                   sx={{
                     mt: 3.5, py: 1.8, borderRadius: '16px', fontWeight: 900, fontSize: '1rem',
-                    background: 'linear-gradient(45deg, #4a148c, #7b1fa2)',
-                    boxShadow: '0 10px 30px rgba(123,31,162,0.3)',
-                    '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 14px 36px rgba(123,31,162,0.4)' },
+                    bgcolor: '#1a73e8',
+                    boxShadow: '0 10px 30px rgba(26,115,232,0.2)',
+                    '&:hover': { transform: 'translateY(-2px)', bgcolor: '#0d47a1', boxShadow: '0 14px 36px rgba(26,115,232,0.3)' },
                     transition: 'all 0.2s',
                   }}
                 >
@@ -1041,7 +1030,7 @@ export default function TruckContactManager({ open, onClose }) {
               <Box sx={{ p: { xs: 2.5, sm: 3.5 } }}>
                 <Box mb={3} display="flex" justifyContent="space-between" alignItems="flex-start">
                   <Box>
-                    <Typography variant="h6" fontWeight={900} color="#4a148c">Assign Temporary Driver</Typography>
+                    <Typography variant="h6" fontWeight={900} color="#0f172a">Assign Temporary Driver</Typography>
                     <Typography variant="caption" color="text.secondary">Fast-track driver updates for trucks already in your database</Typography>
                   </Box>
                   <Chip label="Existing Fleet Only" color="primary" variant="outlined" sx={{ fontWeight: 800, fontSize: '10px' }} />
@@ -1065,7 +1054,7 @@ export default function TruckContactManager({ open, onClose }) {
                         {...params}
                         placeholder="Type Truck No... (e.g. WB39...)"
                         label="Search Database *"
-                        InputProps={{ ...params.InputProps, sx: inputSx, startAdornment: <LocalShippingIcon sx={{ color: '#7b1fa2', mr: 1, fontSize: 18 }} /> }}
+                        InputProps={{ ...params.InputProps, sx: inputSx, startAdornment: <LocalShippingIcon sx={{ color: '#64748b', mr: 1, fontSize: 18 }} /> }}
                       />
                     )}
                   />
@@ -1074,17 +1063,17 @@ export default function TruckContactManager({ open, onClose }) {
                 {form.truckNo ? (
                   <Box sx={{ animation: 'fadeIn 0.3s' }}>
                     {/* Display Current Owner info (Read Only) */}
-                    <Box sx={{ p: 2.5, bgcolor: '#faf5ff', borderRadius: '20px', mb: 3, border: '1px solid #ede7f6', display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Box sx={{ width: 45, height: 45, bgcolor: '#fff', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e9d5ff' }}>
-                        <PersonIcon sx={{ color: '#7b1fa2' }} />
+                    <Box sx={{ p: 2.5, bgcolor: '#f8fafc', borderRadius: '20px', mb: 3, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Box sx={{ width: 45, height: 45, bgcolor: '#fff', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0' }}>
+                        <PersonIcon sx={{ color: '#475569' }} />
                       </Box>
                       <Box flex={1}>
-                        <Typography variant="caption" fontWeight={900} color="#7b1fa2" sx={{ textTransform: 'uppercase', fontSize: '10px' }}>Owner Verified</Typography>
-                        <Typography variant="body2" fontWeight={800} color="#4a148c">{form.ownerName}</Typography>
+                        <Typography variant="caption" fontWeight={900} color="#1a73e8" sx={{ textTransform: 'uppercase', fontSize: '10px' }}>Owner Verified</Typography>
+                        <Typography variant="body2" fontWeight={800} color="#0f172a">{form.ownerName}</Typography>
                         <Typography variant="caption" color="text.secondary">{form.contactNo || 'No contact found in DB'}</Typography>
                       </Box>
                       <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="h6" fontWeight={900} color="#7b1fa2" sx={{ fontFamily: 'monospace' }}>{form.truckNo}</Typography>
+                        <Typography variant="h6" fontWeight={900} color="#0f172a" sx={{ fontFamily: 'monospace' }}>{form.truckNo}</Typography>
                       </Box>
                     </Box>
 
@@ -1110,7 +1099,7 @@ export default function TruckContactManager({ open, onClose }) {
                     {/* Full Digital Document Vault for Temp Driver */}
                     <Box sx={{ mt: 2 }}>
                       <SectionLabel icon={CloudUploadIcon} label="Verification Vault" />
-                      <Box sx={{ border: '1px solid #f3e5f5', borderRadius: '16px', overflow: 'hidden', bgcolor: '#fff' }}>
+                      <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '16px', overflow: 'hidden', bgcolor: '#fff' }}>
                         {docs.map((doc, idx) => (
                           <Box key={doc.id} sx={{
                             display: 'flex', alignItems: 'center', gap: 2, p: 1.5,
@@ -1122,7 +1111,7 @@ export default function TruckContactManager({ open, onClose }) {
                               {doc.label}
                             </Typography>
                             <Chip label={doc.status} size="small" sx={{ fontSize: '9px', height: 18, fontWeight: 800, bgcolor: doc.status === 'Uploaded' ? '#dcfce7' : '#f1f5f9' }} />
-                            <Button component="label" size="small" variant="text" sx={{ textTransform: 'none', fontWeight: 800, color: '#7b1fa2', fontSize: '11px' }}>
+                            <Button component="label" size="small" variant="text" sx={{ textTransform: 'none', fontWeight: 800, color: '#1a73e8', fontSize: '11px' }}>
                               {doc.status === 'Uploaded' ? 'Change' : 'Upload'}
                               <input type="file" hidden accept="application/pdf" onChange={(e) => {
                                 if (e.target.files[0]) {
@@ -1148,9 +1137,9 @@ export default function TruckContactManager({ open, onClose }) {
                       disabled={saving || !form.driverName}
                       sx={{
                         mt: 2, py: 1.8, borderRadius: '16px', fontWeight: 900, fontSize: '1rem',
-                        background: 'linear-gradient(45deg, #7b1fa2, #9c27b0)',
-                        boxShadow: '0 8px 24px rgba(123,31,162,0.2)',
-                        '&:hover': { transform: 'translateY(-2px)' }
+                        bgcolor: '#1a73e8',
+                        boxShadow: '0 8px 24px rgba(26,115,232,0.2)',
+                        '&:hover': { transform: 'translateY(-2px)', bgcolor: '#0d47a1' }
                       }}
                     >
                       {saving ? <CircularProgress size={22} color="inherit" /> : 'Confirm & Update Driver'}
@@ -1172,109 +1161,81 @@ export default function TruckContactManager({ open, onClose }) {
 
             {/* ── TAB 2: EXISTING CONTACTS ── */}
             <TabPanel value={tab} index={2}>
-              <Box sx={{ p: 2 }}>
+              <Box sx={{ p: 3 }}>
+                <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#ffffff', display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <PersonIcon sx={{ color: '#475569' }} />
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Owners</Typography>
+                      <Typography variant="h6" fontWeight={800} color="#0f172a">{uniqueOwners.length}</Typography>
+                    </Box>
+                  </Box>
+                  <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#ffffff', display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <LocalShippingIcon sx={{ color: '#10b981' }} />
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Vehicles</Typography>
+                      <Typography variant="h6" fontWeight={800} color="#047857">{contacts.length}</Typography>
+                    </Box>
+                  </Box>
+                </Box>
+
                 {loading ? (
                   <Box display="flex" justifyContent="center" py={6}>
-                    <CircularProgress sx={{ color: '#7b1fa2' }} />
+                    <CircularProgress sx={{ color: '#1a73e8' }} />
                   </Box>
                 ) : contacts.length === 0 ? (
                   <Box sx={{ textAlign: 'center', py: 8, opacity: 0.5 }}>
-                    <LocalShippingIcon sx={{ fontSize: 48, color: '#7b1fa2', mb: 1 }} />
+                    <LocalShippingIcon sx={{ fontSize: 48, color: '#64748b', mb: 1 }} />
                     <Typography color="text.secondary">No contacts found</Typography>
                   </Box>
                 ) : (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                    {contacts.map((c) => {
-                      // Read legacy DB keys first — that's where existing data lives in MongoDB
-                      const tNo = getStr(c["Truck No "], c["Truck No"], c.truck_no) || 'No Truck No.';
-                      const oName = getStr(c["Owner Name "], c["Owner Name"], c.owner_name) || 'Unknown Owner';
-                      const dName = getStr(c["Driver Name "], c["Driver Name"], c.driver_name);
-                      const phone = getStr(c["Contact No. "], c["Contact No."], c.contact_no);
-                      const pan = getStr(c["PAN No. "], c["PAN No."], c.pan_no);
+                  <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: '12px', maxHeight: '55vh' }}>
+                    <Table stickyHeader size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 50 }}>#</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 120 }}>Vehicle No</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 150 }}>Owner Name</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 150 }}>Driver Name</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 120 }}>Phone</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 120 }}>PAN</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 100 }}>Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {contacts.map((c, idx) => {
+                          const tNo = getStr(c["Truck No "], c["Truck No"], c.truck_no) || '-';
+                          const oName = getStr(c["Owner Name "], c["Owner Name"], c.owner_name) || '-';
+                          const dName = getStr(c["Driver Name "], c["Driver Name"], c.driver_name) || '-';
+                          const phone = getStr(c["Contact No. "], c["Contact No."], c.contact_no) || '-';
+                          const pan = getStr(c["PAN No. "], c["PAN No."], c.pan_no) || '-';
 
-                      return (
-                        <Box
-                          key={c._id}
-                          sx={{
-                            p: 2, borderRadius: '14px',
-                            border: '1px solid #ede7f6',
-                            bgcolor: '#faf5ff',
-                            '&:hover': { bgcolor: '#f3e5f5', borderColor: 'rgba(123,31,162,0.25)' },
-                            transition: 'all 0.2s',
-                          }}
-                        >
-                          <Box display="flex" alignItems="flex-start" gap={2}>
-                            {/* Icon */}
-                            <Box sx={{ p: 1, bgcolor: 'rgba(123,31,162,0.1)', borderRadius: '10px', flexShrink: 0, mt: 0.3 }}>
-                              <LocalShippingIcon sx={{ fontSize: 20, color: '#7b1fa2' }} />
-                            </Box>
-
-                            {/* Details */}
-                            <Box flex={1} minWidth={0}>
-                              <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" mb={0.5}>
-                                <Typography fontWeight={900} color="#4a148c" sx={{ fontFamily: 'monospace', fontSize: '15px' }}>
-                                  {tNo}
-                                </Typography>
-                                <Chip
-                                  label={oName}
-                                  size="small"
-                                  sx={{ bgcolor: '#f3e5f5', color: '#7b1fa2', fontWeight: 700, fontSize: '12px' }}
-                                />
-                              </Box>
-                              <Box display="flex" flexWrap="wrap" gap={1.5}>
-                                {dName && (
-                                  <Box display="flex" alignItems="center" gap={0.4}>
-                                    <BadgeIcon sx={{ fontSize: 13, color: 'text.secondary' }} />
-                                    <Typography variant="caption" color="text.secondary">{dName}</Typography>
-                                  </Box>
-                                )}
-                                {phone && (
-                                  <Box display="flex" alignItems="center" gap={0.4}>
-                                    <PhoneIcon sx={{ fontSize: 13, color: 'text.secondary' }} />
-                                    <Typography variant="caption" color="text.secondary">{phone}</Typography>
-                                  </Box>
-                                )}
-                                {pan && (
-                                  <Box display="flex" alignItems="center" gap={0.4}>
-                                    <ArticleIcon sx={{ fontSize: 13, color: 'text.secondary' }} />
-                                    <Typography variant="caption" color="text.secondary">PAN: {pan}</Typography>
-                                  </Box>
-                                )}
-                              </Box>
-                            </Box>
-
-                            {/* Actions */}
-                            <Box display="flex" gap={0.5} flexShrink={0}>
-                              <IconButton
-                                size="small"
-                                onClick={() => handleEdit(c)}
-                                sx={{
-                                  color: '#7b1fa2',
-                                  bgcolor: 'rgba(123,31,162,0.08)',
-                                  borderRadius: '8px',
-                                  '&:hover': { bgcolor: 'rgba(123,31,162,0.18)' },
-                                }}
-                              >
-                                <EditIcon fontSize="small" />
-                              </IconButton>
-                              <IconButton
-                                size="small"
-                                onClick={() => handleDelete(c._id)}
-                                sx={{
-                                  color: '#d32f2f',
-                                  bgcolor: 'rgba(211,47,47,0.06)',
-                                  borderRadius: '8px',
-                                  '&:hover': { bgcolor: 'rgba(211,47,47,0.16)' },
-                                }}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Box>
-                          </Box>
-                        </Box>
-                      );
-                    })}
-                  </Box>
+                          return (
+                            <TableRow key={c._id} hover sx={{ '&:nth-of-type(even)': { bgcolor: '#fbfbff' } }}>
+                              <TableCell sx={{ color: '#64748b', fontSize: '13px' }}>{idx + 1}</TableCell>
+                              <TableCell sx={{ fontWeight: 700, color: '#0f172a', fontSize: '13px' }}>{tNo}</TableCell>
+                              <TableCell sx={{ fontSize: '13px' }}>{oName}</TableCell>
+                              <TableCell sx={{ fontSize: '13px' }}>{dName}</TableCell>
+                              <TableCell sx={{ fontSize: '13px' }}>{phone}</TableCell>
+                              <TableCell sx={{ fontSize: '13px' }}>{pan}</TableCell>
+                              <TableCell align="right">
+                                <IconButton size="small" onClick={() => handleEdit(c)} sx={{ color: '#1a73e8' }}>
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                                <IconButton size="small" onClick={() => handleDelete(c._id)} sx={{ color: '#d32f2f' }}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
                 )}
               </Box>
             </TabPanel>
@@ -1282,55 +1243,56 @@ export default function TruckContactManager({ open, onClose }) {
             {/* ── TAB 3: APPROVALS QUEUE (Head Office Only) ── */}
             {userRole === 'Head-office' && (
               <TabPanel value={tab} index={3}>
-                <Box sx={{ p: 2.5 }}>
+                <Box sx={{ p: 3 }}>
                   <Box mb={3} display="flex" justifyContent="space-between" alignItems="center">
                     <Box>
-                      <Typography variant="h6" fontWeight={900} color="#4a148c">Approvals Queue</Typography>
+                      <Typography variant="h6" fontWeight={800} color="#0f172a">Approvals Queue</Typography>
                       <Typography variant="caption" color="text.secondary">Review and authorize new truck/driver registrations</Typography>
                     </Box>
-                    <Button startIcon={<ListAltIcon />} size="small" onClick={fetchApprovals}>Refresh</Button>
+                    <Button variant="outlined" startIcon={<ListAltIcon />} size="small" onClick={fetchApprovals} sx={{ borderColor: '#e2e8f0', color: '#475569' }}>Refresh</Button>
                   </Box>
 
                   {approvalLoading ? <CircularProgress sx={{ display: 'block', mx: 'auto', mt: 4 }} /> :
                     approvals.length === 0 ? (
-                      <Box sx={{ textAlign: 'center', py: 10, bgcolor: '#f8fafc', borderRadius: '24px', border: '2px dashed #e2e8f0' }}>
-                        <CheckCircleIcon sx={{ fontSize: 48, color: '#16a34a', mb: 2, opacity: 0.3 }} />
-                        <Typography color="text.secondary">All clear! No pending approvals found.</Typography>
+                      <Box sx={{ textAlign: 'center', py: 10, bgcolor: '#f8fafc', borderRadius: '16px', border: '1px dashed #cbd5e1' }}>
+                        <CheckCircleIcon sx={{ fontSize: 48, color: '#10b981', mb: 2, opacity: 0.5 }} />
+                        <Typography color="text.secondary" fontWeight={600}>All clear! No pending approvals found.</Typography>
                       </Box>
                     ) : (
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {approvals.map((req) => (
-                          <Box key={req._id} sx={{ p: 2, bgcolor: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-                            <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={2}>
-                              <Box flex={1}>
-                                <Box display="flex" alignItems="center" gap={1} mb={1}>
-                                  <Chip label={req.requestType} size="small" sx={{ fontWeight: 800, bgcolor: '#4a148c', color: '#fff', fontSize: '10px' }} />
-                                  <Typography variant="caption" color="text.secondary">Requested: {new Date(req.requestedAt).toLocaleDateString()}</Typography>
-                                </Box>
-                                <Typography variant="body2" fontWeight={900}>{req["Truck No "] || 'N/A'}</Typography>
-                                <Typography variant="caption" sx={{ display: 'block' }}>Owner: {req["Owner Name "]}</Typography>
-                                <Typography variant="caption" sx={{ display: 'block' }}>Driver: {req["Driver Name "]}</Typography>
-                              </Box>
-                              <Box display="flex" gap={1}>
-                                <Button
-                                  variant="contained" color="success" size="small"
-                                  sx={{ borderRadius: '8px', fontWeight: 800, textTransform: 'none' }}
-                                  onClick={() => handleProcessApproval(req._id, 'approved')}
-                                >
-                                  Approve
-                                </Button>
-                                <Button
-                                  variant="outlined" color="error" size="small"
-                                  sx={{ borderRadius: '8px', fontWeight: 800, textTransform: 'none' }}
-                                  onClick={() => handleProcessApproval(req._id, 'rejected')}
-                                >
-                                  Reject
-                                </Button>
-                              </Box>
-                            </Box>
-                          </Box>
-                        ))}
-                      </Box>
+                      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Requested Date</TableCell>
+                              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Type</TableCell>
+                              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Vehicle No</TableCell>
+                              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Owner / Driver</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Action</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {approvals.map((req) => (
+                              <TableRow key={req._id} hover>
+                                <TableCell sx={{ color: '#64748b' }}>{new Date(req.requestedAt).toLocaleDateString()}</TableCell>
+                                <TableCell><Chip label={req.requestType} size="small" sx={{ fontWeight: 700, bgcolor: '#fff7ed', color: '#c2410c' }} /></TableCell>
+                                <TableCell sx={{ fontWeight: 700, color: '#0f172a' }}>{req["Truck No "] || 'N/A'}</TableCell>
+                                <TableCell>
+                                  <Typography variant="caption" sx={{ display: 'block', color: '#475569' }}><b>Owner:</b> {req["Owner Name "]}</Typography>
+                                  <Typography variant="caption" sx={{ display: 'block', color: '#475569' }}><b>Driver:</b> {req["Driver Name "]}</Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Button variant="contained" color="success" size="small" sx={{ borderRadius: '6px', fontWeight: 700, textTransform: 'none', mr: 1, bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' } }} onClick={() => handleProcessApproval(req._id, 'approved')}>
+                                    Approve
+                                  </Button>
+                                  <Button variant="outlined" color="error" size="small" sx={{ borderRadius: '6px', fontWeight: 700, textTransform: 'none' }} onClick={() => handleProcessApproval(req._id, 'rejected')}>
+                                    Reject
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
                     )}
                 </Box>
               </TabPanel>

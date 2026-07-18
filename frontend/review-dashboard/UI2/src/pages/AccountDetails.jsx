@@ -13,6 +13,15 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import UploadIcon from '@mui/icons-material/Upload';
 import AddIcon from '@mui/icons-material/Add';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import TodayIcon from '@mui/icons-material/Today';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import SearchIcon from '@mui/icons-material/Search';
+import PrintIcon from '@mui/icons-material/Print';
+import FilterListIcon from '@mui/icons-material/FilterList';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
@@ -830,6 +839,16 @@ export default function AccountDetails({ onBack }) {
     }
   };
 
+  const totalReceipts = useMemo(() => filteredRows.reduce((sum, r) => sum + (num(localData[r._id]?.Deposit ?? r.Deposit)), 0), [filteredRows, localData]);
+  const totalPayments = useMemo(() => filteredRows.reduce((sum, r) => sum + (num(localData[r._id]?.Withdraw ?? r.Withdraw)), 0), [filteredRows, localData]);
+  const currentBalanceStr = filteredRows.length > 0 ? (localData[filteredRows[filteredRows.length - 1]._id]?.['Closing Balance'] ?? filteredRows[filteredRows.length - 1]['Closing Balance']) : 0;
+  const currentBalance = num(currentBalanceStr);
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayTransactions = filteredRows.filter(r => {
+    const d = localData[r._id]?.['Transaction Date'] ?? r['Transaction Date'];
+    return d && d.startsWith(todayStr);
+  }).length;
+  
   if (loading) {
     return (
       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
@@ -840,20 +859,49 @@ export default function AccountDetails({ onBack }) {
   }
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
-      <Box sx={{
-        px: 2.5, py: 1.2,
-        display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: '#fff', borderBottom: '1px solid #e2e8f0',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flexShrink: 0
-      }}>
-        <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
-          <ArrowBackIcon fontSize="small" />
-        </IconButton>
-        <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-          Bank Book
-        </Typography>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f4f7f9', overflow: 'hidden' }}>
+      <style>{`
+        .erp-table-row { transition: background-color 0.15s ease; }
+        .erp-table-row:hover { background-color: #f1f5f9 !important; }
+        .erp-input:focus { border-color: #3b82f6 !important; background-color: #fff !important; }
+      `}</style>
+      
+      {/* ── Premium ERP Header & Dashboard Cards ── */}
+      <Box sx={{ bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', flexShrink: 0, pb: 2 }}>
+        <Box sx={{ px: 3, py: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+          <IconButton onClick={onBack} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', '&:hover': { bgcolor: '#f1f5f9' } }}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Box>
+            <Typography variant="h5" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.1 }}>
+              Bank Book
+            </Typography>
+            <Typography variant="caption" fontWeight={600} color="#64748b">
+              Financial Year {displayYear} • {displayMonth}
+            </Typography>
+          </Box>
 
+          <Box sx={{ ml: 'auto', display: 'flex', gap: 1.5 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Entries</Typography>
+              <Typography variant="body1" fontWeight={800} color="#0f172a">{filteredRows.length}</Typography>
+            </Box>
+            <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Today's Txns</Typography>
+              <Typography variant="body1" fontWeight={800} color="#0f172a">{todayTransactions}</Typography>
+            </Box>
+          </Box>
+        </Box>
+
+
+      </Box>
+
+      {/* ── ERP Toolbar ── */}
+      <Box sx={{
+        px: 3, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
+        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', flexShrink: 0
+      }}>
         {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" color="warning" sx={{ fontWeight: 700 }} />}
         {selectedIds.size > 0 && (
           <Tooltip title="Delete selected">
@@ -863,166 +911,91 @@ export default function AccountDetails({ onBack }) {
           </Tooltip>
         )}
 
-        <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <Autocomplete
             options={MONTHS}
             value={displayMonth}
             onChange={(e, v) => v && setDisplayMonth(v)}
-            renderInput={(params) => <TextField {...params} label="Month" size="small" sx={{ width: 140, bgcolor: 'rgba(255,255,255,0.08)' }} />}
+            renderInput={(params) => <TextField {...params} label="Month" size="small" sx={{ width: 140 }} />}
             disableClearable
           />
           <Autocomplete
             options={YEARS}
             value={displayYear}
             onChange={(e, v) => v && setDisplayYear(v)}
-            renderInput={(params) => <TextField {...params} label="Year" size="small" sx={{ width: 100, bgcolor: 'rgba(255,255,255,0.08)' }} />}
+            renderInput={(params) => <TextField {...params} label="Year" size="small" sx={{ width: 100 }} />}
             disableClearable
           />
+          <Box sx={{ width: 1, height: 28, bgcolor: '#e2e8f0', mx: 0.5 }} />
+          
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#f8fafc', p: '4px 8px', borderRadius: 2, border: '1px solid #e2e8f0' }}>
+            <FilterListIcon sx={{ color: '#64748b', fontSize: 18 }} />
+            <input
+              type="date"
+              value={filterFrom}
+              onChange={e => setFilterFrom(e.target.value)}
+              style={{ padding: '6px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: '12px', color: '#334155' }}
+            />
+            <Typography color="#94a3b8" fontSize="12px">→</Typography>
+            <input
+              type="date"
+              value={filterTo}
+              min={filterFrom || undefined}
+              onChange={e => setFilterTo(e.target.value)}
+              style={{ padding: '6px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: '12px', color: '#334155' }}
+            />
+            {isFiltered && (
+              <Button size="small" onClick={() => { setFilterFrom(''); setFilterTo(''); }} sx={{ minWidth: 0, p: '4px', color: '#ef4444' }}>✕</Button>
+            )}
+          </Box>
+        </Box>
+        
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Tooltip title="Reload data">
+            <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
+            </IconButton>
+          </Tooltip>
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
+            sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px', color: '#475569', borderColor: '#cbd5e1', '&:hover': { bgcolor: '#f1f5f9' } }}>
+            Export
+          </Button>
+          
+          <Box sx={{ width: 1, height: 28, bgcolor: '#e2e8f0', mx: 0.5 }} />
+
           <Button
-            size="small" variant="contained"
+            size="small" variant="outlined"
             startIcon={uploading ? <CircularProgress size={13} color="inherit" /> : <AccountBalanceIcon />}
             disabled={uploading}
             onClick={handleUploadBankStatementClick}
-            sx={{
-              fontWeight: 800, borderRadius: 2, px: 2, fontSize: '12px',
-              background: 'linear-gradient(135deg, #0891b2, #0e7490)',
-              '&:hover': { background: 'linear-gradient(135deg, #0e7490, #155e75)' }
-            }}>
+            sx={{ fontWeight: 700, borderRadius: 2, px: 2, fontSize: '12px', color: '#0369a1', borderColor: '#bae6fd', bgcolor: '#f0f9ff' }}>
             {uploading ? 'Parsing...' : 'Upload Bank Statement'}
           </Button>
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={handleBankStatementUpload} />
 
-
-          <Tooltip title="Discard & reload">
-            <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: '#f1f5f9' }}>
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Button size="small" variant="contained" startIcon={<UploadIcon />} onClick={() => setShowExcelWizard(true)} sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' }, fontWeight: 700, px: 2, borderRadius: 2 }}>
+          <Button size="small" variant="contained" startIcon={<UploadIcon />} onClick={() => setShowExcelWizard(true)} 
+            sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' }, fontWeight: 700, px: 2, borderRadius: 2, boxShadow: 'none' }}>
             Import Excel
           </Button>
-          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
-            sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>XLS</Button>
+
           <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={handleAddRow}
-            sx={{ fontWeight: 800, borderRadius: 2, px: 2, fontSize: '12px', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' } }}>
+            sx={{ fontWeight: 700, borderRadius: 2, px: 2, fontSize: '12px', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' }, boxShadow: 'none' }}>
             Add Row
           </Button>
+          
           <Button
             size="small" variant="contained"
             startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
             onClick={handleSave} disabled={(dirtyCount === 0 && unsavedImportRows.length === 0) || saving}
             sx={{
-              fontWeight: 800, borderRadius: 2, px: 2.5, fontSize: '12px',
-              bgcolor: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#16a34a' : '#cbd5e1',
-              boxShadow: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '0 4px 12px rgba(22,163,74,0.35)' : 'none',
-              filter: (dirtyCount === 0 && unsavedImportRows.length === 0 && !saving) ? 'grayscale(100%) opacity(0.7)' : 'none',
-              '&:disabled': { bgcolor: '#cbd5e1', color: '#64748b' },
+              fontWeight: 800, borderRadius: 2, px: 3, fontSize: '12px', boxShadow: 'none',
+              bgcolor: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#10b981' : '#e2e8f0',
+              color: (dirtyCount > 0 || unsavedImportRows.length > 0) ? '#fff' : '#94a3b8',
+              '&:hover': { bgcolor: '#059669' }
             }}>
             {saving ? 'Saving…' : `Save${(dirtyCount > 0 || unsavedImportRows.length > 0) ? ` (${dirtyCount + unsavedImportRows.length})` : ''}`}
           </Button>
         </Box>
-      </Box>
-
-      {/* ── Column Key Bar ── */}
-      <Box sx={{ px: 2.5, py: 0.7, bgcolor: '#f0f9ff', borderBottom: '1px solid #bae6fd', display: 'flex', gap: 2, alignItems: 'center', flexShrink: 0 }}>
-        <Typography variant="caption" fontWeight={700} color="#0369a1">Column Key:</Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: '#dcfce7', border: '1px solid #16a34a' }} />
-          <Typography variant="caption" color="#15803d" fontWeight={600}>Auto (from bank statement)</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: '#fff7ed', border: '1px solid #f97316' }} />
-          <Typography variant="caption" color="#c2410c" fontWeight={600}>Manual (Ledger Name, Names, Particulars)</Typography>
-        </Box>
-      </Box>
-
-      {/* ── Date Range Filter Bar ── */}
-      <Box sx={{
-        px: 3, py: 1.2, flexShrink: 0,
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%)',
-        borderBottom: '2px solid #0ea5e9',
-        display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap',
-      }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Box sx={{
-            width: 30, height: 30, borderRadius: '8px',
-            background: 'linear-gradient(135deg, #0ea5e9, #0284c7)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(14,165,233,0.4)'
-          }}>
-            <span style={{ fontSize: 15 }}>📅</span>
-          </Box>
-          <Box>
-            <Typography sx={{ color: '#fff', fontWeight: 800, fontSize: '12px', lineHeight: 1.1 }}>
-              Date Range Filter
-            </Typography>
-            <Typography sx={{ color: '#94a3b8', fontWeight: 500, fontSize: '10px', lineHeight: 1.1 }}>
-              Filter bank statements by date
-            </Typography>
-          </Box>
-        </Box>
-
-        <Box sx={{ width: '1px', height: 32, bgcolor: 'rgba(255,255,255,0.15)' }} />
-
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.4 }}>
-          <Typography sx={{ color: '#94a3b8', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            From Date
-          </Typography>
-          <input
-            type="date"
-            value={filterFrom}
-            onChange={e => setFilterFrom(e.target.value)}
-            style={{
-              padding: '7px 12px', borderRadius: 8, fontSize: '13px', fontWeight: 700,
-              border: filterFrom ? '2px solid #0ea5e9' : '2px solid rgba(255,255,255,0.15)',
-              background: filterFrom ? 'rgba(14,165,233,0.18)' : 'rgba(255,255,255,0.07)',
-              color: filterFrom ? '#e0f2fe' : '#94a3b8', outline: 'none', cursor: 'pointer', transition: 'all 0.2s', minWidth: 145,
-            }}
-          />
-        </Box>
-
-        <Box sx={{ display: 'flex', alignItems: 'flex-end', pb: 0.3 }}>
-          <Typography sx={{ color: '#475569', fontSize: '18px', fontWeight: 900, mt: '18px' }}>→</Typography>
-        </Box>
-
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.4 }}>
-          <Typography sx={{ color: '#94a3b8', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            To Date
-          </Typography>
-          <input
-            type="date"
-            value={filterTo}
-            min={filterFrom || undefined}
-            onChange={e => setFilterTo(e.target.value)}
-            style={{
-              padding: '7px 12px', borderRadius: 8, fontSize: '13px', fontWeight: 700,
-              border: filterTo ? '2px solid #0ea5e9' : '2px solid rgba(255,255,255,0.15)',
-              background: filterTo ? 'rgba(14,165,233,0.18)' : 'rgba(255,255,255,0.07)',
-              color: filterTo ? '#e0f2fe' : '#94a3b8', outline: 'none', cursor: 'pointer', transition: 'all 0.2s', minWidth: 145,
-            }}
-          />
-        </Box>
-
-        {isFiltered && (
-          <>
-            <Box sx={{ width: '1px', height: 32, bgcolor: 'rgba(255,255,255,0.15)', ml: 1 }} />
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, ml: 0.5 }}>
-              <Box sx={{
-                display: 'flex', alignItems: 'center', gap: 0.8, px: 2, py: 0.8, borderRadius: 10,
-                background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', boxShadow: '0 2px 10px rgba(14,165,233,0.4)'
-              }}>
-                <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: '13px' }}>{filteredRows.length}</Typography>
-                <Typography sx={{ color: 'rgba(255,255,255,0.8)', fontWeight: 600, fontSize: '11px' }}>
-                  {filteredRows.length === 1 ? 'row found' : 'rows found'}
-                </Typography>
-              </Box>
-              <Button size="small" onClick={() => { setFilterFrom(''); setFilterTo(''); }}
-                sx={{ fontWeight: 800, fontSize: '12px', color: '#fca5a5', border: '1.5px solid rgba(252,165,165,0.4)', borderRadius: '8px', px: 1.5, py: 0.5, textTransform: 'none' }}>
-                ✕ Clear Filter
-              </Button>
-            </Box>
-          </>
-        )}
       </Box>
 
       <Box sx={{ overflow: 'auto', flex: 1 }}>
@@ -1033,18 +1006,16 @@ export default function AccountDetails({ onBack }) {
           </colgroup>
           <thead>
             <tr>
-              <th style={{ position: 'sticky', top: 0, zIndex: 3, background: '#1e293b', borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+              <th style={{ position: 'sticky', top: 0, zIndex: 3, background: '#f8fafc', borderRight: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1' }}>
                 <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ cursor: 'pointer' }} />
               </th>
               {COLUMNS.map((col) => {
-                const isAuto = AUTO_COLS.has(col.key);
-                const isManual = MANUAL_COLS.has(col.key);
                 return (
                   <th key={col.key} style={{
                     position: 'sticky', top: 0, zIndex: 2,
-                    background: isAuto ? '#059669' : isManual ? '#ea580c' : '#0f766e',
-                    color: '#fff', padding: '10px 5px', textAlign: 'center', fontSize: '10px', fontWeight: 700,
-                    whiteSpace: 'pre-line', borderRight: '1px solid rgba(255,255,255,0.1)',
+                    background: '#f8fafc',
+                    color: '#475569', padding: '12px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 800,
+                    whiteSpace: 'pre-line', borderRight: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1'
                   }}>
                     {col.label}
                   </th>
@@ -1054,16 +1025,26 @@ export default function AccountDetails({ onBack }) {
           </thead>
           <tbody>
             {filteredRows.map((row, ri) => (
-              <tr key={row._id} style={{ background: selectedIds.has(row._id) ? '#f0f9ff' : ri % 2 === 0 ? '#fff' : '#f8fafc' }}>
-                <td style={{ textAlign: 'center', border: '1px solid #e2e8f0' }}>
-                  <input type="checkbox" checked={selectedIds.has(row._id)} onChange={() => toggleSelect(row._id)} />
+              <tr key={row._id} className="erp-table-row" style={{ background: selectedIds.has(row._id) ? '#eff6ff' : (ri % 2 === 0 ? '#ffffff' : '#f8fafc') }}>
+                <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                  <input type="checkbox" checked={selectedIds.has(row._id)} onChange={() => toggleSelect(row._id)} style={{ cursor: 'pointer' }} />
                 </td>
                 {COLUMNS.map((col) => {
                   const val = localData[row._id]?.[col.key] ?? (row[col.key] || '');
                   const isAuto = AUTO_COLS.has(col.key);
                   const isFromBank = row._source === 'bank_statement';
+                  
+                  let cellBg = 'transparent';
+                  let cellColor = '#1e293b';
+                  let cellFontWeight = 500;
+                  
+                  if (col.key === 'Deposit' && num(val) > 0) { cellColor = '#16a34a'; cellFontWeight = 700; cellBg = '#f0fdf4'; }
+                  if (col.key === 'Withdraw' && num(val) > 0) { cellColor = '#ea580c'; cellFontWeight = 700; cellBg = '#fff7ed'; }
+                  if (col.key === 'Closing Balance') { cellFontWeight = 700; cellColor = '#0369a1'; cellBg = '#f0f9ff'; }
+                  if (isAuto && col.key !== 'Closing Balance' && col.key !== 'Deposit' && col.key !== 'Withdraw') cellBg = 'rgba(240,249,255,0.4)';
+                  
                   return (
-                    <td key={col.key} style={{ border: '1px solid #e2e8f0', padding: 0 }}>
+                    <td key={col.key} style={{ border: '1px solid #e2e8f0', padding: 0, background: cellBg }}>
                       {col.key === 'Remittance Copy' ? (
                         <Box sx={{ p: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                           {rowUploading === row._id ? (
@@ -1202,46 +1183,51 @@ export default function AccountDetails({ onBack }) {
                                 disableUnderline: true,
                                 style: {
                                   fontSize: '12px',
-                                  padding: '4px 8px',
-                                  fontWeight: val ? 700 : 400,
-                                  color: '#1e293b'
+                                  padding: '8px 10px',
+                                  fontWeight: cellFontWeight,
+                                  color: cellColor
                                 }
                               }}
                             />
                           )}
                           sx={{
                             width: '100%',
-                            '& .MuiAutocomplete-inputRoot': { padding: 0 },
-                            '& .MuiAutocomplete-input': {
-                              padding: '8px 8px !important',
-                              transition: 'background 0.2s',
-                              '&:hover': { bgcolor: '#f8fafc' },
-                              '&:focus': { bgcolor: '#fff' }
-                            },
+                            height: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            border: '1px solid transparent',
+                            transition: 'border 0.2s, background 0.2s',
+                            '&:hover': { border: '1px solid #cbd5e1' },
+                            '&.Mui-focused': { border: '1px solid #3b82f6', bgcolor: '#fff' },
+                            '& .MuiAutocomplete-inputRoot': { padding: 0, width: '100%' },
+                            '& .MuiAutocomplete-input': { padding: '0 !important' },
                             '& .MuiAutocomplete-endAdornment': { display: 'none' }
                           }}
                         />
                       ) : col.key === 'Remarks' ? (
                         <textarea
+                          className="erp-input"
                           value={val}
                           readOnly={isAuto && isFromBank && !localData[row._id]?.[col.key]}
                           onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
                           style={{
-                            width: '100%', height: '100%', border: 'none', padding: '6px 8px',
-                            background: 'transparent', outline: 'none', fontSize: '12px',
-                            resize: 'vertical', minHeight: '80px', fontFamily: 'inherit',
-                            whiteSpace: 'pre-wrap'
+                            width: '100%', height: '100%', border: '1px solid transparent', padding: '10px 10px',
+                            background: 'transparent', outline: 'none', fontSize: '12px', color: cellColor, fontWeight: cellFontWeight,
+                            resize: 'vertical', minHeight: '60px', fontFamily: 'inherit',
+                            whiteSpace: 'pre-wrap', transition: 'all 0.2s', boxSizing: 'border-box'
                           }}
                         />
                       ) : (
                         <input
+                          className="erp-input"
                           type={col.isDate ? 'date' : 'text'}
                           value={val}
                           readOnly={isAuto && isFromBank && !localData[row._id]?.[col.key]}
                           onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
                           style={{
-                            width: '100%', height: '100%', border: 'none', padding: '6px 8px',
-                            background: 'transparent', outline: 'none', fontSize: '12px'
+                            width: '100%', height: '100%', border: '1px solid transparent', padding: '10px 10px',
+                            background: 'transparent', outline: 'none', fontSize: '12px', color: cellColor, fontWeight: cellFontWeight,
+                            transition: 'all 0.2s', boxSizing: 'border-box'
                           }}
                         />
                       )}

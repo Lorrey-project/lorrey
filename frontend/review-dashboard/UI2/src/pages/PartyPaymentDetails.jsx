@@ -8,6 +8,12 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import PeopleIcon from '@mui/icons-material/People';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import PendingActionsIcon from '@mui/icons-material/PendingActions';
+import TodayIcon from '@mui/icons-material/Today';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
 
@@ -336,6 +342,44 @@ export default function PartyPaymentDetails({ onBack }) {
     return t;
   }, [computedRows]);
 
+  // ── KPI Metrics ─────────────────────────────────────────────────────────────
+  const kpiMetrics = useMemo(() => {
+    const uniqueParties = new Set();
+    let totalPayable = 0;
+    let totalPaid = 0;
+    let totalPending = 0;
+    let todaysPayments = 0;
+    let pendingApprovals = 0;
+
+    const todayStr = new Date().toLocaleDateString('en-IN').replace(/\//g, '-');
+    const todayParts = todayStr.split('-');
+    // try formatting to YYYY-MM-DD for comparison if needed, or just compare exact string 
+    // Since PAYMENT DATE is typed, it's usually YYYY-MM-DD from <input type="date">
+    const todayYYYYMMDD = `${todayParts[2]}-${todayParts[1]?.padStart(2, '0')}-${todayParts[0]?.padStart(2, '0')}`;
+
+    computedRows.forEach(r => {
+      if (r['OWNER NAME']) uniqueParties.add(r['OWNER NAME']);
+      totalPayable += num(r['NET PAYABLE']);
+      totalPaid += num(r['PAID TO PARTY']);
+      totalPending += num(r['BALANCE DUE']);
+      
+      if (num(r['BALANCE DUE']) > 0) pendingApprovals += 1;
+      
+      if (r['PAYMENT DATE'] && (r['PAYMENT DATE'] === todayYYYYMMDD || r['PAYMENT DATE'] === todayStr)) {
+        todaysPayments += num(r['PAID TO PARTY']);
+      }
+    });
+
+    return {
+      totalParties: uniqueParties.size,
+      totalPayable,
+      totalPaid,
+      totalPending,
+      todaysPayments,
+      pendingApprovals
+    };
+  }, [computedRows]);
+
   // ── Handlers ─────────────────────────────────────────────────────────────────
   const handleEdit = (ri, field, val) =>
     setLocalEdits(prev => ({ ...prev, [ri]: { ...(prev[ri] || {}), [field]: val } }));
@@ -404,58 +448,64 @@ export default function PartyPaymentDetails({ onBack }) {
 
       {/* ── Header ── */}
       <Box sx={{ p: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 2, zIndex: 10 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-          <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#ede9fe', '&:hover': { bgcolor: '#ddd6fe' } }}>
-            <ArrowBackIcon fontSize="small" sx={{ color: '#6d28d9' }} />
-          </IconButton>
-          <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-            Party Payment Details
-          </Typography>
-          <Chip label="Cement Register + Truck DB" size="small" variant="outlined"
-            sx={{ fontWeight: 700, borderColor: '#c4b5fd', color: '#6d28d9' }} />
-          {debugInfo && (
-            <Chip label={debugInfo} size="small" variant="outlined"
-              sx={{ fontWeight: 600, borderColor: '#86efac', color: '#16a34a', fontSize: 11 }} />
-          )}
+        {/* Top Row: Title and Global Actions */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+              <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
+            </IconButton>
+            <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
+              Party Payment Details
+            </Typography>
+            <Chip label="Cement Register + Truck DB" size="small"
+              sx={{ fontWeight: 700, bgcolor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }} />
+            {debugInfo && (
+              <Chip label={debugInfo} size="small" variant="outlined"
+                sx={{ fontWeight: 600, borderColor: '#86efac', color: '#16a34a', fontSize: 11 }} />
+            )}
+          </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <SearchableSelect sx={{ minWidth: 140 }} value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}>
-            {MONTH_NAMES.map((m, i) => <MenuItem key={i} value={i + 1}>{m}</MenuItem>)}
-          </SearchableSelect>
-          <SearchableSelect sx={{ minWidth: 120 }} value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}>
-            {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
-          </SearchableSelect>
 
-          <Chip
-            label={`${computedRows.length} vehicle${computedRows.length !== 1 ? 's' : ''}`}
-            size="small"
-            sx={{ bgcolor: '#ede9fe', fontWeight: 700, color: '#6d28d9' }}
-          />
-          {dirtyCount > 0 && (
-            <Chip label={`${dirtyCount} unsaved row${dirtyCount > 1 ? 's' : ''}`} size="small" color="warning" sx={{ fontWeight: 700 }} />
-          )}
+      </Box>
 
-          <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
-            <Tooltip title="Reload from Cement Register & database">
-              <IconButton size="small" onClick={fetchData} sx={{ bgcolor: '#f1f5f9' }}>
-                <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
-              </IconButton>
-            </Tooltip>
-            <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
-              sx={{ fontWeight: 700, borderRadius: 2, borderColor: '#6d28d9', color: '#6d28d9' }}>
-              XLS
-            </Button>
-            <Button
-              size="small" variant="contained"
-              disabled={saving || dirtyCount === 0}
-              startIcon={saving ? <CircularProgress size={16} /> : <SaveIcon />}
-              onClick={handleSave}
-              sx={{ fontWeight: 700, borderRadius: 2, bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' }, px: 3, boxShadow: '0 4px 10px rgba(16,185,129,0.3)' }}
-            >
-              Save Edits
-            </Button>
-          </Box>
+      {/* ── Toolbar ── */}
+      <Box sx={{ px: 2, py: 1.5, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', zIndex: 9 }}>
+        <SearchableSelect sx={{ minWidth: 140 }} value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}>
+          {MONTH_NAMES.map((m, i) => <MenuItem key={i} value={i + 1}>{m}</MenuItem>)}
+        </SearchableSelect>
+        <SearchableSelect sx={{ minWidth: 120 }} value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}>
+          {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+        </SearchableSelect>
+
+        <Chip
+          label={`${computedRows.length} vehicles`}
+          size="small"
+          sx={{ bgcolor: '#f1f5f9', fontWeight: 700, color: '#475569' }}
+        />
+        {dirtyCount > 0 && (
+          <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ fontWeight: 700, bgcolor: '#fef08a', color: '#854d0e' }} />
+        )}
+
+        <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
+          <Tooltip title="Reload from Cement Register & database">
+            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+              <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
+            </IconButton>
+          </Tooltip>
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
+            sx={{ fontWeight: 700, borderRadius: 2, color: '#475569', borderColor: '#cbd5e1' }}>
+            XLS
+          </Button>
+          <Button
+            size="small" variant="contained"
+            disabled={saving || dirtyCount === 0}
+            startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
+            onClick={handleSave}
+            sx={{ fontWeight: 700, borderRadius: 2, bgcolor: dirtyCount > 0 ? '#3b82f6' : '#cbd5e1', '&:hover': { bgcolor: '#2563eb' }, px: 3 }}
+          >
+            Save Edits
+          </Button>
         </Box>
       </Box>
 
@@ -481,28 +531,29 @@ export default function PartyPaymentDetails({ onBack }) {
                 {/* # */}
                 <th style={{
                   position: 'sticky', top: 0, left: 0, zIndex: 6,
-                  background: '#6d28d9', color: '#fff',
-                  padding: '10px 4px', textAlign: 'center', fontSize: 11, fontWeight: 900,
-                  border: '1px solid #5b21b6', whiteSpace: 'nowrap'
+                  background: '#f8fafc', color: '#475569',
+                  padding: '10px 4px', textAlign: 'center', fontSize: 11, fontWeight: 800,
+                  border: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1', whiteSpace: 'nowrap'
                 }}>#</th>
 
                 {COLUMNS.map((col, ci) => {
                   const isSticky = col.key === 'OWNER NAME' || col.key === 'VEHICLE NO';
                   const leftPx = isSticky ? stickyLeft[col.key] : undefined;
-                  const bg = col.editable ? '#e11d48' : col.highlight ? '#4f46e5' : '#6d28d9';
+                  const bg = col.editable ? '#fef2f2' : col.highlight ? '#f0fdf4' : '#f8fafc';
+                  const textColor = col.editable ? '#991b1b' : col.highlight ? '#166534' : '#0f172a';
                   return (
                     <th key={col.key} style={{
                       position: 'sticky', top: 0,
                       left: isSticky ? leftPx : undefined,
                       zIndex: isSticky ? 7 : 5,
-                      background: bg, color: '#fff',
+                      background: bg, color: textColor,
                       padding: '10px 6px', textAlign: 'center',
-                      fontSize: 11, fontWeight: 900, border: '1px solid #5b21b6',
+                      fontSize: 11, fontWeight: 800, border: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1',
                       whiteSpace: 'pre-line', lineHeight: 1.25,
                     }}>
                       {col.label}
-                      {col.editable && <div style={{ fontSize: 9, opacity: 0.85, fontWeight: 400, marginTop: 1 }}>✎ manual</div>}
-                      {col.calc && <div style={{ fontSize: 9, opacity: 0.65, fontWeight: 400, marginTop: 1 }}>∑ auto</div>}
+                      {col.editable && <div style={{ fontSize: 9, opacity: 0.7, fontWeight: 600, marginTop: 1, color: '#dc2626' }}>✎ manual</div>}
+                      {col.calc && <div style={{ fontSize: 9, opacity: 0.5, fontWeight: 600, marginTop: 1 }}>∑ auto</div>}
                     </th>
                   );
                 })}
@@ -527,8 +578,8 @@ export default function PartyPaymentDetails({ onBack }) {
                     <td style={{
                       position: 'sticky', left: 0, zIndex: 3,
                       textAlign: 'center', border: '1px solid #e2e8f0',
-                      fontWeight: 700, color: '#6d28d9', padding: '5px 4px',
-                      background: '#f5f3ff', fontSize: 11
+                      fontWeight: 700, color: '#475569', padding: '5px 4px',
+                      background: '#f8fafc', fontSize: 11
                     }}>
                       {ri + 1}
                     </td>
@@ -543,10 +594,31 @@ export default function PartyPaymentDetails({ onBack }) {
                       const isDate = col.key === 'PAYMENT DATE';
                       const align = isText ? 'left' : isDate ? 'center' : 'right';
 
-                      // Cell background priority: dirty → highlight → col.bg → alternating row
-                      const cellBg = isDirty
-                        ? '#fef08a'
-                        : (col.highlight || col.bg || rowBg);
+                      // Cell background priority: dirty → col.bg → alternating row
+                      // Mapped old harsh backgrounds to lighter ERP tones if needed
+                      let cellBg = isDirty ? '#fef08a' : rowBg;
+                      
+                      // if not dirty, maybe apply col.bg lightly, but rowBg is usually better for ERP
+                      if (!isDirty && col.bg) {
+                        cellBg = col.bg;
+                        // Lighten the hardcoded bg colors slightly for ERP feel
+                        if (cellBg === '#fef3c7') cellBg = '#fffbeb'; // yellow
+                        if (cellBg === '#e0f2fe') cellBg = '#f0f9ff'; // blue
+                        if (cellBg === '#fef08a') cellBg = '#fef9c3'; // toll yellow
+                        if (cellBg === '#bbf7d0') cellBg = '#f0fdf4'; // green
+                        if (cellBg === '#fee2e2') cellBg = '#fef2f2'; // red
+                        if (cellBg === '#fce7f3') cellBg = '#fdf2f8'; // pink
+                        if (cellBg === '#d1fae5') cellBg = '#ecfdf5'; // paid green
+                        if (cellBg === '#f8fafc') cellBg = rowBg;     // default to row
+                      }
+
+                      if (!isDirty && col.highlight) {
+                        cellBg = col.highlight;
+                        if (cellBg === '#dcfce7') cellBg = '#ecfdf5';
+                        if (cellBg === '#f3e8ff') cellBg = '#faf5ff';
+                        if (cellBg === '#e0e7ff') cellBg = '#eef2ff';
+                        if (cellBg === '#fee2e2') cellBg = '#fef2f2';
+                      }
 
                       // Format number with Indian comma grouping
                       let display = '';
@@ -567,6 +639,14 @@ export default function PartyPaymentDetails({ onBack }) {
                         }
                       }
 
+                      // Adjust text colors for ERP
+                      let txtColor = isDirty ? '#92400e' : '#334155';
+                      if (!isDirty) {
+                        if (col.key === 'NET PAYABLE') txtColor = '#1d4ed8';
+                        if (col.key === 'PAID TO PARTY') txtColor = '#047857';
+                        if (col.key === 'BALANCE DUE') txtColor = '#b91c1c';
+                      }
+
                       return (
                         <td key={col.key} style={{
                           position: isSticky ? 'sticky' : undefined,
@@ -576,7 +656,8 @@ export default function PartyPaymentDetails({ onBack }) {
                           background: cellBg,
                           padding: 0,
                           fontWeight: col.calc ? 600 : isDirty ? 800 : 400,
-                          color: isDirty ? '#92400e' : '#0f172a',
+                          color: txtColor,
+                          transition: 'background 0.15s ease'
                         }}>
                           {col.editable ? (
                             <TextField
@@ -589,9 +670,9 @@ export default function PartyPaymentDetails({ onBack }) {
                               sx={{
                                 width: '100%',
                                 '.MuiInputBase-input': {
-                                  padding: '5px 7px', fontSize: 12,
+                                  padding: '6px 7px', fontSize: 12,
                                   fontWeight: isDirty ? 800 : 500,
-                                  color: isDirty ? '#92400e' : '#0f172a',
+                                  color: txtColor,
                                   textAlign: align,
                                   fontFamily: !isText && !isDate ? 'monospace' : 'inherit',
                                   ...(col.key === 'REMARKS' || col.key === 'WITHHOLD REASON' || col.key === 'OTHER REASON' ? {
@@ -599,6 +680,10 @@ export default function PartyPaymentDetails({ onBack }) {
                                     minHeight: '80px',
                                     whiteSpace: 'pre-wrap'
                                   } : {}),
+                                  '&:focus': {
+                                    bgcolor: '#fff',
+                                    boxShadow: 'inset 0 0 0 1px #3b82f6'
+                                  },
                                   // remove ugly calendar picker default styles when empty
                                   '&::-webkit-calendar-picker-indicator': {
                                     cursor: 'pointer',
@@ -609,7 +694,7 @@ export default function PartyPaymentDetails({ onBack }) {
                               }}
                             />
                           ) : (
-                            <div style={{ padding: '5px 7px', textAlign: align, fontFamily: !isText && !isDate ? 'monospace' : 'inherit' }}>
+                            <div style={{ padding: '6px 7px', textAlign: align, fontFamily: !isText && !isDate ? 'monospace' : 'inherit' }}>
                               {display}
                             </div>
                           )}
@@ -628,9 +713,9 @@ export default function PartyPaymentDetails({ onBack }) {
                   {/* # */}
                   <td style={{
                     position: 'sticky', left: 0, zIndex: 12,
-                    background: '#6d28d9', border: '1px solid #5b21b6',
+                    background: '#f8fafc', border: '1px solid #cbd5e1', borderTop: '2px solid #94a3b8',
                     padding: '8px 6px', textAlign: 'center',
-                    fontWeight: 900, color: '#fff', fontSize: 11
+                    fontWeight: 900, color: '#0f172a', fontSize: 12
                   }}>Σ</td>
 
                   {COLUMNS.map(col => {
@@ -653,11 +738,11 @@ export default function PartyPaymentDetails({ onBack }) {
                         position: isSticky ? 'sticky' : undefined,
                         left: isSticky ? leftPx : undefined,
                         zIndex: isSticky ? 12 : 10,
-                        padding: '8px 7px', border: '1px solid #5b21b6',
-                        fontWeight: 900, fontSize: 12,
-                        color: col.key === 'OWNER NAME' ? '#fff' : '#0f172a',
+                        padding: '8px 7px', border: '1px solid #cbd5e1', borderTop: '2px solid #94a3b8',
+                        fontWeight: 900, fontSize: 13,
+                        color: col.key === 'OWNER NAME' ? '#0f172a' : '#1e293b',
                         textAlign: isText ? 'left' : 'right',
-                        background: col.key === 'OWNER NAME' ? '#6d28d9' : col.highlight ? col.highlight : '#f1f5f9',
+                        background: col.key === 'OWNER NAME' ? '#f8fafc' : col.highlight ? col.highlight : '#f1f5f9',
                         fontFamily: !isText ? 'monospace' : 'inherit',
                       }}>
                         {cellContent}
