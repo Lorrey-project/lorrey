@@ -4,7 +4,7 @@ import IncentiveAnalysis from '../components/IncentiveAnalysis';
 import { applyCalcs } from '../utils/cementCalculations';
 import { Box, CircularProgress, Typography } from '@mui/material';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL;
 
 export default function IncentiveCalculationSheet({ onBack }) {
     const now = useMemo(() => new Date(), []);

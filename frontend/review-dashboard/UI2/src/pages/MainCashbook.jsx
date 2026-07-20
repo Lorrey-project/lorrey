@@ -21,9 +21,12 @@ import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
-const socket = io('/', { autoConnect: true });
+const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, {
+    autoConnect: true,
+    transports: ["websocket", "polling"]
+});
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',

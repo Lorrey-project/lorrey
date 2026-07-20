@@ -26,8 +26,7 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || '/';
+const API_URL = import.meta.env.VITE_API_URL;
 
 const num = (val) => Number(String(val || 0).replace(/,/g, '')) || 0;
 
@@ -340,7 +339,10 @@ export default function AccountDetails({ onBack }) {
   useEffect(() => {
     let socket;
     try {
-      socket = io(SOCKET_URL, { autoConnect: true });
+      socket = io(SOCKET_URL, {
+    autoConnect: true,
+    transports: ["websocket", "polling"]
+});
       socket.on('accountDetailsUpdate', () => fetchData(true));
     } catch (err) {
       console.warn('Socket error in AccountDetails:', err.message);

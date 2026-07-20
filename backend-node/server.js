@@ -26,9 +26,7 @@ initSocket(server);
 startWatcher();
 
 const allowedOrigins = [
-  /^http:\/\/localhost:(5173|5174|5175|5176)$/,
-  /^http:\/\/192\.168\.\d+\.\d+:(5173|5174|5175|5176)$/,
-  /^http:\/\/10\.\d+\.\d+\.\d+:(5173|5174|5175|5176)$/,
+  /^http:\/\/localhost:\d+$/,
   /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/
 ];
 
@@ -126,7 +124,7 @@ app.post("/upload", auth, upload.single("invoice"), async (req, res) => {
   try {
     const fileUrl = req.file.location;
     console.log("File uploaded to S3:", fileUrl);
-    const aiWorkerUrl = process.env.AI_WORKER_URL || "http://127.0.0.1:8000";
+    const aiWorkerUrl = process.env.AI_WORKER_URL;
     const response = await axios.post(`${aiWorkerUrl}/process`, {
       file: fileUrl
     });

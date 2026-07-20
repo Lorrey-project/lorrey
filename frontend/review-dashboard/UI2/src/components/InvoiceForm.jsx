@@ -34,8 +34,11 @@ import html2pdf from "html2pdf.js";
 import { io } from "socket.io-client";
 import { API_URL } from "../config";
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
-const socket = io('/', { autoConnect: true });
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, {
+    autoConnect: true,
+    transports: ["websocket", "polling"]
+});
 
 import { toIndianWords } from "../utils/toIndianWords";
 import InvoiceDetails from "./InvoiceDetails";

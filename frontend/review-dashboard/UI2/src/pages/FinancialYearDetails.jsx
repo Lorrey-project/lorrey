@@ -22,9 +22,12 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
-const socket = io(SOCKET_URL, { autoConnect: true });
+const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, {
+    autoConnect: true,
+    transports: ["websocket", "polling"]
+});
 const PAGE_SIZE = 100;
 
 const num = (v) => {

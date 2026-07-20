@@ -14,7 +14,7 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useAuth } from '../context/AuthContext';
 
-const API_URL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:3000`;
+const API_URL = import.meta.env.VITE_API_URL;
 
 // Single brand blue — used everywhere, no accent color changes
 const BLUE = '#4285f4';

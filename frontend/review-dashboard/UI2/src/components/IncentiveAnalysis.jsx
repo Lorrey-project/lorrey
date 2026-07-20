@@ -1466,7 +1466,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
       setLoadingState(true);
       try {
         const token = localStorage.getItem('token');
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const API_URL = import.meta.env.VITE_API_URL;
         const res = await axios.get(`${API_URL}/cement-register/incentive-state?year=${year}&month=${month}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -1507,7 +1507,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     setSavingActuals(true);
     try {
       const token = localStorage.getItem('token');
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const API_URL = import.meta.env.VITE_API_URL;
       await axios.post(`${API_URL}/cement-register/incentive-state`, {
         year,
         month,
@@ -1534,7 +1534,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     setDeletingState(true);
     try {
       const token = localStorage.getItem('token');
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const API_URL = import.meta.env.VITE_API_URL;
       await axios.delete(`${API_URL}/cement-register/incentive-state?year=${year}&month=${month}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1559,7 +1559,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   // ── Truck Contacts from MongoDB (for Wheel & Owner lookup) ──────────────────
   const [truckContacts, setTruckContacts] = useState([]);
   useEffect(() => {
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const API_URL = import.meta.env.VITE_API_URL;
     axios.get(`${API_URL}/truck-contacts`)
       .then(res => { if (res.data?.success) setTruckContacts(res.data.contacts || []); })
       .catch(console.error);
@@ -1573,7 +1573,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   useEffect(() => {
     if (year === undefined || month === undefined) return;
     // month here is 0-indexed, but API expects 1-indexed
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const API_URL = import.meta.env.VITE_API_URL;
     setFetchingRows(true);
     axios.get(`${API_URL}/cement-register`, {
       params: { month: month + 1, year }
@@ -1877,7 +1877,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
               if (file) {
                 try {
                   const token = localStorage.getItem('token');
-                  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                  const API_URL = import.meta.env.VITE_API_URL;
                   const fd = new FormData();
                   fd.append('file', file);
                   const res = await axios.post(`${API_URL}/cement-register/incentive-state/upload`, fd, {

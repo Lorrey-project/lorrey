@@ -25,9 +25,12 @@ import {
 import { exportToCsv } from '../utils/exportCsv';
 
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
-const socket = io('/', { autoConnect: true });
+const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, {
+    autoConnect: true,
+    transports: ["websocket", "polling"]
+});
 
 
 // ─── Excel header alias map ────────────────────────────────────────────────────

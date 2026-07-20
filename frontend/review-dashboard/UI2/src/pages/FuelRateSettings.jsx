@@ -17,7 +17,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EvStationIcon from '@mui/icons-material/EvStation';
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL;
 const PUMPS = ['SAS-1', 'SAS-2'];
 
 function TabPanel(props) {

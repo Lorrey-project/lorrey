@@ -18,8 +18,12 @@ import { exportToCsv } from '../utils/exportCsv';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
-const socket = io('/');
+const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, {
+    autoConnect: true,
+    transports: ["websocket", "polling"]
+});
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'

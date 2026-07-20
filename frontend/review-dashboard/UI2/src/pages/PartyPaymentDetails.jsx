@@ -17,7 +17,7 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL;
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',

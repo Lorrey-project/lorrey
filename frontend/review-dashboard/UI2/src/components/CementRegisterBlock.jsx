@@ -4,9 +4,13 @@ import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 import '../styles/cementRegister.css';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL;
 
-const socket = io('/');
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, {
+    autoConnect: true,
+    transports: ["websocket", "polling"]
+});
 
 export default function CementRegisterBlock() {
   const [entries, setEntries] = useState([]);

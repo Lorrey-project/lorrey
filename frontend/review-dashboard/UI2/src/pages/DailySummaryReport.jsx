@@ -26,7 +26,7 @@ import PublishIcon from '@mui/icons-material/Publish';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL;
 
 const parseNum = (val) => parseFloat(String(val || 0).replace(/,/g, '')) || 0;
 

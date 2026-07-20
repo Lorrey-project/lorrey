@@ -13,7 +13,7 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL;
 
 const ROLE_MAP = {
     'HEAD_OFFICE': { label: 'Head Office', color: '#7c3aed', bg: '#ede9fe', icon: <BusinessIcon sx={{ fontSize: 14 }} /> },

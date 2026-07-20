@@ -39,9 +39,13 @@ import html2pdf from 'html2pdf.js';
 import { toIndianWords } from '../utils/toIndianWords';
 import AdvanceFuelSlipDocument from './AdvanceFuelSlipDocument';
 
-const _dashSocket = io('/', { autoConnect: true });
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const _dashSocket = io(SOCKET_URL, {
+    autoConnect: true,
+    transports: ["websocket", "polling"]
+});
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL;
 
 const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet }) => {
     const { user, logout } = useAuth();
