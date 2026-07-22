@@ -285,16 +285,19 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
             console.log(`[AI WORKER REQUEST] Target URL: ${targetProcessUrl}`);
             console.log("==========================================");
 
+            const startTime = Date.now();
             const aiResponse = await require("axios").post(
                 targetProcessUrl,
                 { file: fileUrl },
-                { timeout: 180000 }
+                { timeout: 90000 } // Reduced timeout since GPT-4o is faster
             );
             aiData = aiResponse.data;
+            const duration = Date.now() - startTime;
             
             console.log("==========================================");
             console.log(`[AI WORKER RESPONSE] Status: ${aiResponse.status}`);
             console.log(`[AI WORKER RESPONSE] Data Length: ${JSON.stringify(aiData).length} bytes`);
+            console.log(`[AI WORKER RESPONSE] Duration: ${duration}ms`);
             console.log("==========================================");
             
         } catch (aiErr) {

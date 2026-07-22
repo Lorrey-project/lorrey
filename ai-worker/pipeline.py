@@ -97,9 +97,18 @@ def download_file_from_s3(s3_url: str) -> str:
 
     print(f"Downloading from S3: bucket={bucket}, key={key}")
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        s3_client.download_fileobj(bucket, key, tmp)
-        return tmp.name
+    import time
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                s3_client.download_fileobj(bucket, key, tmp)
+                return tmp.name
+        except Exception as e:
+            print(f"S3 download failed on attempt {attempt + 1}: {e}")
+            if attempt == max_retries - 1:
+                raise e
+            time.sleep(2 ** attempt)
 
 
 @app.get("/")
@@ -114,11 +123,16 @@ def process_invoice(data: InvoiceRequest):
 
     print("Received file:", file_url)
 
+    import time
+    total_start = time.time()
+    
     # -------------------------------
     # Download file from S3 (authenticated)
     # -------------------------------
     try:
+        t0 = time.time()
         file_path = download_file_from_s3(file_url)
+        print(f"[Profiling] S3 Download completed in {time.time() - t0:.2f}s")
         print("Saved file locally:", file_path)
     except Exception as e:
         print(f"S3 download failed: {e}")
@@ -127,6 +141,7 @@ def process_invoice(data: InvoiceRequest):
 
     # Convert PDF to Image if necessary
     try:
+        t0 = time.time()
         import fitz  # PyMuPDF
         doc = fitz.open(file_path)
         if doc.is_pdf:
@@ -145,6 +160,7 @@ def process_invoice(data: InvoiceRequest):
             img_path = file_path + ".jpg"
             os.rename(file_path, img_path)
             file_path = img_path
+        print(f"[Profiling] PyMuPDF processing completed in {time.time() - t0:.2f}s")
     except Exception as e:
         print(f"PyMuPDF check passed/failed: {e}. Assuming original image.")
         img_path = file_path + ".jpg"
@@ -153,13 +169,15 @@ def process_invoice(data: InvoiceRequest):
 
     # -------------------------------
     # Direct AI Vision Extraction
-    # (No OCR — GPT-4.1 reads image directly)
+    # (No OCR — GPT-4o reads image directly)
     # -------------------------------
     try:
-        print("Running GPT-4.1 Vision extraction...")
+        t0 = time.time()
+        print("Running GPT-4o Vision extraction...")
         invoice_json = extract_invoice_data(file_path, target_schema)
-        print("Vision Extraction Completed")
-
+        print(f"[Profiling] Vision Extraction completed in {time.time() - t0:.2f}s")
+        
+        t0 = time.time()
         # -------------------------------
         # Post-processing & Validation
         # -------------------------------
@@ -185,7 +203,8 @@ def process_invoice(data: InvoiceRequest):
         # GPT vision cross-check / correction pass — disabled (redundant, doubles cost & latency)
         # invoice_json = validate_invoice_with_gpt(file_path, invoice_json)
 
-        print("Extraction + Validation Completed")
+        print(f"[Profiling] Post-processing & Validation completed in {time.time() - t0:.2f}s")
+        print(f"[Profiling] Total Extraction Pipeline Time: {time.time() - total_start:.2f}s")
     except Exception as ai_e:
         import traceback
         traceback.print_exc()
