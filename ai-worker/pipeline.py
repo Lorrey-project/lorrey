@@ -21,6 +21,30 @@ load_dotenv()
 
 app = FastAPI()
 
+@app.on_event("startup")
+def startup_event():
+    access_key = os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_KEY")
+    bucket_var = os.getenv("AWS_S3_BUCKET") or os.getenv("AWS_BUCKET_NAME")
+    
+    print("=== AWS Config Check ===")
+    if access_key:
+        print("Detected AWS Access Key: " + ("AWS_ACCESS_KEY_ID" if os.getenv("AWS_ACCESS_KEY_ID") else "AWS_ACCESS_KEY"))
+    else:
+        print("Missing AWS Access Key! (S3 downloads will fail)")
+        
+    if secret_key:
+        print("Detected AWS Secret Key: " + ("AWS_SECRET_ACCESS_KEY" if os.getenv("AWS_SECRET_ACCESS_KEY") else "AWS_SECRET_KEY"))
+    else:
+        print("Missing AWS Secret Key! (S3 downloads will fail)")
+        
+    if bucket_var:
+        print("Detected AWS Bucket: " + ("AWS_S3_BUCKET" if os.getenv("AWS_S3_BUCKET") else "AWS_BUCKET_NAME"))
+    else:
+        print("No specific AWS Bucket var detected (Using S3 URL parsing fallback)")
+    print("========================")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -61,12 +85,14 @@ def download_file_from_s3(s3_url: str) -> str:
     else:
         raise ValueError(f"Cannot parse S3 URL: {s3_url}")
 
+    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY")
+    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_KEY")
     aws_region = os.getenv("AWS_REGION", "ap-south-1")
     s3_client = boto3.client(
         "s3",
         region_name=aws_region,
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        aws_access_key_id=aws_access_key,
+        aws_secret_access_key=aws_secret_key,
     )
 
     print(f"Downloading from S3: bucket={bucket}, key={key}")
