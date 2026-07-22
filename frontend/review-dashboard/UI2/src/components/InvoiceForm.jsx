@@ -342,7 +342,11 @@ export default function InvoiceForm({ onBack }) {
 
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.post(`${API_URL}/invoice/upload`, data, {
+      const uploadUrl = `${API_URL}/invoice/upload`;
+      console.log("🚀 [Invoice Upload] Firing request to:", uploadUrl);
+      console.log("🚀 [Invoice Upload] VITE_API_URL is:", import.meta.env.VITE_API_URL);
+
+      const response = await axios.post(uploadUrl, data, {
         headers: { "Content-Type": "multipart/form-data", Authorization: `Bearer ${token}` },
       });
 
