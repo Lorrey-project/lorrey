@@ -102,10 +102,8 @@ export default function SupplyDetails({ data, errors, onChange }) {
             value={data?.destination || ''} onChange={handleChange}
             variant="outlined" sx={highlightSx}
           />
-          <FormControl fullWidth variant="outlined">
-            <InputLabel id="dest-state-label">Destination State</InputLabel>
+          <Box>
             <SearchableSelect
-              labelId="dest-state-label"
               name="destination_state"
               value={(() => {
                 const st = data?.destination_state || '';
@@ -115,6 +113,7 @@ export default function SupplyDetails({ data, errors, onChange }) {
               })()}
               onChange={handleChange}
               label="Destination State"
+              size="medium"
             >
               <MenuItem value=""><em>— Select State —</em></MenuItem>
               {[
@@ -132,10 +131,10 @@ export default function SupplyDetails({ data, errors, onChange }) {
                 <MenuItem key="fallback" value={data.destination_state} sx={{ display: 'none' }}>{data.destination_state}</MenuItem>
               )}
             </SearchableSelect>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1, display: 'block' }}>
               Used to identify NT/NVR route billing state
             </Typography>
-          </FormControl>
+          </Box>
 
           {/* ── Mode / Vehicle ── */}
           <TextField fullWidth label="Mode of Transport" name="mode_of_transport" value="Road" variant="outlined" InputProps={{ readOnly: true }} sx={frozenSx} />

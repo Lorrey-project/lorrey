@@ -91,13 +91,13 @@ const InfoRow = ({ label, value, mono }) => (
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            py: 0.8,
-            borderBottom: '1px solid #f1f5f9',
+            py: 1,
+            borderBottom: '1px solid #f8fafc',
             transition: 'background-color 0.2s',
-            '&:hover': { bgcolor: '#f8fafc' },
-            px: 0.5,
+            '&:hover': { bgcolor: '#f1f5f9' },
+            px: 1,
         }}>
-            <Typography variant="body2" sx={{ color: '#64748b', flexShrink: 0, fontWeight: 500, fontSize: '0.85rem' }}>
+            <Typography variant="body2" sx={{ color: '#64748b', flexShrink: 0, fontWeight: 600, fontSize: '0.85rem' }}>
                 {label}
             </Typography>
             <Typography variant="body2" sx={{
@@ -106,7 +106,7 @@ const InfoRow = ({ label, value, mono }) => (
                 wordBreak: 'break-word',
                 fontSize: '0.9rem',
                 fontFamily: mono ? '"Roboto Mono", monospace' : 'inherit',
-                color: '#1e293b',
+                color: '#0f172a',
             }}>
                 {value}
             </Typography>
@@ -118,41 +118,40 @@ const SectionCard = ({ icon, title, color = '#3b82f6', children }) => (
     <Card sx={{ 
         height: '100%',
         overflow: 'visible', 
-        borderRadius: 3, 
+        borderRadius: 4, 
         border: '1px solid #e2e8f0',
-        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.02)',
-        transition: 'transform 0.2s, box-shadow 0.2s',
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.03)',
+        transition: 'all 0.2s',
         '&:hover': {
-            transform: 'translateY(-1px)',
-            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.04)'
+            transform: 'translateY(-2px)',
+            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.06)'
         }
     }}>
         <Box sx={{ 
             bgcolor: '#ffffff',
-            px: 2, 
-            py: 1.5,
-            borderBottom: '1px solid #f1f5f9',
+            px: 2.5, 
+            py: 2,
+            borderBottom: '1px solid #f8fafc',
             display: 'flex', 
             alignItems: 'center', 
             gap: 1.5,
-            borderTopLeftRadius: 12,
-            borderTopRightRadius: 12
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16
         }}>
             <Box sx={{ 
-                bgcolor: color, 
-                p: 0.8, 
+                bgcolor: `${color}15`, 
+                p: 1, 
                 borderRadius: 2, 
                 display: 'flex', 
-                color: '#fff',
-                boxShadow: `0 4px 12px ${color}40`
+                color: color,
             }}>
-                {React.cloneElement(icon, { sx: { fontSize: 18 } })}
+                {React.cloneElement(icon, { sx: { fontSize: 20 } })}
             </Box>
-            <Typography variant="subtitle2" fontWeight="800" sx={{ color: color, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+            <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0f172a', letterSpacing: '0.5px' }}>
                 {title}
             </Typography>
         </Box>
-        <CardContent sx={{ px: 3, py: 2, '&:last-child': { pb: 2 } }}>
+        <CardContent sx={{ px: 2.5, py: 2, '&:last-child': { pb: 2.5 } }}>
             {children}
         </CardContent>
     </Card>
@@ -444,12 +443,12 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                         <Grid item xs={12} lg={5} xl={4}>
                             <Paper sx={{
                                 p: { xs: 3, md: 4 },
-                                borderRadius: 5,
+                                borderRadius: 4,
                                 position: { xs: 'static', lg: 'sticky' },
                                 top: 100,
-                                bgcolor: '#fff',
-                                boxShadow: '0 12px 40px rgba(0,0,0,0.06)',
-                                border: '1px solid rgba(226,232,240,0.8)',
+                                bgcolor: '#ffffff',
+                                boxShadow: '0 12px 40px rgba(0,0,0,0.04)',
+                                border: '1px solid #f1f5f9',
                             }} elevation={0}>
                                 <Typography variant="h5" fontWeight="900" color="#0f172a" mb={1}>Trip Advance</Typography>
                                 <Typography variant="body2" color="#64748b" mb={4}>Review the AI estimated fuel allowance and input the specific loading advance amounts.</Typography>
@@ -457,23 +456,22 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                 {/* ── Required Fuel (Read-only, auto-calculated) ── */}
                                 <Box sx={{
                                     mb: 4,
-                                    borderRadius: 4,
-                                    border: fuelError ? '1px solid #fecaca' : '1px solid #10b981',
-                                    bgcolor: fuelError ? '#fef2f2' : '#ecfdf5',
+                                    borderRadius: 3,
+                                    border: fuelError ? '1px solid #fecaca' : '1px solid #a7f3d0',
+                                    bgcolor: fuelError ? '#fef2f2' : '#f0fdf4',
                                     p: 3,
                                     position: 'relative',
                                     overflow: 'hidden',
-                                    boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.01)'
                                 }}>
                                     <Box sx={{
-                                        position: 'absolute', top: 0, left: 0, width: 6, height: '100%',
+                                        position: 'absolute', top: 0, left: 0, width: 4, height: '100%',
                                         bgcolor: fuelError ? '#ef4444' : '#10b981',
                                     }} />
                                     <Box display="flex" alignItems="center" gap={1.5} mb={1}>
                                         <Box sx={{ p: 1, bgcolor: fuelError ? '#fee2e2' : '#d1fae5', borderRadius: 2, display: 'flex' }}>
                                             <LocalGasStationIcon sx={{ fontSize: 20, color: fuelError ? '#ef4444' : '#059669' }} />
                                         </Box>
-                                        <Typography variant="subtitle2" fontWeight="800" sx={{ color: fuelError ? '#ef4444' : '#065f46', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                                        <Typography variant="subtitle2" fontWeight="700" sx={{ color: fuelError ? '#b91c1c' : '#047857', letterSpacing: '0.5px' }}>
                                             AI Fuel Estimate
                                         </Typography>
                                     </Box>
@@ -488,13 +486,13 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                         </Typography>
                                     ) : fuelRequirement ? (
                                         <Box ml={6}>
-                                            <Typography variant="h3" fontWeight="900" sx={{ color: '#047857', lineHeight: 1.1, letterSpacing: '-1px' }}>
-                                                {fuelRequirement.required_fuel_litres} <Typography component="span" variant="h5" fontWeight="700" color="#059669">Liters</Typography>
+                                            <Typography variant="h3" fontWeight="800" sx={{ color: '#064e3b', lineHeight: 1.2, letterSpacing: '-0.5px' }}>
+                                                {fuelRequirement.required_fuel_litres} <Typography component="span" variant="h6" fontWeight="600" color="#059669">Liters</Typography>
                                             </Typography>
-                                            <Typography variant="caption" fontWeight="600" sx={{ display: 'block', mt: 1, color: '#065f46', opacity: 0.8 }}>
+                                            <Typography variant="caption" fontWeight="600" sx={{ display: 'block', mt: 1, color: '#065f46', opacity: 0.9 }}>
                                                 Route: {fuelRequirement.distance_km} km × 2 trips
                                             </Typography>
-                                            <Typography variant="caption" fontWeight="600" sx={{ display: 'block', color: '#065f46', opacity: 0.8 }}>
+                                            <Typography variant="caption" fontWeight="600" sx={{ display: 'block', color: '#065f46', opacity: 0.9 }}>
                                                 Vehicle: {fuelRequirement.vehicle_type} ({fuelRequirement.mileage_kmpl} km/L)
                                             </Typography>
                                         </Box>
@@ -511,10 +509,10 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                         value={loadingAdv} 
                                         onChange={e => setLoadingAdv(e.target.value)} 
                                         variant="outlined"
-                                        InputLabelProps={{ sx: { fontWeight: 600, color: '#475569' } }}
+                                        InputLabelProps={{ sx: { fontWeight: 600, color: '#64748b' } }}
                                         InputProps={{ 
-                                            startAdornment: <Typography sx={{ mr: 1, color: '#0f172a', fontSize: '1.1rem', fontWeight: 800 }}>₹</Typography>,
-                                            sx: { borderRadius: 3, bgcolor: '#f8fafc', fontWeight: 700, fontSize: '1.1rem' } 
+                                            startAdornment: <Typography sx={{ mr: 1, color: '#0f172a', fontSize: '1.1rem', fontWeight: 700 }}>₹</Typography>,
+                                            sx: { borderRadius: 3, bgcolor: '#f8fafc', fontWeight: 700, fontSize: '1.1rem', '&:hover': { bgcolor: '#f1f5f9' }, transition: 'background-color 0.2s', '&.Mui-focused': { bgcolor: '#ffffff' } } 
                                         }} 
                                     />
                                     
@@ -526,11 +524,11 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                         onChange={e => setDieselLtrs(e.target.value)}
                                         variant="outlined"
                                         helperText={fuelRequirement ? `* AI suggested constraint is ${fuelRequirement.required_fuel_litres} Litres` : ''}
-                                        FormHelperTextProps={{ sx: { fontWeight: 600, color: '#64748b' } }}
-                                        InputLabelProps={{ sx: { fontWeight: 600, color: '#475569' } }}
+                                        FormHelperTextProps={{ sx: { fontWeight: 600, color: '#94a3b8', mt: 1 } }}
+                                        InputLabelProps={{ sx: { fontWeight: 600, color: '#64748b' } }}
                                         InputProps={{ 
-                                            endAdornment: <LocalGasStationIcon sx={{ color: '#3b82f6' }} />,
-                                            sx: { borderRadius: 3, bgcolor: '#f8fafc', fontWeight: 700, fontSize: '1.1rem' }
+                                            endAdornment: <LocalGasStationIcon sx={{ color: '#94a3b8' }} />,
+                                            sx: { borderRadius: 3, bgcolor: '#f8fafc', fontWeight: 700, fontSize: '1.1rem', '&:hover': { bgcolor: '#f1f5f9' }, transition: 'background-color 0.2s', '&.Mui-focused': { bgcolor: '#ffffff' } }
                                         }}
                                     />
                                 </Box>
@@ -546,13 +544,13 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                         fontWeight: 800, 
                                         py: 1.8, 
                                         fontSize: '1.05rem',
-                                        background: 'linear-gradient(135deg, #020617 0%, #1e293b 100%)', 
-                                        boxShadow: '0 10px 25px rgba(15,23,42,0.3)',
+                                        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', 
+                                        boxShadow: '0 8px 20px rgba(15,23,42,0.15)',
                                         transition: 'all 0.2s',
                                         '&:hover': { 
-                                            background: 'linear-gradient(135deg, #0f172a 0%, #334155 100%)',
+                                            background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
                                             transform: 'translateY(-2px)',
-                                            boxShadow: '0 15px 30px rgba(15,23,42,0.4)',
+                                            boxShadow: '0 12px 25px rgba(15,23,42,0.25)',
                                         } 
                                     }}
                                 >

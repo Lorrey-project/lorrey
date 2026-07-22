@@ -285,8 +285,10 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
             aiData = aiResponse.data;
             console.log("AI extraction success");
         } catch (aiErr) {
-            console.error("AI extraction failed:", aiErr.message);
-            return res.status(500).json({ error: "AI extraction failed", details: aiErr.message });
+            const details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
+            console.error("AI extraction failed. Details:", details);
+            console.error(aiErr.stack);
+            return res.status(500).json({ error: details || "AI extraction failed", details: details });
         }
 
         // Save invoice with AI data
@@ -445,8 +447,10 @@ async function processScanFile(scanOutputPath, io) {
             invoice_id: invoice._id
         });
     } catch (e) {
-        console.error("[Scan] processScanFile failed:", e.message);
-        if (io) io.emit("scanner_error", { error: "AI extraction or save failed: " + e.message });
+        const details = e.response?.data?.detail || e.response?.data?.error || e.message;
+        console.error("[Scan] processScanFile failed:", details);
+        console.error(e.stack);
+        if (io) io.emit("scanner_error", { error: "AI extraction or save failed: " + details });
     }
 }
 

@@ -61,20 +61,19 @@ export default function InvoiceDetails({ data, errors, onChange }) {
           />
 
           {/* Invoice Type — SO / STO / NT */}
-          <FormControl fullWidth variant="outlined">
-            <InputLabel>Invoice Type</InputLabel>
-            <SearchableSelect
-              name="invoice_type"
-              value={data?.invoice_type || ""}
-              onChange={(e) => onChange("invoice_details", "invoice_type", e.target.value)}
-              label="Invoice Type"
-            >
-              <MenuItem value="">— Select —</MenuItem>
-              <MenuItem value="SO">SO</MenuItem>
-              <MenuItem value="STO">STO</MenuItem>
-              <MenuItem value="NT">NT</MenuItem>
-            </SearchableSelect>
-          </FormControl>
+          <SearchableSelect
+            name="invoice_type"
+            value={data?.invoice_type || ""}
+            onChange={(e) => onChange("invoice_details", "invoice_type", e.target.value)}
+            label="Invoice Type"
+            sx={highlightSx}
+            size="medium"
+          >
+            <MenuItem value="">— Select —</MenuItem>
+            <MenuItem value="SO">SO</MenuItem>
+            <MenuItem value="STO">STO</MenuItem>
+            <MenuItem value="NT">NT</MenuItem>
+          </SearchableSelect>
 
           {/* Reference Number */}
           <TextField

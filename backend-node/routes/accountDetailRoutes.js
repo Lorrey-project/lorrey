@@ -415,30 +415,60 @@ router.put('/bulk-update', async (req, res) => {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Sync Remarks updates to already linked pump payment register records
+    // Sync updates to already linked pump payment register records
     try {
       const pumpCol = mongoose.connection.useDb('pump_payment_register').collection('records');
       for (const item of updates) {
         const dbDoc = item.isNewRow ? createdDocs[item.id || 'new'] : updatedDocs[item.id];
         if (dbDoc && dbDoc.ledgerName && dbDoc.ledgerName.trim().toLowerCase() === "pump payment") {
+          const withdrawAmt = Number(dbDoc.withdraw) || 0;
           await pumpCol.updateMany(
             { bankBookId: dbDoc._id.toString() },
             [
               {
-                $replaceWith: {
-                  $setField: {
-                    field: "REF. NO",
-                    input: "$$ROOT",
-                    value: dbDoc.remarks || ""
+                $set: {
+                  "REF. NO": dbDoc.referenceNo || dbDoc.remarks || "",
+                  "Remarks": dbDoc.remarks || "",
+                  "PAYMENT AMOUNT": withdrawAmt,
+                  "DUE AMOUNT": {
+                    $subtract: [
+                      { $convert: { input: "$PAYABLE AMOUNT", to: "double", onError: 0, onNull: 0 } },
+                      withdrawAmt
+                    ]
                   }
+                }
+              },
+              {
+                $set: {
+                  "paymentStatus": {
+                    $cond: {
+                      if: { $lte: ["$DUE AMOUNT", 0] },
+                      then: "Paid",
+                      else: {
+                        $cond: {
+                          if: { $gt: ["$PAYMENT AMOUNT", 0] },
+                          then: "Partially Paid",
+                          else: "Pending"
+                        }
+                      }
+                    }
+                  },
+                  "updatedAt": new Date()
                 }
               }
             ]
           );
         }
       }
+      
+      try {
+        const io = getIO();
+        if (io) io.emit('pumpPaymentRegisterUpdate');
+      } catch (socketErr) {
+        console.warn('Socket notify failed for pumpPaymentRegisterUpdate:', socketErr.message);
+      }
     } catch (syncRemarksErr) {
-      console.error('[accountDetailRoutes] sync Remarks to pump payment register error:', syncRemarksErr.message);
+      console.error('[accountDetailRoutes] sync to pump payment register error:', syncRemarksErr.message);
     }
 
     res.json({ success: true, paymentResults });

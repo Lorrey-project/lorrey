@@ -53,6 +53,7 @@ import GCNDocument from "./GCNDocument";
 import LorryHireSlipReview from "./LorryHireSlipReview";
 import FuelSlipReview from "./FuelSlipReview";
 import CameraCaptureDialog from "./CameraCaptureDialog";
+import PremiumUploadArea from "./PremiumUploadArea";
 
 export default function InvoiceForm({ onBack }) {
   const { logout } = useAuth();
@@ -68,6 +69,7 @@ export default function InvoiceForm({ onBack }) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isScanTriggered, setIsScanTriggered] = useState(false);
+  const [currentFile, setCurrentFile] = useState(null);
   const [zoom, setZoom] = useState(window.innerWidth < 600 ? 0.40 : 1.0);
   const ZOOM_STEP = 0.15;
   const ZOOM_MIN = 0.25;
@@ -323,6 +325,14 @@ export default function InvoiceForm({ onBack }) {
       return;
     }
 
+    setCurrentFile({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      url: URL.createObjectURL(file),
+      uploadDate: new Date()
+    });
+
     setProcessingMode("upload");
     setIsProcessing(true);
     setStatus(null);
@@ -383,6 +393,15 @@ export default function InvoiceForm({ onBack }) {
     setShowGCN(false);
     setShowLorrySlip(false);
     setShowFuelSlip(false);
+  };
+
+  const handleRemoveFile = () => {
+    setCurrentFile(null);
+    handleReset();
+  };
+
+  const handleReplaceFile = () => {
+    document.getElementById('file-upload-input')?.click();
   };
 
   const validate = () => {
@@ -637,119 +656,21 @@ export default function InvoiceForm({ onBack }) {
         onCapture={handleScannerCapture}
       />
       <Container maxWidth="xl" sx={{ mt: 4, pb: 14 }}>
-        <Paper
-          elevation={0}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          sx={{
-            p: { xs: 2.5, md: 6 },
-            borderRadius: 2,
-            border: isDragActive ? "2px dashed #1a73e8" : "1px solid #e0e0e0",
-            backgroundColor: isDragActive ? "rgba(26,115,232,0.04)" : "#ffffff",
-            position: "relative",
-            transition: "all 0.2s ease",
-            boxShadow: { xs: 'none', md: '0 4px 12px rgba(0,0,0,0.05)' }
-          }}
-        >
-          {isDragActive && (
-            <Box
-              sx={{
-                position: 'absolute',
-                top: 0, left: 0, right: 0, bottom: 0,
-                zIndex: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(255,255,255,0.8)',
-                borderRadius: 2,
-              }}
-            >
-              <Typography variant="h4" color="primary" fontWeight="bold">Drop document here</Typography>
-            </Box>
-          )}
-          <PremiumLoadingOverlay isProcessing={isProcessing} mode={processingMode} />
+        {processingMode === 'save' && <PremiumLoadingOverlay isProcessing={isProcessing} mode={processingMode} />}
+        
+        <PremiumUploadArea 
+          onUpload={handleFileUpload}
+          onScan={handlePhysicalScan}
+          isProcessing={isProcessing && processingMode === 'upload'}
+          isScanTriggered={isScanTriggered}
+          status={status}
+          currentFile={currentFile}
+          onRemove={handleRemoveFile}
+          onReplace={handleReplaceFile}
+        />
 
-          <Box sx={{ mb: 4 }}>
-            {/* Header & Back Button */}
-            <Box display="flex" alignItems="flex-start" gap={1.5} mb={2.5}>
-              <IconButton
-                onClick={() => window.location.href = '/'}
-                disabled={isProcessing}
-                sx={{ bgcolor: '#f1f5f9', color: '#334155', borderRadius: '12px', mt: 0.5, boxShadow: '0 2px 5px rgba(0,0,0,0.05)', '&:hover': { bgcolor: '#e2e8f0' } }}
-              >
-                <ArrowBackIcon />
-              </IconButton>
-              <Box>
-                <Typography
-                  variant="h4"
-                  fontWeight="900"
-                  color="primary"
-                  sx={{
-                    letterSpacing: '-1px',
-                    fontSize: { xs: '1.5rem', md: '2.5rem' },
-                    lineHeight: 1.15
-                  }}
-                >
-                  DIPALI ASSOCIATES & CO
-                </Typography>
-                <Typography variant="body2" color="text.secondary" fontWeight="500" sx={{ mt: 0.5, fontSize: { xs: '0.85rem', md: '1.1rem' } }}>
-                  Upload PDF or Image. AI will automatically extract data for review.
-                </Typography>
-              </Box>
-            </Box>
-
-            {/* Action Buttons (Scan & Upload) */}
-            <Box display="flex" gap={1.5} sx={{ flexDirection: { xs: 'row', sm: 'row' }, width: '100%' }}>
-              <Button
-                fullWidth
-                variant="contained"
-                color="secondary"
-                startIcon={isScanTriggered ? <CircularProgress size={16} color="inherit" /> : <DocumentScannerIcon />}
-                onClick={handlePhysicalScan}
-                sx={{
-                  borderRadius: '12px', py: { xs: 1.2, md: 1.5 }, fontWeight: 800, fontSize: { xs: '0.9rem', md: '1rem' },
-                  background: 'linear-gradient(45deg, #7b1fa2, #9c27b0)',
-                  boxShadow: '0 4px 12px rgba(123,31,162,0.3)',
-                  whiteSpace: 'nowrap'
-                }}
-                disabled={isProcessing || isScanTriggered}
-              >
-                {isScanTriggered ? 'Scanning...' : 'Scan'}
-              </Button>
-              <Button
-                fullWidth
-                variant="contained"
-                component="label"
-                startIcon={<UploadFileIcon />}
-                sx={{
-                  borderRadius: '12px', py: { xs: 1.2, md: 1.5 }, fontWeight: 800, fontSize: { xs: '0.9rem', md: '1rem' },
-                  bgcolor: '#0052cc', '&:hover': { bgcolor: '#0043a8' },
-                  boxShadow: '0 4px 12px rgba(0,82,204,0.3)',
-                  whiteSpace: 'nowrap'
-                }}
-                disabled={isProcessing}
-              >
-                Upload
-                <input
-                  type="file"
-                  hidden
-                  accept="image/*, application/pdf"
-                  onChange={handleFileUpload}
-                />
-              </Button>
-            </Box>
-          </Box>
-
-
-
-          {status && (
-            <Alert severity={status.type} sx={{ mb: 3 }}>
-              {status.message}
-            </Alert>
-          )}
-
-          <Divider sx={{ mb: 4 }} />
+        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 6 }, borderRadius: 2, border: "1px solid #e0e0e0", backgroundColor: "#ffffff", mb: 4 }}>
+          <Divider sx={{ mb: 4, display: 'none' }} />
 
           <InvoiceDetails data={formData.invoice_details} errors={errors.invoice_details} onChange={handleChange} />
 

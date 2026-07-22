@@ -21,6 +21,8 @@ import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
 
 const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
+import { io } from "socket.io-client";
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -106,7 +108,7 @@ export default function PumpPaymentRegister({ onBack }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const [orderBy, setOrderBy] = useState('DATE');
+  const [orderBy, setOrderBy] = useState('');
   const [order, setOrder] = useState('asc');
 
   const yearOptions = [];
@@ -128,15 +130,7 @@ export default function PumpPaymentRegister({ onBack }) {
       
       if (res.data.success) {
         const records = res.data.records || [];
-        records.sort((a, b) => {
-          const parseToDate = (str) => {
-            if (!str) return new Date(0);
-            const pts = str.split('/');
-            if (pts.length === 3) return new Date(parseInt(pts[2]), parseInt(pts[1]) - 1, parseInt(pts[0]));
-            return new Date(str);
-          };
-          return parseToDate(a['DATE']) - parseToDate(b['DATE']);
-        });
+
 
         setRows(records);
       }
@@ -150,6 +144,21 @@ export default function PumpPaymentRegister({ onBack }) {
 
   useEffect(() => {
     fetchData();
+    
+    let socket;
+    try {
+      socket = io(SOCKET_URL, {
+        autoConnect: true,
+        transports: ["websocket", "polling"]
+      });
+      socket.on('pumpPaymentRegisterUpdate', () => fetchData(true));
+    } catch (err) {
+      console.warn('Socket error in PumpPaymentRegister:', err.message);
+    }
+    
+    return () => {
+      if (socket) socket.disconnect();
+    };
   }, [selMonth, selYear]);
 
   const handleEdit = (id, key, val) => {
@@ -321,6 +330,8 @@ export default function PumpPaymentRegister({ onBack }) {
     };
 
     result.sort((a, b) => {
+      if (!orderBy) return 0;
+
       let valA = localEdits[a._id]?.[orderBy] ?? a[orderBy];
       let valB = localEdits[b._id]?.[orderBy] ?? b[orderBy];
 
@@ -433,20 +444,6 @@ export default function PumpPaymentRegister({ onBack }) {
         </Box>
       </Box>
 
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <MetricCard title="Total Entries" value={metrics.totalEntries} icon={<AssessmentIcon />} color="#6366f1" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <MetricCard title="Current Month Bills" value={metrics.currentMonthBills} icon={<DateRangeIcon />} color="#f59e0b" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <MetricCard title="Total Amount Paid" value={metrics.totalAmountPaid} icon={<PaymentIcon />} color="#10b981" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <MetricCard title="Pending Due" value={metrics.pendingDue} icon={<AccountBalanceWalletIcon />} color="#ef4444" />
-        </Grid>
-      </Grid>
 
       <Card sx={{
         borderRadius: '16px',

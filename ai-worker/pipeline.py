@@ -128,36 +128,46 @@ def process_invoice(data: InvoiceRequest):
     # Direct AI Vision Extraction
     # (No OCR — GPT-4.1 reads image directly)
     # -------------------------------
-    print("Running GPT-4.1 Vision extraction...")
-    invoice_json = extract_invoice_data(file_path, target_schema)
-    print("Vision Extraction Completed")
+    try:
+        print("Running GPT-4.1 Vision extraction...")
+        invoice_json = extract_invoice_data(file_path, target_schema)
+        print("Vision Extraction Completed")
 
-    # -------------------------------
-    # Post-processing & Validation
-    # -------------------------------
+        # -------------------------------
+        # Post-processing & Validation
+        # -------------------------------
 
-    # Hard guard: clear fields the AI should never hallucinate
-    invoice_json = clear_hallucinated_fields(invoice_json, "")
+        # Hard guard: clear fields the AI should never hallucinate
+        invoice_json = clear_hallucinated_fields(invoice_json, "")
 
-    # Rule-based validations
-    invoice_json = validate_invoice(invoice_json)
+        # Rule-based validations
+        invoice_json = validate_invoice(invoice_json)
 
-    # Address validation
-    invoice_json = validate_addresses(invoice_json)
+        # Address validation
+        invoice_json = validate_addresses(invoice_json)
 
-    # GST / PAN validation
-    invoice_json = validate_gst_pan(invoice_json)
+        # GST / PAN validation
+        invoice_json = validate_gst_pan(invoice_json)
 
-    # Amount validation
-    invoice_json = validate_amounts(invoice_json)
+        # Amount validation
+        invoice_json = validate_amounts(invoice_json)
 
-    # Time normalization
-    invoice_json = fill_invoice_time(invoice_json)
+        # Time normalization
+        invoice_json = fill_invoice_time(invoice_json)
 
-    # GPT vision cross-check / correction pass — disabled (redundant, doubles cost & latency)
-    # invoice_json = validate_invoice_with_gpt(file_path, invoice_json)
+        # GPT vision cross-check / correction pass — disabled (redundant, doubles cost & latency)
+        # invoice_json = validate_invoice_with_gpt(file_path, invoice_json)
 
-    print("Extraction + Validation Completed")
+        print("Extraction + Validation Completed")
+    except Exception as ai_e:
+        import traceback
+        traceback.print_exc()
+        try:
+            os.unlink(file_path)
+        except Exception:
+            pass
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"AI Extraction failed: {str(ai_e)}")
 
     # Clean up temp file
     try:

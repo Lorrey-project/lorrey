@@ -24,22 +24,18 @@ export default function SellerDetails({ data, errors, onChange }) {
       <CardContent>
         <Box display="flex" flexDirection="column" gap={3}>
           
-          <FormControl fullWidth variant="outlined">
-            <InputLabel shrink id="seller-name-label">Seller Name</InputLabel>
-            <SearchableSelect
-              labelId="seller-name-label"
-              name="seller_name"
-              value={data?.seller_name === 'NVL' || data?.seller_name === 'NVCL' ? data.seller_name : ''}
-              onChange={handleChange}
-              label="Seller Name"
-              displayEmpty
-              sx={{ bgcolor: '#fff' }}
-            >
-              <MenuItem value="" disabled><em>— Select Seller Name —</em></MenuItem>
-              <MenuItem value="NVL">NU VISTA LTD</MenuItem>
-              <MenuItem value="NVCL">NUVOCO VISTAS CORP. LTD</MenuItem>
-            </SearchableSelect>
-          </FormControl>
+          <SearchableSelect
+            name="seller_name"
+            value={data?.seller_name === 'NVL' || data?.seller_name === 'NVCL' ? data.seller_name : ''}
+            onChange={handleChange}
+            label="Seller Name"
+            sx={{ bgcolor: '#fff' }}
+            size="medium"
+          >
+            <MenuItem value="" disabled><em>— Select Seller Name —</em></MenuItem>
+            <MenuItem value="NVL">NU VISTA LTD</MenuItem>
+            <MenuItem value="NVCL">NUVOCO VISTAS CORP. LTD</MenuItem>
+          </SearchableSelect>
 
           <TextField fullWidth label="Seller Address" name="seller_address" value="PANAGARH INDUSTRIAL PARK, KOTAGRAM, BURDWAN" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
           <TextField fullWidth label="State" name="seller_state" value="WEST BENGAL" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
