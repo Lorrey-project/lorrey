@@ -276,7 +276,7 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
         // Call FastAPI pipeline for AI extraction
         let aiData = null;
         try {
-            const aiWorkerUrl = process.env.AI_WORKER_URL;
+            const aiWorkerUrl = (process.env.AI_WORKER_URL || "").replace(/\/+$/, "");
             const aiResponse = await require("axios").post(
                 `${aiWorkerUrl}/process`,
                 { file: fileUrl },
@@ -285,10 +285,13 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
             aiData = aiResponse.data;
             console.log("AI extraction success");
         } catch (aiErr) {
-            const details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
+            let details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
+            if (aiErr.response?.status === 404) {
+                details = `AI Worker endpoint not found at ${process.env.AI_WORKER_URL}/process`;
+            }
             console.error("AI extraction failed. Details:", details);
             console.error(aiErr.stack);
-            return res.status(500).json({ error: details || "AI extraction failed", details: details });
+            return res.status(500).json({ error: `AI Extraction Failed: ${details}`, details: details });
         }
 
         // Save invoice with AI data
@@ -423,13 +426,24 @@ async function processScanFile(scanOutputPath, io) {
         console.log("[Scan] Uploaded to S3:", s3Url);
         if (io) io.emit("scanner_status", { message: "📤 Scan uploaded. Running AI extraction..." });
 
-        const aiWorkerUrl = process.env.AI_WORKER_URL;
-        const aiResponse = await require("axios").post(
-            `${aiWorkerUrl}/process`,
-            { file: s3Url },
-            { timeout: 90000 }
-        );
-        const aiData = aiResponse.data;
+        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").replace(/\/+$/, "");
+        let aiData;
+        try {
+            const aiResponse = await require("axios").post(
+                `${aiWorkerUrl}/process`,
+                { file: s3Url },
+                { timeout: 90000 }
+            );
+            aiData = aiResponse.data;
+        } catch (aiErr) {
+            let details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
+            if (aiErr.response?.status === 404) {
+                details = `AI Worker endpoint not found at ${process.env.AI_WORKER_URL}/process`;
+            }
+            console.error("[Scan] AI extraction failed:", details);
+            if (io) io.emit("scanner_status", { message: `❌ AI extraction failed: ${details}` });
+            return res.status(500).json({ error: `AI Extraction Failed: ${details}` });
+        }
 
         const Invoice = require("../models/Invoice");
         const { pushToRegister } = require("../utils/syncManager");

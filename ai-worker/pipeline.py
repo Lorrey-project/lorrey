@@ -96,7 +96,8 @@ def process_invoice(data: InvoiceRequest):
         print("Saved file locally:", file_path)
     except Exception as e:
         print(f"S3 download failed: {e}")
-        return {"error": f"Failed to download file from S3: {str(e)}"}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Failed to download file from S3: {str(e)}")
 
     # Convert PDF to Image if necessary
     try:

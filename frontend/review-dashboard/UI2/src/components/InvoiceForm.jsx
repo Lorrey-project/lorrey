@@ -360,9 +360,10 @@ export default function InvoiceForm({ onBack }) {
       // Removed immediate setShowInvoice(true) to allow user review
     } catch (error) {
       console.error("Error connecting to upload pipeline:", error);
+      const backendError = error.response?.data?.error || error.response?.data?.message;
       setStatus({
         type: "error",
-        message: error.response?.data?.message || error.response?.data?.error || "Failed to process document through the AI Worker pipeline.",
+        message: backendError || error.message || "Failed to process document through the AI Worker pipeline.",
       });
     } finally {
       setIsProcessing(false);
