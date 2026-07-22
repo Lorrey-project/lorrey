@@ -276,21 +276,49 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
         // Call FastAPI pipeline for AI extraction
         let aiData = null;
         try {
-            const aiWorkerUrl = (process.env.AI_WORKER_URL || "").replace(/\/+$/, "");
+            const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+            const targetProcessUrl = `${aiWorkerUrl}/process`;
+            
+            console.log("==========================================");
+            console.log(`[AI WORKER REQUEST] File: ${fileUrl}`);
+            console.log(`[AI WORKER REQUEST] Method: POST`);
+            console.log(`[AI WORKER REQUEST] Target URL: ${targetProcessUrl}`);
+            console.log("==========================================");
+
             const aiResponse = await require("axios").post(
-                `${aiWorkerUrl}/process`,
+                targetProcessUrl,
                 { file: fileUrl },
                 { timeout: 180000 }
             );
             aiData = aiResponse.data;
-            console.log("AI extraction success");
+            
+            console.log("==========================================");
+            console.log(`[AI WORKER RESPONSE] Status: ${aiResponse.status}`);
+            console.log(`[AI WORKER RESPONSE] Data Length: ${JSON.stringify(aiData).length} bytes`);
+            console.log("==========================================");
+            
         } catch (aiErr) {
-            let details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
-            if (aiErr.response?.status === 404) {
-                details = `AI Worker endpoint not found at ${process.env.AI_WORKER_URL}/process`;
+            console.error("==========================================");
+            console.error(`[AI WORKER ERROR] Failed to process invoice`);
+            console.error(`[AI WORKER ERROR] Name: ${aiErr.name}`);
+            console.error(`[AI WORKER ERROR] Message: ${aiErr.message}`);
+            
+            let details = aiErr.message;
+            if (aiErr.response) {
+                console.error(`[AI WORKER ERROR] HTTP Status: ${aiErr.response.status}`);
+                console.error(`[AI WORKER ERROR] Response Data:`, aiErr.response.data);
+                
+                details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
+                
+                if (aiErr.response.status === 404) {
+                    details = `AI Worker endpoint not found at: ${process.env.AI_WORKER_URL}/process. Check if the AI Worker service is running and the AI_WORKER_URL environment variable is exactly correct (no trailing slashes, no /process suffix).`;
+                }
+            } else if (aiErr.request) {
+                console.error(`[AI WORKER ERROR] No response received from server.`);
             }
-            console.error("AI extraction failed. Details:", details);
-            console.error(aiErr.stack);
+            console.error(`[AI WORKER ERROR] Stack Trace:`, aiErr.stack);
+            console.error("==========================================");
+            
             return res.status(500).json({ error: `AI Extraction Failed: ${details}`, details: details });
         }
 
@@ -426,7 +454,7 @@ async function processScanFile(scanOutputPath, io) {
         console.log("[Scan] Uploaded to S3:", s3Url);
         if (io) io.emit("scanner_status", { message: "📤 Scan uploaded. Running AI extraction..." });
 
-        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").replace(/\/+$/, "");
+        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
         let aiData;
         try {
             const aiResponse = await require("axios").post(

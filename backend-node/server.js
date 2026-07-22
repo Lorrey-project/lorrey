@@ -132,7 +132,8 @@ app.post("/upload", auth, upload.single("invoice"), async (req, res) => {
   try {
     const fileUrl = req.file.location;
     console.log("File uploaded to S3:", fileUrl);
-    const aiWorkerUrl = process.env.AI_WORKER_URL;
+    const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+    console.log(`[AI WORKER REQUEST] Method: POST, URL: ${aiWorkerUrl}/process`);
     const response = await axios.post(`${aiWorkerUrl}/process`, {
       file: fileUrl
     });
@@ -141,7 +142,7 @@ app.post("/upload", auth, upload.single("invoice"), async (req, res) => {
       ai_data: response.data
     });
   } catch (error) {
-    console.log(error.response?.data || error.message);
+    console.error(`[AI WORKER ERROR] Status: ${error.response?.status}, Data:`, error.response?.data || error.message);
     res.status(500).json({ error: "Processing failed" });
   }
 });
