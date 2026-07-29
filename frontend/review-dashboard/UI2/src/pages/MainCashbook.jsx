@@ -176,8 +176,8 @@ export default function MainCashbook({ onBack }) {
   const now = useMemo(() => new Date(), []);
   const currentFyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
-  const [selYear, setSelYear] = useState(now.getFullYear());
-  const years = useMemo(() => Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i), [now]);
+  const [selYear, setSelYear] = useState(`${currentFyStart}-${currentFyStart + 1}`);
+  const years = useMemo(() => Array.from({ length: 5 }, (_, i) => currentFyStart - 2 + i), [currentFyStart]);
 
   const tableContainerRef = useRef(null);
   useTableNavigation(tableContainerRef);
