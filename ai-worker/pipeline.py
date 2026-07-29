@@ -147,8 +147,8 @@ def process_invoice(data: InvoiceRequest):
         if doc.is_pdf:
             print("PDF detected. Converting first page to image...")
             page = doc.load_page(0)
-            # Render at higher resolution for better OCR
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            # Render at lower resolution for faster OCR without huge quality loss
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_path = file_path + ".jpg"
             pix.save(img_path)
             doc.close()
