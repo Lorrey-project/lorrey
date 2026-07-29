@@ -16,6 +16,8 @@ import AutoPdfRegenerator from '../components/AutoPdfRegenerator';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
 import { useAuth } from '../context/AuthContext';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 import { io } from 'socket.io-client';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -113,8 +115,10 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
 
   const [pumps, setPumps] = useState([]);
   const [rows, setRows] = useState([]);
-  const [localEdits, setLocalEdits] = useState({});
   const [loadingPumps, setLoadingPumps] = useState(true);
+
+  const tableContainerRef = React.useRef(null);
+  useTableNavigation(tableContainerRef);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
@@ -677,6 +681,15 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     return `${selPump || '—'} ( ${s} - ${e} )${hsdBillNo ? ' -' + hsdBillNo : ''}`;
   }, [selPump, selMonth, selYear, selPeriod, hsdBillNo]);
 
+  const billableRows = activeRows.filter(r => r['VERIFICATION STATUS'] === 'Verified' && !r.isBilled && r['CHALLAN STATUS'] !== 'BILLED');
+
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', () => {
+    // Basic fallback if delete logic is not explicit or supported
+  });
+
   const visibleCols = isPumpAdmin
     ? COLUMNS.filter(c => ['LOADING DATE', 'VEHICLE NUMBER', 'HSD (LTR)', 'VERIFICATION CODE'].includes(c.key))
       .map(c => ({
@@ -709,7 +722,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     </Box>
   );
 
-  const billableRows = activeRows.filter(r => r['VERIFICATION STATUS'] === 'Verified' && !r.isBilled && r['CHALLAN STATUS'] !== 'BILLED');
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f0fdfa', overflow: 'hidden' }}>
@@ -923,7 +935,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       )}
 
       {/* ── Table/Cards ── */}
-      <Box sx={{ overflow: 'auto', flex: 1, p: 0, bgcolor: isMobile ? '#f8fafc' : 'inherit' }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, p: 0, bgcolor: isMobile ? '#f8fafc' : 'inherit' }}>
         {loading ? (
           <Box display="flex" alignItems="center" justifyContent="center" height="60%" gap={2}>
             <CircularProgress sx={{ color: '#0891b2' }} />

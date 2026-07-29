@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery } from '@mui/material';
+import { ShortcutProvider } from './context/ShortcutContext';
+import GlobalShortcutHandler from './components/GlobalShortcutHandler';
 import InvoiceForm from './components/InvoiceForm';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
@@ -327,9 +329,12 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
+      <ShortcutProvider>
+        <AuthProvider>
+          <GlobalShortcutHandler />
+          <AppContent />
+        </AuthProvider>
+      </ShortcutProvider>
     </ThemeProvider>
   );
 }

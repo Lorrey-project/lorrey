@@ -23,6 +23,8 @@ import {
 } from '../utils/cementCalculations';
 
 import { exportToCsv } from '../utils/exportCsv';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -369,6 +371,9 @@ export default function CementRegister({ onBack }) {
   const [saveCompleted, setSaveCompleted] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const years = useMemo(() => Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i), [now]);
+
+  const tableContainerRef = useRef(null);
+  useTableNavigation(tableContainerRef);
 
   // ── Excel import wizard and preview state ──────────────────────────────────
   const [unsavedImportRows, setUnsavedImportRows] = useState([]);
@@ -989,6 +994,15 @@ export default function CementRegister({ onBack }) {
     }
   };
 
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', () => {
+    if (selectedIds.size > 0) {
+      setConfirmDel(true);
+    }
+  });
+
   if (loading) {
     return (
       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
@@ -997,6 +1011,7 @@ export default function CementRegister({ onBack }) {
       </Box>
     );
   }
+
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
@@ -1214,7 +1229,7 @@ export default function CementRegister({ onBack }) {
       </Box>
 
       {/* ── Group header row ─────────────────────────────────────────────── */}
-      <Box sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: '#fff' }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: '#fff' }}>
         <table style={{
           borderCollapse: 'collapse', minWidth: '100%',
           tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'

@@ -16,6 +16,8 @@ import TodayIcon from '@mui/icons-material/Today';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -98,6 +100,9 @@ export default function PartyPaymentDetails({ onBack }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
+
+  const tableContainerRef = React.useRef(null);
+  useTableNavigation(tableContainerRef);
   const [debugInfo, setDebugInfo] = useState('');
 
   const yearOptions = [];
@@ -443,6 +448,11 @@ export default function PartyPaymentDetails({ onBack }) {
   // #(40) | Owner Name(150) | Vehicle No(120)
   const stickyLeft = { '#': 0, 'OWNER NAME': 40, 'VEHICLE NO': 190 };
 
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  // delete not applicable here
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f4f7f9', overflow: 'hidden' }}>
 
@@ -510,7 +520,7 @@ export default function PartyPaymentDetails({ onBack }) {
       </Box>
 
       {/* ── Spreadsheet ── */}
-      <Box sx={{ overflow: 'auto', flex: 1 }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
         {loading ? (
           <Box display="flex" alignItems="center" justifyContent="center" height="100%" gap={2}>
             <CircularProgress sx={{ color: '#6d28d9' }} />

@@ -20,6 +20,8 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 import { exportToCsv } from '../utils/exportCsv';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -171,11 +173,13 @@ const CASHBOOK_HEADER_MAP = {
 };
 
 export default function MainCashbook({ onBack }) {
-  const now = new Date();
-  const currentFyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  const [selMonth, setSelMonth] = useState(now.getMonth() + 1); // 1-based
-  const [selYear, setSelYear] = useState(`${currentFyStart}-${currentFyStart + 1}`);
+  const now = useMemo(() => new Date(), []);
+  const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
+  const [selYear, setSelYear] = useState(now.getFullYear());
+  const years = useMemo(() => Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i), [now]);
 
+  const tableContainerRef = useRef(null);
+  useTableNavigation(tableContainerRef);
   const [entries, setEntries] = useState([]);
   const [localData, setLocalData] = useState({});
   const [loading, setLoading] = useState(true);
@@ -712,13 +716,21 @@ export default function MainCashbook({ onBack }) {
     exportToCsv(`cashbook_${selYear}_${selMonth}.xls`, [...computedRows, summaryRow]);
   };
 
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', () => {
+    if (selectedIds.size > 0) {
+      setConfirmDel(true);
+    }
+  });
+
   if (loading) return (
     <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
       <CircularProgress size={48} thickness={4} sx={{ color: '#7c3aed' }} />
       <Typography color="text.secondary" fontWeight={600}>Loading Main Cashbook...</Typography>
     </Box>
   );
-
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
 
@@ -816,7 +828,7 @@ export default function MainCashbook({ onBack }) {
       </Box>
 
       {/* ── Table ── */}
-      <Box sx={{ overflow: 'auto', flex: 1 }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
         <table style={{
           borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content',
           fontFamily: 'Inter, system-ui, sans-serif', fontSize: '12px'

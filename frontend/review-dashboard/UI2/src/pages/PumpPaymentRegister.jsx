@@ -19,6 +19,8 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import DateRangeIcon from '@mui/icons-material/DateRange';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
@@ -98,9 +100,12 @@ export default function PumpPaymentRegister({ onBack }) {
 
   const [rows, setRows] = useState([]);
   const [localEdits, setLocalEdits] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
+
+  const tableContainerRef = React.useRef(null);
+  useTableNavigation(tableContainerRef);
   
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -375,6 +380,11 @@ export default function PumpPaymentRegister({ onBack }) {
     exportToCsv(exportData, `Pump_Payment_Register_${MONTH_NAMES[selMonth - 1]}_${selYear}.csv`);
   };
 
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', handleDeleteSelected);
+
   return (
     <Box sx={{
       p: { xs: 2, md: 4 },
@@ -600,7 +610,7 @@ export default function PumpPaymentRegister({ onBack }) {
                 overflow: 'hidden',
                 boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
               }}>
-                <TableContainer sx={{ maxHeight: '60vh' }}>
+                <TableContainer ref={tableContainerRef} sx={{ maxHeight: '60vh' }}>
                   <Table stickyHeader sx={{ minWidth: 2000, '& .MuiTableCell-root': { py: 1.5, px: 1, borderBottom: '1px solid #f1f5f9' } }}>
                     <TableHead>
                       <TableRow>

@@ -13,6 +13,8 @@ import TableChartIcon from '@mui/icons-material/TableChart';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -68,6 +70,14 @@ export default function VoucherRegister({ onBack }) {
   const [localData, setLocalData]   = useState({});
   const [loading, setLoading]       = useState(true);
   const [saving, setSaving]         = useState(false);
+  const now = new Date();
+  const [selMonth, setSelMonth] = useState(now.getMonth() + 1); // 1-12
+  const [selYear, setSelYear] = useState(now.getFullYear());
+  const years = useMemo(() => Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i), [now]);
+
+  const tableContainerRef = useRef(null);
+  useTableNavigation(tableContainerRef);
+
   const [snack, setSnack]           = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting]     = useState(false);
@@ -204,6 +214,11 @@ export default function VoucherRegister({ onBack }) {
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', handleBulkDelete);
+
   if (loading) {
     return (
       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
@@ -280,7 +295,7 @@ export default function VoucherRegister({ onBack }) {
       </Box>
 
       {/* ── Excel Table ─────────────────────────────────────────────────────── */}
-      <Box sx={{ overflow: 'auto', flex: 1 }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
         <table style={{
           borderCollapse: 'collapse', minWidth: '100%',
           tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
