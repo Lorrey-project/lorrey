@@ -700,6 +700,7 @@ export default function InvoiceForm({ onBack }) {
         {processingMode === 'save' && <PremiumLoadingOverlay isProcessing={isProcessing} mode={processingMode} />}
         
         <PremiumUploadArea 
+          onBack={onBack}
           onUpload={handleFileUpload}
           onScan={handlePhysicalScan}
           isProcessing={isProcessing && processingMode === 'upload'}
