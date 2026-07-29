@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Typography, Button, IconButton, CircularProgress,
   Snackbar, Alert, Select, MenuItem, FormControl, InputLabel,
@@ -115,13 +115,13 @@ export default function PumpPaymentRegister({ onBack }) {
   const yearOptions = [];
   for (let y = currentFyStart - 2; y <= currentFyStart + 1; y++) yearOptions.push(`${y}-${y + 1}`);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setLocalEdits({});
     setSelectedIds(new Set());
     try {
       const token = localStorage.getItem('token');
-      const fyStartYear = parseInt(selYear.split('-')[0], 10);
+      const fyStartYear = parseInt(String(selYear).split('-')[0], 10);
       const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
 
       const res = await axios.get(`${API_URL}/pump-payment-register`, {
@@ -131,17 +131,15 @@ export default function PumpPaymentRegister({ onBack }) {
       
       if (res.data.success) {
         const records = res.data.records || [];
-
-
         setRows(records);
       }
     } catch (e) {
       console.error(e);
       setSnack({ msg: 'Failed to fetch data', sev: 'error' });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, [selMonth, selYear]);
 
   useEffect(() => {
     fetchData();
