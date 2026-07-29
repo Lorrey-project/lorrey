@@ -42,5 +42,9 @@ const invoiceSchema = new mongoose.Schema({
     }
 
 });
+// Performance Indexes
+invoiceSchema.index({ status: 1 });
+invoiceSchema.index({ created_at: -1 });
+invoiceSchema.index({ consignee_name: 1 });
 
 module.exports = mongoose.model("Invoice", invoiceSchema);

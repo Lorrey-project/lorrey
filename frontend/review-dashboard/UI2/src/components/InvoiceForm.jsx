@@ -30,7 +30,6 @@ import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import axios from "axios";
-import html2pdf from "html2pdf.js";
 import { io } from "socket.io-client";
 import { API_URL } from "../config";
 
@@ -206,6 +205,8 @@ export default function InvoiceForm({ onBack }) {
           html2canvas: { scale: 3, useCORS: true, logging: false },
           jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         };
+        const html2pdfModule = await import("html2pdf.js");
+        const html2pdf = html2pdfModule.default || html2pdfModule;
         await html2pdf().set(opt).from(element).save();
         setStatus({ type: "success", message: "✅ Download started successfully!" });
       } catch (err) {

@@ -9,14 +9,11 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def extract_invoice_data(image_path, target_schema):
+def extract_invoice_data(base64_image, target_schema):
     """
-    Directly extract structured invoice data from the image using GPT-4.1 vision.
+    Directly extract structured invoice data from the image using GPT-4o vision.
     No OCR step required — the model reads the image natively.
     """
-
-    with open(image_path, "rb") as img_file:
-        base64_image = base64.b64encode(img_file.read()).decode("utf-8")
 
     prompt = f"""
 TASK:

@@ -365,15 +365,17 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
 
         if (!updatedInvoice) throw new Error("Invoice record disappeared during processing");
 
-        // Propagate to Cement Register
-        await pushToRegister(invoiceId);
-
         emitStatus("success", { 
             message: "AI Extraction complete!",
             ai_data: aiData,
             invoice: updatedInvoice
         });
         console.log(`[Background Task] Successfully processed invoice ${invoiceId}`);
+
+        // Propagate to Cement Register asynchronously without blocking UI updates
+        pushToRegister(invoiceId).catch(err => {
+            console.error(`[Background Task] Error propagating invoice ${invoiceId} to Cement Register:`, err);
+        });
 
     } catch (error) {
         console.error(`[Background Task Error] Invoice ${invoiceId}:`, error);

@@ -139,33 +139,32 @@ def process_invoice(data: InvoiceRequest):
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"Failed to download file from S3: {str(e)}")
 
-    # Convert PDF to Image if necessary
+    # Convert PDF to Image and encode to base64 in memory
+    import base64
+    base64_image = None
     try:
         t0 = time.time()
         import fitz  # PyMuPDF
         doc = fitz.open(file_path)
         if doc.is_pdf:
-            print("PDF detected. Converting first page to image...")
+            print("PDF detected. Converting first page to image in memory...")
             page = doc.load_page(0)
-            # Render at lower resolution for faster OCR without huge quality loss
+            # Render at lower resolution for faster OCR
             pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            img_path = file_path + ".jpg"
-            pix.save(img_path)
+            # Get JPEG bytes directly from memory without disk I/O
+            img_bytes = pix.tobytes("jpeg")
+            base64_image = base64.b64encode(img_bytes).decode("utf-8")
             doc.close()
-            os.unlink(file_path)
-            file_path = img_path
         else:
-            # It's already an image
+            # It's already an image, read directly to memory
             doc.close()
-            img_path = file_path + ".jpg"
-            os.rename(file_path, img_path)
-            file_path = img_path
-        print(f"[Profiling] PyMuPDF processing completed in {time.time() - t0:.2f}s")
+            with open(file_path, "rb") as img_file:
+                base64_image = base64.b64encode(img_file.read()).decode("utf-8")
+        print(f"[Profiling] Image processing completed in {time.time() - t0:.2f}s")
     except Exception as e:
         print(f"PyMuPDF check passed/failed: {e}. Assuming original image.")
-        img_path = file_path + ".jpg"
-        os.rename(file_path, img_path)
-        file_path = img_path
+        with open(file_path, "rb") as img_file:
+            base64_image = base64.b64encode(img_file.read()).decode("utf-8")
 
     # -------------------------------
     # Direct AI Vision Extraction
@@ -174,7 +173,7 @@ def process_invoice(data: InvoiceRequest):
     try:
         t0 = time.time()
         print("Running GPT-4o Vision extraction...")
-        invoice_json = extract_invoice_data(file_path, target_schema)
+        invoice_json = extract_invoice_data(base64_image, target_schema)
         print(f"[Profiling] Vision Extraction completed in {time.time() - t0:.2f}s")
         
         t0 = time.time()
