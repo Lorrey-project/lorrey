@@ -1232,7 +1232,7 @@ export default function CementRegister({ onBack }) {
       <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: '#fff' }}>
         <table style={{
           borderCollapse: 'collapse', minWidth: '100%',
-          tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
+          tableLayout: 'auto', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
         }}>
           {/* Col widths */}
           <colgroup>
@@ -1966,13 +1966,11 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
     border: '1px solid #e2e8f0',
     fontSize: '11px',
     color: '#1e293b',
-    whiteSpace: 'normal',
-    wordBreak: 'break-word',
+    whiteSpace: 'nowrap',
     lineHeight: 1.4,
     borderRight: isDirty ? '2px solid #f59e0b' : '1px solid #e2e8f0',
     background: isDirty ? 'rgba(254,243,199,0.6)' : 'inherit',
-    width: col.width,
-    maxWidth: col.width,
+    minWidth: col.width,
   };
 
   // Color-coded: challan status, bill type
@@ -1989,7 +1987,7 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
       return (
         <td style={{ ...cellStyle, background: bg, padding: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', height: '100%', minHeight: '26px' }}>
-            <span style={{ flex: 1, whiteSpace: 'normal', wordBreak: 'break-word', padding: '4px 5px', color: '#1e293b' }}>{value || ''}</span>
+            <span style={{ flex: 1, whiteSpace: 'nowrap', padding: '4px 5px', color: '#1e293b' }}>{value || ''}</span>
             <AttachButton rowId={row?._id} attachType="bill_pdf" existingUrl={attachUrl} onSaved={onAttachSaved} />
           </div>
         </td>
@@ -2002,7 +2000,7 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
       return (
         <td style={{ ...cellStyle, background: bg, padding: '2px 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, minHeight: '26px' }}>
-            <span style={{ flex: 1, whiteSpace: 'normal', wordBreak: 'break-word' }}>{value || ''}</span>
+            <span style={{ flex: 1, whiteSpace: 'nowrap' }}>{value || ''}</span>
             {voucherPdfUrl ? (
               <a
                 href={voucherPdfUrl}

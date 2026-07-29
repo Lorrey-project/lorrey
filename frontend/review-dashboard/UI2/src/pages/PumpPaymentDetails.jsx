@@ -112,6 +112,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
   const [selYear, setSelYear] = useState(`${currentFyStart}-${currentFyStart + 1}`);
   const [selPeriod, setSelPeriod] = useState(currentDay <= 10 ? 1 : currentDay <= 20 ? 2 : 3);
   const [hsdBillNo, setHsdBillNo] = useState('');
+  const [localEdits, setLocalEdits] = useState({});
 
   const [pumps, setPumps] = useState([]);
   const [rows, setRows] = useState([]);
@@ -299,7 +300,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         headers: { Authorization: `Bearer ${token()}` }
       });
       setIsNotified(data.notified || false);
-    } catch (_) { setIsNotified(false); }
+    } catch { setIsNotified(false); }
   }, [selPump, selMonth, selYear, selPeriod]);
 
   useEffect(() => { fetchNotificationStatus(); }, [fetchNotificationStatus]);
@@ -318,7 +319,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         setPeriodPaymentStatus(data.status || 'Unpaid');
         setPeriodProofUrls(data.proofUrls || []);
       }
-    } catch (_) { }
+    } catch { }
   }, [selPump, selMonth, selYear, selPeriod]);
 
   useEffect(() => { fetchPeriodPaymentStatus(); }, [fetchPeriodPaymentStatus]);
@@ -331,7 +332,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         headers: { Authorization: `Bearer ${token()}` }
       });
       if (data.success) setAllNotifications(data.notifications || []);
-    } catch (_) { }
+    } catch { }
   }, [isOfficeAdmin]);
 
   useEffect(() => { fetchAllNotifications(); }, [fetchAllNotifications]);
@@ -374,22 +375,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     return () => { socket.off('cementUpdates'); socket.off('paymentNotification'); socket.off('periodPaymentUpdated'); socket.off('fuelRateUpdated'); };
   }, [fetchData, selPump, selMonth, selYear, selPeriod, isOfficeAdmin]);
 
-  // ── Send Notification (pump admin only) ───────────────────────────────
-  const handleNotify = async () => {
-    if (!isPumpAdmin || isNotified || notifying) return;
-    setNotifying(true);
-    const fyStartYear = parseInt(selYear.split('-')[0], 10);
-    const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
-    try {
-      await axios.post(`${API_URL}/pump-payment/notify`, {
-        pumpName: selPump, month: selMonth, year: calendarYear, period: selPeriod
-      }, { headers: { Authorization: `Bearer ${token()}` } });
-      setIsNotified(true);
-      setSnack({ severity: 'success', msg: 'Notification sent to Office Admin!' });
-    } catch (err) {
-      setSnack({ severity: 'error', msg: 'Notify failed: ' + (err.response?.data?.error || err.message) });
-    } finally { setNotifying(false); }
-  };
 
   // ── Upload period-level proofs — supports multiple files (Office Admin only) ──
   const handlePeriodProofUpload = async (files) => {
@@ -446,23 +431,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     }
   };
 
-  // ── Upload proof for a specific row (Office Admin only) ─────────────────
-  const handleRowProofUpload = async (ri, files) => {
-    if (!files || files.length === 0 || !isOfficeAdmin) return;
-    try {
-      const formData = new FormData();
-      formData.append('proof', files[0]);
-      const { data } = await axios.post(`${API_URL}/pump-payment/upload-payment-proof`, formData, {
-        headers: { Authorization: `Bearer ${token()}` }
-      });
-      if (data.success) {
-        handleEdit(ri, 'PAYMENT PROOF URL', data.url);
-        setSnack({ severity: 'success', msg: 'Proof uploaded — click Save to persist' });
-      }
-    } catch (err) {
-      setSnack({ severity: 'error', msg: 'Upload failed: ' + (err.response?.data?.error || err.message) });
-    }
-  };
 
   // ── Save period payment status (Office Admin only) ───────────────────────
   const handleSavePeriodPayment = async (newStatus) => {
@@ -612,34 +580,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     } finally { setSaving(false); }
   };
 
-  // ── Upload Payment Proof ───────────────────────────────────────────────
-  const handleUploadProof = async (ri, file) => {
-    if (!file) return;
-    const formData = new FormData();
-    formData.append('proof', file);
-
-    setLocalEdits(prev => ({ ...prev, [ri]: { ...(prev[ri] || {}), _uploading: true } }));
-
-    try {
-      const { data } = await axios.post(`${API_URL}/pump-payment/upload-payment-proof`, formData, {
-        headers: { Authorization: `Bearer ${token()}` }
-      });
-      if (data.success) {
-        setLocalEdits(prev => ({
-          ...prev,
-          [ri]: {
-            ...(prev[ri] || {}),
-            'PAYMENT PROOF URL': data.url,
-            _uploading: false
-          }
-        }));
-        setSnack({ severity: 'success', msg: 'Proof uploaded successfully!' });
-      }
-    } catch (err) {
-      setLocalEdits(prev => ({ ...prev, [ri]: { ...(prev[ri] || {}), _uploading: false } }));
-      setSnack({ severity: 'error', msg: 'Upload failed: ' + (err.response?.data?.error || err.message) });
-    }
-  };
 
   // ── CSV export ─────────────────────────────────────────────────────────
   const handleExport = () => {
@@ -648,7 +588,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     const { startDay, endDay } = getPeriodRange(selPeriod, selMonth, calendarYear);
     const startFmt = `${String(startDay).padStart(2, '0')}.${String(selMonth).padStart(2, '0')}.${String(calendarYear).slice(2)}`;
     const endFmt = `${String(endDay).padStart(2, '0')}.${String(selMonth).padStart(2, '0')}.${String(calendarYear).slice(2)}`;
-    const title = `${selPump} (${startFmt}-${endFmt}) -${hsdBillNo}`;
+
     const exportRows = computedRows.map(r => ({
       'LOADING DT': r['LOADING DATE'],
       'VEHICLE NUMBER': r['VEHICLE NUMBER'],
@@ -1085,7 +1025,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
               )}
               {activeRows.map((row, i) => {
                 const ri = row.originalIndex;
-                const hasEdits = !!localEdits[ri];
+
                 const isBilled = row.isBilled || row['VERIFICATION STATUS'] === 'Billed' || row['CHALLAN STATUS'] === 'BILLED';
                 return (
                   <tr key={i} style={{ 

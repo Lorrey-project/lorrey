@@ -46,11 +46,7 @@ const COLUMNS = [
   { key: 'DUE AMOUNT', label: 'DUE AMOUNT', width: 160, type: 'number', readOnly: true, align: 'right' }
 ];
 
-const getFirstDayOfMonthString = (month, yearRange) => {
-  const year = parseInt(yearRange.split('-')[0], 10);
-  const calendarYear = month >= 4 ? year : year + 1;
-  return `01/${String(month).padStart(2, '0')}/${calendarYear}`;
-};
+
 
 const formatCurrency = (val) => {
   const numVal = parseFloat(val);
@@ -164,7 +160,7 @@ export default function PumpPaymentRegister({ onBack }) {
     return () => {
       if (socket) socket.disconnect();
     };
-  }, [selMonth, selYear]);
+  }, [selMonth, selYear, fetchData]);
 
   const handleEdit = (id, key, val) => {
     setLocalEdits(prev => ({
@@ -301,19 +297,6 @@ export default function PumpPaymentRegister({ onBack }) {
     });
   }, [rows, localEdits]);
 
-  const metrics = React.useMemo(() => {
-    const actualRecords = computedRows;
-    const totalPayments = actualRecords.reduce((acc, r) => acc + (parseFloat(localEdits[r._id]?.['PAYMENT AMOUNT'] ?? r['PAYMENT AMOUNT']) || 0), 0);
-    const totalBills = actualRecords.reduce((acc, r) => acc + (parseFloat(localEdits[r._id]?.['BILL AMOUNT'] ?? r['BILL AMOUNT']) || 0), 0);
-    const pendingDue = computedRows.length > 0 ? computedRows[computedRows.length - 1]['DUE AMOUNT'] : 0;
-    
-    return {
-      totalEntries: actualRecords.length,
-      totalAmountPaid: formatCurrency(totalPayments),
-      currentMonthBills: formatCurrency(totalBills),
-      pendingDue: formatCurrency(pendingDue)
-    };
-  }, [computedRows, localEdits]);
 
   const filteredAndSortedRows = React.useMemo(() => {
     let result = computedRows;
@@ -380,10 +363,10 @@ export default function PumpPaymentRegister({ onBack }) {
     exportToCsv(exportData, `Pump_Payment_Register_${MONTH_NAMES[selMonth - 1]}_${selYear}.csv`);
   };
 
-  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+s', handleSaveAll);
   useShortcut('ctrl+r', () => fetchData());
   useShortcut('ctrl+e', handleExport);
-  useShortcut('delete', handleDeleteSelected);
+  useShortcut('delete', handleBulkDelete);
 
   return (
     <Box sx={{
