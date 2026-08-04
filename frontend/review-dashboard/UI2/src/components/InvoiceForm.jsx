@@ -502,7 +502,7 @@ export default function InvoiceForm({ onBack }) {
           headers: { Authorization: `Bearer ${token}` }
         });
 
-        // Crucial: fetch the officially generated sequential GCN NO (e.g., DAC/26-27/1)
+        // Crucial: fetch the officially generated sequential GCN NO (e.g., DAC-26-27-1)
         try {
           const updated = await axios.get(`${API_URL}/invoice/lorry-data/${formData._id}`, { headers: { Authorization: `Bearer ${token}` } });
           if (updated.data?.gcn_data?.gcn_no) {

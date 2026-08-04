@@ -85,6 +85,7 @@ app.use("/account-details", require("./routes/accountDetailRoutes"));
 app.use("/remittance-advise", require("./routes/remittanceAdviseRoutes"));
 app.use("/daily-summary", require("./routes/dailySummaryRoutes"));
 app.use("/pump-payment-register", require("./routes/pumpPaymentRegisterRoutes"));
+app.use("/settings", require("./routes/settingsRoutes"));
 
 const activePortals = {
   office: 0,

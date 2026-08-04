@@ -4,6 +4,7 @@ const router = express.Router();
 const FinancialYearPayment = require('../models/FinancialYearPayment');
 const FinancialYearRow = require('../models/FinancialYearRow');
 const BillRegisterDocument = require('../models/BillRegisterDocument');
+const ProjectedDeductionSetting = require('../models/ProjectedDeductionSetting');
 const paymentProofUpload = require('../middleware/paymentProofUpload');
 const billPdfUpload = require('../middleware/billPdfUpload');
 
@@ -201,7 +202,7 @@ router.get('/data', async (req, res) => {
       'UNLOADING BILL NO': 1, 'UNLOADING BILL DATE': 1,
       'EXTRA UNLOADING': 1,
       'Freight Generated': 1, 'Unloading Generated': 1,
-      'SHIPMENT NO': 1,
+      'SHIPMENT NO': 1, 'month': 1, 'Month': 1,
       _id: 0
     };
 
@@ -242,8 +243,8 @@ router.get('/data', async (req, res) => {
       const rawSite = normalizeSite(row['SITE']);
       if (rawSite !== 'NVCL' && rawSite !== 'NVL') return;
 
-      const prefix = rawSite === 'NVCL' ? 'NVCL/' : 'DAC/';
-      const cleanInvNo = invNo.replace(/^(DAC|NVCL)\//i, '');
+      const prefix = rawSite === 'NVCL' ? 'NVCL-' : 'DAC-';
+      const cleanInvNo = invNo.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-');
       const finalInvNo = `${prefix}${cleanInvNo}`;
 
       // Strictly check if THIS specific bill's date falls in the financial year
@@ -261,11 +262,16 @@ router.get('/data', async (req, res) => {
 
       if (!aggregated[finalInvNo]) {
         let monthStr = '';
-        const dObj = parseDate(invDate);
-        if (dObj) {
-          const m = dObj.getMonth();
-          const yy = String(dObj.getFullYear()).slice(-2);
-          monthStr = `${MONTH_NAMES[m]} '${yy}`;
+        const rawMonth = parseInt(row.month || row.Month, 10);
+        if (rawMonth >= 1 && rawMonth <= 12) {
+          monthStr = MONTH_NAMES[rawMonth - 1];
+        } else {
+          const dObj = parseDate(invDate);
+          if (dObj) {
+            const m = dObj.getMonth();
+            const yy = String(dObj.getFullYear()).slice(-2);
+            monthStr = `${MONTH_NAMES[m]} '${yy}`;
+          }
         }
         aggregated[finalInvNo] = {
           invoiceDate: invDate,
@@ -445,6 +451,7 @@ router.get('/pending-bills', async (req, res) => {
       'AMOUNT': 1, 'Billing Amount': 1,
       'VEHICLE NUMBER': 1, 'VEHICLE NO': 1,
       'PARTY NAME': 1, 'CHALLAN STATUS': 1,
+      'month': 1, 'Month': 1,
       _id: 0
     };
 
@@ -464,18 +471,23 @@ router.get('/pending-bills', async (req, res) => {
       const rawSite = normalizeSite(row['SITE']);
       if (rawSite !== party.toUpperCase()) continue;
 
-      const prefix = rawSite === 'NVCL' ? 'NVCL/' : 'DAC/';
-      const cleanInvNo = invNo.replace(/^(DAC|NVCL)\//i, '');
+      const prefix = rawSite === 'NVCL' ? 'NVCL-' : 'DAC-';
+      const cleanInvNo = invNo.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-');
       const finalInvNo = `${prefix}${cleanInvNo}`;
 
       if (!aggregated[finalInvNo]) {
         const invDate = row['BILL DATE'] || row['LOADING DT'] || row['LOADING DATE'] || '';
         let monthStr = '';
-        const dObj = parseDate(invDate);
-        if (dObj) {
-          const m = dObj.getMonth();
-          const yy = String(dObj.getFullYear()).slice(-2);
-          monthStr = `${MONTH_NAMES[m]} '${yy}`;
+        const rawMonth = parseInt(row.month || row.Month, 10);
+        if (rawMonth >= 1 && rawMonth <= 12) {
+          monthStr = MONTH_NAMES[rawMonth - 1];
+        } else {
+          const dObj = parseDate(invDate);
+          if (dObj) {
+            const m = dObj.getMonth();
+            const yy = String(dObj.getFullYear()).slice(-2);
+            monthStr = `${MONTH_NAMES[m]} '${yy}`;
+          }
         }
         aggregated[finalInvNo] = {
           invoiceDate: invDate,
@@ -883,6 +895,8 @@ router.post('/save-row', async (req, res) => {
       }
 
       if (reasonsToProcess.length > 0) {
+        const projSettingsDoc = (await ProjectedDeductionSetting.findOne()) || {};
+        
         // 2. Set new overrides for the selected trips
         for (const t of damageTrips) {
 
@@ -984,6 +998,32 @@ router.post('/save-row', async (req, res) => {
               else if (reason === 'Suspense') projectedCol = 'Suspense';
 
               if (projectedCol) {
+                let finalAmtToSync = manualAmt;
+                let hasProjectedSetting = false;
+                let projectedSettingVal = 0;
+
+                if (reason === 'Damage / Shortage') {
+                  hasProjectedSetting = true;
+                  projectedSettingVal = projSettingsDoc.damage || 0;
+                } else if (reason === 'Device Installation Charges' || reason === 'GPS Device Installation') {
+                  hasProjectedSetting = true;
+                  projectedSettingVal = projSettingsDoc.gpsDeviceInstallation || 0;
+                } else if (reason === 'RFID Deduction / Charges' || reason === 'RFID') {
+                  hasProjectedSetting = true;
+                  projectedSettingVal = projSettingsDoc.rfid || 0;
+                } else if (reason === 'GPS Trip Charges' || reason === 'GPS Trip Charge') {
+                  hasProjectedSetting = true;
+                  projectedSettingVal = projSettingsDoc.gpsTripCharge || 0;
+                }
+
+                if (hasProjectedSetting) {
+                  if (manualAmt >= projectedSettingVal) {
+                    finalAmtToSync = manualAmt;
+                  } else {
+                    finalAmtToSync = projectedSettingVal;
+                  }
+                }
+
                 const projVal = parseFloat(String(dbTrip[projectedCol] || '0').replace(/,/g, '')) || 0;
 
                 const overridePath = `deductionsOverride.${reason}`;
@@ -995,7 +1035,7 @@ router.post('/save-row', async (req, res) => {
                       billRegisterRef: billNo,
                       timestamp: new Date()
                     },
-                    [projectedCol]: manualAmt,
+                    [projectedCol]: finalAmtToSync,
                     'DEDICATED': 'Actual'
                   }
                 };
@@ -1149,7 +1189,9 @@ router.get('/trips', async (req, res) => {
       tripDate: t['LOADING DT'] || t['LOADING DATE'] || t['BILL DATE'] || 'Unknown',
       plant: t['PLANT'] || t['FROM'] || 'Unknown',
       destination: t['DESTINATION'] || t['TO'] || 'Unknown',
-      vehicle: t['VEHICLE NUMBER'] || t['VEHICLE NO'] || vehicle
+      vehicle: t['VEHICLE NUMBER'] || t['VEHICLE NO'] || vehicle,
+      shortageBag: t['SHORTAGE (BAG)'],
+      shortageRate: t['SHORTAGE (RATE)']
     }));
 
     formatted.sort((a, b) => parseCustomDate(a.tripDate) - parseCustomDate(b.tripDate));

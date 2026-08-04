@@ -3,7 +3,7 @@ import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
   Autocomplete, TextField, Divider, LinearProgress,
-  TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Checkbox
+  TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Checkbox, TablePagination
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -27,12 +27,13 @@ import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
 const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 
 const num = (val) => Number(String(val || 0).replace(/,/g, '')) || 0;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const currentYear = new Date().getFullYear();
-const YEARS = Array.from({length: 10}, (_, i) => String(currentYear - 5 + i));
+const YEARS = Array.from({ length: 10 }, (_, i) => String(currentYear - 5 + i));
 
 // Columns configuration
 const COLUMNS = [
@@ -56,7 +57,7 @@ const LEDGER_OPTIONS = [
   "Employee P Tax", "Endhan Cash Back", "Fasttag payment", "Freight Advance",
   "Freight payment", "Freight Payment Refund", "GST Paid", "interest Paid",
   "ITR return", "Main cash", "Office Exp", "Partner Interest", "Partner Salary",
-  "Payment recived", "Printing&stationary", "Pump payment", "Room rent",
+  "Payment Received", "Printing&stationary", "Pump payment", "Room rent",
   "Salary Advance", "Staff Salary", "subscription", "TDS on Cash Withdrawl",
   "Tds Payment", "Toll Payment"
 ];
@@ -118,13 +119,13 @@ function parseWorksheetToAOA(ws) {
   try {
     const rangeStr = ws['!ref'];
     if (!rangeStr) return [];
-    const range = window.XLSX ? window.XLSX.utils.decode_range(rangeStr) : {s:{r:0,c:0}, e:{r:50000, c:20}};
+    const range = window.XLSX ? window.XLSX.utils.decode_range(rangeStr) : { s: { r: 0, c: 0 }, e: { r: 50000, c: 20 } };
     const aoa = [];
     for (let R = range.s.r; R <= Math.min(range.e.r, 50000); ++R) {
       const row = [];
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const cellAddress = { c: C, r: R };
-        const cellRef = window.XLSX ? window.XLSX.utils.encode_cell(cellAddress) : `${String.fromCharCode(65+C)}${R+1}`;
+        const cellRef = window.XLSX ? window.XLSX.utils.encode_cell(cellAddress) : `${String.fromCharCode(65 + C)}${R + 1}`;
         const cell = ws[cellRef];
         if (!cell) {
           row.push('');
@@ -195,9 +196,16 @@ export default function AccountDetails({ onBack }) {
   const fileInputRef = useRef(null);
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [rowUploading, setRowUploading] = useState(null); // Track per-row upload state
   const [displayMonth, setDisplayMonth] = useState(MONTHS[new Date().getMonth()]);
   const [displayYear, setDisplayYear] = useState(String(new Date().getFullYear()));
+
+  useEffect(() => {
+    setPage(0);
+  }, [displayMonth, displayYear]);
+
   const [showExcelWizard, setShowExcelWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardMonth, setWizardMonth] = useState(MONTHS[new Date().getMonth()]);
@@ -259,10 +267,10 @@ export default function AccountDetails({ onBack }) {
       if (isSelected) {
         return { ...prev, selectedBills: [], allocations: {} };
       } else {
-        return { 
-          ...prev, 
-          selectedBills: [bill], 
-          allocations: { [bill["BILL NO"]]: bill["DUE AMOUNT"] } 
+        return {
+          ...prev,
+          selectedBills: [bill],
+          allocations: { [bill["BILL NO"]]: bill["DUE AMOUNT"] }
         };
       }
     });
@@ -287,7 +295,11 @@ export default function AccountDetails({ onBack }) {
     const totalAmount = pendingBillsModal.selectedBills.reduce((sum, b) => sum + num(allocs[b.rawBillNumber]), 0);
     const billsStr = pendingBillsModal.selectedBills.map(b => `${b.billNumber}(₹${num(allocs[b.rawBillNumber])})`).join(', ');
     const existingRemarks = localData[pendingBillsModal.rowId]?.['Remarks'] || entries.find(e => e._id === pendingBillsModal.rowId)?.['Remarks'] || '';
-    
+
+    const ledger = localData[pendingBillsModal.rowId]?.['Ledger Name'] || entries.find(e => e._id === pendingBillsModal.rowId)?.['Ledger Name'] || '';
+    const ledgerLower = ledger.toLowerCase();
+    const isReceive = ledgerLower.includes('payment') && ledgerLower.includes('receiv');
+
     // Pass allocations payload
     const allocPayload = pendingBillsModal.selectedBills.map(b => ({
       rawBillNumber: b.rawBillNumber,
@@ -298,7 +310,8 @@ export default function AccountDetails({ onBack }) {
       ...prev,
       [pendingBillsModal.rowId]: {
         ...(prev[pendingBillsModal.rowId] || {}),
-        'Withdraw': totalAmount.toFixed(2),
+        [isReceive ? 'Deposit' : 'Withdraw']: totalAmount.toFixed(2),
+        [isReceive ? 'Withdraw' : 'Deposit']: '',
         'Names': pendingBillsModal.party,
         'Remarks': billsStr ? `${existingRemarks} [Allocations: ${billsStr}]`.trim() : existingRemarks,
         '_allocations': allocPayload
@@ -309,7 +322,7 @@ export default function AccountDetails({ onBack }) {
 
   const handlePumpPaymentApply = () => {
     const existingRemarks = localData[pumpPaymentModal.rowId]?.['Remarks'] || entries.find(e => e._id === pumpPaymentModal.rowId)?.['Remarks'] || '';
-    
+
     const allocPayload = pumpPaymentModal.selectedBills.map(b => ({
       rawBillNumber: b["BILL NO"]
     }));
@@ -340,14 +353,14 @@ export default function AccountDetails({ onBack }) {
     let socket;
     try {
       socket = io(SOCKET_URL, {
-    autoConnect: true,
-    transports: ["websocket", "polling"]
-});
+        autoConnect: true,
+        transports: ["websocket", "polling"]
+      });
       socket.on('accountDetailsUpdate', () => fetchData(true));
     } catch (err) {
       console.warn('Socket error in AccountDetails:', err.message);
     }
-    
+
     const fetchVehicles = async () => {
       try {
         const token = localStorage.getItem('token');
@@ -395,7 +408,7 @@ export default function AccountDetails({ onBack }) {
       });
       if (res.data.success) {
         setEntries(res.data.entries);
-      setUnsavedImportRows([]);
+        setUnsavedImportRows([]);
         setLocalData({});
       }
     } catch (e) {
@@ -432,14 +445,14 @@ export default function AccountDetails({ onBack }) {
       const parts = String(dStr).split(/[-/]/);
       if (parts.length !== 3) return null;
       if (parts[0].length === 4) {
-        return new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2])).getTime();
+        return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])).getTime();
       } else {
-        return new Date(parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0])).getTime();
+        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
       }
     };
 
     const finalArr = [
-      ...unsavedImportRows.map(row => ({...row, ...(localData[row._id] || {})})),
+      ...unsavedImportRows.map(row => ({ ...row, ...(localData[row._id] || {}) })),
       ...computedRows
     ];
     let result = [...finalArr];
@@ -460,7 +473,7 @@ export default function AccountDetails({ onBack }) {
       const tA = parseDateStr(a['Transaction Date'] || a.transactionDate) || 0;
       const tB = parseDateStr(b['Transaction Date'] || b.transactionDate) || 0;
       // Also consider created_at for stable sort if dates are equal
-      if (tA !== tB) return tA - tB; 
+      if (tA !== tB) return tA - tB;
       // If dates are equal, sort new rows to bottom (since they are newer in ascending chronological order)
       if (a.isNewRow && !b.isNewRow) return 1;
       if (!a.isNewRow && b.isNewRow) return -1;
@@ -469,12 +482,16 @@ export default function AccountDetails({ onBack }) {
       const idA = a._id ? a._id.toString() : '';
       const idB = b._id ? b._id.toString() : '';
       if (idA && idB) return idA.localeCompare(idB);
-      
+
       return 0;
     });
 
     return result;
   }, [computedRows, filterFrom, filterTo, unsavedImportRows, localData]);
+
+  const displayedRows = useMemo(() => {
+    return filteredRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  }, [filteredRows, page, rowsPerPage]);
 
   const isFiltered = !!(filterFrom || filterTo);
 
@@ -486,14 +503,14 @@ export default function AccountDetails({ onBack }) {
     const newId = 'new_' + Date.now();
     const today = new Date().toISOString().split('T')[0]; // Auto-fill today's date (YYYY-MM-DD)
     setEntries(prev => [{ _id: newId, isNewRow: true }, ...prev]);
-    setLocalData(prev => ({ 
-      ...prev, 
-      [newId]: { 
+    setLocalData(prev => ({
+      ...prev,
+      [newId]: {
         isNewRow: true,
         'Transaction Date': today,
         selectedMonth: displayMonth,
-        selectedYear: displayYear 
-      } 
+        selectedYear: displayYear
+      }
     }));
   };
 
@@ -539,12 +556,12 @@ export default function AccountDetails({ onBack }) {
     try {
       const token = localStorage.getItem('token');
       const updates = [];
-      
+
       // Validation: Ensure all modified rows have a Transaction Date
       for (const row of unsavedImportRows) {
         const rowEdits = localData[row._id] || {};
         const mergedRow = { ...row, ...rowEdits };
-        
+
         if (!mergedRow['Transaction Date']) {
           setSnack({ severity: 'error', msg: 'Error: Transaction Date is required for all imported rows.' });
           setSaving(false);
@@ -565,13 +582,13 @@ export default function AccountDetails({ onBack }) {
       for (const [id, changes] of Object.entries(localData)) {
         const originalEntry = entries.find(e => e._id === id);
         const transactionDate = changes['Transaction Date'] ?? originalEntry?.['Transaction Date'] ?? originalEntry?.transactionDate ?? '';
-        
+
         if (!transactionDate) {
           setSnack({ severity: 'error', msg: 'Error: Transaction Date is required for all rows.' });
           setSaving(false);
           return;
         }
-        
+
         updates.push({
           id: id.startsWith('new_') ? null : id,
           isNewRow: id.startsWith('new_'),
@@ -676,7 +693,7 @@ export default function AccountDetails({ onBack }) {
     }
   };
 
-  
+
   const handleWizardFileSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -684,19 +701,19 @@ export default function AccountDetails({ onBack }) {
     try {
       const XLSX = await import('xlsx');
       window.XLSX = XLSX; // Expose for our helper
-      
+
       const reader = new FileReader();
       reader.onload = (evt) => {
         const data = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
+
         let aoa = parseWorksheetToAOA(worksheet);
         if (!aoa || aoa.length === 0) {
           aoa = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
         }
-        
+
         if (!aoa || aoa.length === 0) {
           setSnack({ severity: 'error', msg: 'The selected Excel sheet appears to be empty.' });
           return;
@@ -759,10 +776,10 @@ export default function AccountDetails({ onBack }) {
               rowObj[internalKey] = val;
             }
           });
-          
+
           if (Object.keys(rowObj).length > 0) {
             if (!rowObj['Transaction Date']) return; // Skip rows without Transaction Date
-            
+
             const d = new Date(rowObj['Transaction Date']);
             if (!isNaN(d.getTime())) {
               const parsedMonth = MONTHS[d.getMonth()];
@@ -850,7 +867,7 @@ export default function AccountDetails({ onBack }) {
     const d = localData[r._id]?.['Transaction Date'] ?? r['Transaction Date'];
     return d && d.startsWith(todayStr);
   }).length;
-  
+
   if (loading) {
     return (
       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
@@ -867,7 +884,7 @@ export default function AccountDetails({ onBack }) {
         .erp-table-row:hover { background-color: #f1f5f9 !important; }
         .erp-input:focus { border-color: #3b82f6 !important; background-color: #fff !important; }
       `}</style>
-      
+
       {/* ── Premium ERP Header & Dashboard Cards ── */}
       <Box sx={{ bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', flexShrink: 0, pb: 2 }}>
         <Box sx={{ px: 3, py: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -929,7 +946,7 @@ export default function AccountDetails({ onBack }) {
             disableClearable
           />
           <Box sx={{ width: 1, height: 28, bgcolor: '#e2e8f0', mx: 0.5 }} />
-          
+
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#f8fafc', p: '4px 8px', borderRadius: 2, border: '1px solid #e2e8f0' }}>
             <FilterListIcon sx={{ color: '#64748b', fontSize: 18 }} />
             <input
@@ -951,7 +968,7 @@ export default function AccountDetails({ onBack }) {
             )}
           </Box>
         </Box>
-        
+
         <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Tooltip title="Reload data">
             <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
@@ -962,7 +979,7 @@ export default function AccountDetails({ onBack }) {
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px', color: '#475569', borderColor: '#cbd5e1', '&:hover': { bgcolor: '#f1f5f9' } }}>
             Export
           </Button>
-          
+
           <Box sx={{ width: 1, height: 28, bgcolor: '#e2e8f0', mx: 0.5 }} />
 
           <Button
@@ -975,7 +992,7 @@ export default function AccountDetails({ onBack }) {
           </Button>
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={handleBankStatementUpload} />
 
-          <Button size="small" variant="contained" startIcon={<UploadIcon />} onClick={() => setShowExcelWizard(true)} 
+          <Button size="small" variant="contained" startIcon={<UploadIcon />} onClick={() => setShowExcelWizard(true)}
             sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' }, fontWeight: 700, px: 2, borderRadius: 2, boxShadow: 'none' }}>
             Import Excel
           </Button>
@@ -984,7 +1001,7 @@ export default function AccountDetails({ onBack }) {
             sx={{ fontWeight: 700, borderRadius: 2, px: 2, fontSize: '12px', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' }, boxShadow: 'none' }}>
             Add Row
           </Button>
-          
+
           <Button
             size="small" variant="contained"
             startIcon={saving ? <CircularProgress size={13} color="inherit" /> : <SaveIcon />}
@@ -1026,7 +1043,7 @@ export default function AccountDetails({ onBack }) {
             </tr>
           </thead>
           <tbody>
-            {filteredRows.map((row, ri) => (
+            {displayedRows.map((row, ri) => (
               <tr key={row._id} className="erp-table-row" style={{ background: selectedIds.has(row._id) ? '#eff6ff' : (ri % 2 === 0 ? '#ffffff' : '#f8fafc') }}>
                 <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', background: '#f8fafc' }}>
                   <input type="checkbox" checked={selectedIds.has(row._id)} onChange={() => toggleSelect(row._id)} style={{ cursor: 'pointer' }} />
@@ -1034,17 +1051,16 @@ export default function AccountDetails({ onBack }) {
                 {COLUMNS.map((col) => {
                   const val = localData[row._id]?.[col.key] ?? (row[col.key] || '');
                   const isAuto = AUTO_COLS.has(col.key);
-                  const isFromBank = row._source === 'bank_statement';
-                  
+
                   let cellBg = 'transparent';
                   let cellColor = '#1e293b';
                   let cellFontWeight = 500;
-                  
+
                   if (col.key === 'Deposit' && num(val) > 0) { cellColor = '#16a34a'; cellFontWeight = 700; cellBg = '#f0fdf4'; }
                   if (col.key === 'Withdraw' && num(val) > 0) { cellColor = '#ea580c'; cellFontWeight = 700; cellBg = '#fff7ed'; }
                   if (col.key === 'Closing Balance') { cellFontWeight = 700; cellColor = '#0369a1'; cellBg = '#f0f9ff'; }
                   if (isAuto && col.key !== 'Closing Balance' && col.key !== 'Deposit' && col.key !== 'Withdraw') cellBg = 'rgba(240,249,255,0.4)';
-                  
+
                   return (
                     <td key={col.key} style={{ border: '1px solid #e2e8f0', padding: 0, background: cellBg }}>
                       {col.key === 'Remittance Copy' ? (
@@ -1096,22 +1112,22 @@ export default function AccountDetails({ onBack }) {
                               ? MONTHS
                               : col.key === 'Vehicle'
                                 ? (() => {
-                                    const typed = String(localData[row._id]?.['Names'] || row['Names'] || '').trim();
-                                    if (!typed) return [];
-                                    if (ownerVehicleMap[typed]) return ownerVehicleMap[typed];
-                                    const typedLower = typed.toLowerCase();
-                                    return [...new Set(Object.keys(ownerVehicleMap).reduce((acc, k) => {
-                                      if (k.toLowerCase().includes(typedLower) || typedLower.includes(k.toLowerCase())) {
-                                        return acc.concat(ownerVehicleMap[k]);
-                                      }
-                                      return acc;
-                                    }, []))];
-                                  })()
+                                  const typed = String(localData[row._id]?.['Names'] || row['Names'] || '').trim();
+                                  if (!typed) return [];
+                                  if (ownerVehicleMap[typed]) return ownerVehicleMap[typed];
+                                  const typedLower = typed.toLowerCase();
+                                  return [...new Set(Object.keys(ownerVehicleMap).reduce((acc, k) => {
+                                    if (k.toLowerCase().includes(typedLower) || typedLower.includes(k.toLowerCase())) {
+                                      return acc.concat(ownerVehicleMap[k]);
+                                    }
+                                    return acc;
+                                  }, []))];
+                                })()
                                 : col.key === 'Ledger Name'
                                   ? LEDGER_OPTIONS
-                                  : ( (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '')?.toLowerCase().includes('payment')
-                                      && (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '')?.toLowerCase().includes('receiv')
-                                        ? ['NVL', 'NVCL'] : NAMES_OPTIONS )
+                                  : ((localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '')?.toLowerCase().includes('payment')
+                                    && (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '')?.toLowerCase().includes('receiv')
+                                    ? ['NVL', 'NVCL'] : NAMES_OPTIONS)
                           }
                           value={val || ''}
                           freeSolo
@@ -1122,10 +1138,10 @@ export default function AccountDetails({ onBack }) {
                                 const ledger = localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '';
                                 const ledgerLower = ledger.toLowerCase();
                                 if (
-                                    (ledgerLower.includes('payment') && ledgerLower.includes('receiv')) ||
-                                    (ledgerLower.includes('freight') && ledgerLower.includes('payment'))
+                                  (ledgerLower.includes('payment') && ledgerLower.includes('receiv')) ||
+                                  (ledgerLower.includes('freight') && ledgerLower.includes('payment'))
                                 ) {
-                                    openPendingBillsModal(row._id, newValue);
+                                  openPendingBillsModal(row._id, newValue);
                                 }
                               }
                               // Clear vehicle if it doesn't belong to the new owner
@@ -1143,12 +1159,26 @@ export default function AccountDetails({ onBack }) {
                                 }
                               }
                             }
-                            
+
                             if (col.key === 'Ledger Name' || col.key === 'Month') {
                               const currentLedger = (col.key === 'Ledger Name' ? newValue : (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || ''));
                               const currentMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
-                              if (String(currentLedger).toLowerCase() === 'pump payment' && currentMonth) {
+                              const currentLedgerLower = String(currentLedger).toLowerCase();
+
+                              if (currentLedgerLower === 'pump payment' && currentMonth) {
                                 openPumpPaymentModal(row._id, currentMonth);
+                              }
+
+                              if (col.key === 'Ledger Name') {
+                                const currentName = localData[row._id]?.['Names'] || row['Names'] || '';
+                                if (currentName === 'NVL' || currentName === 'NVCL') {
+                                  if (
+                                    (currentLedgerLower.includes('payment') && currentLedgerLower.includes('receiv')) ||
+                                    (currentLedgerLower.includes('freight') && currentLedgerLower.includes('payment'))
+                                  ) {
+                                    openPendingBillsModal(row._id, currentName);
+                                  }
+                                }
                               }
                             }
                           }}
@@ -1210,7 +1240,6 @@ export default function AccountDetails({ onBack }) {
                         <textarea
                           className="erp-input"
                           value={val}
-                          readOnly={isAuto && isFromBank && !localData[row._id]?.[col.key]}
                           onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
                           style={{
                             width: '100%', height: '100%', border: '1px solid transparent', padding: '10px 10px',
@@ -1224,7 +1253,6 @@ export default function AccountDetails({ onBack }) {
                           className="erp-input"
                           type={col.isDate ? 'date' : 'text'}
                           value={val}
-                          readOnly={isAuto && isFromBank && !localData[row._id]?.[col.key]}
                           onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
                           style={{
                             width: '100%', height: '100%', border: '1px solid transparent', padding: '10px 10px',
@@ -1241,6 +1269,25 @@ export default function AccountDetails({ onBack }) {
           </tbody>
         </table>
       </Box>
+
+      <TablePagination
+        component="div"
+        count={filteredRows.length}
+        page={page}
+        onPageChange={(e, newPage) => setPage(newPage)}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={(e) => {
+          setRowsPerPage(parseInt(e.target.value, 10));
+          setPage(0);
+        }}
+        rowsPerPageOptions={[25, 50, 100, 200]}
+        sx={{
+          borderTop: '1px solid #e2e8f0',
+          background: '#f8fafc',
+          borderBottomLeftRadius: '12px',
+          borderBottomRightRadius: '12px'
+        }}
+      />
 
       {/* ── Bank Statement Date Range Picker Dialog ── */}
       <Dialog
@@ -1397,14 +1444,14 @@ export default function AccountDetails({ onBack }) {
                 <Autocomplete
                   options={MONTHS}
                   value={wizardMonth}
-                  onChange={(e,v) => setWizardMonth(v)}
+                  onChange={(e, v) => setWizardMonth(v)}
                   renderInput={(params) => <TextField {...params} label="Month" size="small" sx={{ width: 200 }} />}
                   disableClearable
                 />
                 <Autocomplete
                   options={YEARS}
                   value={wizardYear}
-                  onChange={(e,v) => setWizardYear(v)}
+                  onChange={(e, v) => setWizardYear(v)}
                   renderInput={(params) => <TextField {...params} label="Year" size="small" sx={{ width: 150 }} />}
                   disableClearable
                 />
@@ -1433,7 +1480,7 @@ export default function AccountDetails({ onBack }) {
               <Typography variant="h6" fontWeight={800} color="#0f172a" mb={1}>
                 Preview Import: {wizardPreview.fileName}
               </Typography>
-              
+
               <Box sx={{ bgcolor: '#fff', borderRadius: 2, border: '1px solid #e2e8f0', p: 2, mb: 3 }}>
                 <Typography variant="body2" color="#475569" mb={1}>
                   Total rows found: <strong>{wizardPreview.totalRows}</strong>
@@ -1444,7 +1491,7 @@ export default function AccountDetails({ onBack }) {
                 <Typography variant="body2" color="#16a34a">
                   Columns mapped: <strong>{Object.keys(wizardPreview.mappedCols).length}</strong> / {COLUMNS.length}
                 </Typography>
-                
+
                 {wizardPreview.unmappedHeaders.length > 0 && (
                   <Box mt={2} p={1.5} bgcolor="#fef2f2" border="1px solid #fecaca" borderRadius={1}>
                     <Typography variant="caption" fontWeight={700} color="#dc2626" display="block" mb={0.5}>
@@ -1617,7 +1664,7 @@ export default function AccountDetails({ onBack }) {
                   {pumpPaymentModal.bills.map(b => (
                     <TableRow key={b["BILL NO"]} hover selected={pumpPaymentModal.selectedBills.some(s => s["BILL NO"] === b["BILL NO"])}>
                       <TableCell padding="checkbox">
-                        <Checkbox 
+                        <Checkbox
                           checked={pumpPaymentModal.selectedBills.some(s => s["BILL NO"] === b["BILL NO"])}
                           onChange={() => handlePumpPaymentToggleSelect(b)}
                         />

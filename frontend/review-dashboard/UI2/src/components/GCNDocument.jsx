@@ -80,7 +80,7 @@ const GCNDocument = React.forwardRef(({ data, onUploadComplete }, ref) => {
         const fyStart = month >= 4 ? year : year - 1;
         const fyShort = `${String(fyStart).slice(-2)}-${String(fyStart + 1).slice(-2)}`;
         
-        return `DAC/${fyShort}/TBD`; // Prevent generating fake serial numbers
+        return `DAC-${fyShort}-TBD`; // Prevent generating fake serial numbers
     };
 
     const getFullName = (name) => name === 'NVCL' ? 'NUVOCO VISTAS CORP. LTD' : name === 'NVL' ? 'NU VISTA LTD' : name;

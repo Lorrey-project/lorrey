@@ -29,7 +29,7 @@ export default function SearchableSelect({
 
         // Prevent duplicate values causing keys conflict in MUI Autocomplete
         if (!opts.some(o => o.value === val)) {
-          opts.push({ value: val, label: String(lab) });
+          opts.push({ value: val, label: String(lab), disabled: !!child.props.disabled });
         }
       }
     });
@@ -44,6 +44,7 @@ export default function SearchableSelect({
     <Autocomplete
       options={options}
       getOptionLabel={(option) => option.label || ""}
+      getOptionDisabled={(option) => !!option.disabled}
       value={selectedOption}
       onChange={(event, newValue) => {
         if (onChange) {

@@ -1,9 +1,23 @@
-const mongoose = require('mongoose');
+const { MongoClient } = require('mongodb');
+require('dotenv').config();
 
-mongoose.connect('mongodb+srv://lorrey0004:lorrey0004@cluster0.pqbigfd.mongodb.net/invoiceAI?retryWrites=true&w=majority').then(async () => {
-  const db = mongoose.connection.useDb('lorrey_db');
-  const cementCol = db.collection('cement_registers');
-  const record = await cementCol.findOne({ 'LOADING DATE': { $exists: true } });
-  console.log(record['LOADING DATE']);
-  process.exit(0);
-}).catch(console.error);
+async function main() {
+  const client = new MongoClient(process.env.MONGO_URI);
+  await client.connect();
+  const db = client.db();
+  
+  const records = await db.collection('cement_register').aggregate([
+    {
+      $group: {
+        _id: { month: "$month", year: "$year" },
+        count: { $sum: 1 }
+      }
+    }
+  ]).toArray();
+  
+  console.log('cement_register counts:', records);
+
+  await client.close();
+}
+
+main().catch(console.error);

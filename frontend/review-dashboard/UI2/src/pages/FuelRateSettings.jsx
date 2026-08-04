@@ -481,6 +481,149 @@ function CashDiscountTab({ snackHandler }) {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECTED DEDUCTION SETTINGS TAB
+// ─────────────────────────────────────────────────────────────────────────────
+function ProjectedDeductionTab({ snackHandler }) {
+    const [settings, setSettings] = useState({
+        damage: '',
+        gpsDeviceInstallation: '',
+        rfid: '',
+        gpsTripCharge: ''
+    });
+    const [saving, setSaving] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        fetchSettings();
+    }, []);
+
+    const fetchSettings = async () => {
+        setLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`${API_URL}/settings/projected-deductions`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.success && res.data.data) {
+                setSettings({
+                    damage: String(res.data.data.damage || 476),
+                    gpsDeviceInstallation: String(res.data.data.gpsDeviceInstallation || 1500),
+                    rfid: String(res.data.data.rfid || 100),
+                    gpsTripCharge: String(res.data.data.gpsTripCharge || 145)
+                });
+            }
+        } catch (e) {
+            snackHandler({ msg: 'Failed to load projected deduction settings', sev: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        setSaving(true);
+        try {
+            const token = localStorage.getItem('token');
+            const payload = {
+                damage: parseFloat(settings.damage),
+                gpsDeviceInstallation: parseFloat(settings.gpsDeviceInstallation),
+                rfid: parseFloat(settings.rfid),
+                gpsTripCharge: parseFloat(settings.gpsTripCharge)
+            };
+
+            const invalid = Object.values(payload).some(val => isNaN(val) || val < 0);
+            if (invalid) {
+                snackHandler({ msg: 'All fields must be valid positive numbers', sev: 'error' });
+                setSaving(false);
+                return;
+            }
+
+            const res = await axios.put(`${API_URL}/settings/projected-deductions`,
+                payload,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            
+            if (res.data.success) {
+                snackHandler({ msg: 'Projected Deduction Settings updated successfully!', sev: 'success' });
+                fetchSettings();
+            }
+        } catch (error) {
+            snackHandler({ msg: error.response?.data?.error || 'Failed to update settings', sev: 'error' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleReset = () => {
+        fetchSettings();
+    };
+
+    const handleChange = (field, value) => {
+        setSettings(prev => ({ ...prev, [field]: value }));
+    };
+
+    if (loading) {
+        return (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}>
+                <CircularProgress />
+            </Box>
+        );
+    }
+
+    return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <Grid container spacing={4} justifyContent="center">
+                <Grid item xs={12} md={8} lg={6}>
+                    <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
+                        <Box sx={{ p: 3, borderBottom: '1px solid rgba(255,255,255,0.05)', bgcolor: 'rgba(255,255,255,0.02)' }}>
+                            <Typography variant="h6" fontWeight={600}>Projected Deduction Settings</Typography>
+                            <Typography variant="body2" color="text.secondary">Configure the default projected deduction amounts used throughout the ERP.</Typography>
+                        </Box>
+                        <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            <TextField 
+                                label="Damage Deduction (₹)" 
+                                type="number" 
+                                value={settings.damage}
+                                onChange={(e) => handleChange('damage', e.target.value)}
+                                fullWidth
+                            />
+                            <TextField 
+                                label="GPS Device Installation (₹)" 
+                                type="number" 
+                                value={settings.gpsDeviceInstallation}
+                                onChange={(e) => handleChange('gpsDeviceInstallation', e.target.value)}
+                                fullWidth
+                            />
+                            <TextField 
+                                label="RFID (₹)" 
+                                type="number" 
+                                value={settings.rfid}
+                                onChange={(e) => handleChange('rfid', e.target.value)}
+                                fullWidth
+                            />
+                            <TextField 
+                                label="GPS Trip Charge (₹)" 
+                                type="number" 
+                                value={settings.gpsTripCharge}
+                                onChange={(e) => handleChange('gpsTripCharge', e.target.value)}
+                                fullWidth
+                            />
+                            <Divider sx={{ my: 1 }} />
+                            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                                <Button variant="contained" color="warning" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ flex: 1, borderRadius: 2 }}>
+                                    {saving ? 'Saving...' : 'Save'}
+                                </Button>
+                                <Button variant="text" color="inherit" startIcon={<RefreshIcon />} onClick={handleReset} sx={{ flex: 1, borderRadius: 2 }}>
+                                    Reset
+                                </Button>
+                            </Box>
+                        </CardContent>
+                    </Card>
+                </Grid>
+            </Grid>
+        </Box>
+    );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE COMPONENT
@@ -518,7 +661,7 @@ export default function FuelRateSettings({ onBack }) {
                             Settings & Configurations
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
-                            Manage Fuel Rates and Pump Cash Discounts efficiently.
+                            Manage Fuel Rates, Pump Cash Discounts, and Projected Deductions efficiently.
                         </Typography>
                     </Box>
                 </Box>
@@ -553,6 +696,7 @@ export default function FuelRateSettings({ onBack }) {
                     >
                         <Tab label="Fuel Rate Settings" />
                         <Tab label="Pump Cash Discount" />
+                        <Tab label="Projected Deduction Settings" />
                     </Tabs>
                 </Paper>
             </Box>
@@ -563,6 +707,9 @@ export default function FuelRateSettings({ onBack }) {
             </TabPanel>
             <TabPanel value={tabIndex} index={1}>
                 <CashDiscountTab snackHandler={snackHandler} />
+            </TabPanel>
+            <TabPanel value={tabIndex} index={2}>
+                <ProjectedDeductionTab snackHandler={snackHandler} />
             </TabPanel>
 
             <Snackbar 
