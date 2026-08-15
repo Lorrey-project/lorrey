@@ -89,6 +89,7 @@ router.get("/contacts", async (req, res) => {
 
     // Build grouped map: { "OWNER NAME": ["WB12AB1234", ...] }
     const ownerMap = {};
+    const ownerDetails = {};
     for (const c of contacts) {
       const name = (c.owner_name || c["Owner Name"] || c["Owner Name "] || c.Owner_Name || "").trim();
       const truck = (c.truck_no || c["Truck No"] || c["Truck No "] || c.Truck_No || "").trim();
@@ -97,6 +98,14 @@ router.get("/contacts", async (req, res) => {
       
       if (!ownerMap[name]) ownerMap[name] = [];
       if (!ownerMap[name].includes(truck)) ownerMap[name].push(truck);
+      
+      if (!ownerDetails[name]) {
+        ownerDetails[name] = {
+          pan: (c.pan_no || c["PAN No"] || c["PAN NO"] || c["PAN_No"] || "").trim(),
+          address: (c.address || c["Address"] || c["ADDRESS"] || "").trim(),
+          contactNo: (c.contact_no || c["Contact No"] || c["CONTACT NO"] || c["Contact_No"] || "").trim()
+        };
+      }
     }
 
     // Sort owner names alphabetically
@@ -104,7 +113,7 @@ router.get("/contacts", async (req, res) => {
     // All vehicles flat list (sorted)
     const vehicles = [...new Set(contacts.map(c => (c.truck_no || "").trim()).filter(Boolean))].sort();
 
-    res.json({ success: true, names, vehicles, ownerMap });
+    res.json({ success: true, names, vehicles, ownerMap, ownerDetails });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

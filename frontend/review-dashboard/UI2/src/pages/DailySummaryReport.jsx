@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
+  InputAdornment, List, ListItem, ListItemText, ListItemIcon,
   Box, Button, CircularProgress, Typography, IconButton,
   Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper,
   Snackbar, Alert, TextField, Tooltip, Dialog, DialogTitle,
-  DialogContent, Chip, Divider
+  DialogContent, Chip, Divider, Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -22,20 +23,26 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import DescriptionIcon from '@mui/icons-material/Description';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PublishIcon from '@mui/icons-material/Publish';
+import SearchIcon from '@mui/icons-material/Search';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import PersonIcon from '@mui/icons-material/Person';
 
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import PartyReportView from './PartyReportView';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
 const parseNum = (val) => parseFloat(String(val || 0).replace(/,/g, '')) || 0;
 
-export default function DailySummaryReport({ 
-  onBack, 
-  onUploadNew, 
-  onOpenCementRegister, 
-  onOpenPartyPayment, 
-  onOpenPumpPaymentRegister 
+function DailySummaryTab({
+  onBack,
+  onUploadNew,
+  onOpenCementRegister,
+  onOpenPartyPayment,
+  onOpenPumpPaymentRegister,
+  mainTab,
+  setMainTab
 }) {
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [data, setData] = useState(null);
@@ -124,19 +131,19 @@ export default function DailySummaryReport({
   };
 
   const metrics = useMemo(() => {
-    if (!data) return { 
+    if (!data) return {
       invoicesUploaded: 0, cementMT: 0, cementTrips: 0, fuelLtr: 0, fuelSlips: 0, loadingAdvanceAmt: 0, advanceVehicles: [],
       cashReceivedAmount: 0, cashOpeningBalance: 0, miscExpenses: 0, closingAdvanceBalance: 0, totalBillAmt: 0,
       totalPumpPaymentAmt: 0, missingChallans: 0
     };
-    
+
     // Cement
     let cMT = 0;
     let advAmt = 0;
     let tBillAmt = 0;
     let missingChallansCount = 0;
     const advVehicles = [];
-    
+
     (data.cement || []).forEach(e => {
       cMT += parseNum(e["MT"]);
       tBillAmt += parseNum(e["Billing Amount"] || 0);
@@ -148,9 +155,9 @@ export default function DailySummaryReport({
           advVehicles.push(veh);
         }
       }
-      
+
       if (!e["GCN NO"] || String(e["GCN NO"]).trim() === "") {
-          missingChallansCount++;
+        missingChallansCount++;
       }
     });
 
@@ -164,7 +171,7 @@ export default function DailySummaryReport({
 
     const cb = data.cashbookEntry || {};
     const advData = data.advanceSummary || {};
-    
+
     // Values from advanceSummary (from DB), fallback to basic calculation if missing
     const cashRecv = advData.cashReceived ?? parseNum(cb["P_GIVEN_DAC"]);
     const cashOpen = advData.openingBalance ?? 0;
@@ -179,7 +186,7 @@ export default function DailySummaryReport({
       fuelSlips: (data.pumpSlips || []).length,
       loadingAdvanceAmt: advAmt,
       advanceVehicles: advVehicles,
-      
+
       // Cashbook logic
       cashReceivedAmount: cashRecv,
       cashOpeningBalance: cashOpen,
@@ -204,7 +211,7 @@ export default function DailySummaryReport({
     const pending = [];
     const nonStamp = [];
     const stamp = [];
-    
+
     (data?.cement || []).forEach(e => {
       const billAmt = parseNum(e["Billing Amount"] || 0);
       if (billAmt === 0) return; // Only count those that contribute to the total
@@ -217,7 +224,7 @@ export default function DailySummaryReport({
 
     const sumAmt = (arr) => arr.reduce((acc, e) => acc + parseNum(e["Billing Amount"] || 0), 0);
 
-    return { 
+    return {
       pending, pendingAmt: sumAmt(pending),
       nonStamp, nonStampAmt: sumAmt(nonStamp),
       stamp, stampAmt: sumAmt(stamp),
@@ -241,12 +248,39 @@ export default function DailySummaryReport({
           </IconButton>
           <Box>
             <Typography variant="h5" fontWeight={900} sx={{ letterSpacing: '-0.5px' }}>
-                Daily Operations Dashboard
+              Daily Operations Dashboard
             </Typography>
             <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                Live operational metrics and invoice processing
+              Live operational metrics and invoice processing
             </Typography>
           </Box>
+        </Box>
+        <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
+          <Tabs
+            value={mainTab}
+            onChange={(e, v) => setMainTab(v)}
+            sx={{
+              minHeight: 40,
+              '& .MuiTab-root': {
+                minHeight: 40,
+                borderRadius: 2,
+                textTransform: 'none',
+                fontWeight: 800,
+                px: 3,
+                mx: 1,
+                transition: 'all 0.3s ease'
+              },
+              '& .Mui-selected': {
+                bgcolor: '#0f172a',
+                color: '#fff !important',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+              }
+            }}
+            TabIndicatorProps={{ style: { display: 'none' } }}
+          >
+            <Tab label="Summary Reports" />
+            <Tab label="ALL PARTY REPORTS" />
+          </Tabs>
         </Box>
         <Box display="flex" alignItems="center" gap={2}>
           <TextField
@@ -292,7 +326,7 @@ export default function DailySummaryReport({
         </Box>
       ) : (
         <Box sx={{ px: { xs: 2, md: 4 }, mt: 4, maxWidth: '1600px', mx: 'auto' }}>
-            
+
           {/* ==========================================
               SECTION 1: DAILY OPERATIONS (KPI CARDS)
              ========================================== */}
@@ -300,7 +334,7 @@ export default function DailySummaryReport({
             1. Daily Operations
           </Typography>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)', xl: 'repeat(6, 1fr)' }, gap: 2.5, mb: 4 }}>
-            
+
             <Card sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
               <CardContent sx={{ p: '20px !important' }}>
                 <Typography variant="caption" color="text.secondary" fontWeight={700} textTransform="uppercase">Total Invoices (DB)</Typography>
@@ -312,7 +346,7 @@ export default function DailySummaryReport({
             <Card sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', borderLeft: '4px solid #0d9488' }}>
               <CardContent sx={{ p: '20px !important' }}>
                 <Typography variant="caption" color="text.secondary" fontWeight={700} textTransform="uppercase">Total Cement Load</Typography>
-                <Typography variant="h4" fontWeight={900} mt={0.5} color="#0f172a">{metrics.cementMT} <span style={{fontSize: 16, color: '#64748b'}}>MT</span></Typography>
+                <Typography variant="h4" fontWeight={900} mt={0.5} color="#0f172a">{metrics.cementMT} <span style={{ fontSize: 16, color: '#64748b' }}>MT</span></Typography>
                 <Typography variant="body2" color="text.secondary" mt={0.5} fontWeight={500}>{metrics.cementTrips} Trip(s)</Typography>
               </CardContent>
             </Card>
@@ -320,7 +354,7 @@ export default function DailySummaryReport({
             <Card sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', borderLeft: '4px solid #0284c7' }}>
               <CardContent sx={{ p: '20px !important' }}>
                 <Typography variant="caption" color="text.secondary" fontWeight={700} textTransform="uppercase">Total Diesel</Typography>
-                <Typography variant="h4" fontWeight={900} mt={0.5} color="#0f172a">{metrics.fuelLtr} <span style={{fontSize: 16, color: '#64748b'}}>LTR</span></Typography>
+                <Typography variant="h4" fontWeight={900} mt={0.5} color="#0f172a">{metrics.fuelLtr} <span style={{ fontSize: 16, color: '#64748b' }}>LTR</span></Typography>
                 <Typography variant="body2" color="text.secondary" mt={0.5} fontWeight={500}>{metrics.fuelSlips} Slip(s)</Typography>
               </CardContent>
             </Card>
@@ -336,18 +370,18 @@ export default function DailySummaryReport({
             <Card sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', borderLeft: '4px solid #b91c1c' }}>
               <CardContent sx={{ p: '20px !important' }}>
                 <Typography variant="caption" color="text.secondary" fontWeight={700} textTransform="uppercase">Closing Advance</Typography>
-                <Typography variant="h4" fontWeight={900} mt={0.5} color="#0f172a">₹{metrics.closingAdvanceBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
+                <Typography variant="h4" fontWeight={900} mt={0.5} color="#0f172a">₹{metrics.closingAdvanceBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
                 <Typography variant="body2" color="text.secondary" mt={0.5} fontWeight={500}>End of day balance</Typography>
               </CardContent>
             </Card>
 
-            <Card 
-                onClick={() => setBillBreakdownOpen(true)}
-                sx={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(217,119,6,0.15)', border: '1px solid #fcd34d', bgcolor: '#fffbeb', cursor: 'pointer', transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)'} }}
+            <Card
+              onClick={() => setBillBreakdownOpen(true)}
+              sx={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(217,119,6,0.15)', border: '1px solid #fcd34d', bgcolor: '#fffbeb', cursor: 'pointer', transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}
             >
               <CardContent sx={{ p: '20px !important' }}>
                 <Typography variant="caption" color="#92400e" fontWeight={800} textTransform="uppercase">Total Bill Amount</Typography>
-                <Typography variant="h4" fontWeight={900} mt={0.5} color="#78350f">₹{metrics.totalBillAmt.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
+                <Typography variant="h4" fontWeight={900} mt={0.5} color="#78350f">₹{metrics.totalBillAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
                 <Typography variant="body2" color="#b45309" mt={0.5} fontWeight={600}>Pending Bills: {billBreakdown.totalPendingCount}</Typography>
               </CardContent>
             </Card>
@@ -362,97 +396,97 @@ export default function DailySummaryReport({
           </Typography>
           <Card sx={{ borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', mb: 4, overflow: 'hidden' }}>
             <Box sx={{ p: 3, background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: '#fff' }}>
-                <Grid container spacing={3} alignItems="center">
-                    <Grid item xs={12} md={3}>
-                        <Box display="flex" alignItems="center" gap={2}>
-                            <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: '12px' }}>
-                                <PublishIcon sx={{ fontSize: 32 }} />
-                            </Box>
-                            <Box>
-                                <Typography variant="h3" fontWeight={900}>{invoiceStats.totalUploaded}</Typography>
-                                <Typography variant="body2" fontWeight={600} sx={{ opacity: 0.8 }}>Invoices Uploaded Today</Typography>
-                                {invoiceStats.lastUploadTime && (
-                                    <Typography variant="caption" sx={{ opacity: 0.6, display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-                                        <AccessTimeIcon sx={{ fontSize: 14 }} /> Last: {new Date(invoiceStats.lastUploadTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                    </Typography>
-                                )}
-                            </Box>
-                        </Box>
-                    </Grid>
-                    <Grid item xs={12} md={9}>
-                        <Grid container spacing={2}>
-                            <Grid item xs={4}>
-                                <Box sx={{ bgcolor: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', p: 2, borderRadius: '12px' }}>
-                                    <Typography variant="caption" fontWeight={700} sx={{ color: '#34d399', textTransform: 'uppercase' }}>Processed</Typography>
-                                    <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                                        <CheckCircleOutlineIcon sx={{ color: '#34d399' }} />
-                                        <Typography variant="h5" fontWeight={800}>{invoiceStats.successfullyProcessed}</Typography>
-                                    </Box>
-                                </Box>
-                            </Grid>
-                            <Grid item xs={4}>
-                                <Box sx={{ bgcolor: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', p: 2, borderRadius: '12px' }}>
-                                    <Typography variant="caption" fontWeight={700} sx={{ color: '#fbbf24', textTransform: 'uppercase' }}>Pending Review</Typography>
-                                    <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                                        <PendingActionsIcon sx={{ color: '#fbbf24' }} />
-                                        <Typography variant="h5" fontWeight={800}>{invoiceStats.pendingInvoices}</Typography>
-                                    </Box>
-                                </Box>
-                            </Grid>
-                            <Grid item xs={4}>
-                                <Box sx={{ bgcolor: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', p: 2, borderRadius: '12px' }}>
-                                    <Typography variant="caption" fontWeight={700} sx={{ color: '#f87171', textTransform: 'uppercase' }}>Failed / Error</Typography>
-                                    <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                                        <ErrorOutlineIcon sx={{ color: '#f87171' }} />
-                                        <Typography variant="h5" fontWeight={800}>{invoiceStats.failedInvoices}</Typography>
-                                    </Box>
-                                </Box>
-                            </Grid>
-                        </Grid>
-                    </Grid>
+              <Grid container spacing={3} alignItems="center">
+                <Grid item xs={12} md={3}>
+                  <Box display="flex" alignItems="center" gap={2}>
+                    <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: '12px' }}>
+                      <PublishIcon sx={{ fontSize: 32 }} />
+                    </Box>
+                    <Box>
+                      <Typography variant="h3" fontWeight={900}>{invoiceStats.totalUploaded}</Typography>
+                      <Typography variant="body2" fontWeight={600} sx={{ opacity: 0.8 }}>Invoices Uploaded Today</Typography>
+                      {invoiceStats.lastUploadTime && (
+                        <Typography variant="caption" sx={{ opacity: 0.6, display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                          <AccessTimeIcon sx={{ fontSize: 14 }} /> Last: {new Date(invoiceStats.lastUploadTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
                 </Grid>
+                <Grid item xs={12} md={9}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={4}>
+                      <Box sx={{ bgcolor: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', p: 2, borderRadius: '12px' }}>
+                        <Typography variant="caption" fontWeight={700} sx={{ color: '#34d399', textTransform: 'uppercase' }}>Processed</Typography>
+                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
+                          <CheckCircleOutlineIcon sx={{ color: '#34d399' }} />
+                          <Typography variant="h5" fontWeight={800}>{invoiceStats.successfullyProcessed}</Typography>
+                        </Box>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Box sx={{ bgcolor: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', p: 2, borderRadius: '12px' }}>
+                        <Typography variant="caption" fontWeight={700} sx={{ color: '#fbbf24', textTransform: 'uppercase' }}>Pending Review</Typography>
+                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
+                          <PendingActionsIcon sx={{ color: '#fbbf24' }} />
+                          <Typography variant="h5" fontWeight={800}>{invoiceStats.pendingInvoices}</Typography>
+                        </Box>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Box sx={{ bgcolor: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', p: 2, borderRadius: '12px' }}>
+                        <Typography variant="caption" fontWeight={700} sx={{ color: '#f87171', textTransform: 'uppercase' }}>Failed / Error</Typography>
+                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
+                          <ErrorOutlineIcon sx={{ color: '#f87171' }} />
+                          <Typography variant="h5" fontWeight={800}>{invoiceStats.failedInvoices}</Typography>
+                        </Box>
+                      </Box>
+                    </Grid>
+                  </Grid>
+                </Grid>
+              </Grid>
             </Box>
-            
+
             <Box sx={{ p: 2, bgcolor: '#fff' }}>
-                <Typography variant="subtitle2" fontWeight={800} color="#0f172a" mb={2}>Quick View: Recent Uploads</Typography>
-                {invoiceStats.recentInvoices.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary" p={2} textAlign="center">No invoices uploaded today.</Typography>
-                ) : (
-                    <TableContainer>
-                        <Table size="small">
-                            <TableHead>
-                                <TableRow sx={{ '& th': { borderBottom: '1px solid #e2e8f0', color: '#64748b', fontWeight: 700 } }}>
-                                    <TableCell>Time</TableCell>
-                                    <TableCell>Consignee / Party</TableCell>
-                                    <TableCell>Status</TableCell>
-                                    <TableCell align="right">Action</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {invoiceStats.recentInvoices.map((inv, idx) => (
-                                    <TableRow key={idx} hover sx={{ '& td': { borderBottom: '1px solid #f1f5f9' } }}>
-                                        <TableCell sx={{ color: '#475569', fontSize: '0.875rem' }}>{new Date(inv.created_at).toLocaleTimeString()}</TableCell>
-                                        <TableCell sx={{ fontWeight: 600, color: '#0f172a' }}>{inv.consignee_name}</TableCell>
-                                        <TableCell>
-                                            <Chip 
-                                                label={inv.status || 'pending'} 
-                                                size="small" 
-                                                sx={{ 
-                                                    fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', height: 20,
-                                                    bgcolor: inv.status === 'approved' ? '#d1fae5' : inv.status === 'failed' ? '#fee2e2' : '#fef3c7',
-                                                    color: inv.status === 'approved' ? '#059669' : inv.status === 'failed' ? '#dc2626' : '#d97706'
-                                                }} 
-                                            />
-                                        </TableCell>
-                                        <TableCell align="right">
-                                            <Button size="small" variant="text" sx={{ fontWeight: 700 }}>View</Button>
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    </TableContainer>
-                )}
+              <Typography variant="subtitle2" fontWeight={800} color="#0f172a" mb={2}>Quick View: Recent Uploads</Typography>
+              {invoiceStats.recentInvoices.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" p={2} textAlign="center">No invoices uploaded today.</Typography>
+              ) : (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ '& th': { borderBottom: '1px solid #e2e8f0', color: '#64748b', fontWeight: 700 } }}>
+                        <TableCell>Time</TableCell>
+                        <TableCell>Consignee / Party</TableCell>
+                        <TableCell>Status</TableCell>
+                        <TableCell align="right">Action</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {invoiceStats.recentInvoices.map((inv, idx) => (
+                        <TableRow key={idx} hover sx={{ '& td': { borderBottom: '1px solid #f1f5f9' } }}>
+                          <TableCell sx={{ color: '#475569', fontSize: '0.875rem' }}>{new Date(inv.created_at).toLocaleTimeString()}</TableCell>
+                          <TableCell sx={{ fontWeight: 600, color: '#0f172a' }}>{inv.consignee_name}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={inv.status || 'pending'}
+                              size="small"
+                              sx={{
+                                fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', height: 20,
+                                bgcolor: inv.status === 'approved' ? '#d1fae5' : inv.status === 'failed' ? '#fee2e2' : '#fef3c7',
+                                color: inv.status === 'approved' ? '#059669' : inv.status === 'failed' ? '#dc2626' : '#d97706'
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Button size="small" variant="text" sx={{ fontWeight: 700 }}>View</Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
             </Box>
           </Card>
 
@@ -462,147 +496,147 @@ export default function DailySummaryReport({
                 SECTION 3: FINANCIAL SUMMARY
                ========================================== */}
             <Grid item xs={12} lg={4}>
-                <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                    3. Financial Overview
-                </Typography>
-                <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)' }}>
-                    <CardContent sx={{ p: 3 }}>
-                        <Box display="flex" justifyContent="space-between" mb={2}>
-                            <Typography variant="body2" color="text.secondary" fontWeight={600}>Cash Received (DAC)</Typography>
-                            <Typography variant="body1" fontWeight={800} color="#0f172a">₹{metrics.cashReceivedAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
-                        </Box>
-                        <Box display="flex" justifyContent="space-between" mb={2}>
-                            <Typography variant="body2" color="text.secondary" fontWeight={600}>Opening Balance</Typography>
-                            <Typography variant="body1" fontWeight={800} color="#0f172a">₹{metrics.cashOpeningBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
-                        </Box>
-                        <Divider sx={{ my: 2 }} />
-                        <Box display="flex" justifyContent="space-between" mb={2}>
-                            <Typography variant="body2" color="text.secondary" fontWeight={600}>Loading Advance (-)</Typography>
-                            <Typography variant="body1" fontWeight={800} color="#dc2626">₹{metrics.loadingAdvanceAmt.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
-                        </Box>
-                        <Box display="flex" justifyContent="space-between" mb={2}>
-                            <Typography variant="body2" color="text.secondary" fontWeight={600}>Misc Expenses (-)</Typography>
-                            <Typography variant="body1" fontWeight={800} color="#dc2626">₹{metrics.miscExpenses.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
-                        </Box>
-                        <Divider sx={{ my: 2 }} />
-                        <Box display="flex" justifyContent="space-between" alignItems="center" p={1.5} bgcolor="#f8fafc" borderRadius="8px">
-                            <Typography variant="subtitle1" fontWeight={800} color="#0f172a">Closing Advance</Typography>
-                            <Typography variant="h6" fontWeight={900} color={metrics.closingAdvanceBalance < 0 ? '#dc2626' : '#059669'}>
-                                ₹{metrics.closingAdvanceBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}
-                            </Typography>
-                        </Box>
-                        
-                        <Box mt={3} p={2} bgcolor="#eff6ff" borderRadius="8px" border="1px dashed #bfdbfe">
-                            <Box display="flex" justifyContent="space-between" mb={1}>
-                                <Typography variant="caption" fontWeight={800} color="#1e40af" textTransform="uppercase">Total Gross Freight</Typography>
-                                <Typography variant="subtitle2" fontWeight={900} color="#1e3a8a">₹{metrics.totalBillAmt.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
-                            </Box>
-                            <Box display="flex" justifyContent="space-between">
-                                <Typography variant="caption" fontWeight={800} color="#1e40af" textTransform="uppercase">Pump Payments (HSD)</Typography>
-                                <Typography variant="subtitle2" fontWeight={900} color="#1e3a8a">₹{metrics.totalPumpPaymentAmt.toLocaleString(undefined, {minimumFractionDigits: 2})}</Typography>
-                            </Box>
-                        </Box>
-                    </CardContent>
-                </Card>
+              <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                3. Financial Overview
+              </Typography>
+              <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)' }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Box display="flex" justifyContent="space-between" mb={2}>
+                    <Typography variant="body2" color="text.secondary" fontWeight={600}>Cash Received (DAC)</Typography>
+                    <Typography variant="body1" fontWeight={800} color="#0f172a">₹{metrics.cashReceivedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
+                  </Box>
+                  <Box display="flex" justifyContent="space-between" mb={2}>
+                    <Typography variant="body2" color="text.secondary" fontWeight={600}>Opening Balance</Typography>
+                    <Typography variant="body1" fontWeight={800} color="#0f172a">₹{metrics.cashOpeningBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
+                  </Box>
+                  <Divider sx={{ my: 2 }} />
+                  <Box display="flex" justifyContent="space-between" mb={2}>
+                    <Typography variant="body2" color="text.secondary" fontWeight={600}>Loading Advance (-)</Typography>
+                    <Typography variant="body1" fontWeight={800} color="#dc2626">₹{metrics.loadingAdvanceAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
+                  </Box>
+                  <Box display="flex" justifyContent="space-between" mb={2}>
+                    <Typography variant="body2" color="text.secondary" fontWeight={600}>Misc Expenses (-)</Typography>
+                    <Typography variant="body1" fontWeight={800} color="#dc2626">₹{metrics.miscExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
+                  </Box>
+                  <Divider sx={{ my: 2 }} />
+                  <Box display="flex" justifyContent="space-between" alignItems="center" p={1.5} bgcolor="#f8fafc" borderRadius="8px">
+                    <Typography variant="subtitle1" fontWeight={800} color="#0f172a">Closing Advance</Typography>
+                    <Typography variant="h6" fontWeight={900} color={metrics.closingAdvanceBalance < 0 ? '#dc2626' : '#059669'}>
+                      ₹{metrics.closingAdvanceBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </Typography>
+                  </Box>
+
+                  <Box mt={3} p={2} bgcolor="#eff6ff" borderRadius="8px" border="1px dashed #bfdbfe">
+                    <Box display="flex" justifyContent="space-between" mb={1}>
+                      <Typography variant="caption" fontWeight={800} color="#1e40af" textTransform="uppercase">Total Gross Freight</Typography>
+                      <Typography variant="subtitle2" fontWeight={900} color="#1e3a8a">₹{metrics.totalBillAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
+                    </Box>
+                    <Box display="flex" justifyContent="space-between">
+                      <Typography variant="caption" fontWeight={800} color="#1e40af" textTransform="uppercase">Pump Payments (HSD)</Typography>
+                      <Typography variant="subtitle2" fontWeight={900} color="#1e3a8a">₹{metrics.totalPumpPaymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
             </Grid>
 
             {/* ==========================================
                 SECTION 4: ALERTS & PENDING ACTIONS
                ========================================== */}
             <Grid item xs={12} lg={4}>
-                <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                    4. Alerts & Action Items
-                </Typography>
-                <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)' }}>
-                    <CardContent sx={{ p: 3 }}>
-                        
-                        <Box display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px" sx={{ bgcolor: invoiceStats.pendingInvoices > 0 ? '#fffbeb' : '#f8fafc', border: `1px solid ${invoiceStats.pendingInvoices > 0 ? '#fde68a' : '#e2e8f0'}` }}>
-                            <PendingActionsIcon sx={{ color: invoiceStats.pendingInvoices > 0 ? '#d97706' : '#94a3b8', fontSize: 32 }} />
-                            <Box>
-                                <Typography variant="h6" fontWeight={800} color={invoiceStats.pendingInvoices > 0 ? '#92400e' : '#64748b'}>{invoiceStats.pendingInvoices}</Typography>
-                                <Typography variant="body2" fontWeight={600} color={invoiceStats.pendingInvoices > 0 ? '#b45309' : '#94a3b8'}>Invoices Pending Review</Typography>
-                            </Box>
-                        </Box>
+              <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                4. Alerts & Action Items
+              </Typography>
+              <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)' }}>
+                <CardContent sx={{ p: 3 }}>
 
-                        <Box display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px" sx={{ bgcolor: billBreakdown.totalPendingCount > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${billBreakdown.totalPendingCount > 0 ? '#fecdd3' : '#e2e8f0'}` }}>
-                            <WarningAmberIcon sx={{ color: billBreakdown.totalPendingCount > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
-                            <Box>
-                                <Typography variant="h6" fontWeight={800} color={billBreakdown.totalPendingCount > 0 ? '#be123c' : '#64748b'}>{billBreakdown.totalPendingCount}</Typography>
-                                <Typography variant="body2" fontWeight={600} color={billBreakdown.totalPendingCount > 0 ? '#e11d48' : '#94a3b8'}>Pending Bills to Generate</Typography>
-                            </Box>
-                        </Box>
+                  <Box display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px" sx={{ bgcolor: invoiceStats.pendingInvoices > 0 ? '#fffbeb' : '#f8fafc', border: `1px solid ${invoiceStats.pendingInvoices > 0 ? '#fde68a' : '#e2e8f0'}` }}>
+                    <PendingActionsIcon sx={{ color: invoiceStats.pendingInvoices > 0 ? '#d97706' : '#94a3b8', fontSize: 32 }} />
+                    <Box>
+                      <Typography variant="h6" fontWeight={800} color={invoiceStats.pendingInvoices > 0 ? '#92400e' : '#64748b'}>{invoiceStats.pendingInvoices}</Typography>
+                      <Typography variant="body2" fontWeight={600} color={invoiceStats.pendingInvoices > 0 ? '#b45309' : '#94a3b8'}>Invoices Pending Review</Typography>
+                    </Box>
+                  </Box>
 
-                        <Box display="flex" alignItems="center" gap={2} p={2} borderRadius="12px" sx={{ bgcolor: metrics.missingChallans > 0 ? '#fef2f2' : '#f8fafc', border: `1px solid ${metrics.missingChallans > 0 ? '#fecaca' : '#e2e8f0'}` }}>
-                            <ErrorOutlineIcon sx={{ color: metrics.missingChallans > 0 ? '#dc2626' : '#94a3b8', fontSize: 32 }} />
-                            <Box>
-                                <Typography variant="h6" fontWeight={800} color={metrics.missingChallans > 0 ? '#991b1b' : '#64748b'}>{metrics.missingChallans}</Typography>
-                                <Typography variant="body2" fontWeight={600} color={metrics.missingChallans > 0 ? '#ef4444' : '#94a3b8'}>Missing GCN / Challan Nos</Typography>
-                            </Box>
-                        </Box>
+                  <Box display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px" sx={{ bgcolor: billBreakdown.totalPendingCount > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${billBreakdown.totalPendingCount > 0 ? '#fecdd3' : '#e2e8f0'}` }}>
+                    <WarningAmberIcon sx={{ color: billBreakdown.totalPendingCount > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
+                    <Box>
+                      <Typography variant="h6" fontWeight={800} color={billBreakdown.totalPendingCount > 0 ? '#be123c' : '#64748b'}>{billBreakdown.totalPendingCount}</Typography>
+                      <Typography variant="body2" fontWeight={600} color={billBreakdown.totalPendingCount > 0 ? '#e11d48' : '#94a3b8'}>Pending Bills to Generate</Typography>
+                    </Box>
+                  </Box>
 
-                    </CardContent>
-                </Card>
+                  <Box display="flex" alignItems="center" gap={2} p={2} borderRadius="12px" sx={{ bgcolor: metrics.missingChallans > 0 ? '#fef2f2' : '#f8fafc', border: `1px solid ${metrics.missingChallans > 0 ? '#fecaca' : '#e2e8f0'}` }}>
+                    <ErrorOutlineIcon sx={{ color: metrics.missingChallans > 0 ? '#dc2626' : '#94a3b8', fontSize: 32 }} />
+                    <Box>
+                      <Typography variant="h6" fontWeight={800} color={metrics.missingChallans > 0 ? '#991b1b' : '#64748b'}>{metrics.missingChallans}</Typography>
+                      <Typography variant="body2" fontWeight={600} color={metrics.missingChallans > 0 ? '#ef4444' : '#94a3b8'}>Missing GCN / Challan Nos</Typography>
+                    </Box>
+                  </Box>
+
+                </CardContent>
+              </Card>
             </Grid>
 
             {/* ==========================================
                 SECTION 5: QUICK ACTIONS
                ========================================== */}
             <Grid item xs={12} lg={4}>
-                <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                    5. Quick Actions
-                </Typography>
-                <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)', bgcolor: '#0f172a' }}>
-                    <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        
-                        <Button 
-                            fullWidth variant="contained" 
-                            startIcon={<PublishIcon />}
-                            onClick={onUploadNew}
-                            sx={{ py: 1.5, borderRadius: '10px', bgcolor: '#4f46e5', fontWeight: 800, '&:hover': { bgcolor: '#4338ca' } }}
-                        >
-                            Upload New Invoice
-                        </Button>
-                        
-                        <Button 
-                            fullWidth variant="contained" 
-                            startIcon={<PlayCircleOutlineIcon />}
-                            onClick={() => alert('Batch Billing module not connected yet.')}
-                            sx={{ py: 1.5, borderRadius: '10px', bgcolor: '#059669', fontWeight: 800, '&:hover': { bgcolor: '#047857' } }}
-                        >
-                            Run Batch Billing
-                        </Button>
-                        
-                        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
+              <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                5. Quick Actions
+              </Typography>
+              <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)', bgcolor: '#0f172a' }}>
+                <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
 
-                        <Button 
-                            fullWidth variant="outlined" 
-                            startIcon={<AssessmentIcon />}
-                            onClick={onOpenCementRegister}
-                            sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
-                        >
-                            Open Cement Register
-                        </Button>
+                  <Button
+                    fullWidth variant="contained"
+                    startIcon={<PublishIcon />}
+                    onClick={onUploadNew}
+                    sx={{ py: 1.5, borderRadius: '10px', bgcolor: '#4f46e5', fontWeight: 800, '&:hover': { bgcolor: '#4338ca' } }}
+                  >
+                    Upload New Invoice
+                  </Button>
 
-                        <Button 
-                            fullWidth variant="outlined" 
-                            startIcon={<DescriptionIcon />}
-                            onClick={onOpenPartyPayment}
-                            sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
-                        >
-                            Open Bill Register
-                        </Button>
+                  <Button
+                    fullWidth variant="contained"
+                    startIcon={<PlayCircleOutlineIcon />}
+                    onClick={() => alert('Batch Billing module not connected yet.')}
+                    sx={{ py: 1.5, borderRadius: '10px', bgcolor: '#059669', fontWeight: 800, '&:hover': { bgcolor: '#047857' } }}
+                  >
+                    Run Batch Billing
+                  </Button>
 
-                        <Button 
-                            fullWidth variant="outlined" 
-                            startIcon={<LocalGasStationIcon />}
-                            onClick={onOpenPumpPaymentRegister}
-                            sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
-                        >
-                            Pump Payment Register
-                        </Button>
+                  <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
 
-                    </CardContent>
-                </Card>
+                  <Button
+                    fullWidth variant="outlined"
+                    startIcon={<AssessmentIcon />}
+                    onClick={onOpenCementRegister}
+                    sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
+                  >
+                    Open Cement Register
+                  </Button>
+
+                  <Button
+                    fullWidth variant="outlined"
+                    startIcon={<DescriptionIcon />}
+                    onClick={onOpenPartyPayment}
+                    sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
+                  >
+                    Open Bill Register
+                  </Button>
+
+                  <Button
+                    fullWidth variant="outlined"
+                    startIcon={<LocalGasStationIcon />}
+                    onClick={onOpenPumpPaymentRegister}
+                    sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
+                  >
+                    Pump Payment Register
+                  </Button>
+
+                </CardContent>
+              </Card>
             </Grid>
           </Grid>
 
@@ -705,8 +739,8 @@ export default function DailySummaryReport({
       )}
 
       {/* --- Bill Breakdown Modal --- */}
-      <Dialog 
-        open={billBreakdownOpen} 
+      <Dialog
+        open={billBreakdownOpen}
         onClose={() => setBillBreakdownOpen(false)}
         maxWidth="lg"
         fullWidth
@@ -727,38 +761,38 @@ export default function DailySummaryReport({
         </DialogTitle>
         <DialogContent sx={{ p: 0 }}>
           <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', px: 3, pt: 2 }}>
-            <Tabs 
-              value={billTabValue} 
+            <Tabs
+              value={billTabValue}
               onChange={(e, v) => setBillTabValue(v)}
               TabIndicatorProps={{ style: { backgroundColor: '#4f46e5', height: 3, borderRadius: '3px 3px 0 0' } }}
             >
-              <Tab 
+              <Tab
                 label={
                   <Box>
                     <Typography fontWeight={700}>Pending Challan</Typography>
-                    <Typography variant="caption" color="text.secondary">{billBreakdown.pending.length} Bills | ₹{billBreakdown.pendingAmt.toLocaleString(undefined, {minimumFractionDigits:2})}</Typography>
+                    <Typography variant="caption" color="text.secondary">{billBreakdown.pending.length} Bills | ₹{billBreakdown.pendingAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
                   </Box>
                 }
               />
-              <Tab 
+              <Tab
                 label={
                   <Box>
                     <Typography fontWeight={700}>Non-Stamp</Typography>
-                    <Typography variant="caption" color="text.secondary">{billBreakdown.nonStamp.length} Bills | ₹{billBreakdown.nonStampAmt.toLocaleString(undefined, {minimumFractionDigits:2})}</Typography>
+                    <Typography variant="caption" color="text.secondary">{billBreakdown.nonStamp.length} Bills | ₹{billBreakdown.nonStampAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
                   </Box>
                 }
               />
-              <Tab 
+              <Tab
                 label={
                   <Box>
                     <Typography fontWeight={700}>Stamp</Typography>
-                    <Typography variant="caption" color="text.secondary">{billBreakdown.stamp.length} Bills | ₹{billBreakdown.stampAmt.toLocaleString(undefined, {minimumFractionDigits:2})}</Typography>
+                    <Typography variant="caption" color="text.secondary">{billBreakdown.stamp.length} Bills | ₹{billBreakdown.stampAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Typography>
                   </Box>
                 }
               />
             </Tabs>
           </Box>
-          
+
           <Box sx={{ p: 3, bgcolor: '#fafafa', minHeight: '400px' }}>
             <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', maxHeight: '500px', overflowY: 'auto' }}>
               <Table stickyHeader size="small">
@@ -792,9 +826,9 @@ export default function DailySummaryReport({
                         {billTabValue === 0 && <TableCell>{row["RECEIVING DATE"] || row["BILL DATE"] || row["LOADING DT"] || "-"}</TableCell>}
                         <TableCell>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || "-"}</TableCell>
                         {billTabValue === 0 && <TableCell>{row["PARTY NAME"] || "-"}</TableCell>}
-                        <TableCell fontWeight={600}>₹{parseNum(row["Billing Amount"] || 0).toLocaleString(undefined, {minimumFractionDigits:2})}</TableCell>
+                        <TableCell fontWeight={600}>₹{parseNum(row["Billing Amount"] || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell>
-                          <Box sx={{ 
+                          <Box sx={{
                             px: 1.5, py: 0.5, borderRadius: '20px', display: 'inline-block', fontSize: '0.75rem', fontWeight: 800,
                             bgcolor: billTabValue === 0 ? '#fffbeb' : billTabValue === 1 ? '#fef2f2' : '#ecfdf5',
                             color: billTabValue === 0 ? '#b45309' : billTabValue === 1 ? '#b91c1c' : '#047857',
@@ -826,4 +860,282 @@ export default function DailySummaryReport({
       </Snackbar>
     </Box>
   );
+}
+
+
+// ==========================================
+// NEW: ALL PARTY REPORTS TAB SKELETON
+// ==========================================
+
+
+function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
+  const [parties, setParties] = useState([]);
+  const [ownerDetailsMap, setOwnerDetailsMap] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [snack, setSnack] = useState(null);
+  const [selectedParty, setSelectedParty] = useState(null);
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [ownerMap, setOwnerMap] = useState({});
+  const [expandedOwner, setExpandedOwner] = useState(null);
+
+  useEffect(() => {
+    fetchParties();
+  }, []);
+
+  const fetchParties = async () => {
+    try {
+      setLoading(true);
+      const res = await axios.get(`${API_URL}/voucher/contacts`);
+      if (res.data.success) {
+        setParties(res.data.names || []);
+        setOwnerMap(res.data.ownerMap || {});
+        setOwnerDetailsMap(res.data.ownerDetails || {});
+      }
+    } catch (err) {
+      console.error(err);
+      setSnack({ msg: 'Failed to fetch party names', severity: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (selectedParty && selectedVehicle) {
+    return (
+      <PartyReportView
+        partyName={selectedParty}
+        selectedVehicle={selectedVehicle}
+        ownerDetails={ownerDetailsMap[selectedParty] || {}}
+        onBack={() => { setSelectedParty(null); setSelectedVehicle(null); }}
+      />
+    );
+  }
+
+  const filteredParties = parties.filter(p => {
+    const term = searchTerm.toLowerCase();
+    const matchOwner = p.toLowerCase().includes(term);
+    const vehicles = ownerMap[p] || [];
+    const matchVehicle = vehicles.some(v => v.toLowerCase().includes(term));
+    return matchOwner || matchVehicle;
+  });
+
+  return (
+    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', pb: 6 }}>
+      {/* --- Sticky Header --- */}
+      <Box sx={{
+        position: 'sticky', top: 0, zIndex: 10,
+        bgcolor: '#ffffff', color: '#0f172a',
+        px: { xs: 2, md: 4 }, py: 2,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+      }}>
+        <Box display="flex" alignItems="center" gap={1.5}>
+          <IconButton onClick={onBack} sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Box>
+            <Typography variant="h5" fontWeight={900} sx={{ letterSpacing: '-0.5px' }}>
+              Daily Operations Dashboard
+            </Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+              All Party Reports Module
+            </Typography>
+          </Box>
+        </Box>
+
+        <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
+          <Tabs
+            value={mainTab}
+            onChange={(e, v) => setMainTab(v)}
+            sx={{
+              minHeight: 40,
+              '& .MuiTab-root': {
+                minHeight: 40,
+                borderRadius: 2,
+                textTransform: 'none',
+                fontWeight: 800,
+                px: 3,
+                mx: 1,
+                transition: 'all 0.3s ease'
+              },
+              '& .Mui-selected': {
+                bgcolor: '#0f172a',
+                color: '#fff !important',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+              }
+            }}
+            TabIndicatorProps={{ style: { display: 'none' } }}
+          >
+            <Tab label="Summary Reports" />
+            <Tab label="ALL PARTY REPORTS" />
+          </Tabs>
+        </Box>
+
+        <Box sx={{ width: 170 }}>
+          <Tooltip title="Refresh Data">
+            <IconButton onClick={fetchParties} sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+
+      <Box sx={{ px: { xs: 2, md: 4 }, mt: 4, maxWidth: '1000px', mx: 'auto' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+          <Typography variant="h5" fontWeight={800} color="#0f172a" sx={{ letterSpacing: '-0.5px' }}>
+            ALL PARTY REPORTS
+          </Typography>
+          <TextField
+            size="small"
+            placeholder="Search Owner / Vehicle..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ width: 350, bgcolor: '#fff', borderRadius: 2, '& fieldset': { borderColor: '#e2e8f0' } }}
+          />
+        </Box>
+
+        <Box sx={{ mb: 4 }}>
+          {loading ? (
+            <Box display="flex" justifyContent="center" p={8}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <Box>
+              {filteredParties.map((party, index) => {
+                const vehicles = ownerMap[party] || [];
+                const isExpanded = expandedOwner === party;
+                return (
+                  <Accordion
+                    key={party}
+                    expanded={isExpanded}
+                    onChange={(e, expanded) => setExpandedOwner(expanded ? party : null)}
+                    disableGutters
+                    elevation={0}
+                    sx={{
+                      mb: 2,
+                      borderRadius: '12px !important',
+                      border: '1px solid #e2e8f0',
+                      boxShadow: isExpanded ? '0 10px 25px -5px rgba(0,0,0,0.1)' : '0 2px 4px rgba(0,0,0,0.02)',
+                      transition: 'all 0.3s ease',
+                      overflow: 'hidden',
+                      '&:before': { display: 'none' },
+                      '&:hover': {
+                        borderColor: isExpanded ? '#e2e8f0' : '#cbd5e1',
+                        boxShadow: isExpanded ? '0 10px 25px -5px rgba(0,0,0,0.1)' : '0 4px 6px -1px rgba(0,0,0,0.05)'
+                      }
+                    }}
+                  >
+                    <AccordionSummary
+                      expandIcon={<ExpandMoreIcon sx={{ color: isExpanded ? '#0f172a' : '#64748b' }} />}
+                      sx={{
+                        py: 1, px: 3,
+                        bgcolor: isExpanded ? '#f1f5f9' : '#fff',
+                        transition: 'background-color 0.3s ease'
+                      }}
+                    >
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Box sx={{
+                          width: 40, height: 40, borderRadius: '10px',
+                          bgcolor: isExpanded ? '#0f172a' : '#f1f5f9',
+                          color: isExpanded ? '#fff' : '#64748b',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 0.3s ease'
+                        }}>
+                          <PersonIcon />
+                        </Box>
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight={800} color="#0f172a" sx={{ letterSpacing: '-0.3px' }}>
+                            {party}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                            {vehicles.length} Vehicle{vehicles.length !== 1 ? 's' : ''}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails sx={{ p: 0, bgcolor: '#fff', borderTop: '1px solid #e2e8f0' }}>
+                      <List disablePadding>
+                        {vehicles.length === 0 ? (
+                          <ListItem sx={{ py: 3, px: 3 }}>
+                            <Typography variant="body2" color="text.secondary" fontWeight={500}>No vehicles registered to this owner.</Typography>
+                          </ListItem>
+                        ) : (
+                          vehicles.map((v, i) => (
+                            <React.Fragment key={v}>
+                              <ListItem sx={{ py: 2, px: { xs: 2, md: 4 }, display: 'flex', justifyContent: 'space-between', '&:hover': { bgcolor: '#f8fafc' }, transition: 'background-color 0.2s' }}>
+                                <Box display="flex" alignItems="center" gap={2}>
+                                  <LocalShippingIcon sx={{ color: '#94a3b8', fontSize: 24 }} />
+                                  <Typography variant="body1" fontWeight={700} color="#1e293b" sx={{ letterSpacing: '0.5px' }}>
+                                    {v}
+                                  </Typography>
+                                </Box>
+                                <Button
+                                  variant="contained"
+                                  size="small"
+                                  onClick={() => { setSelectedParty(party); setSelectedVehicle(v); }}
+                                  sx={{
+                                    borderRadius: '8px', fontWeight: 800, textTransform: 'none', py: 0.5, px: 2,
+                                    bgcolor: '#fff', color: '#0f172a', border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                                    '&:hover': { bgcolor: '#0f172a', color: '#fff', borderColor: '#0f172a' }
+                                  }}
+                                >
+                                  VIEW REPORT
+                                </Button>
+                              </ListItem>
+                              {i < vehicles.length - 1 && <Divider sx={{ mx: 4 }} />}
+                            </React.Fragment>
+                          ))
+                        )}
+                      </List>
+                    </AccordionDetails>
+                  </Accordion>
+                );
+              })}
+              {filteredParties.length === 0 && (
+                <Card sx={{ p: 8, textAlign: 'center', borderRadius: '16px', border: '1px dashed #cbd5e1', boxShadow: 'none', bgcolor: '#fff' }}>
+                  <Typography variant="h6" color="text.secondary" fontWeight={700}>
+                    No results found
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" mt={1}>
+                    Try searching for a different Owner Name or Vehicle Number.
+                  </Typography>
+                </Card>
+              )}
+            </Box>
+          )}
+        </Box>
+      </Box>
+
+      <Snackbar
+        open={!!snack}
+        autoHideDuration={6000}
+        onClose={() => setSnack(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSnack(null)} severity={snack?.severity || 'info'} sx={{ width: '100%', fontWeight: 700 }}>
+          {snack?.msg}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+}
+
+// ==========================================
+// WRAPPER MODULE
+// ==========================================
+export default function DailySummaryReport(props) {
+  const [mainTab, setMainTab] = useState(0);
+
+  if (mainTab === 0) {
+    return <DailySummaryTab {...props} mainTab={mainTab} setMainTab={setMainTab} />;
+  } else {
+    return <AllPartyReportsTab {...props} mainTab={mainTab} setMainTab={setMainTab} />;
+  }
 }

@@ -645,7 +645,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     </Box>
                                     <Box>
                                         <Typography variant="h5" fontWeight={900} sx={{ letterSpacing: 0.5, mb: 0.5 }}>
-                                            DAILY SUMMARY REPORT
+                                            SUMMARY REPORTS
                                         </Typography>
                                         <Typography variant="body2" sx={{ opacity: 0.8, fontWeight: 500 }}>
                                             Live operational overview for today
