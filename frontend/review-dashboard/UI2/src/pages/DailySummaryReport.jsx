@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
+  Box, Typography, Button, IconButton, Grid, Card, CardContent, CircularProgress, 
+  Tabs, Tab, Select, MenuItem, FormControl, TableContainer, Table, TableHead, 
+  TableRow, TableCell, TableBody, Paper, Collapse,
+  Snackbar, Alert, TextField, Tooltip, Popover, Chip, Divider,
+  Dialog, DialogTitle, DialogContent, DialogActions,
   InputAdornment, List, ListItem, ListItemText, ListItemIcon,
-  Box, Button, CircularProgress, Typography, IconButton,
-  Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, Paper,
-  Snackbar, Alert, TextField, Tooltip, Dialog, DialogTitle,
-  DialogContent, Chip, Divider, Accordion, AccordionSummary, AccordionDetails
+  Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
+import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, AreaChart, Area, ComposedChart, Line } from 'recharts';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
@@ -35,6 +38,50 @@ const API_URL = import.meta.env.VITE_API_URL;
 
 const parseNum = (val) => parseFloat(String(val || 0).replace(/,/g, '')) || 0;
 
+const getCurrentFYAndMonth = () => {
+  const currentDate = new Date();
+  const currentMonthIndex = currentDate.getMonth();
+  const currentYear = currentDate.getFullYear();
+  let currentFY;
+  if (currentMonthIndex < 3) {
+    currentFY = `FY ${currentYear - 1}-${String(currentYear).substring(2)}`;
+  } else {
+    currentFY = `FY ${currentYear}-${String(currentYear + 1).substring(2)}`;
+  }
+  const monthNamesArray = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  return { fy: currentFY, month: monthNamesArray[currentMonthIndex], dateStr: currentDate.toISOString().split('T')[0] };
+};
+
+const fyOptions = ['FY 2024-25', 'FY 2025-26', 'FY 2026-27'];
+const monthOptions = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+
+const getDatesForFYAndMonth = (fy, monthName) => {
+  if (!fy || !monthName) return [];
+  const startYearStr = fy.substring(3, 7);
+  let year = parseInt(startYearStr, 10);
+
+  const mIdx = monthOptions.indexOf(monthName);
+  if (mIdx >= 9) {
+    year += 1;
+  }
+
+  const jsMonthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const jsMonthIdx = jsMonthNames.indexOf(monthName);
+
+  const daysInMonth = new Date(year, jsMonthIdx + 1, 0).getDate();
+  const dates = [];
+  for (let i = 1; i <= daysInMonth; i++) {
+    const dStr = String(i).padStart(2, '0');
+    const mStr = String(jsMonthIdx + 1).padStart(2, '0');
+    const yStr = year;
+    dates.push({
+      display: `${dStr}-${monthName.substring(0, 3)}-${yStr}`,
+      value: `${yStr}-${mStr}-${dStr}`
+    });
+  }
+  return dates;
+};
+
 function DailySummaryTab({
   onBack,
   onUploadNew,
@@ -44,7 +91,21 @@ function DailySummaryTab({
   mainTab,
   setMainTab
 }) {
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const initialSelection = useMemo(() => getCurrentFYAndMonth(), []);
+  const [financialYear, setFinancialYear] = useState(initialSelection.fy);
+  const [month, setMonth] = useState(initialSelection.month);
+
+  const dateOptions = useMemo(() => getDatesForFYAndMonth(financialYear, month), [financialYear, month]);
+
+  const [date, setDate] = useState('ALL');
+
+  useEffect(() => {
+    setDate('ALL');
+  }, [financialYear, month]);
+  
+  const [calendarAnchorEl, setCalendarAnchorEl] = useState(null);
+  const handleOpenCalendar = (event) => setCalendarAnchorEl(event.currentTarget);
+  const handleCloseCalendar = () => setCalendarAnchorEl(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [billBreakdownOpen, setBillBreakdownOpen] = useState(false);
@@ -52,12 +113,23 @@ function DailySummaryTab({
   const [tabValue, setTabValue] = useState(0);
   const [snack, setSnack] = useState(null);
 
+  const [alertModalOpen, setAlertModalOpen] = useState(false);
+  const [alertModalTitle, setAlertModalTitle] = useState('');
+  const [alertModalData, setAlertModalData] = useState([]);
+
   const fetchData = useCallback(async (targetDate) => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
+      
+      let queryDate = targetDate;
+      if (targetDate === 'ALL') {
+        // Build comma-separated list of all dates in current month selection
+        queryDate = dateOptions.map(d => d.value).join(',');
+      }
+
       const res = await axios.get(`${API_URL}/daily-summary/data`, {
-        params: { date: targetDate },
+        params: { date: queryDate },
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data.success) {
@@ -71,7 +143,7 @@ function DailySummaryTab({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dateOptions]);
 
   useEffect(() => {
     fetchData(date);
@@ -179,7 +251,6 @@ function DailySummaryTab({
     const closingAdv = advData.closingBalance ?? (cashRecv - cashOpen - advAmt - miscExp);
 
     return {
-      invoicesUploaded: data.invoicesUploaded || 0,
       cementMT: Math.round(cMT * 100) / 100,
       cementTrips: (data.cement || []).length,
       fuelLtr: Math.round(fL * 100) / 100,
@@ -196,14 +267,6 @@ function DailySummaryTab({
       totalPumpPaymentAmt: pPaymentAmt,
       missingChallans: missingChallansCount
     };
-  }, [data]);
-
-  const invoiceStats = useMemo(() => {
-    if (!data || !data.invoiceStats) return {
-      totalUploaded: 0, successfullyProcessed: 0, pendingInvoices: 0, failedInvoices: 0,
-      lastUploadTime: null, recentInvoices: []
-    };
-    return data.invoiceStats;
   }, [data]);
 
   // Bill Breakdown Categories
@@ -231,6 +294,95 @@ function DailySummaryTab({
       totalPendingCount: pending.length
     };
   }, [data]);
+
+  const challanAlerts = useMemo(() => {
+    const pending = [];
+    const nonStamp = [];
+    const stamp = [];
+
+    (data?.cement || []).forEach(e => {
+      const status = String(e["CHALLAN STATUS"] || "").toUpperCase().trim();
+      if (status === "STAMP") stamp.push(e);
+      else if (status.includes("NON-STAMP") || status.includes("NON STAMP")) nonStamp.push(e);
+      else pending.push(e);
+    });
+
+    return { pending, nonStamp, stamp };
+  }, [data]);
+
+  const performanceAnalytics = useMemo(() => {
+    if (!data?.cement) return { chartData: [] };
+
+    // Group logic: determine if we need to group by month
+    const monthSet = new Set();
+    data.cement.forEach(e => {
+      const d = String(e["LOADING DT"] || e["LOADING DATE"] || e["BILL DATE"] || "Unknown").trim();
+      if (d !== "Unknown") {
+        const parts = d.split('-'); // Format is DD-MMM-YYYY or YYYY-MM-DD
+        if (parts.length >= 2) {
+          let mm = parts[1];
+          monthSet.add(mm);
+        }
+      }
+    });
+
+    const groupByMonth = monthSet.size > 1;
+
+    const mapRev = {};
+    const mapMT = {};
+
+    data.cement.forEach(e => {
+      const amt = parseNum(e["Billing Amount"] || e["AMOUNT"] || 0);
+      const mt = parseNum(e["MT"] || 0);
+      
+      const d = String(e["LOADING DT"] || e["LOADING DATE"] || e["BILL DATE"] || "Unknown").trim();
+      let key = d;
+      
+      if (d !== "Unknown" && groupByMonth) {
+        const parts = d.split('-');
+        if (parts.length === 3) {
+           key = parts[1]; // e.g. 'Jun'
+        }
+      }
+      
+      if (amt > 0) mapRev[key] = (mapRev[key] || 0) + amt;
+      if (mt > 0) mapMT[key] = (mapMT[key] || 0) + mt;
+    });
+
+    const allKeys = Array.from(new Set([...Object.keys(mapRev), ...Object.keys(mapMT)]));
+    
+    // Sort logic
+    if (!groupByMonth) {
+      allKeys.sort((a, b) => {
+        const da = a.split(/[-/]/);
+        const db = b.split(/[-/]/);
+        if(da.length === 3 && db.length === 3) {
+           return Number(da[0]) - Number(db[0]); 
+        }
+        return a.localeCompare(b);
+      });
+    } else {
+      const monthOrder = { 'Apr': 1, 'May': 2, 'Jun': 3, 'Jul': 4, 'Aug': 5, 'Sep': 6, 'Oct': 7, 'Nov': 8, 'Dec': 9, 'Jan': 10, 'Feb': 11, 'Mar': 12 };
+      allKeys.sort((a, b) => (monthOrder[a] || 99) - (monthOrder[b] || 99));
+    }
+
+    const chartData = allKeys.map(key => ({
+      name: key,
+      revenue: Math.round((mapRev[key] || 0) * 100) / 100,
+      tonnage: Math.round((mapMT[key] || 0) * 100) / 100
+    }));
+
+    return { chartData };
+  }, [data]);
+
+  const handleAlertClick = (type, records) => {
+    if (type === 'Pending') setAlertModalTitle('PENDING CHALLAN DETAILS');
+    else if (type === 'STAMP') setAlertModalTitle('STAMP BILL DETAILS');
+    else if (type === 'NON-STAMP') setAlertModalTitle('NON-STAMP BILL DETAILS');
+
+    setAlertModalData(records);
+    setAlertModalOpen(true);
+  };
 
   return (
     <Box sx={{ bgcolor: '#f4f7fa', minHeight: '100vh', pb: 6 }}>
@@ -278,24 +430,115 @@ function DailySummaryTab({
             }}
             TabIndicatorProps={{ style: { display: 'none' } }}
           >
-            <Tab label="Summary Reports" />
+            <Tab label="DAILY SUMMARY REPORTS" />
             <Tab label="ALL PARTY REPORTS" />
           </Tabs>
         </Box>
-        <Box display="flex" alignItems="center" gap={2}>
-          <TextField
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            size="small"
+        <Box display="flex" alignItems="center" gap={1.5}>
+          <FormControl size="small">
+            <Select
+              value={financialYear}
+              onChange={(e) => setFinancialYear(e.target.value)}
+              sx={{ bgcolor: '#f8fafc', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: 120 }}
+            >
+              {fyOptions.map(fy => <MenuItem key={fy} value={fy} sx={{ fontWeight: 600 }}>{fy}</MenuItem>)}
+            </Select>
+          </FormControl>
+
+          <FormControl size="small">
+            <Select
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              sx={{ bgcolor: '#f8fafc', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: 120 }}
+            >
+              {monthOptions.map(m => <MenuItem key={m} value={m} sx={{ fontWeight: 600 }}>{m}</MenuItem>)}
+            </Select>
+          </FormControl>
+
+          <Button
+            onClick={handleOpenCalendar}
+            variant="outlined"
+            endIcon={<CalendarTodayIcon />}
             sx={{
-              bgcolor: '#f8fafc', borderRadius: '8px',
-              width: 170,
-              '& .MuiOutlinedInput-root': {
-                '& fieldset': { borderColor: '#e2e8f0' },
+              bgcolor: '#f8fafc', 
+              borderRadius: '8px', 
+              borderColor: '#e2e8f0', 
+              color: '#0f172a',
+              fontWeight: 800, 
+              minWidth: 130,
+              textTransform: 'none',
+              px: 2,
+              '&:hover': { bgcolor: '#f1f5f9', borderColor: '#cbd5e1' }
+            }}
+          >
+            {date === 'ALL' ? 'ALL' : (dateOptions.find(d => d.value === date)?.display?.split('-')[0] + ' ' + month.substring(0,3))}
+          </Button>
+
+          <Popover
+            open={Boolean(calendarAnchorEl)}
+            anchorEl={calendarAnchorEl}
+            onClose={handleCloseCalendar}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            PaperProps={{
+              sx: {
+                mt: 1, p: 2, borderRadius: '16px', boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+                border: '1px solid #e2e8f0', width: '320px', bgcolor: '#fff'
               }
             }}
-          />
+          >
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="subtitle1" fontWeight={900} color="#0f172a" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                {month} {financialYear.substring(3, 7)}
+              </Typography>
+            </Box>
+            
+            <Button
+              fullWidth
+              variant={date === 'ALL' ? 'contained' : 'outlined'}
+              onClick={() => { setDate('ALL'); handleCloseCalendar(); }}
+              sx={{
+                bgcolor: date === 'ALL' ? '#0f172a' : 'transparent',
+                color: date === 'ALL' ? '#fff' : '#0f172a',
+                borderColor: '#0f172a',
+                fontWeight: 800,
+                borderRadius: '8px',
+                mb: 2,
+                py: 1,
+                '&:hover': { bgcolor: date === 'ALL' ? '#1e293b' : '#f8fafc', borderColor: '#1e293b' }
+              }}
+            >
+              ALL (Full Month)
+            </Button>
+
+            <Grid container spacing={1}>
+              {dateOptions.map(d => {
+                const dNum = parseInt(d.display.split('-')[0], 10);
+                const isSelected = date === d.value;
+                const isToday = new Date().toISOString().split('T')[0] === d.value;
+                return (
+                  <Grid item xs={12/7} key={d.value}>
+                    <Box
+                      onClick={() => { setDate(d.value); handleCloseCalendar(); }}
+                      sx={{
+                        cursor: 'pointer',
+                        bgcolor: isSelected ? '#3b82f6' : 'transparent',
+                        color: isSelected ? '#fff' : '#1e293b',
+                        borderRadius: '8px',
+                        py: 1,
+                        textAlign: 'center',
+                        transition: 'all 0.15s',
+                        '&:hover': { bgcolor: isSelected ? '#2563eb' : '#f1f5f9' }
+                      }}
+                    >
+                      <Typography variant="body2" fontWeight={isSelected ? 800 : 600}>{dNum}</Typography>
+                      {isToday && <Box sx={{ width: 4, height: 4, bgcolor: isSelected ? '#fff' : '#3b82f6', borderRadius: '50%', mx: 'auto', mt: 0.5 }} />}
+                    </Box>
+                  </Grid>
+                );
+              })}
+            </Grid>
+          </Popover>
           <Tooltip title="Refresh Data">
             <IconButton onClick={() => fetchData(date)} sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <RefreshIcon />
@@ -337,9 +580,9 @@ function DailySummaryTab({
 
             <Card sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
               <CardContent sx={{ p: '20px !important' }}>
-                <Typography variant="caption" color="text.secondary" fontWeight={700} textTransform="uppercase">Total Invoices (DB)</Typography>
-                <Typography variant="h4" fontWeight={900} mt={0.5} color="#0f172a">{metrics.invoicesUploaded}</Typography>
-                <Typography variant="body2" color="text.secondary" mt={0.5} fontWeight={500}>Logged in system</Typography>
+                <Typography variant="caption" color="text.secondary" fontWeight={700} textTransform="uppercase">TOTAL INVOICE</Typography>
+                <Typography variant="h4" fontWeight={900} mt={0.5} color="#0f172a">{data?.invoicesUploaded || 0}</Typography>
+                <Typography variant="body2" color="text.secondary" mt={0.5} fontWeight={500}>From Cement Register</Typography>
               </CardContent>
             </Card>
 
@@ -386,110 +629,6 @@ function DailySummaryTab({
               </CardContent>
             </Card>
           </Box>
-
-
-          {/* ==========================================
-              SECTION 2: INVOICE SECTION (HERO PANEL)
-             ========================================== */}
-          <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-            2. Invoice Uploads & Processing
-          </Typography>
-          <Card sx={{ borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', mb: 4, overflow: 'hidden' }}>
-            <Box sx={{ p: 3, background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: '#fff' }}>
-              <Grid container spacing={3} alignItems="center">
-                <Grid item xs={12} md={3}>
-                  <Box display="flex" alignItems="center" gap={2}>
-                    <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: '12px' }}>
-                      <PublishIcon sx={{ fontSize: 32 }} />
-                    </Box>
-                    <Box>
-                      <Typography variant="h3" fontWeight={900}>{invoiceStats.totalUploaded}</Typography>
-                      <Typography variant="body2" fontWeight={600} sx={{ opacity: 0.8 }}>Invoices Uploaded Today</Typography>
-                      {invoiceStats.lastUploadTime && (
-                        <Typography variant="caption" sx={{ opacity: 0.6, display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-                          <AccessTimeIcon sx={{ fontSize: 14 }} /> Last: {new Date(invoiceStats.lastUploadTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </Typography>
-                      )}
-                    </Box>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={9}>
-                  <Grid container spacing={2}>
-                    <Grid item xs={4}>
-                      <Box sx={{ bgcolor: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', p: 2, borderRadius: '12px' }}>
-                        <Typography variant="caption" fontWeight={700} sx={{ color: '#34d399', textTransform: 'uppercase' }}>Processed</Typography>
-                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                          <CheckCircleOutlineIcon sx={{ color: '#34d399' }} />
-                          <Typography variant="h5" fontWeight={800}>{invoiceStats.successfullyProcessed}</Typography>
-                        </Box>
-                      </Box>
-                    </Grid>
-                    <Grid item xs={4}>
-                      <Box sx={{ bgcolor: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', p: 2, borderRadius: '12px' }}>
-                        <Typography variant="caption" fontWeight={700} sx={{ color: '#fbbf24', textTransform: 'uppercase' }}>Pending Review</Typography>
-                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                          <PendingActionsIcon sx={{ color: '#fbbf24' }} />
-                          <Typography variant="h5" fontWeight={800}>{invoiceStats.pendingInvoices}</Typography>
-                        </Box>
-                      </Box>
-                    </Grid>
-                    <Grid item xs={4}>
-                      <Box sx={{ bgcolor: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', p: 2, borderRadius: '12px' }}>
-                        <Typography variant="caption" fontWeight={700} sx={{ color: '#f87171', textTransform: 'uppercase' }}>Failed / Error</Typography>
-                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                          <ErrorOutlineIcon sx={{ color: '#f87171' }} />
-                          <Typography variant="h5" fontWeight={800}>{invoiceStats.failedInvoices}</Typography>
-                        </Box>
-                      </Box>
-                    </Grid>
-                  </Grid>
-                </Grid>
-              </Grid>
-            </Box>
-
-            <Box sx={{ p: 2, bgcolor: '#fff' }}>
-              <Typography variant="subtitle2" fontWeight={800} color="#0f172a" mb={2}>Quick View: Recent Uploads</Typography>
-              {invoiceStats.recentInvoices.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" p={2} textAlign="center">No invoices uploaded today.</Typography>
-              ) : (
-                <TableContainer>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ '& th': { borderBottom: '1px solid #e2e8f0', color: '#64748b', fontWeight: 700 } }}>
-                        <TableCell>Time</TableCell>
-                        <TableCell>Consignee / Party</TableCell>
-                        <TableCell>Status</TableCell>
-                        <TableCell align="right">Action</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {invoiceStats.recentInvoices.map((inv, idx) => (
-                        <TableRow key={idx} hover sx={{ '& td': { borderBottom: '1px solid #f1f5f9' } }}>
-                          <TableCell sx={{ color: '#475569', fontSize: '0.875rem' }}>{new Date(inv.created_at).toLocaleTimeString()}</TableCell>
-                          <TableCell sx={{ fontWeight: 600, color: '#0f172a' }}>{inv.consignee_name}</TableCell>
-                          <TableCell>
-                            <Chip
-                              label={inv.status || 'pending'}
-                              size="small"
-                              sx={{
-                                fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', height: 20,
-                                bgcolor: inv.status === 'approved' ? '#d1fae5' : inv.status === 'failed' ? '#fee2e2' : '#fef3c7',
-                                color: inv.status === 'approved' ? '#059669' : inv.status === 'failed' ? '#dc2626' : '#d97706'
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Button size="small" variant="text" sx={{ fontWeight: 700 }}>View</Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-            </Box>
-          </Card>
-
 
           <Grid container spacing={4} mb={4}>
             {/* ==========================================
@@ -550,28 +689,43 @@ function DailySummaryTab({
               <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)' }}>
                 <CardContent sx={{ p: 3 }}>
 
-                  <Box display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px" sx={{ bgcolor: invoiceStats.pendingInvoices > 0 ? '#fffbeb' : '#f8fafc', border: `1px solid ${invoiceStats.pendingInvoices > 0 ? '#fde68a' : '#e2e8f0'}` }}>
-                    <PendingActionsIcon sx={{ color: invoiceStats.pendingInvoices > 0 ? '#d97706' : '#94a3b8', fontSize: 32 }} />
-                    <Box>
-                      <Typography variant="h6" fontWeight={800} color={invoiceStats.pendingInvoices > 0 ? '#92400e' : '#64748b'}>{invoiceStats.pendingInvoices}</Typography>
-                      <Typography variant="body2" fontWeight={600} color={invoiceStats.pendingInvoices > 0 ? '#b45309' : '#94a3b8'}>Invoices Pending Review</Typography>
+                  <Box
+                    onClick={() => handleAlertClick('Pending', challanAlerts.pending)}
+                    display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px"
+                    sx={{ cursor: 'pointer', bgcolor: challanAlerts.pending.length > 0 ? '#fffbeb' : '#f8fafc', border: `1px solid ${challanAlerts.pending.length > 0 ? '#fde68a' : '#e2e8f0'}`, transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' } }}
+                  >
+                    <WarningAmberIcon sx={{ color: challanAlerts.pending.length > 0 ? '#d97706' : '#94a3b8', fontSize: 32 }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight={800} color={challanAlerts.pending.length > 0 ? '#b45309' : '#64748b'}>Challan Status Pending</Typography>
+                      <Typography variant="caption" fontWeight={600} color={challanAlerts.pending.length > 0 ? '#d97706' : '#94a3b8'}>Click to view pending records</Typography>
                     </Box>
+                    <Typography variant="h5" fontWeight={900} color={challanAlerts.pending.length > 0 ? '#92400e' : '#64748b'}>{challanAlerts.pending.length}</Typography>
                   </Box>
 
-                  <Box display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px" sx={{ bgcolor: billBreakdown.totalPendingCount > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${billBreakdown.totalPendingCount > 0 ? '#fecdd3' : '#e2e8f0'}` }}>
-                    <WarningAmberIcon sx={{ color: billBreakdown.totalPendingCount > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
-                    <Box>
-                      <Typography variant="h6" fontWeight={800} color={billBreakdown.totalPendingCount > 0 ? '#be123c' : '#64748b'}>{billBreakdown.totalPendingCount}</Typography>
-                      <Typography variant="body2" fontWeight={600} color={billBreakdown.totalPendingCount > 0 ? '#e11d48' : '#94a3b8'}>Pending Bills to Generate</Typography>
+                  <Box
+                    onClick={() => handleAlertClick('STAMP', challanAlerts.stamp)}
+                    display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px"
+                    sx={{ cursor: 'pointer', bgcolor: challanAlerts.stamp.length > 0 ? '#f0fdf4' : '#f8fafc', border: `1px solid ${challanAlerts.stamp.length > 0 ? '#bbf7d0' : '#e2e8f0'}`, transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' } }}
+                  >
+                    <CheckCircleOutlineIcon sx={{ color: challanAlerts.stamp.length > 0 ? '#16a34a' : '#94a3b8', fontSize: 32 }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight={800} color={challanAlerts.stamp.length > 0 ? '#15803d' : '#64748b'}>STAMP Bills</Typography>
+                      <Typography variant="caption" fontWeight={600} color={challanAlerts.stamp.length > 0 ? '#16a34a' : '#94a3b8'}>Click to view STAMP records</Typography>
                     </Box>
+                    <Typography variant="h5" fontWeight={900} color={challanAlerts.stamp.length > 0 ? '#14532d' : '#64748b'}>{challanAlerts.stamp.length}</Typography>
                   </Box>
 
-                  <Box display="flex" alignItems="center" gap={2} p={2} borderRadius="12px" sx={{ bgcolor: metrics.missingChallans > 0 ? '#fef2f2' : '#f8fafc', border: `1px solid ${metrics.missingChallans > 0 ? '#fecaca' : '#e2e8f0'}` }}>
-                    <ErrorOutlineIcon sx={{ color: metrics.missingChallans > 0 ? '#dc2626' : '#94a3b8', fontSize: 32 }} />
-                    <Box>
-                      <Typography variant="h6" fontWeight={800} color={metrics.missingChallans > 0 ? '#991b1b' : '#64748b'}>{metrics.missingChallans}</Typography>
-                      <Typography variant="body2" fontWeight={600} color={metrics.missingChallans > 0 ? '#ef4444' : '#94a3b8'}>Missing GCN / Challan Nos</Typography>
+                  <Box
+                    onClick={() => handleAlertClick('NON-STAMP', challanAlerts.nonStamp)}
+                    display="flex" alignItems="center" gap={2} p={2} borderRadius="12px"
+                    sx={{ cursor: 'pointer', bgcolor: challanAlerts.nonStamp.length > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${challanAlerts.nonStamp.length > 0 ? '#fecdd3' : '#e2e8f0'}`, transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' } }}
+                  >
+                    <ErrorOutlineIcon sx={{ color: challanAlerts.nonStamp.length > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight={800} color={challanAlerts.nonStamp.length > 0 ? '#be123c' : '#64748b'}>NON-STAMP Bills</Typography>
+                      <Typography variant="caption" fontWeight={600} color={challanAlerts.nonStamp.length > 0 ? '#e11d48' : '#94a3b8'}>Click to view NON-STAMP records</Typography>
                     </Box>
+                    <Typography variant="h5" fontWeight={900} color={challanAlerts.nonStamp.length > 0 ? '#881337' : '#64748b'}>{challanAlerts.nonStamp.length}</Typography>
                   </Box>
 
                 </CardContent>
@@ -639,6 +793,135 @@ function DailySummaryTab({
               </Card>
             </Grid>
           </Grid>
+
+          {/* ==========================================
+              SECTION 6: LIVE TRENDS / ANALYTICS
+             ========================================== */}
+          <Card sx={{ width: '100%', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', mb: 5, bgcolor: '#fff', overflow: 'hidden' }}>
+            <Box sx={{ bgcolor: '#f8fafc', px: { xs: 2, md: 4 }, py: 2.5, borderBottom: '1px solid #e2e8f0' }}>
+              <Typography variant="subtitle2" fontWeight={800} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                6. Live Trends / Analytics
+              </Typography>
+            </Box>
+            
+            <CardContent sx={{ p: { xs: 2, md: 4 } }}>
+              <Grid container spacing={4}>
+                
+                {/* DAILY / OPERATIONAL TRENDS */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" fontWeight={800} color="#0f172a" mb={2}>
+                    DAILY / OPERATIONAL TRENDS
+                  </Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={6} md={4} lg={2}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                        <Typography variant="body2" color="text.secondary" fontWeight={700}>Total Lifting</Typography>
+                        <Typography variant="h6" fontWeight={800} color="#0f172a">{metrics.cementMT} MT</Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={6} md={4} lg={2}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                        <Typography variant="body2" color="text.secondary" fontWeight={700}>Total L/A Given</Typography>
+                        <Typography variant="h6" fontWeight={800} color="#ef4444">₹{metrics.loadingAdvanceAmt.toLocaleString()}</Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={6} md={4} lg={2}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                        <Typography variant="body2" color="text.secondary" fontWeight={700}>Cash Opening</Typography>
+                        <Typography variant="h6" fontWeight={800} color="#0f172a">₹{metrics.cashOpeningBalance.toLocaleString()}</Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={6} md={4} lg={2}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                        <Typography variant="body2" color="text.secondary" fontWeight={700}>Total Expense</Typography>
+                        <Typography variant="h6" fontWeight={800} color="#f59e0b">₹{metrics.miscExpenses.toLocaleString()}</Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={6} md={4} lg={2}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                        <Typography variant="body2" color="text.secondary" fontWeight={700}>Cash Closing</Typography>
+                        <Typography variant="h6" fontWeight={800} color={metrics.closingAdvanceBalance >= 0 ? '#10b981' : '#ef4444'}>₹{metrics.closingAdvanceBalance.toLocaleString()}</Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={6} md={4} lg={2}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                        <Typography variant="body2" color="text.secondary" fontWeight={700}>Total Fuel Issued</Typography>
+                        <Typography variant="h6" fontWeight={800} color="#3b82f6">{metrics.fuelLtr} LTR</Typography>
+                      </Paper>
+                    </Grid>
+                  </Grid>
+                </Grid>
+
+                {/* MONTHLY / YEARLY PERFORMANCE */}
+                <Grid item xs={12}>
+                  <Box sx={{ p: 4, borderRadius: '16px', border: '1px solid #e2e8f0', bgcolor: '#ffffff', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
+                    <Typography variant="h5" fontWeight={800} color="#0f172a" mb={1} align="center">
+                      MONTHLY / YEARLY PERFORMANCE
+                    </Typography>
+                    <Typography variant="subtitle2" fontWeight={700} color="text.secondary" mb={4} align="center">
+                      Revenue & Tonnage Trends
+                    </Typography>
+                    
+                    {performanceAnalytics.chartData.length === 0 ? (
+                      <Box display="flex" flex={1} alignItems="center" justifyContent="center" minHeight={450}>
+                        <Typography variant="body1" color="text.secondary" fontWeight={600}>No data for selected period</Typography>
+                      </Box>
+                    ) : (
+                      <Box sx={{ width: '100%', height: 450 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart data={performanceAnalytics.chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                            <XAxis 
+                              dataKey="name" 
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fill: '#64748b', fontSize: 13, fontWeight: 700 }} 
+                              dy={10} 
+                            />
+                            {/* Primary Y-Axis for REVENUE */}
+                            <YAxis 
+                              yAxisId="left"
+                              orientation="left"
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fill: '#4f46e5', fontSize: 13, fontWeight: 700 }} 
+                              tickFormatter={(value) => `₹${value >= 1000 ? (value/1000).toFixed(0) + 'k' : value}`} 
+                            />
+                            {/* Secondary Y-Axis for TONNAGE */}
+                            <YAxis 
+                              yAxisId="right"
+                              orientation="right"
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fill: '#10b981', fontSize: 13, fontWeight: 700 }} 
+                              tickFormatter={(value) => `${value} MT`} 
+                            />
+                            <RechartsTooltip 
+                              cursor={{ fill: '#f8fafc' }} 
+                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', fontWeight: 700, padding: '12px 16px' }} 
+                              formatter={(value, name) => {
+                                if (name === 'Revenue') return [`₹${value.toLocaleString()}`, 'Revenue'];
+                                if (name === 'Tonnage') return [`${value} MT`, 'Tonnage'];
+                                return [value, name];
+                              }}
+                              labelStyle={{ color: '#0f172a', fontWeight: 800, marginBottom: '8px' }}
+                            />
+                            <Legend verticalAlign="bottom" height={40} iconType="circle" wrapperStyle={{ fontSize: '14px', fontWeight: 700, color: '#1e293b' }} />
+                            
+                            {/* Revenue as the primary visual (Bars) */}
+                            <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill="#4f46e5" radius={[6, 6, 0, 0]} maxBarSize={60} />
+                            
+                            {/* Tonnage as the secondary visual (Line) */}
+                            <Line yAxisId="right" type="monotone" dataKey="tonnage" name="Tonnage" stroke="#10b981" strokeWidth={4} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </Box>
+                    )}
+                  </Box>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
 
 
           {/* --- Detail Sections (Registers) --- */}
@@ -847,6 +1130,61 @@ function DailySummaryTab({
         </DialogContent>
       </Dialog>
 
+      {/* --- Dynamic Alert Detail Dialog --- */}
+      <Dialog open={alertModalOpen} onClose={() => setAlertModalOpen(false)} maxWidth="lg" fullWidth PaperProps={{ sx: { borderRadius: '16px', bgcolor: '#f8fafc' } }}>
+        <DialogTitle sx={{ bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', px: 3, py: 2.5 }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6" fontWeight={800} color="#0f172a">
+              {alertModalTitle}
+            </Typography>
+            <Chip label={`${alertModalData.length} Records`} sx={{ bgcolor: '#e0e7ff', color: '#4338ca', fontWeight: 800, borderRadius: '8px' }} />
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)', border: '1px solid #e2e8f0' }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2 }}>SL</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>VEHICLE</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>DATE</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>PARTY</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>DESTINATION</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>CHALLAN STATUS</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {alertModalData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
+                      No records found.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  alertModalData.map((row, idx) => (
+                    <TableRow key={idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                      <TableCell>{idx + 1}</TableCell>
+                      <TableCell sx={{ fontWeight: 700, color: '#0f172a' }}>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "-"}</TableCell>
+                      <TableCell>{row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || "-"}</TableCell>
+                      <TableCell>{row["PARTY NAME"] || "-"}</TableCell>
+                      <TableCell>{row["DESTINATION"] || row["SITE"] || "-"}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={row["CHALLAN STATUS"] || "Pending"} sx={{ fontWeight: 700, fontSize: '0.7rem' }} />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions sx={{ p: 3, pt: 0 }}>
+          <Button onClick={() => setAlertModalOpen(false)} variant="contained" sx={{ bgcolor: '#0f172a', color: '#fff', borderRadius: '8px', px: 4, fontWeight: 700, '&:hover': { bgcolor: '#1e293b' } }}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* --- Snackbar alerts --- */}
       <Snackbar
         open={!!snack}
@@ -966,7 +1304,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
             }}
             TabIndicatorProps={{ style: { display: 'none' } }}
           >
-            <Tab label="Summary Reports" />
+            <Tab label="DAILY SUMMARY REPORTS" />
             <Tab label="ALL PARTY REPORTS" />
           </Tabs>
         </Box>
