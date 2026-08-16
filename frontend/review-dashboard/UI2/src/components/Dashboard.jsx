@@ -26,6 +26,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import HistoryIcon from '@mui/icons-material/History';
 import TableChartIcon from '@mui/icons-material/TableChart';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import axios from 'axios';
 import { startRegistration } from '@simplewebauthn/browser';
@@ -47,7 +48,7 @@ const _dashSocket = io(SOCKET_URL, {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAiExtraExpense }) => {
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
     const [invoices, setInvoices] = useState([]);
@@ -773,6 +774,34 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                         <Box>
                                             <Typography variant="subtitle2" fontWeight={800}>INCENTIVE SHEET</Typography>
                                             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 500 }}>Compare ATO/MKT</Typography>
+                                        </Box>
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+                        </Grid>
+                    </Box>
+
+                    {/* ── AI & Analytics ─────────────────────────── */}
+                    <Box>
+                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
+                            AI & ANALYTICS
+                        </Typography>
+                        <Grid container spacing={3}>
+                            <Grid item xs={12} sm={6} md={3}>
+                                <Card sx={{
+                                    borderRadius: '20px', bgcolor: '#5b21b6', color: '#fff',
+                                    boxShadow: '0 10px 20px rgba(0,0,0,0.15)',
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    cursor: 'pointer', transition: 'all 0.2s',
+                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 14px 28px rgba(0,0,0,0.25)' }
+                                }} onClick={onOpenAiExtraExpense}>
+                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '12px' }}>
+                                            <AutoAwesomeIcon sx={{ fontSize: 24 }} />
+                                        </Box>
+                                        <Box>
+                                            <Typography variant="subtitle1" fontWeight={900}>THE AI with EXTRA EXPENSE</Typography>
+                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>AI Expense Management</Typography>
                                         </Box>
                                     </CardContent>
                                 </Card>

@@ -28,6 +28,7 @@ import AccountApprovalsPage from './pages/AccountApprovalsPage';
 import DailySummaryReport from './pages/DailySummaryReport';
 import PumpPaymentRegister from './pages/PumpPaymentRegister';
 import IncentiveCalculationSheet from './pages/IncentiveCalculationSheet';
+import AiExtraExpense from './pages/AiExtraExpense';
 
 const theme = createTheme({
   palette: {
@@ -249,6 +250,10 @@ function AppContent() {
     );
   }
 
+  if (currentView === 'aiExtraExpense') {
+    return <AiExtraExpense onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'incentiveCalculationSheet') {
     return <IncentiveCalculationSheet onBack={() => setCurrentView('dashboard')} />;
   }
@@ -315,6 +320,7 @@ function AppContent() {
         onOpenAccountDetails={() => setCurrentView('accountDetails')}
         onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
         onOpenDailySummaryReport={() => setCurrentView('dailySummary')}
+        onOpenAiExtraExpense={() => setCurrentView('aiExtraExpense')}
         onOpenIncentiveSheet={() => setCurrentView('incentiveCalculationSheet')}
       />
     );
