@@ -263,7 +263,6 @@ router.get("/truck-contact/:truck_no", async (req, res) => {
 });
 
 router.post("/upload", upload.single("invoice"), async (req, res) => {
-
     try {
         console.log("/upload endpoint hit");
         if (!req.file) {
@@ -273,52 +272,127 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
         const fileUrl = req.file.location;
         console.log("File URL:", fileUrl);
 
-        // Call FastAPI pipeline for AI extraction
-        let aiData = null;
-        try {
-            const aiWorkerUrl = process.env.AI_WORKER_URL;
-            const aiResponse = await require("axios").post(
-                `${aiWorkerUrl}/process`,
-                { file: fileUrl },
-                { timeout: 180000 }
-            );
-            aiData = aiResponse.data;
-            console.log("AI extraction success");
-        } catch (aiErr) {
-            const details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
-            console.error("AI extraction failed. Details:", details);
-            console.error(aiErr.stack);
-            return res.status(500).json({ error: details || "AI extraction failed", details: details });
-        }
-
-        // Save invoice with AI data
-        const consignee_name =
-            aiData?.invoice_data?.consignee_details?.consignee_name || '';
-
+        // Save a placeholder invoice to get an ID immediately
         const invoice = new Invoice({
             file_url: fileUrl,
-            ai_data: aiData,
-            consignee_name,
-            status: "pending"
+            status: "processing"
         });
         await invoice.save();
-        console.log("Invoice saved with _id:", invoice._id);
-
-        // Propagate to Cement Register
-        await pushToRegister(invoice._id.toString());
-
-        res.json({
-            message: "Invoice uploaded and processed",
+        const invoiceId = invoice._id.toString();
+        
+        // Return 202 Accepted to frontend immediately to prevent Render 502 Timeout
+        res.status(202).json({
+            message: "Upload successful. AI extraction started.",
             file_url: fileUrl,
-            invoice_id: invoice._id,
-            ai_data: aiData
+            invoice_id: invoiceId
         });
+
+        // Fire and forget background processing
+        processInvoiceBackground(invoiceId, fileUrl).catch(err => {
+            console.error(`[Background Processing Error] Invoice ${invoiceId}:`, err);
+        });
+
     } catch (error) {
         console.error("Error in /upload:", error);
         res.status(500).json({ error: error.message });
     }
-
 });
+
+// ── Background Processing Function ──────────────────────────────────────────────
+async function processInvoiceBackground(invoiceId, fileUrl) {
+    let io = null;
+    try {
+        const { getIO } = require("../socket");
+        io = getIO();
+    } catch (_) {
+        console.log("Socket.io not initialized for background task");
+    }
+
+    const emitStatus = (status, data = {}) => {
+        if (io) {
+            io.emit("invoice_status", { invoiceId, status, ...data });
+        }
+    };
+
+    try {
+        emitStatus("extracting", { message: "Running AI Extraction..." });
+
+        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+        const targetProcessUrl = `${aiWorkerUrl}/process`;
+        
+        let aiData = null;
+        const maxRetries = 3;
+        
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                console.log(`[AI WORKER REQUEST] Attempt ${attempt + 1}: ${fileUrl}`);
+                const startTime = performance.now();
+                
+                const aiResponse = await require("axios").post(
+                    targetProcessUrl,
+                    { file: fileUrl },
+                    { timeout: 90000 } // 90 seconds timeout
+                );
+                aiData = aiResponse.data;
+                
+                const duration = performance.now() - startTime;
+                console.log(`[AI WORKER RESPONSE] Duration: ${duration.toFixed(2)}ms`);
+                break; // Success, exit retry loop
+            } catch (aiErr) {
+                console.error(`[AI WORKER ERROR] Attempt ${attempt + 1} failed: ${aiErr.message}`);
+                if (attempt === maxRetries - 1) {
+                    throw aiErr; // Throw on last failure
+                }
+                emitStatus("retrying", { message: `AI Error. Retrying (Attempt ${attempt + 2}/${maxRetries})...` });
+                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000)); // Exponential backoff
+            }
+        }
+
+        emitStatus("validating", { message: "Saving data..." });
+
+        const consignee_name = aiData?.invoice_data?.consignee_details?.consignee_name || '';
+
+        // Update the existing placeholder invoice
+        const updatedInvoice = await Invoice.findByIdAndUpdate(
+            invoiceId,
+            {
+                ai_data: aiData,
+                consignee_name,
+                status: "pending"
+            },
+            { new: true }
+        );
+
+        if (!updatedInvoice) throw new Error("Invoice record disappeared during processing");
+
+        emitStatus("success", { 
+            message: "AI Extraction complete!",
+            ai_data: aiData,
+            invoice: updatedInvoice
+        });
+        console.log(`[Background Task] Successfully processed invoice ${invoiceId}`);
+
+        // Propagate to Cement Register asynchronously without blocking UI updates
+        pushToRegister(invoiceId).catch(err => {
+            console.error(`[Background Task] Error propagating invoice ${invoiceId} to Cement Register:`, err);
+        });
+
+    } catch (error) {
+        console.error(`[Background Task Error] Invoice ${invoiceId}:`, error);
+        let details = error.message;
+        if (error.response) {
+            details = error.response?.data?.detail || error.response?.data?.error || error.message;
+        }
+        
+        // Update DB to mark as failed
+        await Invoice.findByIdAndUpdate(invoiceId, { status: "failed", error_message: details }).catch(() => {});
+        
+        emitStatus("error", { 
+            message: `AI Extraction Failed: ${details}`,
+            error: details 
+        });
+    }
+}
 
 // ── Physical Scanner Trigger (Universal — HP, Epson, Canon, etc.) ─────────────────────────────
 // Strategy 1: scanimage with auto-detected device (works for all SANE-supported scanners)
@@ -423,13 +497,24 @@ async function processScanFile(scanOutputPath, io) {
         console.log("[Scan] Uploaded to S3:", s3Url);
         if (io) io.emit("scanner_status", { message: "📤 Scan uploaded. Running AI extraction..." });
 
-        const aiWorkerUrl = process.env.AI_WORKER_URL;
-        const aiResponse = await require("axios").post(
-            `${aiWorkerUrl}/process`,
-            { file: s3Url },
-            { timeout: 90000 }
-        );
-        const aiData = aiResponse.data;
+        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+        let aiData;
+        try {
+            const aiResponse = await require("axios").post(
+                `${aiWorkerUrl}/process`,
+                { file: s3Url },
+                { timeout: 90000 }
+            );
+            aiData = aiResponse.data;
+        } catch (aiErr) {
+            let details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
+            if (aiErr.response?.status === 404) {
+                details = `AI Worker endpoint not found at ${process.env.AI_WORKER_URL}/process`;
+            }
+            console.error("[Scan] AI extraction failed:", details);
+            if (io) io.emit("scanner_status", { message: `❌ AI extraction failed: ${details}` });
+            return res.status(500).json({ error: `AI Extraction Failed: ${details}` });
+        }
 
         const Invoice = require("../models/Invoice");
         const { pushToRegister } = require("../utils/syncManager");

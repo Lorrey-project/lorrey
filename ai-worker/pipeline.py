@@ -21,6 +21,30 @@ load_dotenv()
 
 app = FastAPI()
 
+@app.on_event("startup")
+def startup_event():
+    access_key = os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_KEY")
+    bucket_var = os.getenv("AWS_S3_BUCKET") or os.getenv("AWS_BUCKET_NAME")
+    
+    print("=== AWS Config Check ===")
+    if access_key:
+        print("Detected AWS Access Key: " + ("AWS_ACCESS_KEY_ID" if os.getenv("AWS_ACCESS_KEY_ID") else "AWS_ACCESS_KEY"))
+    else:
+        print("Missing AWS Access Key! (S3 downloads will fail)")
+        
+    if secret_key:
+        print("Detected AWS Secret Key: " + ("AWS_SECRET_ACCESS_KEY" if os.getenv("AWS_SECRET_ACCESS_KEY") else "AWS_SECRET_KEY"))
+    else:
+        print("Missing AWS Secret Key! (S3 downloads will fail)")
+        
+    if bucket_var:
+        print("Detected AWS Bucket: " + ("AWS_S3_BUCKET" if os.getenv("AWS_S3_BUCKET") else "AWS_BUCKET_NAME"))
+    else:
+        print("No specific AWS Bucket var detected (Using S3 URL parsing fallback)")
+    print("========================")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -61,19 +85,30 @@ def download_file_from_s3(s3_url: str) -> str:
     else:
         raise ValueError(f"Cannot parse S3 URL: {s3_url}")
 
+    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY")
+    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_KEY")
     aws_region = os.getenv("AWS_REGION", "ap-south-1")
     s3_client = boto3.client(
         "s3",
         region_name=aws_region,
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        aws_access_key_id=aws_access_key,
+        aws_secret_access_key=aws_secret_key,
     )
 
     print(f"Downloading from S3: bucket={bucket}, key={key}")
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        s3_client.download_fileobj(bucket, key, tmp)
-        return tmp.name
+    import time
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                s3_client.download_fileobj(bucket, key, tmp)
+                return tmp.name
+        except Exception as e:
+            print(f"S3 download failed on attempt {attempt + 1}: {e}")
+            if attempt == max_retries - 1:
+                raise e
+            time.sleep(2 ** attempt)
 
 
 @app.get("/")
@@ -88,51 +123,60 @@ def process_invoice(data: InvoiceRequest):
 
     print("Received file:", file_url)
 
+    import time
+    total_start = time.time()
+    
     # -------------------------------
     # Download file from S3 (authenticated)
     # -------------------------------
     try:
+        t0 = time.time()
         file_path = download_file_from_s3(file_url)
+        print(f"[Profiling] S3 Download completed in {time.time() - t0:.2f}s")
         print("Saved file locally:", file_path)
     except Exception as e:
         print(f"S3 download failed: {e}")
-        return {"error": f"Failed to download file from S3: {str(e)}"}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Failed to download file from S3: {str(e)}")
 
-    # Convert PDF to Image if necessary
+    # Convert PDF to Image and encode to base64 in memory
+    import base64
+    base64_image = None
     try:
+        t0 = time.time()
         import fitz  # PyMuPDF
         doc = fitz.open(file_path)
         if doc.is_pdf:
-            print("PDF detected. Converting first page to image...")
+            print("PDF detected. Converting first page to image in memory...")
             page = doc.load_page(0)
-            # Render at higher resolution for better OCR
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            img_path = file_path + ".jpg"
-            pix.save(img_path)
+            # Render at lower resolution for faster OCR
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+            # Get JPEG bytes directly from memory without disk I/O
+            img_bytes = pix.tobytes("jpeg")
+            base64_image = base64.b64encode(img_bytes).decode("utf-8")
             doc.close()
-            os.unlink(file_path)
-            file_path = img_path
         else:
-            # It's already an image
+            # It's already an image, read directly to memory
             doc.close()
-            img_path = file_path + ".jpg"
-            os.rename(file_path, img_path)
-            file_path = img_path
+            with open(file_path, "rb") as img_file:
+                base64_image = base64.b64encode(img_file.read()).decode("utf-8")
+        print(f"[Profiling] Image processing completed in {time.time() - t0:.2f}s")
     except Exception as e:
         print(f"PyMuPDF check passed/failed: {e}. Assuming original image.")
-        img_path = file_path + ".jpg"
-        os.rename(file_path, img_path)
-        file_path = img_path
+        with open(file_path, "rb") as img_file:
+            base64_image = base64.b64encode(img_file.read()).decode("utf-8")
 
     # -------------------------------
     # Direct AI Vision Extraction
-    # (No OCR — GPT-4.1 reads image directly)
+    # (No OCR — GPT-4o reads image directly)
     # -------------------------------
     try:
-        print("Running GPT-4.1 Vision extraction...")
-        invoice_json = extract_invoice_data(file_path, target_schema)
-        print("Vision Extraction Completed")
-
+        t0 = time.time()
+        print("Running GPT-4o Vision extraction...")
+        invoice_json = extract_invoice_data(base64_image, target_schema)
+        print(f"[Profiling] Vision Extraction completed in {time.time() - t0:.2f}s")
+        
+        t0 = time.time()
         # -------------------------------
         # Post-processing & Validation
         # -------------------------------
@@ -158,7 +202,8 @@ def process_invoice(data: InvoiceRequest):
         # GPT vision cross-check / correction pass — disabled (redundant, doubles cost & latency)
         # invoice_json = validate_invoice_with_gpt(file_path, invoice_json)
 
-        print("Extraction + Validation Completed")
+        print(f"[Profiling] Post-processing & Validation completed in {time.time() - t0:.2f}s")
+        print(f"[Profiling] Total Extraction Pipeline Time: {time.time() - total_start:.2f}s")
     except Exception as ai_e:
         import traceback
         traceback.print_exc()

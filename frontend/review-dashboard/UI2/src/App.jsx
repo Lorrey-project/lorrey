@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery } from '@mui/material';
+import { ShortcutProvider } from './context/ShortcutContext';
+import GlobalShortcutHandler from './components/GlobalShortcutHandler';
 import InvoiceForm from './components/InvoiceForm';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
@@ -27,6 +29,7 @@ import DailySummaryReport from './pages/DailySummaryReport';
 import PumpPaymentRegister from './pages/PumpPaymentRegister';
 import IncentiveCalculationSheet from './pages/IncentiveCalculationSheet';
 import AttendancePanel from './pages/AttendancePanel';
+import AiExtraExpense from './pages/AiExtraExpense';
 
 const theme = createTheme({
   palette: {
@@ -248,6 +251,10 @@ function AppContent() {
     );
   }
 
+  if (currentView === 'aiExtraExpense') {
+    return <AiExtraExpense onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'incentiveCalculationSheet') {
     return <IncentiveCalculationSheet onBack={() => setCurrentView('dashboard')} />;
   }
@@ -318,6 +325,7 @@ function AppContent() {
         onOpenAccountDetails={() => setCurrentView('accountDetails')}
         onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
         onOpenDailySummaryReport={() => setCurrentView('dailySummary')}
+        onOpenAiExtraExpense={() => setCurrentView('aiExtraExpense')}
         onOpenIncentiveSheet={() => setCurrentView('incentiveCalculationSheet')}
         onOpenAttendancePanel={() => setCurrentView('attendancePanel')}
       />
@@ -333,9 +341,12 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
+      <ShortcutProvider>
+        <AuthProvider>
+          <GlobalShortcutHandler />
+          <AppContent />
+        </AuthProvider>
+      </ShortcutProvider>
     </ThemeProvider>
   );
 }

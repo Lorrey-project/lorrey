@@ -97,10 +97,13 @@ const getMonthIndexFromDate = (dateStr) => {
 const formatDateForInput = (dateStr) => {
   if (!dateStr) return '';
   if (String(dateStr).includes('T')) return String(dateStr).split('T')[0];
-  const parts = String(dateStr).split('-');
+  
+  const normalizedStr = String(dateStr).replace(/\//g, '-');
+  const parts = normalizedStr.split('-');
+  
   if (parts.length === 3) {
-    if (parts[2].length === 4) return `${parts[2]}-${parts[1]}-${parts[0]}`;
-    if (parts[0].length === 4) return String(dateStr);
+    if (parts[2].length >= 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    if (parts[0].length >= 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
   }
   return '';
 };
@@ -275,6 +278,8 @@ export default function FinancialYearDetails({ onBack }) {
         } else {
           fetchData();
         }
+      } else if (data?.action === 'paymentMapped') {
+        fetchData();
       }
     });
     return () => {
@@ -311,13 +316,7 @@ export default function FinancialYearDetails({ onBack }) {
     }
   };
 
-  const toggleDamageVehicle = async (vehicle) => {
-    let updated;
-    if (damageSelectedVehicles.includes(vehicle)) {
-      updated = damageSelectedVehicles.filter(v => v !== vehicle);
-    } else {
-      updated = [...damageSelectedVehicles, vehicle];
-    }
+  const handleDamageVehiclesChange = async (updated) => {
     setDamageSelectedVehicles(updated);
 
     if (updated.length === 0) {
@@ -351,10 +350,24 @@ export default function FinancialYearDetails({ onBack }) {
     const inv = damageTarget.invoiceNumber;
     const gid = damageTarget.groupId;
 
-    const targetAmt = Math.abs(num(damageTarget.debitAmount));
+    const targetAmt = Math.max(0, num(damageTarget.difference));
+    
     // Sum amounts keyed by invoiceNo (one per trip-row)
-    const allocatedAmt = damageSelectedTrips.reduce((sum, t) => sum + num(damageVehicleAmounts[t.invoiceNo] || 0), 0);
-    // Amount matching validation removed as per user request
+    // Wait, the validation should sum ALL allocations for the group, not just the currently selected trips!
+    const groupRows = computedRows.filter(cr => cr.groupId === gid);
+    const groupAllocatedAmt = groupRows.reduce((total, cr) => {
+      const rowAmountsObj = cr.invoiceNumber === inv ? damageVehicleAmounts : cr.damageVehicleAmounts;
+      return total + Object.values(rowAmountsObj || {}).reduce((tripSum, tripObj) => {
+        return tripSum + Object.values(tripObj || {}).reduce((s, v) => s + num(v), 0);
+      }, 0);
+    }, 0);
+
+    if (groupAllocatedAmt > targetAmt && targetAmt > 0) {
+      setSnack({ severity: 'error', msg: `Total allocated amount (₹${groupAllocatedAmt}) cannot exceed the Difference (₹${targetAmt}).` });
+      return;
+    }
+    
+    const calculatedDebitAmount = Math.max(0, targetAmt - groupAllocatedAmt);
 
     try {
       const valRes = await axios.post(`${API_URL}/fy-details/validate-deduction`, {
@@ -405,8 +418,8 @@ export default function FinancialYearDetails({ onBack }) {
     // Build the updated payment record
     const existingPayment = payments.find(p => p.id === gid);
     const updatedPayment = existingPayment
-      ? { ...existingPayment, remarks: combinedRemarks }
-      : { id: gid, billNos: [inv], paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: combinedRemarks, tdsProvision: '' };
+      ? { ...existingPayment, remarks: combinedRemarks, debitAmount: calculatedDebitAmount }
+      : { id: gid, billNos: [inv], paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: calculatedDebitAmount, remarks: combinedRemarks, tdsProvision: '' };
 
     // Update local state immediately for snappy UI
     setPayments(prev => {
@@ -493,11 +506,12 @@ export default function FinancialYearDetails({ onBack }) {
       let autoInv = r.displayInvoiceNumber || r.invoiceNumber || '';
 
       // Auto-correct existing invoice prefix based on loaded site
-      if (siteUpper === 'NVCL' && autoInv.match(/^DAC\//i)) {
-        autoInv = autoInv.replace(/^DAC\//i, 'NVCL/');
-      } else if (siteUpper === 'NVL' && autoInv.match(/^NVCL\//i)) {
-        autoInv = autoInv.replace(/^NVCL\//i, 'DAC/');
+      if (siteUpper === 'NVCL' && autoInv.match(/^DAC[\/\-]/i)) {
+        autoInv = autoInv.replace(/^DAC[\/\-]/i, 'NVCL-');
+      } else if (siteUpper === 'NVL' && autoInv.match(/^NVCL[\/\-]/i)) {
+        autoInv = autoInv.replace(/^NVCL[\/\-]/i, 'DAC-');
       }
+      autoInv = autoInv.replace(/\//g, '-');
 
       const paymentObj = payments.find(p => p.billNos?.includes(r.invoiceNumber));
       return {
@@ -634,7 +648,9 @@ export default function FinancialYearDetails({ onBack }) {
       const hasWorkflowReason = newReasons.some(v => WORKFLOW_REASONS.includes(v));
 
       if (r && computedR && hasWorkflowReason && addedReasons.length > 0) {
-        setDamageTarget({ invoiceNumber: invoiceNumber, groupId: computedR.groupId, reasons: newReasons, debitAmount: computedR.groupData?.debitAmount });
+        const groupTotalRecv = computedRows.filter(cr => cr.groupId === computedR.groupId).reduce((s, x) => s + x.receivable, 0);
+        const groupDiff = groupTotalRecv - num(computedR.groupData?.paymentAmount) - num(computedR.groupData?.tdsProvision);
+        setDamageTarget({ invoiceNumber: invoiceNumber, groupId: computedR.groupId, reasons: newReasons, difference: groupDiff });
         
         // Pre-fill modal state if there are existing deductions
         setDamageYear(r.damageYear || selYear);
@@ -683,9 +699,9 @@ export default function FinancialYearDetails({ onBack }) {
       if (field === 'site') {
         let inv = updated.displayInvoiceNumber || updated.invoiceNumber || '';
         if (value === 'NVCL') {
-          updated.displayInvoiceNumber = inv.replace(/^DAC\//i, 'NVCL/');
+          updated.displayInvoiceNumber = inv.replace(/^DAC[\/\-]/i, 'NVCL-').replace(/\//g, '-');
         } else if (value === 'NVL') {
-          updated.displayInvoiceNumber = inv.replace(/^NVCL\//i, 'DAC/');
+          updated.displayInvoiceNumber = inv.replace(/^NVCL[\/\-]/i, 'DAC-').replace(/\//g, '-');
         }
       }
       return updated;
@@ -867,9 +883,18 @@ export default function FinancialYearDetails({ onBack }) {
     exportToCsv('FinancialYearDetails.xls', computedRows.map(r => {
       const g = r.groupData || {};
       const groupTotalRecv = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((s, x) => s + (x.receivable || 0), 0) : 0;
-      const calcDebit = g.id ? num(g.debitAmount) : 0;
-      const diff = g.id ? groupTotalRecv - num(g.paymentAmount) - calcDebit - num(g.tdsProvision) : 0;
-      return { 'Invoice Date': r.invoiceDate, 'Invoice Number': r.invoiceNumber, 'Shipment Number': r.shipmentNos?.join(', ') || '', 'Month': r.month, 'SITE': r.site, 'BILL': r.billType, 'Amount': r.amount, 'CGST': r.cgst, 'SGST': r.sgst, 'Total Amount': r.totalAmount, 'Tds @2%': r.tds, 'Receivable': r.receivable, 'Payment Amount': g.paymentAmount || 0, 'TDS Provision': g.tdsProvision || 0, 'Difference': diff, 'Payment Date': g.paymentDate || '', 'Reference No': g.referenceNo || '', 'Debit Amount': calcDebit, 'Debit Reasons(Deduction)': (r.debitReasons || []).join(', ') || 'None', 'Remarks': g.remarks || '' };
+      
+      const groupDiff = g.id ? groupTotalRecv - num(g.paymentAmount) - num(g.tdsProvision) : 0;
+      
+      const groupAlloc = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((total, cr) => {
+        return total + Object.values(cr.damageVehicleAmounts || {}).reduce((tripSum, tripObj) => {
+          return tripSum + Object.values(tripObj || {}).reduce((s, v) => s + num(v), 0);
+        }, 0);
+      }, 0) : 0;
+      
+      const calcDebit = g.id ? Math.max(0, groupDiff - groupAlloc) : 0;
+
+      return { 'Invoice Date': r.invoiceDate, 'Invoice Number': r.invoiceNumber, 'Shipment Number': r.shipmentNos?.join(', ') || '', 'Month': r.month, 'SITE': r.site, 'BILL': r.billType, 'Amount': r.amount, 'CGST': r.cgst, 'SGST': r.sgst, 'Total Amount': r.totalAmount, 'Tds @2%': r.tds, 'Receivable': r.receivable, 'Payment Amount': g.paymentAmount || 0, 'TDS Provision': g.tdsProvision || 0, 'Difference': groupDiff, 'Payment Date': g.paymentDate || '', 'Reference No': g.referenceNo || '', 'Debit Amount': calcDebit, 'Debit Reasons(Deduction)': (r.debitReasons || []).join(', ') || 'None', 'Remarks': g.remarks || '' };
     }));
   };
 
@@ -885,8 +910,15 @@ export default function FinancialYearDetails({ onBack }) {
       ? computedRows.filter(cr => cr.groupId === gid).reduce((s, x) => s + x.receivable, 0)
       : 0;
 
-    const calcDebit = isGroupStart ? num(gd.debitAmount) : 0;
-    const groupDiff = isGroupStart ? groupTotalRecv - num(gd.paymentAmount) - calcDebit - num(gd.tdsProvision) : 0;
+    const groupDiff = isGroupStart ? groupTotalRecv - num(gd.paymentAmount) - num(gd.tdsProvision) : 0;
+    
+    const groupAlloc = isGroupStart ? computedRows.filter(cr => cr.groupId === gid).reduce((total, cr) => {
+      return total + Object.values(cr.damageVehicleAmounts || {}).reduce((tripSum, tripObj) => {
+        return tripSum + Object.values(tripObj || {}).reduce((s, v) => s + num(v), 0);
+      }, 0);
+    }, 0) : 0;
+    
+    const calcDebit = isGroupStart ? Math.max(0, groupDiff - groupAlloc) : 0;
 
     // Row styling logic matched perfectly to Cement Register
     const hasDraft = dirtyRows.has(r.invoiceNumber) || (gid && dirtyGroups.has(gid));
@@ -916,21 +948,25 @@ export default function FinancialYearDetails({ onBack }) {
 
 
     // Parse month/year for the monthYear column
-    const rawMonth = String(r.month || '').toUpperCase();
+    const rawMonth = String(r.month || '').trim();
     let curM = '', curY = '';
     if (rawMonth.includes('-')) { [curM, curY] = rawMonth.split('-'); }
     else if (rawMonth.includes(' ')) {
       [curM, curY] = rawMonth.split(' ');
       if (curY?.startsWith("'")) curY = '20' + curY.substring(1);
     } else { curM = rawMonth; }
-    if (!MONTHS.includes(curM)) curM = '';
+    
+    const matchFull = MONTH_NAMES_FULL.find(m => m && m.toUpperCase() === curM.toUpperCase());
+    if (matchFull) curM = matchFull;
+    else curM = '';
+    
     if (!YEARS.includes(curY)) curY = '';
 
     const handleMonthYearChange = (type, val) => {
-      let newM = type === 'M' ? val : (curM || 'JANUARY');
+      let newM = type === 'M' ? val : (curM || 'January');
       let newY = type === 'Y' ? val : (curY || String(new Date().getFullYear()));
 
-      const mIndex = MONTHS.indexOf(newM);
+      const mIndex = MONTH_NAMES_FULL.indexOf(newM) - 1;
       const now = new Date();
       const curMonthIndex = now.getMonth(); 
       const curYear = now.getFullYear();
@@ -942,7 +978,7 @@ export default function FinancialYearDetails({ onBack }) {
         newY = String(curYear - 1);
       }
 
-      handleRowEdit(r.invoiceNumber, 'month', `${newM}-${newY}`);
+      handleRowEdit(r.invoiceNumber, 'month', `${newM.toUpperCase()}-${newY}`);
     };
 
     return (
@@ -1012,7 +1048,7 @@ export default function FinancialYearDetails({ onBack }) {
             <div style={{ display: 'flex', gap: 2 }}>
               <SearchableSelect variant="standard" value={curM} onChange={e => handleMonthYearChange('M', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#0369a1' : 'inherit', minWidth: 110 }} disabled={r.isLocked}>
                 <option value="">Month</option>
-                {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                {MONTH_NAMES_FULL.slice(1).map(m => <option key={m} value={m}>{m}</option>)}
               </SearchableSelect>
               <SearchableSelect variant="standard" value={curY} onChange={e => handleMonthYearChange('Y', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#0369a1' : 'inherit', minWidth: 80 }} disabled={r.isLocked}>
                 <option value="">Year</option>
@@ -1071,9 +1107,14 @@ export default function FinancialYearDetails({ onBack }) {
                 <input
                   type="number"
                   value={gd.paymentAmount || ''}
-                  onChange={e => handleInlineEdit(gid, 'paymentAmount', e.target.value, gd)}
-                  style={{ ...iStyle, textAlign: 'right', fontWeight: 800, color: '#1e293b' }}
-                  placeholder="0"
+                  readOnly
+                  style={{
+                    width: '100%', padding: '4px 6px',
+                    border: '1px solid #cbd5e1', borderRadius: '4px',
+                    fontSize: '0.8rem', background: '#f8fafc',
+                    color: '#64748b'
+                  }}
+                  title="Auto-synced from Bank Book"
                 />
                 <label style={{ cursor: 'pointer', textAlign: 'right' }}>
                   <span style={{ fontSize: 10, color: '#4f46e5', fontWeight: 600, border: '1px solid #818cf8', borderRadius: 4, padding: '2px 6px', background: '#fff' }}>
@@ -1119,14 +1160,8 @@ export default function FinancialYearDetails({ onBack }) {
 
           {/* Debit Amount */}
           {(!gid || isGroupStart) && (
-            <td style={td({ background: paymentBg })} rowSpan={rowSpan}>
-              <input
-                type="number"
-                value={gd.debitAmount || ''}
-                onChange={e => handleInlineEdit(gid, 'debitAmount', e.target.value, gd)}
-                style={{ ...iStyle, textAlign: 'right', fontWeight: 700, color: '#0f172a' }}
-                placeholder="0"
-              />
+            <td style={td({ background: paymentBg, textAlign: 'right', fontWeight: 700, color: '#0f172a' })} rowSpan={rowSpan}>
+              {isGroupStart && calcDebit > 0 ? `₹${calcDebit.toLocaleString('en-IN')}` : (isGroupStart ? '₹0' : '')}
             </td>
           )}
 
@@ -1396,7 +1431,7 @@ export default function FinancialYearDetails({ onBack }) {
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
           <Typography variant="body2" color="text.secondary">Applying to {selectedIds.length} invoices.</Typography>
           <TextField label="Receivable Amount (Auto-Calculated)" fullWidth value={paymentForm.receivableAmount || 0} InputProps={{ readOnly: true }} type="number" sx={{ bgcolor: '#f8fafc' }} />
-          <TextField label="Payment Amount" fullWidth value={paymentForm.paymentAmount} onChange={e => setPaymentForm({ ...paymentForm, paymentAmount: e.target.value })} type="number" />
+          <TextField label="Payment Amount (Paid - Auto synced)" fullWidth value={paymentForm.paymentAmount} InputProps={{ readOnly: true }} type="number" sx={{ bgcolor: '#f8fafc' }} />
           <TextField label="TDS Provision" fullWidth value={paymentForm.tdsProvision} onChange={e => setPaymentForm({ ...paymentForm, tdsProvision: e.target.value })} type="number" />
           <TextField label="Payment Date" fullWidth value={paymentForm.paymentDate} onChange={e => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} type="date" InputLabelProps={{ shrink: true }} />
           <TextField label="Reference No" fullWidth value={paymentForm.referenceNo} onChange={e => setPaymentForm({ ...paymentForm, referenceNo: e.target.value })} />
@@ -1476,24 +1511,18 @@ export default function FinancialYearDetails({ onBack }) {
           </Box>
           <Box>
             <Typography variant="body2" fontWeight={600} mb={1}>3. Select Vehicle(s)</Typography>
-            <Box sx={{ maxHeight: 150, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 2, p: 1, bgcolor: damageMonth ? '#fff' : '#f8fafc' }}>
+            <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2, p: 1, bgcolor: damageMonth ? '#fff' : '#f8fafc' }}>
               {!damageYear ? (
                 <Typography variant="body2" color="text.secondary" textAlign="center">Select a financial year first.</Typography>
               ) : !damageMonth ? (
                 <Typography variant="body2" color="text.secondary" textAlign="center">Select a month first.</Typography>
-              ) : damageVehicles.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" textAlign="center">No vehicles found.</Typography>
               ) : (
-                damageVehicles.map((v) => (
-                  <Box
-                    key={v}
-                    onClick={() => toggleDamageVehicle(v)}
-                    sx={{ p: 1, mb: 0.5, borderRadius: 1, cursor: 'pointer', bgcolor: damageSelectedVehicles.includes(v) ? '#e0e7ff' : '#fff', '&:hover': { bgcolor: '#f1f5f9' }, display: 'flex', alignItems: 'center', gap: 1 }}
-                  >
-                    <input type="checkbox" checked={damageSelectedVehicles.includes(v)} readOnly style={{ cursor: 'pointer' }} />
-                    <Typography variant="body2">{v}</Typography>
-                  </Box>
-                ))
+                <MultiSelectSearchable
+                  options={damageVehicles}
+                  value={damageSelectedVehicles}
+                  onChange={(e) => handleDamageVehiclesChange(e.target.value)}
+                  label="Search and select vehicle(s)..."
+                />
               )}
             </Box>
           </Box>
@@ -1666,16 +1695,21 @@ export default function FinancialYearDetails({ onBack }) {
                 <Typography variant="body2" fontWeight={600}>
                   5. Allocate Amount
                   <Typography component="span" variant="caption" color="text.secondary" fontWeight={400} sx={{ ml: 1 }}>
-                    Total Debit: ₹{Math.abs(num(damageTarget?.debitAmount || 0))}
+                    Total Difference: ₹{Math.max(0, num(damageTarget?.difference || 0))}
                   </Typography>
                 </Typography>
                 {(() => {
-                  const target = Math.abs(num(damageTarget?.debitAmount || 0));
-                  const alloc = damageSelectedTrips.reduce((s, t) => {
-                    const rowAmounts = damageVehicleAmounts[t.invoiceNo] || {};
-                    const rowTotal = Object.values(rowAmounts).reduce((rs, val) => rs + num(val || 0), 0);
-                    return s + rowTotal;
+                  const target = Math.max(0, num(damageTarget?.difference || 0));
+                  
+                  // In the modal, we show remaining based on the group's difference and the entire group's allocations
+                  const groupRows = computedRows.filter(cr => cr.groupId === damageTarget?.groupId);
+                  const alloc = groupRows.reduce((total, cr) => {
+                    const rowAmountsObj = cr.invoiceNumber === damageTarget?.invoiceNumber ? damageVehicleAmounts : cr.damageVehicleAmounts;
+                    return total + Object.values(rowAmountsObj || {}).reduce((tripSum, tripObj) => {
+                      return tripSum + Object.values(tripObj || {}).reduce((s, v) => s + num(v), 0);
+                    }, 0);
                   }, 0);
+
                   if (target === 0) return null;
                   const remaining = target - alloc;
                   return (
@@ -1715,7 +1749,37 @@ export default function FinancialYearDetails({ onBack }) {
                             </Box>
                           </td>
                           {(damageTarget?.reasons || []).map(reason => (
-                            <td key={reason} style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>
+                            <td key={reason} style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right', verticalAlign: 'bottom' }}>
+                              {reason === 'Damage / Shortage' && (
+                                <Box sx={{ 
+                                  display: 'flex', flexDirection: 'column', alignItems: 'stretch', mb: 1.5,
+                                  border: '1px solid #e2e8f0', borderRadius: 2, p: 1.5,
+                                  bgcolor: '#f8fafc', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                                  minWidth: 260 
+                                }}>
+                                  <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#475569', letterSpacing: 0.5, textAlign: 'center', mb: 1.5, borderBottom: '1px solid #e2e8f0', pb: 0.5 }}>
+                                    DAMAGE / SHORTAGE INFORMATION
+                                  </Typography>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
+                                    <Typography sx={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>SHORTAGE (BAG)</Typography>
+                                    <Typography sx={{ fontSize: 11, color: '#1e293b', fontWeight: 700, fontFamily: 'monospace' }}>
+                                      {t.shortageBag || 0} Bags
+                                    </Typography>
+                                  </Box>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
+                                    <Typography sx={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>SHORTAGE (RATE)</Typography>
+                                    <Typography sx={{ fontSize: 11, color: '#1e293b', fontWeight: 700, fontFamily: 'monospace' }}>
+                                      ₹{t.shortageRate || 0} / Bag
+                                    </Typography>
+                                  </Box>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5, pt: 1, borderTop: '1px dashed #cbd5e1', alignItems: 'center' }}>
+                                    <Typography sx={{ fontSize: 12, color: '#0f172a', fontWeight: 800 }}>PROJECTED VALUE</Typography>
+                                    <Typography sx={{ fontSize: 14, color: '#4f46e5', fontWeight: 800, fontFamily: 'monospace' }}>
+                                      ₹{Math.round(num(t.shortageBag) * num(t.shortageRate)).toLocaleString()}
+                                    </Typography>
+                                  </Box>
+                                </Box>
+                              )}
                               <input
                                 type="number"
                                 min="0"

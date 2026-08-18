@@ -26,8 +26,8 @@ async function run() {
       const rawSite = normalizeSite(row['SITE']);
       if (rawSite !== party.toUpperCase()) continue;
 
-      const prefix = rawSite === 'NVCL' ? 'NVCL/' : 'DAC/';
-      const cleanInvNo = invNo.replace(/^(DAC|NVCL)\//i, '');
+      const prefix = rawSite === 'NVCL' ? 'NVCL-' : 'DAC-';
+      const cleanInvNo = invNo.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-');
       const finalInvNo = `${prefix}${cleanInvNo}`;
 
       if (!aggregated[finalInvNo]) {

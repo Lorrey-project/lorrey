@@ -49,7 +49,7 @@ export const buildGcnDataFromInvoice = (data) => {
     const fyStart = month >= 4 ? yr : yr - 1;
     const fyShort = `${String(fyStart).slice(-2)}-${String(fyStart + 1).slice(-2)}`;
     const ref = details.reference_number || '';
-    const gcnNo = supply.lorrey_receipt_number || (inv?.gcn_data?.gcn_no && inv.gcn_data.gcn_no !== '' ? inv.gcn_data.gcn_no : `DAC/${fyShort}/?`);
+    const gcnNo = supply.lorrey_receipt_number || (inv?.gcn_data?.gcn_no && inv.gcn_data.gcn_no !== '' ? inv.gcn_data.gcn_no : `DAC-${fyShort}-?`);
 
     const getFullName = (name) => name === 'NVCL' ? 'NUVOCO VISTAS CORP. LTD' : name === 'NVL' ? 'NU VISTA LTD' : name;
 

@@ -9,14 +9,11 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def extract_invoice_data(image_path, target_schema):
+def extract_invoice_data(base64_image, target_schema):
     """
-    Directly extract structured invoice data from the image using GPT-4.1 vision.
+    Directly extract structured invoice data from the image using GPT-4o vision.
     No OCR step required — the model reads the image natively.
     """
-
-    with open(image_path, "rb") as img_file:
-        base64_image = base64.b64encode(img_file.read()).decode("utf-8")
 
     prompt = f"""
 TASK:
@@ -90,28 +87,39 @@ SCHEMA:
 Return ONLY valid JSON matching the schema exactly.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1",
-        temperature=0,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
+    import time
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                temperature=0,
+                timeout=60, # 60 seconds timeout
+                messages=[
                     {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}",
-                            "detail": "high"
-                        }
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
                     }
                 ]
-            }
-        ]
-    )
-
-    content = response.choices[0].message.content
-    print("GPT VISION EXTRACTION RESPONSE:", content[:300], "...")
+            )
+            content = response.choices[0].message.content
+            print("GPT VISION EXTRACTION RESPONSE:", content[:300], "...")
+            break
+        except Exception as e:
+            print(f"OpenAI API Error on attempt {attempt + 1}: {e}")
+            if attempt == max_retries - 1:
+                raise ValueError(f"Failed GPT vision extraction after {max_retries} attempts: {e}")
+            time.sleep(2 ** attempt) # Exponential backoff
 
     if not content:
         raise ValueError("Empty response from GPT vision extraction")

@@ -289,7 +289,7 @@ export function fmt2(n) { return Math.round(num(n) * 100) / 100; }
 export function parseToDate(dStr) {
   if (!dStr) return new Date(0);
   const clean = String(dStr).trim();
-  const parts = clean.split(/[-\/\.]/);
+  const parts = clean.split(/[-/.]/);
   if (parts.length === 3) {
     const day = parseInt(parts[0], 10);
     const month = parseInt(parts[1], 10) - 1;

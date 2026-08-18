@@ -83,6 +83,12 @@ router.get("/", async (req, res) => {
     const filter = {};
     if (req.query.site) filter["SITE"] = req.query.site;
     if (req.query.owner) filter["OWNER NAME"] = req.query.owner;
+    if (req.query.vehicle) {
+      // Create a space-agnostic regex for vehicle number to match variants like "WB 11A 1111" vs "WB11A1111"
+      const stripped = req.query.vehicle.replace(/[^a-zA-Z0-9]/g, '');
+      const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
+      filter["VEHICLE NUMBER"] = { $regex: new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i') };
+    }
     if (req.query.from || req.query.to) {
       filter["LOADING DATE"] = {};
       if (req.query.from) filter["LOADING DATE"]["$gte"] = new Date(req.query.from);

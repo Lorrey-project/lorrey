@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import SearchableSelect from '../../components/SearchableSelect';
 import {
     Box, Typography, Container, Grid, Card, CardContent,
@@ -35,15 +35,12 @@ const MobileDashboard = ({
     onOpenFuelSlip,
     onOpenFuelRateSettings,
     onOpenVouchers,
-    onOpenContacts,
-    onOpenRegisters,
     onOpenBillingSheet,
-    onRegisterBiometrics,
     onOpenAccountApprovals,
 }) => {
     const { user, logout, registerPasskey } = useAuth();
     const [invoices, setInvoices] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [, setLoading] = useState(true);
     const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
     const [regError, setRegError] = useState('');
     const [regSuccess, setRegSuccess] = useState(false);
@@ -58,12 +55,12 @@ const MobileDashboard = ({
     const [selectedInvoices, setSelectedInvoices] = useState(new Set());
     const [portalStatuses, setPortalStatuses] = useState([]);
 
-    const [pumpVerifications, setPumpVerifications] = useState([]);
-    const [pumpStats, setPumpStats] = useState({ totalLitresToday: 0, verifiedTodayCount: 0, pendingCount: 0 });
-    const [billingRows, setBillingRows] = useState([]);
-    const [periodStatus, setPeriodStatus] = useState('Unpaid');
-    const [verificationCodes, setVerificationCodes] = useState({});
-    const [billingLoading, setBillingLoading] = useState(false);
+    const [, setPumpVerifications] = useState([]);
+    const [, setPumpStats] = useState({ totalLitresToday: 0, verifiedTodayCount: 0, pendingCount: 0 });
+    const [, setBillingRows] = useState([]);
+    const [, setPeriodStatus] = useState('Unpaid');
+    const [, setVerificationCodes] = useState({});
+    const [, setBillingLoading] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [pendingApprovals, setPendingApprovals] = useState(0);
 
@@ -101,7 +98,7 @@ const MobileDashboard = ({
                 if (authRes.data?.success && authRes.data.users) count += authRes.data.users.length;
                 if (truckRes.data?.success && truckRes.data.requests) count += truckRes.data.requests.length;
                 setPendingApprovals(count);
-            } catch (e) { /* silent */ }
+            } catch { /* silent */ }
         };
         fetchPending();
         const interval = setInterval(fetchPending, 30000);
@@ -130,7 +127,7 @@ const MobileDashboard = ({
                 setLoading(false);
             }
         }
-    }, [user, autoPump]);
+    }, [user, autoPump, fetchPumpData]);
 
     const fetchPumpData = async (pumpName = user?.pumpName) => {
         if (!pumpName) return;
@@ -157,43 +154,17 @@ const MobileDashboard = ({
     };
 
     const fetchBillingRows = async (token, pumpName = user?.pumpName) => {
-        setBillingLoading(true);
         try {
-            const res = await axios.get(`${API_URL}/pump-payment/data`, {
+            await axios.get(`${API_URL}/pump-payment/data`, {
                 params: { pumpName: pumpName, month: selMonth, year: selYear, period: selPeriod },
                 headers: { Authorization: `Bearer ${token}` }
             });
-            if (res.data.success) {
-                setBillingRows(res.data.rows || []);
-                setPeriodStatus(res.data.periodStatus || 'Unpaid');
-            }
         } catch (e) {
             console.error('Fetch billing rows failed', e);
-        } finally {
-            setBillingLoading(false);
         }
     };
 
-    const handleVerifyCode = async (row) => {
-        const code = (verificationCodes[row._cementId] || '').trim();
-        if (!code) return alert('Enter code');
-        if (code !== (row['HSD SLIP NO'] || '').trim()) return alert('Invalid code');
 
-        try {
-            const token = localStorage.getItem('token');
-            const finalPump = autoPump || user?.pumpName;
-            await axios.put(`${API_URL}/cement-register/${row._cementId}`, {
-                'VERIFICATION STATUS': 'Verified',
-                'HSD RATE': 90, // Default for now
-                'PUMP NAME': finalPump
-            }, { headers: { Authorization: `Bearer ${token}` } });
-
-            alert('Verified!');
-            fetchPumpData(finalPump); // Refresh everything
-        } catch (e) {
-            alert('Verification failed');
-        }
-    };
     const handleRegisterDevice = async () => {
         setRegError('');
         setRegSuccess(false);
@@ -243,7 +214,7 @@ const MobileDashboard = ({
             );
             setSelectedInvoices(new Set());
             fetchInvoices();
-        } catch (e) {
+        } catch {
             alert('Failed to delete slips');
         }
     };
@@ -261,7 +232,7 @@ const MobileDashboard = ({
     const isRecent = (dateStr) => {
         if (!dateStr) return false;
         try {
-            const p = dateStr.replace(/[\.\/]/g, '-').split('-');
+            const p = dateStr.replace(/[./]/g, '-').split('-');
             if (p.length !== 3) return true;
             
             let d;
@@ -278,7 +249,7 @@ const MobileDashboard = ({
             
             const diffDays = (new Date() - d) / (1000 * 60 * 60 * 24);
             return diffDays <= 1.5;
-        } catch (e) { return true; }
+        } catch { return true; }
     };
 
     const currentYear = new Date().getFullYear();
@@ -296,7 +267,7 @@ const MobileDashboard = ({
         let m, y;
 
         if (dateStr) {
-            const parts = dateStr.replace(/[\.\/]/g, '-').split('-');
+            const parts = dateStr.replace(/[./]/g, '-').split('-');
             if (parts.length === 3) {
                 // Determine which part is the year (usually 4 digits)
                 const p0 = parseInt(parts[0]);

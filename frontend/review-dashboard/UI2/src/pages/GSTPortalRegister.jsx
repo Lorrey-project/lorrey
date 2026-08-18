@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
@@ -17,6 +17,8 @@ import SyncIcon from '@mui/icons-material/Sync';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -81,12 +83,17 @@ export default function GSTPortalRegister({ onBack }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [uploadingObj, setUploadingObj] = useState(null); // { id: rowId }
   const [activeTab, setActiveTab] = useState(0);
-  const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
-  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const now = new Date();
+  const [filterMonth, setFilterMonth] = useState(now.getMonth() + 1);
+  const [filterYear, setFilterYear] = useState(now.getFullYear());
+  const years = useMemo(() => Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i), [now]);
   const [syncing, setSyncing] = useState(false);
   const [inputReceived, setInputReceived] = useState(0);
   const [tempInputReceived, setTempInputReceived] = useState('0');
   const [savingSummary, setSavingSummary] = useState(false);
+
+  const tableContainerRef = useRef(null);
+  useTableNavigation(tableContainerRef);
 
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -238,13 +245,16 @@ export default function GSTPortalRegister({ onBack }) {
         { [field]: value },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      // No manual success snackbar to keep it unobtrusive
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Auto-save failed: ' + (err.response?.data?.error || err.message) });
     }
   }, []);
 
   // ── Delete selected ─────────────────────────────────────────────────────────
+  const handleBulkDelete = async () => {
+    setConfirmDel(true);
+  };
+  const handleSave = () => {};
   const handleDelete = async () => {
     setDeleting(true);
     try {
@@ -298,28 +308,10 @@ export default function GSTPortalRegister({ onBack }) {
     }
   };
 
-  // ── Excel (.xlsx) Export ───────────────────────────────────────────────────
-  const handleExportExcel = () => {
-    const EXCEL_COLS = COLUMNS.filter(c => c.type !== 'upload');
-    const headerRow = EXCEL_COLS.map(c => c.label.replace(/\n/g, ' '));
-    const dataRows = entries.map(v =>
-      EXCEL_COLS.map(c => {
-        const val = v[c.key];
-        return val !== undefined && val !== null ? String(val) : '';
-      })
-    );
-    const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
-    ws['!cols'] = EXCEL_COLS.map(c => ({ wch: Math.max(12, Math.floor(c.width / 7)) }));
-    ws['!freeze'] = { xSplit: 0, ySplit: 1 };
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'GST Portal Details');
-    XLSX.writeFile(wb, `GST_Portal_${new Date().toISOString().slice(0, 10)}.xlsx`);
-  };
-
-  // ── XLS Export ──────────────────────────────────────────────────────────────
+  // ── Export ──────────────────────────────────────────────────────────────
   const handleExport = () => {
-    const exportCols = COLUMNS.filter(c => c.type !== 'upload');
-    const rows = entries.map(v => {
+    const exportCols = activeTab === 0 ? COLUMNS.filter(c => c.type !== 'upload') : LIABILITY_COLUMNS;
+    const rows = (activeTab === 0 ? entries.filter(e => !e.type || e.type === 'b2b') : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))).map(v => {
       const row = {};
       exportCols.forEach(c => {
         const val = v[c.key];
@@ -331,6 +323,11 @@ export default function GSTPortalRegister({ onBack }) {
       exportToCsv('gst_portal_register.xls', rows)
     );
   };
+
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', handleBulkDelete);
 
   // ─────────────────────────────────────────────────────────────────────────────
   if (loading) {
@@ -358,7 +355,7 @@ export default function GSTPortalRegister({ onBack }) {
 
   const filteredEntries = activeTab === 0
     ? entries.filter(e => !e.type || e.type === 'b2b')
-    : entries.filter(e => e.type === 'liability' && e.filterMonth === filterMonth && e.filterYear === filterYear);
+    : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear));
 
   filteredEntries.forEach(row => {
     if (activeTab === 0) {
@@ -420,7 +417,7 @@ export default function GSTPortalRegister({ onBack }) {
               onChange={e => setFilterYear(e.target.value)}
               sx={{ fontSize: '12px', fontWeight: 700, bgcolor: '#fff', borderRadius: 2, height: 32 }}
             >
-              {[2024, 2025, 2026, 2027, 2028].map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+              {years.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
             </SearchableSelect>
           </Box>
         )}
@@ -434,7 +431,7 @@ export default function GSTPortalRegister({ onBack }) {
           {selectedIds.size > 0 && (
             <Button size="small" variant="contained"
               startIcon={deleting ? <CircularProgress size={13} color="inherit" /> : <DeleteIcon />}
-              onClick={() => setConfirmDel(true)} disabled={deleting}
+              onClick={handleBulkDelete} disabled={deleting}
               sx={{
                 fontWeight: 800, borderRadius: 2, px: 2, fontSize: '12px',
                 background: 'linear-gradient(135deg,#dc2626,#b91c1c)',
@@ -496,203 +493,137 @@ export default function GSTPortalRegister({ onBack }) {
 
       {/* ── Tab Content ────────────────────────────────────────────────────── */}
       {activeTab === 0 && (
-        <>
-          {/* ── Excel Table ─────────────────────────────────────────────────────── */}
-          <Box sx={{ overflow: 'auto', flex: 1 }}>
-            <table style={{
-              borderCollapse: 'collapse', minWidth: '100%',
-              tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
-            }}>
-              <colgroup>
-                <col style={{ width: 40, minWidth: 40 }} />
-                {COLUMNS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
-              </colgroup>
+        <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
+          <table style={{
+            borderCollapse: 'collapse', minWidth: '100%',
+            tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
+          }}>
+            <colgroup>
+              <col style={{ width: 40, minWidth: 40 }} />
+              {COLUMNS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
+            </colgroup>
 
-              <thead>
-                <tr>
-                  {/* Select-all checkbox */}
-                  <th style={{
-                    position: 'sticky', top: 0, zIndex: 3, width: 40,
-                    background: 'linear-gradient(135deg,#0f172a,#1e293b)',
-                    textAlign: 'center', padding: '7px 4px',
-                    borderRight: '1px solid rgba(255,255,255,0.12)',
-                    borderBottom: '2px solid rgba(255,255,255,0.2)',
-                  }}>
-                    <input type="checkbox" checked={allSelected}
-                      ref={el => { if (el) el.indeterminate = someSelected; }}
-                      onChange={toggleSelectAll}
-                      style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#0ea5e9' }} />
-                  </th>
+            <thead>
+              <tr>
+                <th style={{
+                  position: 'sticky', top: 0, zIndex: 3, width: 40,
+                  background: 'linear-gradient(135deg,#0f172a,#1e293b)',
+                  textAlign: 'center', padding: '7px 4px',
+                  borderRight: '1px solid rgba(255,255,255,0.12)',
+                  borderBottom: '2px solid rgba(255,255,255,0.2)',
+                }}>
+                  <input type="checkbox" checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected; }}
+                    onChange={toggleSelectAll}
+                    style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#0ea5e9' }} />
+                </th>
 
-                  {COLUMNS.map(col => {
-                    const typeStyle = col.type === 'auto'
-                      ? { background: 'linear-gradient(135deg,#0369a1,#075985)', color: '#e0f2fe' }
-                      : col.type === 'upload'
-                        ? { background: 'linear-gradient(135deg,#8b5cf6,#7c3aed)', color: '#ede9fe' }
-                        : col.type === 'dropdown'
-                          ? { background: 'linear-gradient(135deg,#0284c7,#0369a1)', color: '#bae6fd' }
-                          : { background: 'linear-gradient(135deg,#3b82f6,#2563eb)', color: '#bfdbfe' };
-                    return (
-                      <th key={col.key} style={{
-                        position: 'sticky', top: 0, zIndex: 2,
-                        ...typeStyle,
-                        padding: '7px 5px', textAlign: 'center',
-                        fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.3px',
-                        whiteSpace: 'pre-line', lineHeight: 1.3,
-                        borderRight: '1px solid rgba(255,255,255,0.12)',
-                        borderBottom: '2px solid rgba(255,255,255,0.2)',
-                      }}>
-                        {col.label}
-                        {col.type === 'auto' && <div style={{ fontSize: '7px', opacity: 0.7, marginTop: 2 }}>🔒 AUTO</div>}
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-
-              <tbody>
-                {entries.filter(e => !e.type || e.type === 'b2b').length === 0 && (
-                  <tr>
-                    <td colSpan={COLUMNS.length + 1} style={{
-                      textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px'
-                    }}>
-                      No entries found. Click "New Row" to add one.
-                    </td>
-                  </tr>
-                )}
-                {entries.filter(e => !e.type || e.type === 'b2b').map((row, ri) => {
-                  const isSelected = selectedIds.has(row._id);
+                {COLUMNS.map(col => {
+                  const typeStyle = col.type === 'auto'
+                    ? { background: 'linear-gradient(135deg,#0369a1,#075985)', color: '#e0f2fe' }
+                    : col.type === 'upload'
+                      ? { background: 'linear-gradient(135deg,#8b5cf6,#7c3aed)', color: '#ede9fe' }
+                      : col.type === 'dropdown'
+                        ? { background: 'linear-gradient(135deg,#0284c7,#0369a1)', color: '#bae6fd' }
+                        : { background: 'linear-gradient(135deg,#3b82f6,#2563eb)', color: '#bfdbfe' };
                   return (
-                    <tr key={row._id} style={{
-                      background: isSelected ? 'rgba(14,165,233,0.08)'
-                        : ri % 2 === 0 ? '#fff' : '#f8fafc',
-                      outline: isSelected ? '2px solid rgba(14,165,233,0.4)' : 'none',
+                    <th key={col.key} style={{
+                      position: 'sticky', top: 0, zIndex: 2,
+                      ...typeStyle,
+                      padding: '7px 5px', textAlign: 'center',
+                      fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.3px',
+                      whiteSpace: 'pre-line', lineHeight: 1.3,
+                      borderRight: '1px solid rgba(255,255,255,0.12)',
+                      borderBottom: '2px solid rgba(255,255,255,0.2)',
                     }}>
-                      {/* Row checkbox */}
-                      <td style={{
-                        width: 40, textAlign: 'center', border: '1px solid #e2e8f0', padding: '4px',
-                        background: isSelected ? 'rgba(14,165,233,0.06)' : 'transparent',
-                      }}>
-                        <input type="checkbox" checked={isSelected}
-                          onChange={() => toggleSelect(row._id)}
-                          style={{ cursor: 'pointer', width: 13, height: 13, accentColor: '#0ea5e9' }} />
-                      </td>
-
-                      {COLUMNS.map(col => {
-                        const rawVal = row[col.key];
-                        let display = rawVal !== null && rawVal !== undefined ? String(rawVal) : '';
-
-                        const cellStyle = {
-                          padding: '4px 5px', border: '1px solid #e2e8f0', fontSize: '11px',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          borderRight: '1px solid #e2e8f0',
-                          width: col.width, maxWidth: col.width,
-                        };
-
-                        // ── Auto (read-only) ────────────────────────────────────
-                        if (col.type === 'auto') {
-                          return (
-                            <td key={col.key} style={{
-                              ...cellStyle,
-                              background: 'rgba(237,233,254,0.18)',
-                              cursor: 'default',
-                            }}>{display}</td>
-                          );
-                        }
-
-                        // ── Upload ───────────────────────────────────────────────
-                        if (col.type === 'upload') {
-                          return (
-                            <td key={col.key} style={{ ...cellStyle, textAlign: 'center', padding: '3px' }}>
-                              {uploadingObj === row._id ? (
-                                <CircularProgress size={16} />
-                              ) : rawVal ? (
-                                <Box display="flex" gap={1} justifyContent="center" alignItems="center">
-                                  <a href={rawVal} target="_blank" rel="noopener noreferrer"
-                                    title="View GST File"
-                                    style={{
-                                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                      gap: 3, padding: '3px 8px', borderRadius: 6,
-                                      background: '#eff6ff', border: '1px solid #93c5fd',
-                                      color: '#2563eb', textDecoration: 'none', fontSize: '10px', fontWeight: 700,
-                                    }}>📄 View</a>
-                                  <IconButton size="small" onClick={() => handleTriggerUpload(row._id)} sx={{ padding: '2px' }}>
-                                    <RefreshIcon sx={{ fontSize: 14 }} />
-                                  </IconButton>
-                                </Box>
-                              ) : (
-                                <Button size="small" variant="outlined" onClick={() => handleTriggerUpload(row._id)}
-                                  startIcon={<FileUploadIcon sx={{ fontSize: 14 }} />}
-                                  sx={{
-                                    padding: '2px 6px', fontSize: '10px', minWidth: '40px',
-                                    textTransform: 'none', borderRadius: '6px'
-                                  }}>Upload</Button>
-                              )}
-                            </td>
-                          );
-                        }
-
-                        // ── Dropdown ────────────────────────────────────────────
-                        if (col.type === 'dropdown') {
-                          return (
-                            <td key={col.key} style={{ ...cellStyle, padding: 0 }}>
-                              <SearchableSelect variant="standard" value={display}
-                                onChange={e => handleCellEdit(row._id, col.key, e.target.value)}
-                                style={{
-                                  width: '100%', height: '100%', border: 'none', background: 'transparent',
-                                  fontSize: '11px', cursor: 'pointer', padding: '4px 5px',
-                                  color: '#0f172a', fontWeight: 700,
-                                }}>
-                                {col.options.map(o => <option key={o} value={o}>{o}</option>)}
-                              </SearchableSelect>
-                            </td>
-                          );
-                        }
-
-                        // ── Manual editable ─────────────────────────────────────
-                        return (
-                          <EditableCell key={col.key}
-                            value={String(rawVal ?? '')}
-                            isDirty={false}
-                            onChange={v => handleCellEdit(row._id, col.key, v)}
-                            style={cellStyle}
-                          />
-                        );
-                      })}
-                    </tr>
+                      {col.label}
+                      {col.type === 'auto' && <div style={{ fontSize: '7px', opacity: 0.7, marginTop: 2 }}>🔒 AUTO</div>}
+                    </th>
                   );
                 })}
-              </tbody>
+              </tr>
+            </thead>
 
-              <tfoot style={{ position: 'sticky', bottom: 0, zIndex: 4, boxShadow: '0 -4px 12px rgba(0,0,0,0.06)' }}>
-                <tr style={{ background: '#f8fafc', fontWeight: 900, color: '#0f172a' }}>
-                  <td style={{ background: '#f1f5f9', borderRight: '1px solid #e2e8f0', borderTop: '3px solid #94a3b8' }}></td>
-                  {COLUMNS.map((col, idx) => {
-                    const isTotalCol = Object.keys(totals).includes(col.key);
-                    const isLabelCol = idx === 0;
-
-                    return (
-                      <td key={col.key} style={{
-                        padding: '10px 5px', textAlign: isTotalCol ? 'left' : 'center', fontSize: '12px',
-                        borderTop: '3px solid #94a3b8', borderRight: '1px solid #e2e8f0',
-                        color: isTotalCol ? '#000' : '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        background: isLabelCol ? '#f1f5f9' : 'transparent',
-                        letterSpacing: isLabelCol ? '1px' : 'normal'
-                      }}>
-                        {isLabelCol ? 'TOTAL' : isTotalCol ? totals[col.key].toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
-                      </td>
-                    );
-                  })}
+            <tbody>
+              {entries.filter(e => !e.type || e.type === 'b2b').length === 0 && (
+                <tr>
+                  <td colSpan={COLUMNS.length + 1} style={{
+                    textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px'
+                  }}>
+                    No entries found. Click "New Row" to add one.
+                  </td>
                 </tr>
-              </tfoot>
-            </table>
-          </Box>
-        </>
+              )}
+              {entries.filter(e => !e.type || e.type === 'b2b').map((row, ri) => {
+                const isSelected = selectedIds.has(row._id);
+                return (
+                  <tr key={row._id} style={{
+                    background: isSelected ? 'rgba(14,165,233,0.08)'
+                      : ri % 2 === 0 ? '#fff' : '#f8fafc',
+                    outline: isSelected ? '2px solid rgba(14,165,233,0.4)' : 'none',
+                  }}>
+                    <td style={{
+                      width: 40, textAlign: 'center', border: '1px solid #e2e8f0', padding: '4px',
+                      background: isSelected ? 'rgba(14,165,233,0.06)' : 'transparent',
+                    }}>
+                      <input type="checkbox" checked={isSelected}
+                        onChange={() => toggleSelect(row._id)}
+                        style={{ cursor: 'pointer', width: 13, height: 13, accentColor: '#0ea5e9' }} />
+                    </td>
+
+                    {COLUMNS.map(col => {
+                      const rawVal = row[col.key];
+                      let display = rawVal !== null && rawVal !== undefined ? String(rawVal) : '';
+                      const cellStyle = {
+                        padding: '4px 5px', border: '1px solid #e2e8f0', fontSize: '11px',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        borderRight: '1px solid #e2e8f0',
+                        width: col.width, maxWidth: col.width,
+                      };
+
+                      if (col.type === 'auto') return <td key={col.key} style={{ ...cellStyle, background: 'rgba(237,233,254,0.18)' }}>{display}</td>;
+                      if (col.type === 'upload') return (
+                        <td key={col.key} style={{ ...cellStyle, textAlign: 'center', padding: '3px' }}>
+                          {uploadingObj === row._id ? <CircularProgress size={16} /> : rawVal ? (
+                            <Box display="flex" gap={1} justifyContent="center" alignItems="center">
+                              <a href={rawVal} target="_blank" rel="noopener noreferrer" style={{ padding: '3px 8px', borderRadius: 6, background: '#eff6ff', border: '1px solid #93c5fd', color: '#2563eb', textDecoration: 'none', fontSize: '10px', fontWeight: 700 }}>📄 View</a>
+                              <IconButton size="small" onClick={() => handleTriggerUpload(row._id)}><RefreshIcon sx={{ fontSize: 14 }} /></IconButton>
+                            </Box>
+                          ) : <Button size="small" variant="outlined" onClick={() => handleTriggerUpload(row._id)} startIcon={<FileUploadIcon sx={{ fontSize: 14 }} />} sx={{ padding: '2px 6px', fontSize: '10px', minWidth: '40px', borderRadius: '6px' }}>Upload</Button>}
+                        </td>
+                      );
+                      if (col.type === 'dropdown') return (
+                        <td key={col.key} style={{ ...cellStyle, padding: 0 }}>
+                          <SearchableSelect variant="standard" value={display} onChange={e => handleCellEdit(row._id, col.key, e.target.value)} style={{ width: '100%', height: '100%', border: 'none', background: 'transparent', fontSize: '11px', cursor: 'pointer', padding: '4px 5px', color: '#0f172a', fontWeight: 700 }}>{col.options.map(o => <option key={o} value={o}>{o}</option>)}</SearchableSelect>
+                        </td>
+                      );
+                      return <EditableCell key={col.key} value={String(rawVal ?? '')} onChange={v => handleCellEdit(row._id, col.key, v)} style={cellStyle} />;
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot style={{ position: 'sticky', bottom: 0, zIndex: 4, boxShadow: '0 -4px 12px rgba(0,0,0,0.06)' }}>
+              <tr style={{ background: '#f8fafc', fontWeight: 900, color: '#0f172a' }}>
+                <td style={{ background: '#f1f5f9', borderRight: '1px solid #e2e8f0', borderTop: '3px solid #94a3b8' }}></td>
+                {COLUMNS.map((col, idx) => {
+                  const isTotalCol = Object.keys(totals).includes(col.key);
+                  const isLabelCol = idx === 0;
+                  return (
+                    <td key={col.key} style={{ padding: '10px 5px', textAlign: isTotalCol ? 'left' : 'center', fontSize: '12px', borderTop: '3px solid #94a3b8', borderRight: '1px solid #e2e8f0', color: isTotalCol ? '#000' : '#1e293b', background: isLabelCol ? '#f1f5f9' : 'transparent' }}>
+                      {isLabelCol ? 'TOTAL' : isTotalCol ? totals[col.key].toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          </table>
+        </Box>
       )}
 
       {/* ── GST LIABILITIES Tab Content ──────────────────────────────────────── */}
       {activeTab === 1 && (
-        <Box sx={{ overflow: 'auto', flex: 1 }}>
+        <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
           <table style={{
             borderCollapse: 'collapse', minWidth: '100%',
             tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'

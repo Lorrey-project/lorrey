@@ -90,8 +90,8 @@ router.post("/sync-liabilities", auth, async (req, res) => {
       const rawSite = normalizeSite(row['SITE']);
       if (rawSite !== 'NVCL' && rawSite !== 'NVL') continue;
 
-      const prefix = rawSite === 'NVCL' ? 'NVCL/' : 'DAC/';
-      const cleanInvNo = invNo.replace(/^(DAC|NVCL)\//i, '');
+      const prefix = rawSite === 'NVCL' ? 'NVCL-' : 'DAC-';
+      const cleanInvNo = invNo.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-');
       const finalInvNo = `${prefix}${cleanInvNo}`;
 
       if (!aggregated[finalInvNo]) {

@@ -17,7 +17,8 @@ const accountDetailSchema = new mongoose.Schema({
   selectedMonth: { type: String, default: '' },
   selectedYear: { type: String, default: '' },
   vehicle: { type: String, default: '' },
-  _source: { type: String, default: 'manual' }
+  _source: { type: String, default: 'manual' },
+  _allocations: { type: mongoose.Schema.Types.Mixed, default: [] }
 }, {
   timestamps: true,
   collection: 'account_details'

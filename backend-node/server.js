@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+const validateEnv = require("./utils/envValidator");
+validateEnv();
+
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -58,6 +61,14 @@ app.use((req, res, next) => {
     }
   });
 
+  // If request has /api prefix, strip it so the backend routes match properly
+  // This helps when VITE_API_URL includes /api on production
+  if (req.url.startsWith("/api/")) {
+    const oldUrl = req.url;
+    req.url = req.url.replace(/^\/api/, "");
+    console.log(`[ROUTE REWRITE] Re-wrote ${oldUrl} to ${req.url}`);
+  }
+
   next();
 });
 
@@ -75,6 +86,7 @@ app.use("/remittance-advise", require("./routes/remittanceAdviseRoutes"));
 app.use("/daily-summary", require("./routes/dailySummaryRoutes"));
 app.use("/pump-payment-register", require("./routes/pumpPaymentRegisterRoutes"));
 app.use("/attendance", require("./routes/attendanceRoutes"));
+app.use("/settings", require("./routes/settingsRoutes"));
 
 const activePortals = {
   office: 0,
@@ -125,7 +137,8 @@ app.post("/upload", auth, upload.single("invoice"), async (req, res) => {
   try {
     const fileUrl = req.file.location;
     console.log("File uploaded to S3:", fileUrl);
-    const aiWorkerUrl = process.env.AI_WORKER_URL;
+    const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+    console.log(`[AI WORKER REQUEST] Method: POST, URL: ${aiWorkerUrl}/process`);
     const response = await axios.post(`${aiWorkerUrl}/process`, {
       file: fileUrl
     });
@@ -134,7 +147,7 @@ app.post("/upload", auth, upload.single("invoice"), async (req, res) => {
       ai_data: response.data
     });
   } catch (error) {
-    console.log(error.response?.data || error.message);
+    console.error(`[AI WORKER ERROR] Status: ${error.response?.status}, Data:`, error.response?.data || error.message);
     res.status(500).json({ error: "Processing failed" });
   }
 });
@@ -196,8 +209,19 @@ const connectDB = async () => {
 };
 connectDB();
 
-
 app.use("/invoice", auth, invoiceRoutes);
+
+// Catch-all 404 logger
+app.use((req, res, next) => {
+  console.log(`🚨 [404 NOT FOUND] No route matched for ${req.method} ${req.url}`);
+  res.status(404).json({ error: `Route not found: ${req.method} ${req.url}` });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error(`🚨 [500 INTERNAL ERROR] on ${req.method} ${req.url}`, err);
+  res.status(500).json({ error: err.message || "Internal Server Error" });
+});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {

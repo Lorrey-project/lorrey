@@ -9,6 +9,7 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 export default function PremiumUploadArea({ 
   onUpload, 
@@ -18,7 +19,8 @@ export default function PremiumUploadArea({
   status, 
   currentFile, 
   onRemove, 
-  onReplace 
+  onReplace,
+  onBack
 }) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -107,7 +109,19 @@ export default function PremiumUploadArea({
   return (
     <Box sx={{ mb: 4 }}>
       {/* Title Section */}
-      <Box display="flex" alignItems="flex-start" gap={1.5} mb={3}>
+      <Box display="flex" alignItems="center" gap={2} mb={3}>
+        {onBack && (
+          <IconButton 
+            onClick={onBack}
+            sx={{ 
+              bgcolor: '#f1f5f9', 
+              color: '#475569',
+              '&:hover': { bgcolor: '#e2e8f0' }
+            }}
+          >
+            <ArrowBackIcon />
+          </IconButton>
+        )}
         <Box>
           <Typography variant="h4" fontWeight="800" sx={{ color: '#0f172a', letterSpacing: '-1px', fontSize: { xs: '1.5rem', md: '2.25rem' } }}>
             DIPALI ASSOCIATES & CO

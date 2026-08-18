@@ -18,9 +18,9 @@ function getDatePatterns(dateStr) {
   const mm = parts[1]; // e.g. "06"
   const d = String(parseInt(parts[2], 10)); // e.g. "9"
   const dd = parts[2]; // e.g. "09"
-  
+
   const yShort = y.slice(-2);
-  
+
   const patterns = [
     `${dd}-${mm}-${y}`,
     `${d}-${m}-${y}`,
@@ -41,7 +41,12 @@ router.get("/data", auth, async (req, res) => {
       return res.status(400).json({ success: false, error: "Date parameter is required (YYYY-MM-DD)" });
     }
 
-    const patterns = getDatePatterns(date);
+    const dateList = date.split(',');
+    let patterns = [];
+    dateList.forEach(d => {
+      patterns.push(...getDatePatterns(d));
+    });
+    patterns = Array.from(new Set(patterns));
 
     // Fetch Cement Register entries based on date patterns
     const cementEntries = await getCementCol().find({
@@ -53,59 +58,44 @@ router.get("/data", auth, async (req, res) => {
     }).toArray();
 
     // Fetch Main Cashbook entry for the selected date
-    const cashbookEntry = await mongoose.connection.useDb("main_cashbook").collection("entries").findOne({
+    const cashbookEntries = await mongoose.connection.useDb("main_cashbook").collection("entries").find({
       DATE: { $in: patterns }
-    });
+    }).toArray();
+    
+    let cashbookEntry = null;
+    if (cashbookEntries.length > 0) {
+      cashbookEntry = {
+        OPENING_BALANCE: cashbookEntries[0].OPENING_BALANCE,
+        RECEIVED_AMOUNT: cashbookEntries.reduce((s, e) => s + (parseFloat(String(e.RECEIVED_AMOUNT || 0).replace(/,/g, '')) || 0), 0),
+        PAYMENT_AMOUNT: cashbookEntries.reduce((s, e) => s + (parseFloat(String(e.PAYMENT_AMOUNT || 0).replace(/,/g, '')) || 0), 0)
+      };
+    }
 
     // Fetch Advance Summary for the selected date
     let isoDateObj = new Date(date);
     let advanceSummary = null;
-    let invoiceStats = {
-      totalUploaded: 0,
-      successfullyProcessed: 0,
-      pendingInvoices: 0,
-      failedInvoices: 0,
-      lastUploadTime: null,
-      recentInvoices: []
-    };
 
-    if (!isNaN(isoDateObj.getTime())) {
-      const y = isoDateObj.getFullYear();
-      const m = String(isoDateObj.getMonth() + 1).padStart(2, '0');
-      const d = String(isoDateObj.getDate()).padStart(2, '0');
-      const isoFmt = `${y}-${m}-${d}`;
-      advanceSummary = await mongoose.connection.useDb("invoiceAI").collection("daily_advances").findOne({ date: isoFmt });
-      
-      // Calculate start and end of the day for Invoice query
-      const startOfDay = new Date(isoDateObj.setHours(0, 0, 0, 0));
-      const endOfDay = new Date(isoDateObj.setHours(23, 59, 59, 999));
-      
-      const invoicesToday = await Invoice.find({
-        created_at: { $gte: startOfDay, $lte: endOfDay }
-      }).sort({ created_at: -1 }).lean();
-
-      invoiceStats.totalUploaded = invoicesToday.length;
-      if (invoicesToday.length > 0) {
-        invoiceStats.lastUploadTime = invoicesToday[0].created_at;
-      }
-
-      invoicesToday.forEach(inv => {
-        const status = (inv.status || '').toLowerCase();
-        if (status === 'approved' || status === 'completed') {
-          invoiceStats.successfullyProcessed++;
-        } else if (status === 'failed' || status === 'error') {
-          invoiceStats.failedInvoices++;
-        } else {
-          invoiceStats.pendingInvoices++;
-        }
+    let validDates = dateList.map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+    if (validDates.length > 0) {
+      const isoDateStrings = validDates.map(dateObj => {
+        const yr = dateObj.getFullYear();
+        const mo = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const da = String(dateObj.getDate()).padStart(2, '0');
+        return `${yr}-${mo}-${da}`;
       });
 
-      invoiceStats.recentInvoices = invoicesToday.slice(0, 5).map(inv => ({
-        _id: inv._id,
-        consignee_name: inv.consignee_name || (inv.human_verified_data?.consignee_details?.consignee_name) || (inv.ai_data?.consignee_details?.consignee_name) || "Unknown",
-        status: inv.status,
-        created_at: inv.created_at
-      }));
+      const advSummaries = await mongoose.connection.useDb("invoiceAI").collection("daily_advances").find({ date: { $in: isoDateStrings } }).sort({ date: 1 }).toArray();
+      if (advSummaries.length > 0) {
+        advanceSummary = {
+          openingBalance: advSummaries[0].openingBalance,
+          closingBalance: advSummaries[advSummaries.length - 1].closingBalance,
+          cashReceived: advSummaries.reduce((s, a) => s + (a.cashReceived || 0), 0),
+          miscExpense: advSummaries.reduce((s, a) => s + (a.miscExpense || 0), 0),
+          totalAdvancesAmt: advSummaries.reduce((s, a) => s + (a.totalAdvancesAmt || 0), 0),
+          unadjustedAdvances: advSummaries.reduce((s, a) => s + (a.unadjustedAdvances || 0), 0),
+          advancesCount: advSummaries.reduce((s, a) => s + (a.advancesCount || 0), 0)
+        };
+      }
     }
 
     // Extract pump slips (entries from cement register with pump details)
@@ -117,8 +107,7 @@ router.get("/data", auth, async (req, res) => {
 
     res.json({
       success: true,
-      invoicesUploaded: cementEntries.length, // Keeping for backward compatibility with total cement entries
-      invoiceStats,
+      invoicesUploaded: cementEntries.length,
       cement: cementEntries,
       pumpSlips,
       cashbookEntry,

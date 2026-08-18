@@ -30,7 +30,6 @@ import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import axios from "axios";
-import html2pdf from "html2pdf.js";
 import { io } from "socket.io-client";
 import { API_URL } from "../config";
 
@@ -71,6 +70,7 @@ export default function InvoiceForm({ onBack }) {
   const [isScanTriggered, setIsScanTriggered] = useState(false);
   const [currentFile, setCurrentFile] = useState(null);
   const [zoom, setZoom] = useState(window.innerWidth < 600 ? 0.40 : 1.0);
+  const [pendingInvoiceId, setPendingInvoiceId] = useState(null);
   const ZOOM_STEP = 0.15;
   const ZOOM_MIN = 0.25;
   const ZOOM_MAX = 3.0;
@@ -205,6 +205,8 @@ export default function InvoiceForm({ onBack }) {
           html2canvas: { scale: 3, useCORS: true, logging: false },
           jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         };
+        const html2pdfModule = await import("html2pdf.js");
+        const html2pdf = html2pdfModule.default || html2pdfModule;
         await html2pdf().set(opt).from(element).save();
         setStatus({ type: "success", message: "✅ Download started successfully!" });
       } catch (err) {
@@ -293,16 +295,46 @@ export default function InvoiceForm({ onBack }) {
       setIsProcessing(false);
     };
 
+    const onInvoiceStatus = (data) => {
+      if (pendingInvoiceId && data.invoiceId !== pendingInvoiceId) return;
+      
+      setProcessingMode("upload");
+      setIsProcessing(true);
+
+      if (data.status === "error") {
+        setIsProcessing(false);
+        setStatus({ type: "error", message: data.message });
+        setPendingInvoiceId(null);
+      } else if (data.status === "success") {
+        setFormData({
+          _id: data.invoiceId,
+          ...getEmptySchema(),
+          ...data.ai_data.invoice_data,
+        });
+        setErrors({});
+        setStatus({
+          type: "success",
+          message: data.message || "AI Extraction complete, please review the fields below.",
+        });
+        setIsProcessing(false);
+        setPendingInvoiceId(null);
+      } else {
+        setStatus({ type: "info", message: data.message });
+      }
+    };
+
     socket.on("scanner_status", onStatus);
     socket.on("scanner_error", onError);
     socket.on("scanner_document_processed", onProcessed);
+    socket.on("invoice_status", onInvoiceStatus);
 
     return () => {
       socket.off("scanner_status", onStatus);
       socket.off("scanner_error", onError);
       socket.off("scanner_document_processed", onProcessed);
+      socket.off("invoice_status", onInvoiceStatus);
     };
-  }, []);
+  }, [pendingInvoiceId]);
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -335,37 +367,46 @@ export default function InvoiceForm({ onBack }) {
 
     setProcessingMode("upload");
     setIsProcessing(true);
-    setStatus(null);
+    setStatus({ type: "info", message: "Uploading document..." });
 
     const data = new FormData();
     data.append("invoice", file);
 
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.post(`${API_URL}/invoice/upload`, data, {
+      const uploadUrl = `${API_URL}/invoice/upload`;
+      
+      const response = await axios.post(uploadUrl, data, {
         headers: { "Content-Type": "multipart/form-data", Authorization: `Bearer ${token}` },
       });
 
-      const invoiceId = response.data.invoice_id;
-      setFormData({
-        _id: invoiceId,
-        ...getEmptySchema(),
-        ...response.data.ai_data.invoice_data,
-      });
-      setErrors({});
-      setStatus({
-        type: "success",
-        message: "Document processed! AI Extraction complete, please review the fields below.",
-      });
-      // Removed immediate setShowInvoice(true) to allow user review
+      if (response.status === 202) {
+        // Backend accepted the file and AI is running in the background
+        setPendingInvoiceId(response.data.invoice_id);
+        setStatus({ type: "info", message: "Upload successful. AI extraction started..." });
+      } else {
+        // Fallback for synchronous response (if any)
+        setFormData({
+          _id: response.data.invoice_id,
+          ...getEmptySchema(),
+          ...response.data.ai_data.invoice_data,
+        });
+        setErrors({});
+        setStatus({
+          type: "success",
+          message: "Document processed! AI Extraction complete.",
+        });
+        setIsProcessing(false);
+      }
     } catch (error) {
       console.error("Error connecting to upload pipeline:", error);
+      const backendError = error.response?.data?.error || error.response?.data?.message;
       setStatus({
         type: "error",
-        message: error.response?.data?.message || error.response?.data?.error || "Failed to process document through the AI Worker pipeline.",
+        message: backendError || error.message || "Failed to process document through the AI Worker pipeline.",
       });
-    } finally {
       setIsProcessing(false);
+    } finally {
       event.target.value = null;
     }
   };
@@ -461,7 +502,7 @@ export default function InvoiceForm({ onBack }) {
           headers: { Authorization: `Bearer ${token}` }
         });
 
-        // Crucial: fetch the officially generated sequential GCN NO (e.g., DAC/26-27/1)
+        // Crucial: fetch the officially generated sequential GCN NO (e.g., DAC-26-27-1)
         try {
           const updated = await axios.get(`${API_URL}/invoice/lorry-data/${formData._id}`, { headers: { Authorization: `Bearer ${token}` } });
           if (updated.data?.gcn_data?.gcn_no) {
@@ -659,6 +700,7 @@ export default function InvoiceForm({ onBack }) {
         {processingMode === 'save' && <PremiumLoadingOverlay isProcessing={isProcessing} mode={processingMode} />}
         
         <PremiumUploadArea 
+          onBack={onBack}
           onUpload={handleFileUpload}
           onScan={handlePhysicalScan}
           isProcessing={isProcessing && processingMode === 'upload'}

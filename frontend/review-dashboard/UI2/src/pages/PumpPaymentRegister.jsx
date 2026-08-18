@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Typography, Button, IconButton, CircularProgress,
   Snackbar, Alert, Select, MenuItem, FormControl, InputLabel,
@@ -19,6 +19,8 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import DateRangeIcon from '@mui/icons-material/DateRange';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
@@ -44,11 +46,7 @@ const COLUMNS = [
   { key: 'DUE AMOUNT', label: 'DUE AMOUNT', width: 160, type: 'number', readOnly: true, align: 'right' }
 ];
 
-const getFirstDayOfMonthString = (month, yearRange) => {
-  const year = parseInt(yearRange.split('-')[0], 10);
-  const calendarYear = month >= 4 ? year : year + 1;
-  return `01/${String(month).padStart(2, '0')}/${calendarYear}`;
-};
+
 
 const formatCurrency = (val) => {
   const numVal = parseFloat(val);
@@ -98,9 +96,12 @@ export default function PumpPaymentRegister({ onBack }) {
 
   const [rows, setRows] = useState([]);
   const [localEdits, setLocalEdits] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
+
+  const tableContainerRef = React.useRef(null);
+  useTableNavigation(tableContainerRef);
   
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -114,13 +115,13 @@ export default function PumpPaymentRegister({ onBack }) {
   const yearOptions = [];
   for (let y = currentFyStart - 2; y <= currentFyStart + 1; y++) yearOptions.push(`${y}-${y + 1}`);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setLocalEdits({});
     setSelectedIds(new Set());
     try {
       const token = localStorage.getItem('token');
-      const fyStartYear = parseInt(selYear.split('-')[0], 10);
+      const fyStartYear = parseInt(String(selYear).split('-')[0], 10);
       const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
 
       const res = await axios.get(`${API_URL}/pump-payment-register`, {
@@ -130,17 +131,15 @@ export default function PumpPaymentRegister({ onBack }) {
       
       if (res.data.success) {
         const records = res.data.records || [];
-
-
         setRows(records);
       }
     } catch (e) {
       console.error(e);
       setSnack({ msg: 'Failed to fetch data', sev: 'error' });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, [selMonth, selYear]);
 
   useEffect(() => {
     fetchData();
@@ -159,7 +158,7 @@ export default function PumpPaymentRegister({ onBack }) {
     return () => {
       if (socket) socket.disconnect();
     };
-  }, [selMonth, selYear]);
+  }, [selMonth, selYear, fetchData]);
 
   const handleEdit = (id, key, val) => {
     setLocalEdits(prev => ({
@@ -296,19 +295,6 @@ export default function PumpPaymentRegister({ onBack }) {
     });
   }, [rows, localEdits]);
 
-  const metrics = React.useMemo(() => {
-    const actualRecords = computedRows;
-    const totalPayments = actualRecords.reduce((acc, r) => acc + (parseFloat(localEdits[r._id]?.['PAYMENT AMOUNT'] ?? r['PAYMENT AMOUNT']) || 0), 0);
-    const totalBills = actualRecords.reduce((acc, r) => acc + (parseFloat(localEdits[r._id]?.['BILL AMOUNT'] ?? r['BILL AMOUNT']) || 0), 0);
-    const pendingDue = computedRows.length > 0 ? computedRows[computedRows.length - 1]['DUE AMOUNT'] : 0;
-    
-    return {
-      totalEntries: actualRecords.length,
-      totalAmountPaid: formatCurrency(totalPayments),
-      currentMonthBills: formatCurrency(totalBills),
-      pendingDue: formatCurrency(pendingDue)
-    };
-  }, [computedRows, localEdits]);
 
   const filteredAndSortedRows = React.useMemo(() => {
     let result = computedRows;
@@ -374,6 +360,11 @@ export default function PumpPaymentRegister({ onBack }) {
     });
     exportToCsv(exportData, `Pump_Payment_Register_${MONTH_NAMES[selMonth - 1]}_${selYear}.csv`);
   };
+
+  useShortcut('ctrl+s', handleSaveAll);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', handleBulkDelete);
 
   return (
     <Box sx={{
@@ -600,7 +591,7 @@ export default function PumpPaymentRegister({ onBack }) {
                 overflow: 'hidden',
                 boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
               }}>
-                <TableContainer sx={{ maxHeight: '60vh' }}>
+                <TableContainer ref={tableContainerRef} sx={{ maxHeight: '60vh' }}>
                   <Table stickyHeader sx={{ minWidth: 2000, '& .MuiTableCell-root': { py: 1.5, px: 1, borderBottom: '1px solid #f1f5f9' } }}>
                     <TableHead>
                       <TableRow>

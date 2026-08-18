@@ -13,6 +13,8 @@ import TableChartIcon from '@mui/icons-material/TableChart';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -68,6 +70,10 @@ export default function VoucherRegister({ onBack }) {
   const [localData, setLocalData]   = useState({});
   const [loading, setLoading]       = useState(true);
   const [saving, setSaving]         = useState(false);
+  const now = new Date();
+  const tableContainerRef = useRef(null);
+  useTableNavigation(tableContainerRef);
+
   const [snack, setSnack]           = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting]     = useState(false);
@@ -165,25 +171,6 @@ export default function VoucherRegister({ onBack }) {
     } finally { setDeleting(false); }
   };
 
-  // ── Excel (.xlsx) Export ───────────────────────────────────────────────────
-  const handleExportExcel = () => {
-    const EXCEL_COLS = COLUMNS.filter(c => c.type !== 'slipUrl');
-    const headerRow  = EXCEL_COLS.map(c => c.label.replace(/\n/g, ' '));
-    const dataRows   = vouchers.map(v =>
-      EXCEL_COLS.map(c => {
-        const val = v[c.key];
-        if (c.isDate || c.key === 'createdAt') return fmtDate(val);
-        if (c.key === 'amount') return Number(val) || 0;
-        return val !== undefined && val !== null ? String(val) : '';
-      })
-    );
-    const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
-    ws['!cols'] = EXCEL_COLS.map(c => ({ wch: Math.max(12, Math.floor(c.width / 7)) }));
-    ws['!freeze'] = { xSplit: 0, ySplit: 1 };
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Voucher Register');
-    XLSX.writeFile(wb, `Voucher_Register_${fmtDate(new Date().toISOString())}.xlsx`);
-  };
 
   // ── XLS Export (via shared utility) ──────────────────────────────────────
   const handleExport = () => {
@@ -204,6 +191,15 @@ export default function VoucherRegister({ onBack }) {
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', () => {
+    if (selectedIds.size > 0) {
+      setConfirmDel(true);
+    }
+  });
+
   if (loading) {
     return (
       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
@@ -280,7 +276,7 @@ export default function VoucherRegister({ onBack }) {
       </Box>
 
       {/* ── Excel Table ─────────────────────────────────────────────────────── */}
-      <Box sx={{ overflow: 'auto', flex: 1 }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
         <table style={{
           borderCollapse: 'collapse', minWidth: '100%',
           tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'

@@ -16,6 +16,8 @@ import AutoPdfRegenerator from '../components/AutoPdfRegenerator';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
 import { useAuth } from '../context/AuthContext';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 import { io } from 'socket.io-client';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -110,11 +112,14 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
   const [selYear, setSelYear] = useState(`${currentFyStart}-${currentFyStart + 1}`);
   const [selPeriod, setSelPeriod] = useState(currentDay <= 10 ? 1 : currentDay <= 20 ? 2 : 3);
   const [hsdBillNo, setHsdBillNo] = useState('');
+  const [localEdits, setLocalEdits] = useState({});
 
   const [pumps, setPumps] = useState([]);
   const [rows, setRows] = useState([]);
-  const [localEdits, setLocalEdits] = useState({});
   const [loadingPumps, setLoadingPumps] = useState(true);
+
+  const tableContainerRef = React.useRef(null);
+  useTableNavigation(tableContainerRef);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
@@ -295,7 +300,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         headers: { Authorization: `Bearer ${token()}` }
       });
       setIsNotified(data.notified || false);
-    } catch (_) { setIsNotified(false); }
+    } catch { setIsNotified(false); }
   }, [selPump, selMonth, selYear, selPeriod]);
 
   useEffect(() => { fetchNotificationStatus(); }, [fetchNotificationStatus]);
@@ -314,7 +319,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         setPeriodPaymentStatus(data.status || 'Unpaid');
         setPeriodProofUrls(data.proofUrls || []);
       }
-    } catch (_) { }
+    } catch { }
   }, [selPump, selMonth, selYear, selPeriod]);
 
   useEffect(() => { fetchPeriodPaymentStatus(); }, [fetchPeriodPaymentStatus]);
@@ -327,7 +332,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
         headers: { Authorization: `Bearer ${token()}` }
       });
       if (data.success) setAllNotifications(data.notifications || []);
-    } catch (_) { }
+    } catch { }
   }, [isOfficeAdmin]);
 
   useEffect(() => { fetchAllNotifications(); }, [fetchAllNotifications]);
@@ -370,22 +375,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     return () => { socket.off('cementUpdates'); socket.off('paymentNotification'); socket.off('periodPaymentUpdated'); socket.off('fuelRateUpdated'); };
   }, [fetchData, selPump, selMonth, selYear, selPeriod, isOfficeAdmin]);
 
-  // ── Send Notification (pump admin only) ───────────────────────────────
-  const handleNotify = async () => {
-    if (!isPumpAdmin || isNotified || notifying) return;
-    setNotifying(true);
-    const fyStartYear = parseInt(selYear.split('-')[0], 10);
-    const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
-    try {
-      await axios.post(`${API_URL}/pump-payment/notify`, {
-        pumpName: selPump, month: selMonth, year: calendarYear, period: selPeriod
-      }, { headers: { Authorization: `Bearer ${token()}` } });
-      setIsNotified(true);
-      setSnack({ severity: 'success', msg: 'Notification sent to Office Admin!' });
-    } catch (err) {
-      setSnack({ severity: 'error', msg: 'Notify failed: ' + (err.response?.data?.error || err.message) });
-    } finally { setNotifying(false); }
-  };
 
   // ── Upload period-level proofs — supports multiple files (Office Admin only) ──
   const handlePeriodProofUpload = async (files) => {
@@ -442,23 +431,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     }
   };
 
-  // ── Upload proof for a specific row (Office Admin only) ─────────────────
-  const handleRowProofUpload = async (ri, files) => {
-    if (!files || files.length === 0 || !isOfficeAdmin) return;
-    try {
-      const formData = new FormData();
-      formData.append('proof', files[0]);
-      const { data } = await axios.post(`${API_URL}/pump-payment/upload-payment-proof`, formData, {
-        headers: { Authorization: `Bearer ${token()}` }
-      });
-      if (data.success) {
-        handleEdit(ri, 'PAYMENT PROOF URL', data.url);
-        setSnack({ severity: 'success', msg: 'Proof uploaded — click Save to persist' });
-      }
-    } catch (err) {
-      setSnack({ severity: 'error', msg: 'Upload failed: ' + (err.response?.data?.error || err.message) });
-    }
-  };
 
   // ── Save period payment status (Office Admin only) ───────────────────────
   const handleSavePeriodPayment = async (newStatus) => {
@@ -608,34 +580,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     } finally { setSaving(false); }
   };
 
-  // ── Upload Payment Proof ───────────────────────────────────────────────
-  const handleUploadProof = async (ri, file) => {
-    if (!file) return;
-    const formData = new FormData();
-    formData.append('proof', file);
-
-    setLocalEdits(prev => ({ ...prev, [ri]: { ...(prev[ri] || {}), _uploading: true } }));
-
-    try {
-      const { data } = await axios.post(`${API_URL}/pump-payment/upload-payment-proof`, formData, {
-        headers: { Authorization: `Bearer ${token()}` }
-      });
-      if (data.success) {
-        setLocalEdits(prev => ({
-          ...prev,
-          [ri]: {
-            ...(prev[ri] || {}),
-            'PAYMENT PROOF URL': data.url,
-            _uploading: false
-          }
-        }));
-        setSnack({ severity: 'success', msg: 'Proof uploaded successfully!' });
-      }
-    } catch (err) {
-      setLocalEdits(prev => ({ ...prev, [ri]: { ...(prev[ri] || {}), _uploading: false } }));
-      setSnack({ severity: 'error', msg: 'Upload failed: ' + (err.response?.data?.error || err.message) });
-    }
-  };
 
   // ── CSV export ─────────────────────────────────────────────────────────
   const handleExport = () => {
@@ -644,7 +588,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     const { startDay, endDay } = getPeriodRange(selPeriod, selMonth, calendarYear);
     const startFmt = `${String(startDay).padStart(2, '0')}.${String(selMonth).padStart(2, '0')}.${String(calendarYear).slice(2)}`;
     const endFmt = `${String(endDay).padStart(2, '0')}.${String(selMonth).padStart(2, '0')}.${String(calendarYear).slice(2)}`;
-    const title = `${selPump} (${startFmt}-${endFmt}) -${hsdBillNo}`;
+
     const exportRows = computedRows.map(r => ({
       'LOADING DT': r['LOADING DATE'],
       'VEHICLE NUMBER': r['VEHICLE NUMBER'],
@@ -676,6 +620,15 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     const e = `${String(endDay).padStart(2, '0')}.${String(selMonth).padStart(2, '0')}.${String(calendarYear).slice(2)}`;
     return `${selPump || '—'} ( ${s} - ${e} )${hsdBillNo ? ' -' + hsdBillNo : ''}`;
   }, [selPump, selMonth, selYear, selPeriod, hsdBillNo]);
+
+  const billableRows = activeRows.filter(r => r['VERIFICATION STATUS'] === 'Verified' && !r.isBilled && r['CHALLAN STATUS'] !== 'BILLED');
+
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', () => {
+    // Basic fallback if delete logic is not explicit or supported
+  });
 
   const visibleCols = isPumpAdmin
     ? COLUMNS.filter(c => ['LOADING DATE', 'VEHICLE NUMBER', 'HSD (LTR)', 'VERIFICATION CODE'].includes(c.key))
@@ -709,7 +662,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
     </Box>
   );
 
-  const billableRows = activeRows.filter(r => r['VERIFICATION STATUS'] === 'Verified' && !r.isBilled && r['CHALLAN STATUS'] !== 'BILLED');
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f0fdfa', overflow: 'hidden' }}>
@@ -923,7 +875,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
       )}
 
       {/* ── Table/Cards ── */}
-      <Box sx={{ overflow: 'auto', flex: 1, p: 0, bgcolor: isMobile ? '#f8fafc' : 'inherit' }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, p: 0, bgcolor: isMobile ? '#f8fafc' : 'inherit' }}>
         {loading ? (
           <Box display="flex" alignItems="center" justifyContent="center" height="60%" gap={2}>
             <CircularProgress sx={{ color: '#0891b2' }} />
@@ -1073,7 +1025,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
               )}
               {activeRows.map((row, i) => {
                 const ri = row.originalIndex;
-                const hasEdits = !!localEdits[ri];
+
                 const isBilled = row.isBilled || row['VERIFICATION STATUS'] === 'Billed' || row['CHALLAN STATUS'] === 'BILLED';
                 return (
                   <tr key={i} style={{ 

@@ -148,20 +148,22 @@ async function getOrAssignGcnNo(col, invoiceId, loadingDate) {
 
   const date = new Date(loadingDate || Date.now());
   const fy = getFinancialYear(date);
-  const prefix = `DAC/${fy}/`;
+  const prefix = `DAC-${fy}-`;
 
-  // Find max GCN number in this FY assigned natively. Format: DAC/25-26/N
+  // Find max GCN number in this FY assigned natively. Format: DAC-25-26-N
   const docs = await col.find(
-    { "GCN NO": { $regex: new RegExp(`^DAC/${fy}/\\d+$`) } },
+    { "GCN NO": { $regex: new RegExp(`^DAC[\\/\\-]${fy}[\\/\\-]\\d+$`) } },
     { projection: { "GCN NO": 1 } }
   ).toArray();
 
   let maxSeq = 0;
   for (const doc of docs) {
     if (!doc["GCN NO"]) continue;
-    const parts = doc["GCN NO"].split('/');
-    if (parts.length === 3) {
-      const seq = parseInt(parts[2], 10);
+    // Split by both / and - to handle existing numbers in the db seamlessly
+    const parts = doc["GCN NO"].split(/[\/\-]/);
+    if (parts.length === 3 || parts.length === 4) { // e.g. DAC/25-26/1 (3 parts) or DAC-25-26-1 (4 parts if FY has -)
+      const seqStr = parts[parts.length - 1]; // Sequence is always the last part
+      const seq = parseInt(seqStr, 10);
       if (!isNaN(seq) && seq > maxSeq) {
         maxSeq = seq;
       }
@@ -196,7 +198,7 @@ async function generateHsdBillNo(pumpName, loadingDate, invoiceId) {
 
   const intervalIndex = (fyMonthOffset * 3) + periodInMonth;
 
-  return `${prefix}/${fy}/${intervalIndex}`;
+  return `${prefix}-${fy}-${intervalIndex}`;
 }
 
 async function getFuelRate(pumpName, dateVal) {

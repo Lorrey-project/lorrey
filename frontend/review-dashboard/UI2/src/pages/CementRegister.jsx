@@ -23,6 +23,8 @@ import {
 } from '../utils/cementCalculations';
 
 import { exportToCsv } from '../utils/exportCsv';
+import { useShortcut } from '../context/ShortcutContext';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -369,6 +371,9 @@ export default function CementRegister({ onBack }) {
   const [saveCompleted, setSaveCompleted] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const years = useMemo(() => Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i), [now]);
+
+  const tableContainerRef = useRef(null);
+  useTableNavigation(tableContainerRef);
 
   // ── Excel import wizard and preview state ──────────────────────────────────
   const [unsavedImportRows, setUnsavedImportRows] = useState([]);
@@ -721,8 +726,8 @@ export default function CementRegister({ onBack }) {
     const isAlreadyGenerated = ids.some(id => {
       const r = computedRows.find(row => row._id === id);
       if (!r) return false;
-      const fGen = r['Freight Generated'] === 'Yes';
-      const uGen = r['Unloading Generated'] === 'Yes';
+      const fGen = r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== '');
+      const uGen = r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== '');
       return (billType === 'Freight' && fGen) || (billType === 'Unloading' && uGen);
     });
 
@@ -989,6 +994,15 @@ export default function CementRegister({ onBack }) {
     }
   };
 
+  useShortcut('ctrl+s', handleSave);
+  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+e', handleExport);
+  useShortcut('delete', () => {
+    if (selectedIds.size > 0) {
+      setConfirmDel(true);
+    }
+  });
+
   if (loading) {
     return (
       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
@@ -997,6 +1011,7 @@ export default function CementRegister({ onBack }) {
       </Box>
     );
   }
+
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
@@ -1140,7 +1155,10 @@ export default function CementRegister({ onBack }) {
         <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
           {selectedIds.size > 0 && (
             <Button size="small" variant="outlined"
-              onClick={() => setIsBillingModalOpen(true)}
+              onClick={() => {
+                setBulkBillInput({ billDate: '', billType: '' });
+                setIsBillingModalOpen(true);
+              }}
               sx={{
                 fontWeight: 700, borderRadius: '10px', px: 2, fontSize: '0.8rem',
                 color: '#4f46e5', borderColor: '#c7d2fe', bgcolor: '#eef2ff',
@@ -1214,10 +1232,10 @@ export default function CementRegister({ onBack }) {
       </Box>
 
       {/* ── Group header row ─────────────────────────────────────────────── */}
-      <Box sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: '#fff' }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: '#fff' }}>
         <table style={{
           borderCollapse: 'collapse', minWidth: '100%',
-          tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
+          tableLayout: 'auto', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
         }}>
           {/* Col widths */}
           <colgroup>
@@ -1872,7 +1890,8 @@ export default function CementRegister({ onBack }) {
                   <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Trip Date</th>
                   <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Party Name</th>
                   <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Destination</th>
-                  <th style={{ padding: '8px' }}>Freight Amount</th>
+                  <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>MT</th>
+                  <th style={{ padding: '8px' }}>BILLING AMOUNT</th>
                 </tr>
               </thead>
               <tbody>
@@ -1885,9 +1904,10 @@ export default function CementRegister({ onBack }) {
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['VEHICLE NUMBER'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['INVOICE NO'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['LOADING DT'] || row['LOADING DATE'] || ''}</td>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['NAMES'] || ''}</td>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SITE'] || ''}</td>
-                      <td style={{ padding: '8px' }}>{row['BILLING ER 95%'] || row['BILLING ER VAR'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['PARTY NAME'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['DESTINATION'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['MT'] || ''}</td>
+                      <td style={{ padding: '8px' }}>{row['Billing Amount'] || ''}</td>
                     </tr>
                   );
                 })}
@@ -1895,8 +1915,8 @@ export default function CementRegister({ onBack }) {
             </table>
           </Box>
 
-          <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-            <Box sx={{ flex: 1 }}>
+          <Box sx={{ display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box sx={{ flex: 1, minWidth: 200 }}>
               <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', mb: 0.5, display: 'block' }}>BILL DATE</Typography>
               <input
                 type="date"
@@ -1905,36 +1925,80 @@ export default function CementRegister({ onBack }) {
                 style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none' }}
               />
             </Box>
-            <Box sx={{ flex: 1 }}>
+            <Box sx={{ flex: 1, minWidth: 200 }}>
               <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', mb: 0.5, display: 'block' }}>BILL TYPE</Typography>
-              <SearchableSelect
-                value={bulkBillInput.billType}
-                onChange={e => setBulkBillInput(prev => ({ ...prev, billType: e.target.value }))}
-                fullWidth
-                size="small"
-                displayEmpty
-                sx={{ borderRadius: '8px', bgcolor: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#cbd5e1' } }}
-              >
-                <MenuItem value="" disabled>Select Bill Type</MenuItem>
-                <MenuItem
-                  value="Freight"
-                  disabled={
-                    computedRows.some(r => selectedIds.has(r._id) && r['Freight Generated'] === 'Yes')
-                  }
-                >Freight</MenuItem>
-                <MenuItem
-                  value="Unloading"
-                  disabled={
-                    computedRows.some(r => selectedIds.has(r._id) && r['Unloading Generated'] === 'Yes')
-                  }
-                >Unloading</MenuItem>
-              </SearchableSelect>
+              {(() => {
+                const selectedRowsArray = [...selectedIds].map(id => computedRows.find(r => r._id === id)).filter(Boolean);
+                const totalSelected = selectedRowsArray.length;
+                
+                const hasFreightCount = selectedRowsArray.filter(r => r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== '')).length;
+                const hasUnloadingCount = selectedRowsArray.filter(r => r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== '')).length;
+                
+                const isFreightDisabled = hasFreightCount > 0;
+                const isUnloadingDisabled = hasUnloadingCount > 0;
+                
+                let freightHelperText = '';
+                if (hasFreightCount === totalSelected && totalSelected > 0) {
+                  freightHelperText = "Freight Bill already generated for the selected records.";
+                } else if (hasFreightCount > 0) {
+                  freightHelperText = "Some selected records already have Freight Bills. Please select only eligible records.";
+                }
+                
+                let unloadingHelperText = '';
+                if (hasUnloadingCount === totalSelected && totalSelected > 0) {
+                  unloadingHelperText = "Unloading Bill already generated for the selected records.";
+                } else if (hasUnloadingCount > 0) {
+                  unloadingHelperText = "Some selected records already have Unloading Bills. Please select only eligible records.";
+                }
+
+                const isConfirmDisabled = !bulkBillInput.billDate || !bulkBillInput.billType || 
+                  (bulkBillInput.billType === 'Freight' && isFreightDisabled) || 
+                  (bulkBillInput.billType === 'Unloading' && isUnloadingDisabled);
+
+                return (
+                  <>
+                    <SearchableSelect
+                      value={bulkBillInput.billType}
+                      onChange={e => setBulkBillInput(prev => ({ ...prev, billType: e.target.value }))}
+                      fullWidth
+                      size="small"
+                      displayEmpty
+                      sx={{ borderRadius: '8px', bgcolor: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#cbd5e1' } }}
+                    >
+                      <MenuItem value="" disabled>Select Bill Type</MenuItem>
+                      <MenuItem value="Freight" disabled={isFreightDisabled}>Freight</MenuItem>
+                      <MenuItem value="Unloading" disabled={isUnloadingDisabled}>Unloading</MenuItem>
+                    </SearchableSelect>
+                    
+                    {(freightHelperText || unloadingHelperText) && (
+                      <Box sx={{ mt: 1 }}>
+                        {freightHelperText && <Typography variant="caption" color="error" sx={{ display: 'block', fontWeight: 600 }}>• {freightHelperText}</Typography>}
+                        {unloadingHelperText && <Typography variant="caption" color="error" sx={{ display: 'block', fontWeight: 600 }}>• {unloadingHelperText}</Typography>}
+                      </Box>
+                    )}
+
+                    {/* We need to pass isConfirmDisabled out of this scope to disable the button. We can render the DialogActions here or just recreate the logic for the button below. Since this is an IIFE, we can't easily pass it down. Instead, we'll re-evaluate the button disabled state in the button. */}
+                  </>
+                );
+              })()}
             </Box>
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 3, pt: 1, borderTop: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
           <Button onClick={() => setIsBillingModalOpen(false)} sx={{ color: '#64748b', fontWeight: 600 }}>Cancel</Button>
-          <Button variant="contained" onClick={handleBulkBillApply} sx={{ bgcolor: '#0f172a', fontWeight: 700, px: 3, borderRadius: '8px', boxShadow: 'none' }}>
+          <Button 
+            variant="contained" 
+            onClick={handleBulkBillApply} 
+            disabled={(() => {
+              const selectedRowsArray = [...selectedIds].map(id => computedRows.find(r => r._id === id)).filter(Boolean);
+              const isFreightDisabled = selectedRowsArray.some(r => r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== ''));
+              const isUnloadingDisabled = selectedRowsArray.some(r => r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== ''));
+              return !bulkBillInput.billDate || !bulkBillInput.billType || 
+                (bulkBillInput.billType === 'Freight' && isFreightDisabled) || 
+                (bulkBillInput.billType === 'Unloading' && isUnloadingDisabled);
+            })()}
+            sx={{ bgcolor: '#0f172a', fontWeight: 700, px: 3, borderRadius: '8px', boxShadow: 'none', '&.Mui-disabled': { bgcolor: '#cbd5e1', color: '#94a3b8' } }}
+          >
             Generate Bill
           </Button>
         </DialogActions>
@@ -1951,13 +2015,11 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
     border: '1px solid #e2e8f0',
     fontSize: '11px',
     color: '#1e293b',
-    whiteSpace: 'normal',
-    wordBreak: 'break-word',
+    whiteSpace: 'nowrap',
     lineHeight: 1.4,
     borderRight: isDirty ? '2px solid #f59e0b' : '1px solid #e2e8f0',
     background: isDirty ? 'rgba(254,243,199,0.6)' : 'inherit',
-    width: col.width,
-    maxWidth: col.width,
+    minWidth: col.width,
   };
 
   // Color-coded: challan status, bill type
@@ -1974,7 +2036,7 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
       return (
         <td style={{ ...cellStyle, background: bg, padding: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', height: '100%', minHeight: '26px' }}>
-            <span style={{ flex: 1, whiteSpace: 'normal', wordBreak: 'break-word', padding: '4px 5px', color: '#1e293b' }}>{value || ''}</span>
+            <span style={{ flex: 1, whiteSpace: 'nowrap', padding: '4px 5px', color: '#1e293b' }}>{value || ''}</span>
             <AttachButton rowId={row?._id} attachType="bill_pdf" existingUrl={attachUrl} onSaved={onAttachSaved} />
           </div>
         </td>
@@ -1987,7 +2049,7 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
       return (
         <td style={{ ...cellStyle, background: bg, padding: '2px 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, minHeight: '26px' }}>
-            <span style={{ flex: 1, whiteSpace: 'normal', wordBreak: 'break-word' }}>{value || ''}</span>
+            <span style={{ flex: 1, whiteSpace: 'nowrap' }}>{value || ''}</span>
             {voucherPdfUrl ? (
               <a
                 href={voucherPdfUrl}

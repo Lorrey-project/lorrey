@@ -277,7 +277,8 @@ const keyMap = {
   'remittanceFileName': 'remittanceFileName',
   'selectedMonth': 'selectedMonth',
   'selectedYear': 'selectedYear',
-  'Vehicle': 'vehicle'
+  'Vehicle': 'vehicle',
+  '_allocations': '_allocations'
 };
 const reverseMap = Object.fromEntries(Object.entries(keyMap).map(([k, v]) => [v, k]));
 
@@ -295,8 +296,23 @@ router.get('/', async (req, res) => {
     const { month, year } = req.query;
     const query = {};
     if (month && year) {
-      query.selectedMonth = month;
-      query.selectedYear = year;
+      const mRegex = new RegExp(`^\\s*${month}\\s*$`, 'i');
+      const yRegex = new RegExp(`^\\s*${year}\\s*$`, 'i');
+      query.$and = [
+        {
+          $or: [
+            { selectedMonth: mRegex },
+            { month: mRegex }
+          ]
+        },
+        {
+          $or: [
+            { selectedYear: yRegex },
+            // Also fallback to checking if transactionDate contains the year (e.g. '2026-')
+            { transactionDate: { $regex: new RegExp(`^\\s*${year}`, 'i') } }
+          ]
+        }
+      ];
     }
     const docs = await AccountDetail.find(query).sort({ transactionDate: 1, createdAt: 1 });
     res.json({ success: true, entries: docs.map(docToFrontend) });

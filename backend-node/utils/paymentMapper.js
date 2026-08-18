@@ -40,7 +40,18 @@ function num(val) {
  *   or null if not a payment row.
  */
 function detectPaymentRow(row) {
+  const hasAllocations = row._allocations && Array.isArray(row._allocations) && row._allocations.length > 0;
   const deposit = num(row['Deposit'] || row.deposit);
+  const withdraw = num(row['Withdraw'] || row.withdraw);
+
+  if (deposit <= 0 && withdraw <= 0 && !hasAllocations) return null;
+
+  // If there are manual allocations from the UI popup, it's definitely a payment row
+  if (hasAllocations) {
+    return { isPayment: true, sites: [], totalDeposit: deposit > 0 ? deposit : withdraw };
+  }
+
+  // Otherwise, fallback to auto-detection (only for deposits)
   if (deposit <= 0) return null;
 
   const names = String(row['Names'] || row.names || '').trim().toUpperCase();
@@ -242,11 +253,23 @@ async function allocatePaymentToBills(paymentRow) {
   if (paymentRow._allocations && Array.isArray(paymentRow._allocations)) {
     for (const alloc of paymentRow._allocations) {
       if (alloc.allocatedAmount <= 0) continue;
-      
+
       try {
-        const matchedBill = await col.findOne({ 'INVOICE NO': alloc.rawBillNumber });
+        const rawNum = alloc.rawBillNumber || '';
+        const searchNum = rawNum.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-');
+        const regexStr = searchNum.replace(/[-/]/g, '[-/\\\\s]*');
+        
+        const matchedBill = await col.findOne({
+          $or: [
+            { 'INVOICE NO': rawNum },
+            { 'BILL NO': rawNum },
+            { 'INVOICE NO': { $regex: new RegExp(regexStr, 'i') } },
+            { 'BILL NO': { $regex: new RegExp(regexStr, 'i') } }
+          ]
+        });
+
         if (!matchedBill) {
-          errors.push(`No unpaid bill found with INVOICE NO: ${alloc.rawBillNumber}`);
+          errors.push(`No unpaid bill found with INVOICE NO / BILL NO: ${alloc.rawBillNumber}`);
           continue;
         }
 
@@ -254,7 +277,7 @@ async function allocatePaymentToBills(paymentRow) {
         const netAmt = num(matchedBill['NET AMOUNT'] || matchedBill['GROSS AMOUNT']);
         const existingBankTf = num(matchedBill['Bank TF']);
         const newBankTf = existingBankTf + alloc.allocatedAmount;
-        
+
         let paymentStatus = 'Paid';
         if (netAmt > 0 && newBankTf < netAmt - 1) {
           paymentStatus = 'Partial';
@@ -276,17 +299,19 @@ async function allocatePaymentToBills(paymentRow) {
         );
 
         // Map it to FinancialYearPayment for Bill Register display
-        const fyPayId = `AUTO-${alloc.rawBillNumber}`;
-        const existingFyPay = await FinancialYearPayment.findOne({ id: fyPayId });
+        let existingFyPay = await FinancialYearPayment.findOne({ billNos: alloc.rawBillNumber });
+        let fyPayId = existingFyPay ? existingFyPay.id : `AUTO-${alloc.rawBillNumber}`;
         const newFyAmt = (existingFyPay?.paymentAmount || 0) + alloc.allocatedAmount;
 
         await FinancialYearPayment.findOneAndUpdate(
           { id: fyPayId },
           {
-            billNos: [alloc.rawBillNumber],
-            paymentAmount: newFyAmt,
-            paymentDate: transactionDate,
-            referenceNo: paymentRef
+            $addToSet: { billNos: alloc.rawBillNumber },
+            $set: {
+              paymentAmount: newFyAmt,
+              paymentDate: transactionDate,
+              referenceNo: paymentRef
+            }
           },
           { upsert: true }
         );
@@ -314,9 +339,9 @@ async function allocatePaymentToBills(paymentRow) {
           io.emit('cementUpdates', { action: 'paymentMapped', allocated });
           io.emit('accountDetailsUpdate', { action: 'paymentMapped' });
         }
-      } catch (_) {}
+      } catch (_) { }
     }
-    
+
     return { allocated, unmapped: errors.length, errors };
   }
 
@@ -390,6 +415,30 @@ async function allocatePaymentToBills(paymentRow) {
         }
       );
 
+      // Map it to FinancialYearPayment for Bill Register display
+      const invNoStr = matchedBill['BILL NO'] || matchedBill['INVOICE NO'] || '';
+      const rawSiteStr = matchedBill['SITE'] ? String(matchedBill['SITE']).trim().toUpperCase() : '';
+      const prefixStr = rawSiteStr === 'NVCL' ? 'NVCL-' : (rawSiteStr ? 'DAC-' : '');
+      const cleanInvNoStr = String(invNoStr).replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-');
+      const finalInvNoStr = prefixStr ? `${prefixStr}${cleanInvNoStr}` : cleanInvNoStr;
+
+      let existingFyPay = await FinancialYearPayment.findOne({ billNos: finalInvNoStr });
+      let fyPayId = existingFyPay ? existingFyPay.id : `AUTO-${finalInvNoStr}`;
+      const newFyAmt = (existingFyPay?.paymentAmount || 0) + amount;
+
+      await FinancialYearPayment.findOneAndUpdate(
+        { id: fyPayId },
+        {
+          $addToSet: { billNos: finalInvNoStr },
+          $set: {
+            paymentAmount: newFyAmt,
+            paymentDate: transactionDate,
+            referenceNo: paymentRef
+          }
+        },
+        { upsert: true }
+      );
+
       allocated.push({
         site,
         amount,
@@ -418,7 +467,7 @@ async function allocatePaymentToBills(paymentRow) {
         io.emit('cementUpdates', { action: 'paymentMapped', allocated });
         io.emit('accountDetailsUpdate', { action: 'paymentMapped' });
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return { allocated, unmapped: errors.length, errors };
