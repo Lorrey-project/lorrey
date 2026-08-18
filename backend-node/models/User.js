@@ -33,6 +33,11 @@ const userSchema = new mongoose.Schema({
         enum: ['SAS-1', 'SAS-2', null],
         default: null
     },
+    assignedSite: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Site',
+        default: null
+    },
     fuelRate: {
         type: Number,
         default: 90   // HSD diesel rate (₹/litre) — can be updated per-pump

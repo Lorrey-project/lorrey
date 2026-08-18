@@ -164,7 +164,7 @@ Transport operations in bulk-goods logistics (particularly cement distribution f
                            ┌────────────────────────────────────▼──────────┐
                            │                AWS S3 BUCKET                  │
                            │  (lorreyproject, ap-south-1)                  │
-                           │                                                │
+                           │                                               │
                            │  /invoice_uploads/ — original scanned PDFs    │
                            │  /voucher_slips/   — AI-generated voucher PDFs│
                            │  /softcopy/        — human-attached softcopies│

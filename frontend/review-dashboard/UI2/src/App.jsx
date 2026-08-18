@@ -26,6 +26,7 @@ import AccountApprovalsPage from './pages/AccountApprovalsPage';
 import DailySummaryReport from './pages/DailySummaryReport';
 import PumpPaymentRegister from './pages/PumpPaymentRegister';
 import IncentiveCalculationSheet from './pages/IncentiveCalculationSheet';
+import AttendancePanel from './pages/AttendancePanel';
 
 const theme = createTheme({
   palette: {
@@ -251,6 +252,10 @@ function AppContent() {
     return <IncentiveCalculationSheet onBack={() => setCurrentView('dashboard')} />;
   }
 
+  if (currentView === 'attendancePanel') {
+    return <AttendancePanel onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'dashboard') {
     if (isMobile) {
       if (user.role === 'PETROL PUMP') {
@@ -314,6 +319,7 @@ function AppContent() {
         onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
         onOpenDailySummaryReport={() => setCurrentView('dailySummary')}
         onOpenIncentiveSheet={() => setCurrentView('incentiveCalculationSheet')}
+        onOpenAttendancePanel={() => setCurrentView('attendancePanel')}
       />
     );
   }
