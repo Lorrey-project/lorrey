@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import SearchableSelect from '../../components/SearchableSelect';
 import {
     Box, Typography, Container, Grid, Card, CardContent,
@@ -115,21 +115,33 @@ const MobileDashboard = ({
     const selYear = now.getFullYear();
     const selPeriod = currentDay <= 10 ? 1 : currentDay <= 20 ? 2 : 3;
 
-    useEffect(() => {
-        if (user?.role !== 'PETROL PUMP') {
-            fetchInvoices();
-        } else {
-            // Priority: Port detection -> user profile -> null
-            const finalPump = autoPump || user?.pumpName;
-            if (finalPump) {
-                fetchPumpData(finalPump);
-            } else {
-                setLoading(false);
-            }
+    const fetchInvoices = useCallback(async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`${API_URL}/invoice/all`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setInvoices(res.data);
+            setSelectedInvoices(new Set());
+        } catch (e) {
+            console.error('Fetch failed', e);
+        } finally {
+            setLoading(false);
         }
-    }, [user, autoPump, fetchPumpData]);
+    }, []);
 
-    const fetchPumpData = async (pumpName = user?.pumpName) => {
+    const fetchBillingRows = useCallback(async (token, pumpName = user?.pumpName) => {
+        try {
+            await axios.get(`${API_URL}/pump-payment/data`, {
+                params: { pumpName: pumpName, month: selMonth, year: selYear, period: selPeriod },
+                headers: { Authorization: `Bearer ${token}` }
+            });
+        } catch (e) {
+            console.error('Fetch billing rows failed', e);
+        }
+    }, [selMonth, selYear, selPeriod, user?.pumpName]);
+
+    const fetchPumpData = useCallback(async (pumpName = user?.pumpName) => {
         if (!pumpName) return;
         try {
             const token = localStorage.getItem('token');
@@ -151,19 +163,21 @@ const MobileDashboard = ({
         } finally {
             setLoading(false);
         }
-    };
+    }, [user?.pumpName, fetchBillingRows]);
 
-    const fetchBillingRows = async (token, pumpName = user?.pumpName) => {
-        try {
-            await axios.get(`${API_URL}/pump-payment/data`, {
-                params: { pumpName: pumpName, month: selMonth, year: selYear, period: selPeriod },
-                headers: { Authorization: `Bearer ${token}` }
-            });
-        } catch (e) {
-            console.error('Fetch billing rows failed', e);
+    useEffect(() => {
+        if (user?.role !== 'PETROL PUMP') {
+            fetchInvoices();
+        } else {
+            // Priority: Port detection -> user profile -> null
+            const finalPump = autoPump || user?.pumpName;
+            if (finalPump) {
+                fetchPumpData(finalPump);
+            } else {
+                setLoading(false);
+            }
         }
-    };
-
+    }, [user, autoPump, fetchPumpData, fetchInvoices]);
 
     const handleRegisterDevice = async () => {
         setRegError('');
@@ -176,21 +190,6 @@ const MobileDashboard = ({
             setRegError(err.message || 'Registration failed');
         } finally {
             setIsRegistering(false);
-        }
-    };
-
-    const fetchInvoices = async () => {
-        try {
-            const token = localStorage.getItem('token');
-            const res = await axios.get(`${API_URL}/invoice/all`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            setInvoices(res.data);
-            setSelectedInvoices(new Set());
-        } catch (e) {
-            console.error('Fetch failed', e);
-        } finally {
-            setLoading(false);
         }
     };
 

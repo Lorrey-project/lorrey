@@ -48,6 +48,14 @@ const attendanceSchema = new mongoose.Schema({
         type: String,
         enum: ["checked-in", "checked-out", "absent"],
         default: "checked-in"
+    },
+    checkInStatus: {
+        type: String,
+        default: null
+    },
+    checkOutStatus: {
+        type: String,
+        default: null
     }
 }, { timestamps: true });
 

@@ -8,6 +8,8 @@ const User = require('../models/User');
 const Site = require('../models/Site');
 const Attendance = require('../models/Attendance');
 const AttendanceAuditLog = require('../models/AttendanceAuditLog');
+const AttendanceSetting = require('../models/AttendanceSetting');
+const Holiday = require('../models/Holiday');
 
 const app = express();
 app.use(express.json());
@@ -18,6 +20,7 @@ let adminUser;
 let otherUser;
 let officeSite;
 let rajHouseSite;
+let somHouseSite;
 let employeeToken;
 let adminToken;
 let otherToken;
@@ -33,6 +36,22 @@ beforeAll(async () => {
   await Site.deleteMany({});
   await Attendance.deleteMany({});
   await AttendanceAuditLog.deleteMany({});
+  await AttendanceSetting.deleteMany({});
+  await Holiday.deleteMany({});
+
+  // Seed settings
+  await AttendanceSetting.create({
+    officeStartTime: "09:30",
+    gracePeriodMinutes: 15,
+    officeEndTime: "17:30",
+    earlyCheckoutThreshold: "17:15"
+  });
+
+  // Seed a test holiday
+  await Holiday.create({
+    name: "Independence Day",
+    date: "2026-08-15"
+  });
 
   // Seed sites
   officeSite = await Site.create({
@@ -47,6 +66,14 @@ beforeAll(async () => {
     siteName: "Raj House",
     latitude: 22.73359230270436,
     longitude: 87.34229223812619,
+    geofenceRadius: 100,
+    maxGpsAccuracy: 250
+  });
+
+  somHouseSite = await Site.create({
+    siteName: "Som House",
+    latitude: 23.673127177268128,
+    longitude: 86.96936630940948,
     geofenceRadius: 100,
     maxGpsAccuracy: 250
   });
@@ -411,5 +438,231 @@ describe('Location-Based Attendance Security & Validation', () => {
 
     const logs = await AttendanceAuditLog.find({ action: 'CHECK_IN_REJECTED', reason: 'OUTSIDE_GEOFENCE' });
     expect(logs.length).toBe(1);
+  });
+
+  it('succeeds check-in when employee is inside Som House geofence (23.6731, 86.9693)', async () => {
+    const res = await request(app)
+      .post('/attendance/check-in')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        selectedLocationName: "Som House",
+        latitude: 23.673127177268128,
+        longitude: 86.96936630940948,
+        accuracy: 10
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.attendance.status).toBe('checked-in');
+    expect(res.body.attendance.selectedLocationName).toBe('Som House');
+  });
+
+  it('rejects check-in when employee selects Som House but GPS is near Office', async () => {
+    const res = await request(app)
+      .post('/attendance/check-in')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        selectedLocationName: "Som House",
+        latitude: 23.4540,
+        longitude: 87.4453,
+        accuracy: 10
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('outside');
+
+    const logs = await AttendanceAuditLog.find({ action: 'CHECK_IN_REJECTED', reason: 'OUTSIDE_GEOFENCE' });
+    expect(logs.length).toBe(1);
+  });
+
+  describe('Attendance Timing, Grace Period, and Early Checkout Rules via Manual Creation', () => {
+    const runCreateManual = async (payload) => {
+      return await request(app)
+        .post('/attendance/create-manual')
+        .set('Authorization', "Bearer " + adminToken)
+        .send(payload);
+    };
+
+    // CHECK-IN CASES
+    it('marks check-in at 09:29 as ON TIME', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24", // Monday
+        checkInTime: "2026-08-24T09:29:00",
+        reason: "Test 09:29"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("ON TIME");
+    });
+
+    it('marks check-in at 09:30 as ON TIME', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:30:00",
+        reason: "Test 09:30"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("ON TIME");
+    });
+
+    it('marks check-in at 09:31 as GRACE PERIOD', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:31:00",
+        reason: "Test 09:31"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("GRACE PERIOD");
+    });
+
+    it('marks check-in at 09:40 as GRACE PERIOD', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:40:00",
+        reason: "Test 09:40"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("GRACE PERIOD");
+    });
+
+    it('marks check-in at 09:45 as GRACE PERIOD', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:45:00",
+        reason: "Test 09:45"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("GRACE PERIOD");
+    });
+
+    it('marks check-in at 09:46 as LATE', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:46:00",
+        reason: "Test 09:46"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("LATE");
+    });
+
+    it('marks check-in at 10:00 as LATE', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T10:00:00",
+        reason: "Test 10:00"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("LATE");
+    });
+
+    // CHECK-OUT CASES
+    it('marks check-out at 17:14 as EARLY CHECKOUT', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:00:00",
+        checkOutTime: "2026-08-24T17:14:00",
+        reason: "Test 17:14"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkOutStatus).toBe("EARLY CHECKOUT");
+    });
+
+    it('marks check-out at 17:15 as NORMAL CHECKOUT', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:00:00",
+        checkOutTime: "2026-08-24T17:15:00",
+        reason: "Test 17:15"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkOutStatus).toBe("NORMAL CHECKOUT");
+    });
+
+    it('marks check-out at 17:20 as NORMAL CHECKOUT', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:00:00",
+        checkOutTime: "2026-08-24T17:20:00",
+        reason: "Test 17:20"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkOutStatus).toBe("NORMAL CHECKOUT");
+    });
+
+    it('marks check-out at 17:30 as NORMAL CHECKOUT', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T09:00:00",
+        checkOutTime: "2026-08-24T17:30:00",
+        reason: "Test 17:30"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkOutStatus).toBe("NORMAL CHECKOUT");
+    });
+
+    // SUNDAY & HOLIDAY CASES
+    it('marks Sunday check-in and check-out as WEEKLY_OFF', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-23", // Sunday
+        checkInTime: "2026-08-23T10:00:00",
+        checkOutTime: "2026-08-23T15:00:00",
+        reason: "Test Sunday"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("WEEKLY_OFF");
+      expect(res.body.attendance.checkOutStatus).toBe("WEEKLY_OFF");
+    });
+
+    it('marks Allocated Holiday check-in and check-out as HOLIDAY', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-15", // Independence Day (seeded holiday)
+        checkInTime: "2026-08-15T10:00:00",
+        checkOutTime: "2026-08-15T15:00:00",
+        reason: "Test Holiday"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("HOLIDAY");
+      expect(res.body.attendance.checkOutStatus).toBe("HOLIDAY");
+    });
+
+    // LATE AND EARLY CHECKOUT COMBINATION
+    it('preserves both LATE check-in and EARLY CHECKOUT status', async () => {
+      const res = await runCreateManual({
+        employeeId: employeeUser._id,
+        siteId: officeSite._id,
+        date: "2026-08-24",
+        checkInTime: "2026-08-24T10:00:00", // Late (start: 09:30, grace: 15m)
+        checkOutTime: "2026-08-24T17:00:00", // Early checkout (threshold: 17:15)
+        reason: "Test Combination"
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.attendance.checkInStatus).toBe("LATE");
+      expect(res.body.attendance.checkOutStatus).toBe("EARLY CHECKOUT");
+    });
   });
 });

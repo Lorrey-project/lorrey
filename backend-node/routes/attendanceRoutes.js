@@ -5,6 +5,8 @@ const Site = require("../models/Site");
 const Attendance = require("../models/Attendance");
 const AttendanceAuditLog = require("../models/AttendanceAuditLog");
 const User = require("../models/User");
+const AttendanceSetting = require("../models/AttendanceSetting");
+const Holiday = require("../models/Holiday");
 
 // Seed default sites helper
 async function seedDefaultSites() {
@@ -28,6 +30,13 @@ async function seedDefaultSites() {
                 longitude: 87.34229223812619,
                 geofenceRadius: 100,
                 maxGpsAccuracy: 250
+            },
+            {
+                siteName: "Som House",
+                latitude: 23.673127177268128,
+                longitude: 86.96936630940948,
+                geofenceRadius: 100,
+                maxGpsAccuracy: 250
             }
         ];
 
@@ -44,8 +53,133 @@ async function seedDefaultSites() {
     }
 }
 
-// Trigger seeding immediately on route load
-seedDefaultSites();
+async function seedDefaultSettings() {
+    try {
+        const count = await AttendanceSetting.countDocuments();
+        if (count === 0) {
+            await AttendanceSetting.create({
+                officeStartTime: "09:30",
+                gracePeriodMinutes: 15,
+                officeEndTime: "17:30",
+                earlyCheckoutThreshold: "17:15"
+            });
+            console.log("Ensured default attendance settings are seeded.");
+        }
+    } catch (e) {
+        console.error("Failed to seed default settings:", e);
+    }
+}
+
+async function seedDefaultHolidays() {
+    try {
+        const defaultHolidays = [
+            { name: "New Year's Day", date: "2026-01-01" },
+            { name: "Saraswati Puja", date: "2026-02-02" },
+            { name: "Holi / Dol Jatra", date: "2026-03-03" },
+            { name: "Bengali New Year / Nababarsha", date: "2026-04-14" },
+            { name: "15th August - Independence Day", date: "2026-08-15" },
+            { name: "Mahasaptami - Durgapuja", date: "2026-10-17" },
+            { name: "Mahaashtami - Durgapuja", date: "2026-10-18" },
+            { name: "Mahanavami - Durgapuja", date: "2026-10-19" },
+            { name: "Vijayadashami - Durgapuja", date: "2026-10-20" },
+            { name: "Laxmi Puja", date: "2026-10-24" },
+            { name: "Kali Puja / Diwali", date: "2026-11-08" },
+            { name: "Bhai Dooj / Bhaifota", date: "2026-11-10" },
+            { name: "X-Mass Day", date: "2026-12-25" }
+        ];
+
+        for (const dh of defaultHolidays) {
+            await Holiday.findOneAndUpdate(
+                { date: dh.date },
+                dh,
+                { upsert: true, new: true }
+            );
+        }
+        console.log("Ensured default office holidays are seeded.");
+    } catch (e) {
+        console.error("Failed to seed default holidays:", e);
+    }
+}
+
+async function getAttendanceSettings() {
+    let settings = await AttendanceSetting.findOne();
+    if (!settings) {
+        settings = await AttendanceSetting.create({});
+    }
+    return settings;
+}
+
+async function isHolidayOrSunday(dateStr) {
+    const dateObj = new Date(dateStr + "T00:00:00Z");
+    if (dateObj.getUTCDay() === 0) {
+        return { isSunday: true, isHoliday: false };
+    }
+    const holiday = await Holiday.findOne({ date: dateStr });
+    if (holiday) {
+        return { isSunday: false, isHoliday: true, holidayName: holiday.name };
+    }
+    return { isSunday: false, isHoliday: false };
+}
+
+async function calculateCheckInStatus(checkInTime, dateStr) {
+    const { isSunday, isHoliday } = await isHolidayOrSunday(dateStr);
+    if (isSunday) return "WEEKLY_OFF";
+    if (isHoliday) return "HOLIDAY";
+
+    const settings = await getAttendanceSettings();
+    const [startHour, startMin] = settings.officeStartTime.split(":").map(Number);
+    const graceMinutes = settings.gracePeriodMinutes;
+
+    const utc = checkInTime.getTime() + (checkInTime.getTimezoneOffset() * 60000);
+    const istDate = new Date(utc + (3600000 * 5.5));
+    const hours = istDate.getHours();
+    const minutes = istDate.getMinutes();
+    const timeInMins = hours * 60 + minutes;
+
+    const startTimeMins = startHour * 60 + startMin;
+    const graceEndMins = startTimeMins + graceMinutes;
+
+    if (timeInMins <= startTimeMins) {
+        return "ON TIME";
+    } else if (timeInMins <= graceEndMins) {
+        return "GRACE PERIOD";
+    } else {
+        return "LATE";
+    }
+}
+
+async function calculateCheckOutStatus(checkOutTime, dateStr) {
+    if (!checkOutTime) return null;
+    const { isSunday, isHoliday } = await isHolidayOrSunday(dateStr);
+    if (isSunday) return "WEEKLY_OFF";
+    if (isHoliday) return "HOLIDAY";
+
+    const settings = await getAttendanceSettings();
+    const [thresholdHour, thresholdMin] = settings.earlyCheckoutThreshold.split(":").map(Number);
+
+    const utc = checkOutTime.getTime() + (checkOutTime.getTimezoneOffset() * 60000);
+    const istDate = new Date(utc + (3600000 * 5.5));
+    const hours = istDate.getHours();
+    const minutes = istDate.getMinutes();
+    const timeInMins = hours * 60 + minutes;
+
+    const thresholdMins = thresholdHour * 60 + thresholdMin;
+
+    if (timeInMins < thresholdMins) {
+        return "EARLY CHECKOUT";
+    } else {
+        return "NORMAL CHECKOUT";
+    }
+}
+
+
+
+// Trigger seeding immediately on route load if not in test environment
+if (process.env.NODE_ENV !== "test") {
+    seedDefaultSites();
+    seedDefaultSettings();
+    seedDefaultHolidays();
+}
 
 // Distance calculation: Haversine formula
 function getHaversineDistance(lat1, lon1, lat2, lon2) {
@@ -135,7 +269,7 @@ router.post("/check-in", auth, async (req, res) => {
         }
 
         // Validate that it's one of the official locations
-        if (site.siteName !== "Office" && site.siteName !== "Raj House") {
+        if (site.siteName !== "Office" && site.siteName !== "Raj House" && site.siteName !== "Som House") {
             await AttendanceAuditLog.create({
                 employeeId: userId,
                 action: "CHECK_IN_REJECTED",
@@ -209,6 +343,8 @@ router.post("/check-in", auth, async (req, res) => {
         }
 
         // 6. Save Check-In
+        const now = new Date();
+        const checkInStatus = await calculateCheckInStatus(now, dateStr);
         const newAttendance = new Attendance({
             employeeId: userId,
             siteId: site._id,
@@ -216,7 +352,7 @@ router.post("/check-in", auth, async (req, res) => {
             selectedLocationName: site.siteName,
             date: dateStr,
             checkIn: {
-                time: new Date(),
+                time: now,
                 latitude: latNum,
                 longitude: lonNum,
                 accuracy: accNum,
@@ -224,7 +360,8 @@ router.post("/check-in", auth, async (req, res) => {
                 geofenceRadius: geofenceRadius,
                 validationStatus: "VALIDATED"
             },
-            status: "checked-in"
+            status: "checked-in",
+            checkInStatus: checkInStatus
         });
 
         await newAttendance.save();
@@ -341,8 +478,10 @@ router.post("/check-out", auth, async (req, res) => {
         }
 
         // 6. Save Check-Out
+        const now = new Date();
+        const checkOutStatus = await calculateCheckOutStatus(now, dateStr);
         attendance.checkOut = {
-            time: new Date(),
+            time: now,
             latitude: latNum,
             longitude: lonNum,
             accuracy: accNum,
@@ -351,6 +490,7 @@ router.post("/check-out", auth, async (req, res) => {
             validationStatus: "VALIDATED"
         };
         attendance.status = "checked-out";
+        attendance.checkOutStatus = checkOutStatus;
         await attendance.save();
 
         // 7. Audit log
@@ -513,12 +653,18 @@ router.post("/correct", auth, async (req, res) => {
             } else {
                 attendance.checkIn.time = checkInTime ? new Date(checkInTime) : null;
             }
+            if (attendance.checkIn && attendance.checkIn.time) {
+                attendance.checkInStatus = await calculateCheckInStatus(attendance.checkIn.time, attendance.date);
+            } else {
+                attendance.checkInStatus = null;
+            }
             newValue.checkInTime = checkInTime;
         }
 
         if (checkOutTime !== undefined) {
             if (checkOutTime === null) {
                 attendance.checkOut = null;
+                attendance.checkOutStatus = null;
             } else {
                 if (!attendance.checkOut) {
                     attendance.checkOut = {
@@ -533,6 +679,7 @@ router.post("/correct", auth, async (req, res) => {
                 } else {
                     attendance.checkOut.time = new Date(checkOutTime);
                 }
+                attendance.checkOutStatus = await calculateCheckOutStatus(attendance.checkOut.time, attendance.date);
             }
             newValue.checkOutTime = checkOutTime;
         }
@@ -588,6 +735,7 @@ router.post("/create-manual", auth, async (req, res) => {
             return res.status(404).json({ success: false, error: "Site not found" });
         }
 
+        const checkInStatus = await calculateCheckInStatus(new Date(checkInTime), date);
         const newAttendance = new Attendance({
             employeeId,
             siteId,
@@ -601,10 +749,12 @@ router.post("/create-manual", auth, async (req, res) => {
                 geofenceRadius: site.geofenceRadius,
                 validationStatus: "MANUAL_BY_ADMIN"
             },
-            status: checkOutTime ? "checked-out" : "checked-in"
+            status: checkOutTime ? "checked-out" : "checked-in",
+            checkInStatus: checkInStatus
         });
 
         if (checkOutTime) {
+            const checkOutStatus = await calculateCheckOutStatus(new Date(checkOutTime), date);
             newAttendance.checkOut = {
                 time: new Date(checkOutTime),
                 latitude: site.latitude,
@@ -614,6 +764,7 @@ router.post("/create-manual", auth, async (req, res) => {
                 geofenceRadius: site.geofenceRadius,
                 validationStatus: "MANUAL_BY_ADMIN"
             };
+            newAttendance.checkOutStatus = checkOutStatus;
         }
 
         await newAttendance.save();
@@ -690,6 +841,38 @@ router.get("/sites", auth, async (req, res) => {
     try {
         const sites = await Site.find().select("siteName latitude longitude").lean();
         res.json({ success: true, sites });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// GET /attendance/settings
+router.get("/settings", auth, async (req, res) => {
+    try {
+        const settings = await getAttendanceSettings();
+        res.json({ success: true, data: settings });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// PUT /attendance/settings
+router.put("/settings", auth, async (req, res) => {
+    if (req.user.role !== "HEAD_OFFICE") {
+        return res.status(403).json({ success: false, error: "Forbidden: Admins only" });
+    }
+
+    try {
+        const { officeStartTime, gracePeriodMinutes, officeEndTime, earlyCheckoutThreshold } = req.body;
+        const settings = await getAttendanceSettings();
+
+        if (officeStartTime !== undefined) settings.officeStartTime = officeStartTime;
+        if (gracePeriodMinutes !== undefined) settings.gracePeriodMinutes = Number(gracePeriodMinutes);
+        if (officeEndTime !== undefined) settings.officeEndTime = officeEndTime;
+        if (earlyCheckoutThreshold !== undefined) settings.earlyCheckoutThreshold = earlyCheckoutThreshold;
+
+        await settings.save();
+        res.json({ success: true, message: "Attendance settings updated.", data: settings });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }

@@ -53,7 +53,6 @@ export default function AttendancePanel({ onBack }) {
     const [selectedLocation, setSelectedLocation] = useState('');
 
     // Admin states
-    const [activeTab, setActiveTab] = useState(0); // 0: My Attendance, 1: Employee Logs, 2: Audit Logs
     const [allHistory, setAllHistory] = useState([]);
     const [auditLogs, setAuditLogs] = useState([]);
     const [sitesList, setSitesList] = useState([]);
@@ -84,6 +83,57 @@ export default function AttendancePanel({ onBack }) {
     const [deleteReason, setDeleteReason] = useState('');
 
     const [usersList, setUsersList] = useState([]);
+    const [officeStartTime, setOfficeStartTime] = useState('09:30');
+    const [gracePeriodMinutes, setGracePeriodMinutes] = useState(15);
+    const [officeEndTime, setOfficeEndTime] = useState('17:30');
+    const [earlyCheckoutThreshold, setEarlyCheckoutThreshold] = useState('17:15');
+    const [mgmtSubTab, setMgmtSubTab] = useState(0); // 0: Employee Logs, 1: Audit Logs, 2: Timing Settings
+    const [showMgmtPage, setShowMgmtPage] = useState(false);
+
+    const handleOpenMgmt = () => {
+        setMgmtSubTab(0);
+        setShowMgmtPage(true);
+    };
+
+    // Fetch settings
+    const fetchSettings = useCallback(async () => {
+        try {
+            const res = await axios.get(`${API_URL}/attendance/settings`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.success) {
+                setOfficeStartTime(res.data.data.officeStartTime);
+                setGracePeriodMinutes(res.data.data.gracePeriodMinutes);
+                setOfficeEndTime(res.data.data.officeEndTime);
+                setEarlyCheckoutThreshold(res.data.data.earlyCheckoutThreshold);
+            }
+        } catch (e) {
+            console.error('Failed to load attendance settings:', e);
+        }
+    }, [token]);
+
+    const saveSettings = async () => {
+        try {
+            setActionLoading(true);
+            setErrorMsg('');
+            setSuccessMsg('');
+            const res = await axios.put(`${API_URL}/attendance/settings`, {
+                officeStartTime,
+                gracePeriodMinutes,
+                officeEndTime,
+                earlyCheckoutThreshold
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.success) {
+                setSuccessMsg('Attendance settings updated successfully.');
+            }
+        } catch (e) {
+            setErrorMsg(e.response?.data?.error || 'Failed to update settings.');
+        } finally {
+            setActionLoading(false);
+        }
+    };
 
     // Fetch personal data
     const fetchMyAttendance = useCallback(async () => {
@@ -148,7 +198,11 @@ export default function AttendancePanel({ onBack }) {
     useEffect(() => {
         fetchMyAttendance();
         fetchSites();
-    }, [fetchMyAttendance, fetchSites]);
+        if (user.role === 'HEAD_OFFICE') {
+            fetchAdminData();
+            fetchSettings();
+        }
+    }, [fetchMyAttendance, fetchSites, fetchAdminData, fetchSettings, user.role]);
 
     useEffect(() => {
         if (today) {
@@ -161,12 +215,6 @@ export default function AttendancePanel({ onBack }) {
             setSelectedLocation('');
         }
     }, [today]);
-
-    useEffect(() => {
-        if (activeTab > 0 && user.role === 'HEAD_OFFICE') {
-            fetchAdminData();
-        }
-    }, [activeTab, user.role, fetchAdminData]);
 
     // Request device location
     const captureLocation = () => {
@@ -375,6 +423,464 @@ export default function AttendancePanel({ onBack }) {
         return new Date(dateStr).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
     };
 
+    // Helper dialogs component to avoid code duplication between pages
+    const renderDialogs = () => (
+        <>
+            {/* Dialog: Admin Correction */}
+            <Dialog open={correctOpen} onClose={() => setCorrectOpen(false)} fullWidth maxWidth="sm">
+                <DialogTitle fontWeight={800}>Correct Attendance Log</DialogTitle>
+                <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+                    <TextField
+                        label="Check-In Time"
+                        type="datetime-local"
+                        value={correctFields.checkInTime}
+                        onChange={(e) => setCorrectFields({ ...correctFields, checkInTime: e.target.value })}
+                        InputLabelProps={{ shrink: true }}
+                        fullWidth
+                    />
+                    <TextField
+                        label="Check-Out Time (Leave blank to remove check-out)"
+                        type="datetime-local"
+                        value={correctFields.checkOutTime}
+                        onChange={(e) => setCorrectFields({ ...correctFields, checkOutTime: e.target.value })}
+                        InputLabelProps={{ shrink: true }}
+                        fullWidth
+                    />
+                    <TextField
+                        select
+                        label="Attendance Location / Site"
+                        value={correctFields.siteId || ''}
+                        onChange={(e) => setCorrectFields({ ...correctFields, siteId: e.target.value })}
+                        fullWidth
+                    >
+                        {sitesList.map((s) => (
+                            <MenuItem key={s._id} value={s._id}>{s.siteName}</MenuItem>
+                        ))}
+                    </TextField>
+                    <TextField
+                        select
+                        label="Status"
+                        value={correctFields.status}
+                        onChange={(e) => setCorrectFields({ ...correctFields, status: e.target.value })}
+                        fullWidth
+                    >
+                        <MenuItem value="checked-in">Checked In</MenuItem>
+                        <MenuItem value="checked-out">Checked Out</MenuItem>
+                        <MenuItem value="absent">Absent</MenuItem>
+                    </TextField>
+                    <TextField
+                        label="Reason for Correction"
+                        value={correctFields.reason}
+                        onChange={(e) => setCorrectFields({ ...correctFields, reason: e.target.value })}
+                        fullWidth
+                        required
+                    />
+                </DialogContent>
+                <DialogActions sx={{ p: 3 }}>
+                    <Button onClick={() => setCorrectOpen(false)}>Cancel</Button>
+                    <Button onClick={submitCorrection} variant="contained" sx={{ bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' } }}>Submit Correction</Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Dialog: Manual Attendance Create */}
+            <Dialog open={createManualOpen} onClose={() => setCreateManualOpen(false)} fullWidth maxWidth="sm">
+                <DialogTitle fontWeight={800}>Create Manual Attendance</DialogTitle>
+                <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+                    <TextField
+                        select
+                        label="Select Employee"
+                        value={createManualFields.employeeId}
+                        onChange={(e) => setCreateManualFields({ ...createManualFields, employeeId: e.target.value })}
+                        fullWidth
+                        required
+                    >
+                        {usersList.map((u) => (
+                            <MenuItem key={u._id} value={u._id}>{u.name} ({u.email})</MenuItem>
+                        ))}
+                    </TextField>
+                    <TextField
+                        select
+                        label="Select Location / Site"
+                        value={createManualFields.siteId}
+                        onChange={(e) => setCreateManualFields({ ...createManualFields, siteId: e.target.value })}
+                        fullWidth
+                        required
+                    >
+                        {sitesList.map((s) => (
+                            <MenuItem key={s._id} value={s._id}>{s.siteName}</MenuItem>
+                        ))}
+                    </TextField>
+                    <TextField
+                        label="Date"
+                        type="date"
+                        value={createManualFields.date}
+                        onChange={(e) => setCreateManualFields({ ...createManualFields, date: e.target.value })}
+                        InputLabelProps={{ shrink: true }}
+                        fullWidth
+                        required
+                    />
+                    <TextField
+                        label="Check-In Time"
+                        type="datetime-local"
+                        value={createManualFields.checkInTime}
+                        onChange={(e) => setCreateManualFields({ ...createManualFields, checkInTime: e.target.value })}
+                        InputLabelProps={{ shrink: true }}
+                        fullWidth
+                        required
+                    />
+                    <TextField
+                        label="Check-Out Time (Optional)"
+                        type="datetime-local"
+                        value={createManualFields.checkOutTime}
+                        onChange={(e) => setCreateManualFields({ ...createManualFields, checkOutTime: e.target.value })}
+                        InputLabelProps={{ shrink: true }}
+                        fullWidth
+                    />
+                    <TextField
+                        label="Reason for Manual Log"
+                        value={createManualFields.reason}
+                        onChange={(e) => setCreateManualFields({ ...createManualFields, reason: e.target.value })}
+                        fullWidth
+                        required
+                    />
+                </DialogContent>
+                <DialogActions sx={{ p: 3 }}>
+                    <Button onClick={() => setCreateManualOpen(false)}>Cancel</Button>
+                    <Button onClick={submitManualCreate} variant="contained" sx={{ bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' } }}>Create Log</Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Dialog: Delete Attendance */}
+            <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} fullWidth maxWidth="xs">
+                <DialogTitle fontWeight={800}>Cancel/Delete Attendance Record</DialogTitle>
+                <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+                    <Typography variant="body2" color="text.secondary">Are you sure you want to completely remove this attendance record? This action will be fully logged in the permanent security audit history.</Typography>
+                    <TextField
+                        label="Reason for deletion"
+                        value={deleteReason}
+                        onChange={(e) => setDeleteReason(e.target.value)}
+                        fullWidth
+                        required
+                    />
+                </DialogContent>
+                <DialogActions sx={{ p: 3 }}>
+                    <Button onClick={() => setDeleteOpen(false)}>Cancel</Button>
+                    <Button onClick={submitDelete} variant="contained" color="error">Confirm Delete</Button>
+                </DialogActions>
+            </Dialog>
+        </>
+    );
+
+    if (showMgmtPage && user.role === 'HEAD_OFFICE') {
+        return (
+            <Box sx={{ minHeight: '100vh', bgcolor: '#f4f7f9', py: 4 }}>
+                <Container maxWidth="lg">
+                    {/* Header Row for Attendance Management Page */}
+                    <Box display="flex" justifyContent="space-between" alignItems="center" gap={2} mb={4} flexDirection={{ xs: 'column', sm: 'row' }}>
+                        <Box display="flex" alignItems="center" gap={2}>
+                            <Button
+                                variant="outlined"
+                                startIcon={<ArrowBackIcon />}
+                                onClick={() => setShowMgmtPage(false)}
+                                sx={{
+                                    borderRadius: '12px',
+                                    textTransform: 'none',
+                                    fontWeight: 700,
+                                    borderColor: '#cbd5e1',
+                                    color: '#334155',
+                                    bgcolor: 'white',
+                                    '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
+                                }}
+                            >
+                                Back
+                            </Button>
+                            <Box display="flex" alignItems="center" gap={1.5}>
+                                <Box sx={{ p: 1, bgcolor: '#4f46e5', borderRadius: '10px', color: 'white', display: 'flex', alignItems: 'center' }}>
+                                    <SecurityIcon />
+                                </Box>
+                                <Typography variant="h4" fontWeight={900} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
+                                    Attendance Management
+                                </Typography>
+                            </Box>
+                        </Box>
+                    </Box>
+
+                    {errorMsg && <Alert severity="error" sx={{ borderRadius: '16px', mb: 3 }} onClose={() => setErrorMsg('')}>{errorMsg}</Alert>}
+                    {successMsg && <Alert severity="success" sx={{ borderRadius: '16px', mb: 3 }} onClose={() => setSuccessMsg('')}>{successMsg}</Alert>}
+
+                    {/* Attendance Management Detailed Card */}
+                    <Card sx={{ borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,0.02)', p: 4 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                <Box sx={{ p: 1, bgcolor: '#4f46e5', borderRadius: '10px', color: 'white', display: 'flex', alignItems: 'center' }}>
+                                    <SecurityIcon />
+                                </Box>
+                                <Typography variant="h5" fontWeight={900} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
+                                    Attendance Management
+                                </Typography>
+                            </Box>
+                            <Box sx={{ bgcolor: 'white', borderRadius: '14px', p: 0.5, border: '1px solid #e2e8f0' }}>
+                                <Tabs value={mgmtSubTab} onChange={(e, val) => setMgmtSubTab(val)} sx={{ minHeight: 40 }} TabIndicatorProps={{ sx: { display: 'none' } }}>
+                                    <Tab label="Employee Logs" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', minHeight: 36, '&.Mui-selected': { bgcolor: '#4f46e5', color: 'white' } }} />
+                                    <Tab label="Audit Logs" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', minHeight: 36, '&.Mui-selected': { bgcolor: '#4f46e5', color: 'white' } }} />
+                                    <Tab label="Timing Settings" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', minHeight: 36, '&.Mui-selected': { bgcolor: '#4f46e5', color: 'white' } }} />
+                                </Tabs>
+                            </Box>
+                        </Box>
+
+                        <Divider sx={{ mb: 3 }} />
+
+                        {/* Sub-tab 0: Employee Logs */}
+                        {mgmtSubTab === 0 && (
+                            <Box sx={{ mx: -4 }}>
+                                <Box p={3} display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+                                    <Typography variant="h6" fontWeight={850} color="#0f172a">All Employee Attendance</Typography>
+                                    <Button
+                                        variant="contained"
+                                        startIcon={<AddIcon />}
+                                        onClick={() => setCreateManualOpen(true)}
+                                        sx={{ borderRadius: '12px', textTransform: 'none', fontWeight: 700, bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' } }}
+                                    >
+                                        Manual Check-In
+                                    </Button>
+                                </Box>
+                                <Divider />
+                                {adminLoading ? (
+                                    <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>
+                                ) : (
+                                    <TableContainer>
+                                        <Table>
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Employee</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Date</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Assigned Site</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Check-In Time</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Check-Out Time</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Status</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }} align="center">Actions</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {allHistory.length === 0 ? (
+                                                    <TableRow>
+                                                        <TableCell colSpan={7} align="center" sx={{ py: 6, color: 'text.secondary' }}>No records found.</TableCell>
+                                                    </TableRow>
+                                                ) : (
+                                                    allHistory.map((row) => (
+                                                        <TableRow key={row._id}>
+                                                            <TableCell sx={{ fontWeight: 700 }}>
+                                                                {row.employeeId?.name || 'Unnamed Employee'}
+                                                                <Typography variant="caption" display="block" color="text.secondary">{row.employeeId?.email}</Typography>
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontWeight: 600 }}>{row.date}</TableCell>
+                                                            <TableCell>{row.siteId?.siteName || 'N/A'}</TableCell>
+                                                            <TableCell>{formatDateTime(row.checkIn?.time)}</TableCell>
+                                                            <TableCell>{row.checkOut ? formatDateTime(row.checkOut.time) : '--'}</TableCell>
+                                                            <TableCell>
+                                                                <Badge
+                                                                    badgeContent={row.status}
+                                                                    color={row.status === 'checked-out' ? 'success' : 'warning'}
+                                                                    sx={{ '& .MuiBadge-badge': { fontWeight: 700 } }}
+                                                                />
+                                                            </TableCell>
+                                                            <TableCell align="center">
+                                                                <Box display="flex" gap={1} justifyContent="center">
+                                                                    <Button
+                                                                        size="small"
+                                                                        variant="outlined"
+                                                                        startIcon={<EditIcon />}
+                                                                        onClick={() => {
+                                                                            setCorrectTarget(row);
+                                                                            setCorrectFields({
+                                                                                checkInTime: row.checkIn?.time ? new Date(row.checkIn.time).toISOString().slice(0, 16) : '',
+                                                                                checkOutTime: row.checkOut?.time ? new Date(row.checkOut.time).toISOString().slice(0, 16) : '',
+                                                                                status: row.status,
+                                                                                siteId: row.siteId?._id || '',
+                                                                                reason: ''
+                                                                            });
+                                                                            setCorrectOpen(true);
+                                                                        }}
+                                                                        sx={{ borderRadius: '8px', textTransform: 'none' }}
+                                                                    >
+                                                                        Correct
+                                                                    </Button>
+                                                                    <Button
+                                                                        size="small"
+                                                                        variant="outlined"
+                                                                        color="error"
+                                                                        startIcon={<DeleteIcon />}
+                                                                        onClick={() => {
+                                                                            setDeleteTargetId(row._id);
+                                                                            setDeleteReason('');
+                                                                            setDeleteOpen(true);
+                                                                        }}
+                                                                        sx={{ borderRadius: '8px', textTransform: 'none' }}
+                                                                    >
+                                                                        Delete
+                                                                    </Button>
+                                                                </Box>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+                                )}
+                            </Box>
+                        )}
+
+                        {/* Sub-tab 1: Audit Logs */}
+                        {mgmtSubTab === 1 && (
+                            <Box sx={{ mx: -4 }}>
+                                <Box p={3} display="flex" alignItems="center" gap={1.5}>
+                                    <SecurityIcon color="action" />
+                                    <Typography variant="h6" fontWeight={850} color="#0f172a">Attendance Security Audit Logs</Typography>
+                                </Box>
+                                <Divider />
+                                {adminLoading ? (
+                                    <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>
+                                ) : (
+                                    <TableContainer>
+                                        <Table>
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Timestamp</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Employee</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Action Taken</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Details / Reason</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Performed By</TableCell>
+                                                    <TableCell sx={{ fontWeight: 800 }}>Device Info</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {auditLogs.length === 0 ? (
+                                                    <TableRow>
+                                                        <TableCell colSpan={6} align="center" sx={{ py: 6, color: 'text.secondary' }}>No audit records found.</TableCell>
+                                                    </TableRow>
+                                                ) : (
+                                                    auditLogs.map((log) => (
+                                                        <TableRow key={log._id}>
+                                                            <TableCell sx={{ fontWeight: 600 }}>{formatDateFull(log.timestamp)} {formatDateTime(log.timestamp)}</TableCell>
+                                                            <TableCell sx={{ fontWeight: 700 }}>{log.employeeId?.name || 'N/A'}</TableCell>
+                                                            <TableCell>
+                                                                <Badge
+                                                                    badgeContent={log.action}
+                                                                    color={log.action.includes('REJECT') ? 'error' : (log.action.includes('SUCCESS') ? 'success' : 'primary')}
+                                                                    sx={{ '& .MuiBadge-badge': { fontWeight: 700, fontSize: '0.65rem' } }}
+                                                                />
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <Typography variant="body2" fontWeight={500}>{log.reason || 'Succeeded validation.'}</Typography>
+                                                                {log.previousValue && (
+                                                                    <Box mt={1} sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.75rem' }}>
+                                                                        {log.previousValue.checkInTime !== undefined && (
+                                                                            <div><strong>Prev Check-In:</strong> {formatDateTime(log.previousValue.checkInTime)} | <strong>Prev Check-Out:</strong> {formatDateTime(log.previousValue.checkOutTime)}</div>
+                                                                        )}
+                                                                        {log.previousValue.siteName && (
+                                                                            <div><strong>Prev Location:</strong> {log.previousValue.siteName}</div>
+                                                                        )}
+                                                                    </Box>
+                                                                )}
+                                                                {log.newValue && (
+                                                                    <Box mt={0.5} sx={{ p: 1, bgcolor: '#f0fdf4', borderRadius: '8px', border: '1px solid #dcfce7', fontSize: '0.75rem' }}>
+                                                                        {log.newValue.checkInTime !== undefined && (
+                                                                            <div><strong>New Check-In:</strong> {formatDateTime(log.newValue.checkInTime)} | <strong>New Check-Out:</strong> {formatDateTime(log.newValue.checkOutTime)}</div>
+                                                                        )}
+                                                                        {log.newValue.siteName && (
+                                                                            <div><strong>New Location:</strong> {log.newValue.siteName}</div>
+                                                                        )}
+                                                                        {log.newValue.location && (
+                                                                            <div><strong>Location:</strong> {log.newValue.location} | <strong>Distance:</strong> {log.newValue.distance} | <strong>Accuracy:</strong> {log.newValue.accuracy}</div>
+                                                                        )}
+                                                                    </Box>
+                                                                )}
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontWeight: 600 }}>{log.performedBy?.name || 'System'}</TableCell>
+                                                            <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
+                                                                IP: {log.ipAddress || 'unknown'}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+                                )}
+                            </Box>
+                        )}
+
+                        {/* Sub-tab 2: Timing Settings */}
+                        {mgmtSubTab === 2 && (
+                            <Box>
+                                <Typography variant="h6" fontWeight={850} color="#0f172a" mb={3}>
+                                    Office Timing & Grace Period Configurations
+                                </Typography>
+                                <Grid container spacing={3} sx={{ maxWidth: 600 }}>
+                                    <Grid size={{ xs: 12, sm: 6 }}>
+                                        <TextField
+                                            label="Office Start Time"
+                                            type="text"
+                                            placeholder="09:30"
+                                            helperText="Format: HH:MM (24-hour style)"
+                                            value={officeStartTime}
+                                            onChange={(e) => setOfficeStartTime(e.target.value)}
+                                            fullWidth
+                                        />
+                                    </Grid>
+                                    <Grid size={{ xs: 12, sm: 6 }}>
+                                        <TextField
+                                            label="Grace Period (Minutes)"
+                                            type="number"
+                                            value={gracePeriodMinutes}
+                                            onChange={(e) => setGracePeriodMinutes(Number(e.target.value))}
+                                            fullWidth
+                                        />
+                                    </Grid>
+                                    <Grid size={{ xs: 12, sm: 6 }}>
+                                        <TextField
+                                            label="Office End Time"
+                                            type="text"
+                                            placeholder="17:30"
+                                            helperText="Format: HH:MM (24-hour style)"
+                                            value={officeEndTime}
+                                            onChange={(e) => setOfficeEndTime(e.target.value)}
+                                            fullWidth
+                                        />
+                                    </Grid>
+                                    <Grid size={{ xs: 12, sm: 6 }}>
+                                        <TextField
+                                            label="Early Checkout Threshold"
+                                            type="text"
+                                            placeholder="17:15"
+                                            helperText="Format: HH:MM (24-hour style)"
+                                            value={earlyCheckoutThreshold}
+                                            onChange={(e) => setEarlyCheckoutThreshold(e.target.value)}
+                                            fullWidth
+                                        />
+                                    </Grid>
+                                    <Grid size={{ xs: 12 }}>
+                                        <Button
+                                            variant="contained"
+                                            onClick={saveSettings}
+                                            disabled={actionLoading}
+                                            sx={{ borderRadius: '12px', px: 4, py: 1.5, textTransform: 'none', fontWeight: 700, bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' } }}
+                                        >
+                                            {actionLoading ? 'Saving...' : 'Save Settings'}
+                                        </Button>
+                                    </Grid>
+                                </Grid>
+                            </Box>
+                        )}
+                    </Card>
+
+                    {renderDialogs()}
+                </Container>
+            </Box>
+        );
+    }
+
     return (
         <Box sx={{ minHeight: '100vh', bgcolor: '#f4f7f9', py: 4 }}>
             <Container maxWidth="lg">
@@ -406,26 +912,18 @@ export default function AttendancePanel({ onBack }) {
                             </Typography>
                         </Box>
                     </Box>
-                    {user.role === 'HEAD_OFFICE' && (
-                        <Box sx={{ bgcolor: 'white', borderRadius: '14px', p: 0.5, border: '1px solid #e2e8f0' }}>
-                            <Tabs value={activeTab} onChange={(e, val) => setActiveTab(val)} sx={{ minHeight: 40 }} TabIndicatorProps={{ sx: { display: 'none' } }}>
-                                <Tab label="My Attendance" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', minHeight: 36, '&.Mui-selected': { bgcolor: '#4f46e5', color: 'white' } }} />
-                                <Tab label="Employee Logs" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', minHeight: 36, '&.Mui-selected': { bgcolor: '#4f46e5', color: 'white' } }} />
-                                <Tab label="Audit Logs" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', minHeight: 36, '&.Mui-selected': { bgcolor: '#4f46e5', color: 'white' } }} />
-                            </Tabs>
-                        </Box>
-                    )}
                 </Box>
 
                 {errorMsg && <Alert severity="error" sx={{ borderRadius: '16px', mb: 3 }} onClose={() => setErrorMsg('')}>{errorMsg}</Alert>}
                 {successMsg && <Alert severity="success" sx={{ borderRadius: '16px', mb: 3 }} onClose={() => setSuccessMsg('')}>{successMsg}</Alert>}
 
-                {/* Tab 0: Personal Attendance */}
-                {activeTab === 0 && (
-                    <Grid container spacing={3}>
-                        {/* Check-In/Check-Out Operations */}
-                        <Grid item xs={12} md={5}>
-                            <Card sx={{ borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,0.02)', mb: 3 }}>
+                {/* Main Layout Grid */}
+                <Grid container spacing={3}>
+                    {/* Left Column: My Attendance */}
+                    <Grid size={{ xs: 12, md: user.role === 'HEAD_OFFICE' ? 6 : 12 }}>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            {/* My Attendance Card */}
+                            <Card sx={{ borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,0.02)' }}>
                                 <CardContent sx={{ p: 4 }}>
                                     <Typography variant="h6" fontWeight={850} color="#0f172a" mb={2}>
                                         Mark Attendance
@@ -517,7 +1015,6 @@ export default function AttendancePanel({ onBack }) {
                                     </Box>
 
                                     {/* GPS Debug Stats */}
-                                    {/* GPS Debug Stats */}
                                     {(() => {
                                         const activeSite = sitesList.find(s => s.siteName === selectedLocation);
                                         let calculatedDistance = null;
@@ -598,12 +1095,9 @@ export default function AttendancePanel({ onBack }) {
                                     })()}
                                 </CardContent>
                             </Card>
-                        </Grid>
 
-                        {/* Current Status and Logs History */}
-                        <Grid item xs={12} md={7}>
-                            {/* Today Status Widget */}
-                            <Card sx={{ borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,0.02)', mb: 3 }}>
+                            {/* Today's Session Card */}
+                            <Card sx={{ borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,0.02)' }}>
                                 <CardContent sx={{ p: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                     <Box>
                                         <Typography variant="h6" fontWeight={850} color="#0f172a">Today's Session</Typography>
@@ -629,7 +1123,7 @@ export default function AttendancePanel({ onBack }) {
                                 </CardContent>
                             </Card>
 
-                            {/* Personal History */}
+                            {/* Recent Personal Attendance Table */}
                             <TableContainer component={Paper} sx={{ borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
                                 <Box p={3} pb={1} display="flex" alignItems="center" gap={1}>
                                     <HistoryIcon color="action" />
@@ -670,333 +1164,73 @@ export default function AttendancePanel({ onBack }) {
                                     </TableBody>
                                 </Table>
                             </TableContainer>
-                        </Grid>
+                        </Box>
                     </Grid>
-                )}
 
-                {/* Tab 1: Employee Logs (Admin Only) */}
-                {activeTab === 1 && user.role === 'HEAD_OFFICE' && (
-                    <Card sx={{ borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-                        <Box p={3} display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
-                            <Typography variant="h6" fontWeight={850} color="#0f172a">All Employee Attendance</Typography>
-                            <Button
-                                variant="contained"
-                                startIcon={<AddIcon />}
-                                onClick={() => setCreateManualOpen(true)}
-                                sx={{ borderRadius: '12px', textTransform: 'none', fontWeight: 700, bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' } }}
+                    {/* Right Column: Attendance Management (Compact Card) */}
+                    {user.role === 'HEAD_OFFICE' && (
+                        <Grid size={{ xs: 12, md: 6 }}>
+                            <Card 
+                                onClick={handleOpenMgmt}
+                                sx={{ 
+                                    borderRadius: '24px', 
+                                    border: '1px solid #e2e8f0', 
+                                    boxShadow: '0 4px 20px rgba(0,0,0,0.02)', 
+                                    p: 4, 
+                                    height: 'fit-content',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                    '&:hover': { 
+                                        boxShadow: '0 10px 30px rgba(79,70,229,0.08)', 
+                                        borderColor: '#4f46e5',
+                                        '& .mgmt-title': {
+                                            color: '#4f46e5'
+                                        }
+                                    }
+                                }}
                             >
-                                Manual Check-In
-                            </Button>
-                        </Box>
-                        <Divider />
-                        {adminLoading ? (
-                            <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>
-                        ) : (
-                            <TableContainer>
-                                <Table>
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell sx={{ fontWeight: 800 }}>Employee</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Date</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Assigned Site</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Check-In Time</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Check-Out Time</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Status</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }} align="center">Actions</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {allHistory.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={7} align="center" sx={{ py: 6, color: 'text.secondary' }}>No records found.</TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            allHistory.map((row) => (
-                                                <TableRow key={row._id}>
-                                                    <TableCell sx={{ fontWeight: 700 }}>
-                                                        {row.employeeId?.name || 'Unnamed Employee'}
-                                                        <Typography variant="caption" display="block" color="text.secondary">{row.employeeId?.email}</Typography>
-                                                    </TableCell>
-                                                    <TableCell sx={{ fontWeight: 600 }}>{row.date}</TableCell>
-                                                    <TableCell>{row.siteId?.siteName || 'N/A'}</TableCell>
-                                                    <TableCell>{formatDateTime(row.checkIn?.time)}</TableCell>
-                                                    <TableCell>{row.checkOut ? formatDateTime(row.checkOut.time) : '--'}</TableCell>
-                                                    <TableCell>
-                                                        <Badge
-                                                            badgeContent={row.status}
-                                                            color={row.status === 'checked-out' ? 'success' : 'warning'}
-                                                            sx={{ '& .MuiBadge-badge': { fontWeight: 700 } }}
-                                                        />
-                                                    </TableCell>
-                                                    <TableCell align="center">
-                                                        <Box display="flex" justifyContent="center" gap={1}>
-                                                            <Button
-                                                                size="small"
-                                                                variant="outlined"
-                                                                startIcon={<EditIcon />}
-                                                                onClick={() => {
-                                                                    setCorrectTarget(row);
-                                                                    setCorrectFields({
-                                                                        checkInTime: row.checkIn ? new Date(row.checkIn.time).toISOString().slice(0, 16) : '',
-                                                                        checkOutTime: row.checkOut ? new Date(row.checkOut.time).toISOString().slice(0, 16) : '',
-                                                                        status: row.status,
-                                                                        siteId: row.siteId?._id || '',
-                                                                        reason: ''
-                                                                    });
-                                                                    setCorrectOpen(true);
-                                                                }}
-                                                                sx={{ borderRadius: '8px', textTransform: 'none' }}
-                                                            >
-                                                                Correct
-                                                            </Button>
-                                                            <Button
-                                                                size="small"
-                                                                variant="outlined"
-                                                                color="error"
-                                                                startIcon={<DeleteIcon />}
-                                                                onClick={() => {
-                                                                    setDeleteTargetId(row._id);
-                                                                    setDeleteReason('');
-                                                                    setDeleteOpen(true);
-                                                                }}
-                                                                sx={{ borderRadius: '8px', textTransform: 'none' }}
-                                                            >
-                                                                Delete
-                                                            </Button>
-                                                        </Box>
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                        )}
-                    </Card>
-                )}
+                                <Box>
+                                    <Box 
+                                        sx={{ 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            gap: 1.5, 
+                                            mb: 2
+                                        }}
+                                    >
+                                        <Box sx={{ p: 1, bgcolor: '#4f46e5', borderRadius: '10px', color: 'white', display: 'flex', alignItems: 'center' }}>
+                                            <SecurityIcon />
+                                        </Box>
+                                        <Typography className="mgmt-title" variant="h6" fontWeight={850} sx={{ color: '#0f172a', letterSpacing: '-0.5px', transition: 'color 0.2s' }}>
+                                            Attendance Management
+                                        </Typography>
+                                    </Box>
+                                    <Divider sx={{ mb: 3 }} />
+                                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontWeight: 500 }}>
+                                        Manage employee attendance, logs and timing
+                                    </Typography>
+                                </Box>
+                                <Button
+                                    variant="contained"
+                                    sx={{
+                                        borderRadius: '12px',
+                                        textTransform: 'none',
+                                        fontWeight: 700,
+                                        bgcolor: '#4f46e5',
+                                        '&:hover': { bgcolor: '#4338ca' },
+                                        alignSelf: 'flex-start',
+                                        px: 4,
+                                        py: 1
+                                    }}
+                                >
+                                    Open
+                                </Button>
+                            </Card>
+                        </Grid>
+                    )}
+                </Grid>
 
-                {/* Tab 2: Audit Logs (Admin Only) */}
-                {activeTab === 2 && user.role === 'HEAD_OFFICE' && (
-                    <Card sx={{ borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-                        <Box p={3} display="flex" alignItems="center" gap={1.5}>
-                            <SecurityIcon color="action" />
-                            <Typography variant="h6" fontWeight={850} color="#0f172a">Attendance Security Audit Logs</Typography>
-                        </Box>
-                        <Divider />
-                        {adminLoading ? (
-                            <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>
-                        ) : (
-                            <TableContainer>
-                                <Table>
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell sx={{ fontWeight: 800 }}>Timestamp</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Employee</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Action Taken</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Details / Reason</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Performed By</TableCell>
-                                            <TableCell sx={{ fontWeight: 800 }}>Device Info</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {auditLogs.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={6} align="center" sx={{ py: 6, color: 'text.secondary' }}>No audit records found.</TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            auditLogs.map((log) => (
-                                                <TableRow key={log._id}>
-                                                    <TableCell sx={{ fontWeight: 600 }}>{formatDateFull(log.timestamp)} {formatDateTime(log.timestamp)}</TableCell>
-                                                    <TableCell sx={{ fontWeight: 700 }}>{log.employeeId?.name || 'N/A'}</TableCell>
-                                                    <TableCell>
-                                                        <Badge
-                                                            badgeContent={log.action}
-                                                            color={log.action.includes('REJECT') ? 'error' : (log.action.includes('SUCCESS') ? 'success' : 'primary')}
-                                                            sx={{ '& .MuiBadge-badge': { fontWeight: 700, fontSize: '0.65rem' } }}
-                                                        />
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Typography variant="body2" fontWeight={500}>{log.reason || 'Succeeded validation.'}</Typography>
-                                                        {log.previousValue && (
-                                                            <Box mt={1} sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.75rem' }}>
-                                                                {log.previousValue.checkInTime !== undefined && (
-                                                                    <div><strong>Prev Check-In:</strong> {formatDateTime(log.previousValue.checkInTime)} | <strong>Prev Check-Out:</strong> {formatDateTime(log.previousValue.checkOutTime)}</div>
-                                                                )}
-                                                                {log.previousValue.siteName && (
-                                                                    <div><strong>Prev Location:</strong> {log.previousValue.siteName}</div>
-                                                                )}
-                                                            </Box>
-                                                        )}
-                                                        {log.newValue && (
-                                                            <Box mt={0.5} sx={{ p: 1, bgcolor: '#f0fdf4', borderRadius: '8px', border: '1px solid #dcfce7', fontSize: '0.75rem' }}>
-                                                                {log.newValue.checkInTime !== undefined && (
-                                                                    <div><strong>New Check-In:</strong> {formatDateTime(log.newValue.checkInTime)} | <strong>New Check-Out:</strong> {formatDateTime(log.newValue.checkOutTime)}</div>
-                                                                )}
-                                                                {log.newValue.siteName && (
-                                                                    <div><strong>New Location:</strong> {log.newValue.siteName}</div>
-                                                                )}
-                                                                {log.newValue.location && (
-                                                                    <div><strong>Location:</strong> {log.newValue.location} | <strong>Distance:</strong> {log.newValue.distance} | <strong>Accuracy:</strong> {log.newValue.accuracy}</div>
-                                                                )}
-                                                            </Box>
-                                                        )}
-                                                    </TableCell>
-                                                    <TableCell sx={{ fontWeight: 600 }}>{log.performedBy?.name || 'System'}</TableCell>
-                                                    <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                                                        IP: {log.ipAddress || 'unknown'}
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                        )}
-                    </Card>
-                )}
-
-                {/* Dialog: Admin Correction */}
-                <Dialog open={correctOpen} onClose={() => setCorrectOpen(false)} fullWidth maxWidth="sm">
-                    <DialogTitle fontWeight={800}>Correct Attendance Log</DialogTitle>
-                    <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
-                        <TextField
-                            label="Check-In Time"
-                            type="datetime-local"
-                            value={correctFields.checkInTime}
-                            onChange={(e) => setCorrectFields({ ...correctFields, checkInTime: e.target.value })}
-                            InputLabelProps={{ shrink: true }}
-                            fullWidth
-                        />
-                        <TextField
-                            label="Check-Out Time (Leave blank to remove check-out)"
-                            type="datetime-local"
-                            value={correctFields.checkOutTime}
-                            onChange={(e) => setCorrectFields({ ...correctFields, checkOutTime: e.target.value })}
-                            InputLabelProps={{ shrink: true }}
-                            fullWidth
-                        />
-                        <TextField
-                            select
-                            label="Attendance Location / Site"
-                            value={correctFields.siteId || ''}
-                            onChange={(e) => setCorrectFields({ ...correctFields, siteId: e.target.value })}
-                            fullWidth
-                        >
-                            {sitesList.map((s) => (
-                                <MenuItem key={s._id} value={s._id}>{s.siteName}</MenuItem>
-                            ))}
-                        </TextField>
-                        <TextField
-                            select
-                            label="Status"
-                            value={correctFields.status}
-                            onChange={(e) => setCorrectFields({ ...correctFields, status: e.target.value })}
-                            fullWidth
-                        >
-                            <MenuItem value="checked-in">Checked In</MenuItem>
-                            <MenuItem value="checked-out">Checked Out</MenuItem>
-                            <MenuItem value="absent">Absent</MenuItem>
-                        </TextField>
-                        <TextField
-                            label="Reason for Correction"
-                            value={correctFields.reason}
-                            onChange={(e) => setCorrectFields({ ...correctFields, reason: e.target.value })}
-                            fullWidth
-                            required
-                        />
-                    </DialogContent>
-                    <DialogActions sx={{ p: 3 }}>
-                        <Button onClick={() => setCorrectOpen(false)}>Cancel</Button>
-                        <Button onClick={submitCorrection} variant="contained" sx={{ bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' } }}>Submit Correction</Button>
-                    </DialogActions>
-                </Dialog>
-
-                {/* Dialog: Manual Attendance Create */}
-                <Dialog open={createManualOpen} onClose={() => setCreateManualOpen(false)} fullWidth maxWidth="sm">
-                    <DialogTitle fontWeight={800}>Create Manual Attendance</DialogTitle>
-                    <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
-                        <TextField
-                            select
-                            label="Select Employee"
-                            value={createManualFields.employeeId}
-                            onChange={(e) => setCreateManualFields({ ...createManualFields, employeeId: e.target.value })}
-                            fullWidth
-                            required
-                        >
-                            {usersList.map((u) => (
-                                <MenuItem key={u._id} value={u._id}>{u.name} ({u.email})</MenuItem>
-                            ))}
-                        </TextField>
-                        <TextField
-                            select
-                            label="Select Location / Site"
-                            value={createManualFields.siteId}
-                            onChange={(e) => setCreateManualFields({ ...createManualFields, siteId: e.target.value })}
-                            fullWidth
-                            required
-                        >
-                            {sitesList.map((s) => (
-                                <MenuItem key={s._id} value={s._id}>{s.siteName}</MenuItem>
-                            ))}
-                        </TextField>
-                        <TextField
-                            label="Date"
-                            type="date"
-                            value={createManualFields.date}
-                            onChange={(e) => setCreateManualFields({ ...createManualFields, date: e.target.value })}
-                            InputLabelProps={{ shrink: true }}
-                            fullWidth
-                            required
-                        />
-                        <TextField
-                            label="Check-In Time"
-                            type="datetime-local"
-                            value={createManualFields.checkInTime}
-                            onChange={(e) => setCreateManualFields({ ...createManualFields, checkInTime: e.target.value })}
-                            InputLabelProps={{ shrink: true }}
-                            fullWidth
-                            required
-                        />
-                        <TextField
-                            label="Check-Out Time (Optional)"
-                            type="datetime-local"
-                            value={createManualFields.checkOutTime}
-                            onChange={(e) => setCreateManualFields({ ...createManualFields, checkOutTime: e.target.value })}
-                            InputLabelProps={{ shrink: true }}
-                            fullWidth
-                        />
-                        <TextField
-                            label="Reason for Manual Log"
-                            value={createManualFields.reason}
-                            onChange={(e) => setCreateManualFields({ ...createManualFields, reason: e.target.value })}
-                            fullWidth
-                            required
-                        />
-                    </DialogContent>
-                    <DialogActions sx={{ p: 3 }}>
-                        <Button onClick={() => setCreateManualOpen(false)}>Cancel</Button>
-                        <Button onClick={submitManualCreate} variant="contained" sx={{ bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' } }}>Create Log</Button>
-                    </DialogActions>
-                </Dialog>
-
-                {/* Dialog: Delete Attendance */}
-                <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} fullWidth maxWidth="xs">
-                    <DialogTitle fontWeight={800}>Cancel/Delete Attendance Record</DialogTitle>
-                    <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-                        <Typography variant="body2" color="text.secondary">Are you sure you want to completely remove this attendance record? This action will be fully logged in the permanent security audit history.</Typography>
-                        <TextField
-                            label="Reason for deletion"
-                            value={deleteReason}
-                            onChange={(e) => setDeleteReason(e.target.value)}
-                            fullWidth
-                            required
-                        />
-                    </DialogContent>
-                    <DialogActions sx={{ p: 3 }}>
-                        <Button onClick={() => setDeleteOpen(false)}>Cancel</Button>
-                        <Button onClick={submitDelete} variant="contained" color="error">Confirm Delete</Button>
-                    </DialogActions>
-                </Dialog>
+                {renderDialogs()}
             </Container>
         </Box>
     );
