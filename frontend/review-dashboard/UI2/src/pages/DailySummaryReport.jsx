@@ -122,14 +122,8 @@ function DailySummaryTab({
     try {
       const token = localStorage.getItem('token');
       
-      let queryDate = targetDate;
-      if (targetDate === 'ALL') {
-        // Build comma-separated list of all dates in current month selection
-        queryDate = dateOptions.map(d => d.value).join(',');
-      }
-
       const res = await axios.get(`${API_URL}/daily-summary/data`, {
-        params: { date: queryDate },
+        params: { date: targetDate, fy: financialYear, month: month },
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data.success) {
@@ -218,7 +212,8 @@ function DailySummaryTab({
 
     (data.cement || []).forEach(e => {
       cMT += parseNum(e["MT"]);
-      tBillAmt += parseNum(e["Billing Amount"] || 0);
+      // robust parsing for billing amount to catch alternate names
+      tBillAmt += parseNum(e["Billing Amount"] || e["BILLING AMOUNT"] || e["AMOUNT"]);
       const adv = parseNum(e["ADVANCE"] || e["LOADING ADVANCE"]);
       if (adv > 0) {
         advAmt += adv;
@@ -233,10 +228,10 @@ function DailySummaryTab({
       }
     });
 
-    // Fuel Slips
+    // Fuel Slips (using main cement array to be 100% accurate per requirement)
     let fL = 0;
     let pPaymentAmt = 0;
-    (data.pumpSlips || []).forEach(e => {
+    (data.cement || []).forEach(e => {
       fL += parseNum(e["HSD (LTR)"]);
       pPaymentAmt += parseNum(e["HSD AMOUNT"]);
     });
@@ -276,7 +271,7 @@ function DailySummaryTab({
     const stamp = [];
 
     (data?.cement || []).forEach(e => {
-      const billAmt = parseNum(e["Billing Amount"] || 0);
+      const billAmt = parseNum(e["Billing Amount"] || e["BILLING AMOUNT"] || e["AMOUNT"]);
       if (billAmt === 0) return; // Only count those that contribute to the total
 
       const status = String(e["CHALLAN STATUS"] || "").toUpperCase().trim();
@@ -285,7 +280,7 @@ function DailySummaryTab({
       else pending.push(e);
     });
 
-    const sumAmt = (arr) => arr.reduce((acc, e) => acc + parseNum(e["Billing Amount"] || 0), 0);
+    const sumAmt = (arr) => arr.reduce((acc, e) => acc + parseNum(e["Billing Amount"] || e["BILLING AMOUNT"] || e["AMOUNT"]), 0);
 
     return {
       pending, pendingAmt: sumAmt(pending),
