@@ -19,6 +19,7 @@ import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 import { useShortcut } from '../context/ShortcutContext';
 import { useTableNavigation } from '../hooks/useTableNavigation';
+import Gstr1Tab from '../components/Gstr1Tab';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -209,14 +210,18 @@ export default function GSTPortalRegister({ onBack }) {
   const handleAddNewRow = async () => {
     try {
       const token = localStorage.getItem('token');
-      const currentEntries = activeTab === 0
+      if (activeTab === 0) {
+        setSnack({ severity: 'info', msg: 'GSTR_1 functionality is not yet available.' });
+        return;
+      }
+      const currentEntries = activeTab === 1
         ? entries.filter(e => !e.type || e.type === 'b2b')
         : entries.filter(e => e.type === 'liability');
 
       const nextSlNo = currentEntries.length > 0 ? Math.max(...currentEntries.map(e => e['SL NO'] || 0)) + 1 : 1;
 
-      const payload = { "SL NO": nextSlNo, type: activeTab === 0 ? 'b2b' : 'liability' };
-      if (activeTab === 1) {
+      const payload = { "SL NO": nextSlNo, type: activeTab === 1 ? 'b2b' : 'liability' };
+      if (activeTab === 2) {
         payload.filterMonth = filterMonth;
         payload.filterYear = filterYear;
       }
@@ -310,8 +315,12 @@ export default function GSTPortalRegister({ onBack }) {
 
   // ── Export ──────────────────────────────────────────────────────────────
   const handleExport = () => {
-    const exportCols = activeTab === 0 ? COLUMNS.filter(c => c.type !== 'upload') : LIABILITY_COLUMNS;
-    const rows = (activeTab === 0 ? entries.filter(e => !e.type || e.type === 'b2b') : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))).map(v => {
+    if (activeTab === 0) {
+      setSnack({ severity: 'info', msg: 'Export for GSTR_1 is not yet available.' });
+      return;
+    }
+    const exportCols = activeTab === 1 ? COLUMNS.filter(c => c.type !== 'upload') : LIABILITY_COLUMNS;
+    const rows = (activeTab === 1 ? entries.filter(e => !e.type || e.type === 'b2b') : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))).map(v => {
       const row = {};
       exportCols.forEach(c => {
         const val = v[c.key];
@@ -340,25 +349,25 @@ export default function GSTPortalRegister({ onBack }) {
   }
 
   // Calculate Totals
-  const totals = activeTab === 0 ? {
+  const totals = activeTab === 1 ? {
     'Invoice Value': 0,
     'Taxable Value': 0,
     'Integrated Tax': 0,
     'CGST': 0,
     'SGST': 0,
     'Cess': 0
-  } : {
+  } : activeTab === 2 ? {
     'Amount': 0,
     'GST(18%)': 0,
     'Total Amount': 0
-  };
+  } : {};
 
-  const filteredEntries = activeTab === 0
+  const filteredEntries = activeTab === 1
     ? entries.filter(e => !e.type || e.type === 'b2b')
-    : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear));
+    : activeTab === 2 ? entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear)) : [];
 
   filteredEntries.forEach(row => {
-    if (activeTab === 0) {
+    if (activeTab === 1) {
       Object.keys(totals).forEach(k => {
         const val = parseFloat(row[k]);
         if (!isNaN(val)) totals[k] += val;
@@ -401,7 +410,7 @@ export default function GSTPortalRegister({ onBack }) {
         />
         <Chip label="Real-time Auto-save Active" size="small" sx={{ fontWeight: 700, bgcolor: '#dcfce7', color: '#166534' }} />
 
-        {activeTab === 1 && (
+        {(activeTab === 0 || activeTab === 2) && (
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', ml: 2 }}>
             <SearchableSelect
               size="small"
@@ -440,7 +449,7 @@ export default function GSTPortalRegister({ onBack }) {
             >Delete ({selectedIds.size})</Button>
           )}
 
-          {activeTab === 1 && (
+          {activeTab === 2 && (
             <>
               <Button size="small" variant="contained"
                 startIcon={syncing ? <CircularProgress size={13} color="inherit" /> : <SyncIcon />}
@@ -486,6 +495,7 @@ export default function GSTPortalRegister({ onBack }) {
             '& .Mui-selected': { color: '#0ea5e9 !important' },
             '& .MuiTabs-indicator': { backgroundColor: '#0ea5e9', height: 3, borderRadius: '3px 3px 0 0' }
           }}>
+          <Tab label="GSTR_1" />
           <Tab label="B2B" />
           <Tab label="GST LIABILITIES" />
         </Tabs>
@@ -493,6 +503,10 @@ export default function GSTPortalRegister({ onBack }) {
 
       {/* ── Tab Content ────────────────────────────────────────────────────── */}
       {activeTab === 0 && (
+        <Gstr1Tab entries={entries} filterMonth={filterMonth} filterYear={filterYear} />
+      )}
+
+      {activeTab === 1 && (
         <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
           <table style={{
             borderCollapse: 'collapse', minWidth: '100%',
@@ -622,7 +636,7 @@ export default function GSTPortalRegister({ onBack }) {
       )}
 
       {/* ── GST LIABILITIES Tab Content ──────────────────────────────────────── */}
-      {activeTab === 1 && (
+      {activeTab === 2 && (
         <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
           <table style={{
             borderCollapse: 'collapse', minWidth: '100%',
