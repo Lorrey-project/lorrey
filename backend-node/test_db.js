@@ -1,23 +1,10 @@
 const { MongoClient } = require('mongodb');
-require('dotenv').config();
-
-async function main() {
-  const client = new MongoClient(process.env.MONGO_URI);
+async function run() {
+  const client = new MongoClient('mongodb://localhost:27017');
   await client.connect();
-  const db = client.db();
-  
-  const records = await db.collection('cement_register').aggregate([
-    {
-      $group: {
-        _id: { month: "$month", year: "$year" },
-        count: { $sum: 1 }
-      }
-    }
-  ]).toArray();
-  
-  console.log('cement_register counts:', records);
-
-  await client.close();
+  const db = client.db('lorrey');
+  const doc = await db.collection('cement_register').findOne({ "BILL NO": { $exists: true, $ne: "" } });
+  console.log(JSON.stringify(doc, null, 2));
+  client.close();
 }
-
-main().catch(console.error);
+run();

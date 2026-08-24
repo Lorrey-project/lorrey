@@ -1,8 +1,14 @@
-const mongoose = require('mongoose');
-mongoose.connect('mongodb+srv://lorrey0004:lorrey0004@cluster0.pqbigfd.mongodb.net/invoiceAI?retryWrites=true&w=majority').then(async () => {
-  const db = mongoose.connection.useDb('lorrey_db');
-  const cementCol = db.collection('cement_registers');
-  const record = await cementCol.findOne();
-  console.log(record);
-  process.exit(0);
-}).catch(console.error);
+const { MongoClient } = require('mongodb');
+async function run() {
+  const client = new MongoClient('mongodb+srv://lorrey0004:lorrey0004@cluster0.pqbigfd.mongodb.net/invoiceAI?retryWrites=true&w=majority');
+  try {
+    await client.connect();
+    const cementDb = client.db('cement_register');
+    const col = cementDb.collection('entries');
+    const doc = await col.findOne({});
+    console.log("RAW DOC:", doc);
+  } finally {
+    await client.close();
+  }
+}
+run();

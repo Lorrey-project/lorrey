@@ -91,6 +91,8 @@ exports.login = async (req, res) => {
 
         res.json({ token, user: { id: user._id, email: user.email, role: user.role, name: user.name || '', pumpName: user.pumpName || null } });
     } catch (error) {
+        console.error("Login route error: ", error);
+        require('fs').appendFileSync('auth_error.log', new Date().toISOString() + ': ' + error.stack + '\n');
         res.status(500).json({ message: "Server error during login", error: error.message });
     }
 };

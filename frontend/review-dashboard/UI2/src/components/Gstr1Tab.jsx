@@ -13,7 +13,7 @@ const API_URL = import.meta.env.VITE_API_URL;
 const parseNum = (val) => parseFloat(val) || 0;
 const formatMoney = (val) => Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const defaultRowState = { count: '0', docType: '', val: '0', igst: '0', cgst: '0', sgst: '0', cess: '0' };
+const defaultRowState = { count: '0', docType: '', val: '0.00', igst: '0.00', cgst: '0.00', sgst: '0.00', cess: '0.00' };
 
 export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
   const monthName = MONTH_NAMES[filterMonth - 1] || '';
@@ -137,7 +137,7 @@ export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
     boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.2)',
   };
 
-  const EditableCell = ({ value, onChange, align = 'left', isNumeric = true }) => {
+  const EditableCell = ({ value, onChange, align = 'left', isNumeric = true, isCurrency = false }) => {
     const [isHovered, setIsHovered] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
 
@@ -156,18 +156,34 @@ export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
       setIsFocused(false);
       if (isNumeric) {
         if (value === '' || value === '-' || isNaN(parseFloat(value))) {
-          onChange('0');
+          onChange(isCurrency ? '0.00' : '0');
         } else {
           const num = parseFloat(value);
-          onChange(value.includes('.') ? value : num.toString());
+          if (isCurrency) {
+            onChange(num.toFixed(2));
+          } else {
+            onChange(num.toString());
+          }
         }
       }
     };
 
+    let displayValue = value;
+    if (!isFocused && isNumeric && value !== '' && value !== '-') {
+      const num = parseFloat(value);
+      if (!isNaN(num)) {
+        if (isCurrency) {
+          displayValue = num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        } else {
+          displayValue = num.toString();
+        }
+      }
+    }
+
     return (
       <input
         type="text"
-        value={value}
+        value={isFocused ? value : displayValue}
         onChange={handleChange}
         onFocus={() => setIsFocused(true)}
         onBlur={handleBlur}
@@ -261,19 +277,19 @@ export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
           <EditableCell value={row.docType} onChange={(v) => updateField(rowId, 'docType', v)} align="center" isNumeric={false} />
         </td>
         <td style={tdStyle}>
-          <EditableCell value={row.val} onChange={(v) => updateField(rowId, 'val', v)} align="right" />
+          <EditableCell value={row.val} onChange={(v) => updateField(rowId, 'val', v)} align="right" isCurrency={true} />
         </td>
         <td style={tdStyle}>
-          <EditableCell value={row.igst} onChange={(v) => updateField(rowId, 'igst', v)} align="right" />
+          <EditableCell value={row.igst} onChange={(v) => updateField(rowId, 'igst', v)} align="right" isCurrency={true} />
         </td>
         <td style={tdStyle}>
-          <EditableCell value={row.cgst} onChange={(v) => updateField(rowId, 'cgst', v)} align="right" />
+          <EditableCell value={row.cgst} onChange={(v) => updateField(rowId, 'cgst', v)} align="right" isCurrency={true} />
         </td>
         <td style={tdStyle}>
-          <EditableCell value={row.sgst} onChange={(v) => updateField(rowId, 'sgst', v)} align="right" />
+          <EditableCell value={row.sgst} onChange={(v) => updateField(rowId, 'sgst', v)} align="right" isCurrency={true} />
         </td>
         <td style={tdStyle}>
-          <EditableCell value={row.cess} onChange={(v) => updateField(rowId, 'cess', v)} align="right" />
+          <EditableCell value={row.cess} onChange={(v) => updateField(rowId, 'cess', v)} align="right" isCurrency={true} />
         </td>
       </tr>
     );

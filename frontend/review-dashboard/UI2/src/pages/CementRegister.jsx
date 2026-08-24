@@ -30,8 +30,8 @@ import { useTableNavigation } from '../hooks/useTableNavigation';
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 const socket = io(SOCKET_URL, {
-    autoConnect: true,
-    transports: ["websocket", "polling"]
+  autoConnect: true,
+  transports: ["websocket", "polling"]
 });
 
 
@@ -413,6 +413,8 @@ export default function CementRegister({ onBack }) {
   const [syncing, setSyncing] = useState(false);
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
   const [bulkBillInput, setBulkBillInput] = useState({ billDate: '', billType: '' });
+  const [generatedBillsPreview, setGeneratedBillsPreview] = useState(null);
+  const [showPreviousScreen, setShowPreviousScreen] = useState(false);
   const [activeRowId, setActiveRowId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBillingStatus, setFilterBillingStatus] = useState('All');
@@ -710,7 +712,7 @@ export default function CementRegister({ onBack }) {
   const handleExport = () => exportToCsv('cement_register.xls', computedRows);
 
   // ── Apply Bulk Bill to selected rows ─────────────────────────
-  const handleBulkBillApply = async () => {
+  const handlePreviewBatchBill = () => {
     const { billDate, billType } = bulkBillInput;
     const ids = [...selectedIds];
     if (ids.length === 0) {
@@ -736,6 +738,14 @@ export default function CementRegister({ onBack }) {
       return;
     }
 
+    setIsBillingModalOpen(false);
+    setShowPreviousScreen(true);
+  };
+
+  const handleFinalGenerateBatchBill = async () => {
+    const { billDate, billType } = bulkBillInput;
+    const ids = [...selectedIds];
+
     try {
       setSnack({ severity: 'info', msg: `Generating batch bills...` });
       const token = localStorage.getItem('token');
@@ -750,16 +760,21 @@ export default function CementRegister({ onBack }) {
       });
 
       if (res.data.success) {
-        setIsBillingModalOpen(false);
         setBulkBillInput({ billDate: '', billType: '' });
         setSelectedIds(new Set());
+        setShowPreviousScreen(false);
 
         const generatedCount = res.data.summary?.length || 0;
         setSnack({ severity: 'success', msg: `Successfully generated ${generatedCount} party-wise bill(s).` });
 
         // Refresh data to show new bill numbers
-        fetchData();
-      } else {
+        await fetchData();
+
+        if (res.data.summary && res.data.summary.length > 0) {
+          const generatedBillNumbers = res.data.summary.map(s => s.billNumber);
+          setGeneratedBillsPreview(generatedBillNumbers);
+          setShowPreviousScreen(true);
+        }
         setSnack({ severity: 'error', msg: res.data.error || 'Failed to generate batch bills.' });
       }
     } catch (err) {
@@ -994,6 +1009,29 @@ export default function CementRegister({ onBack }) {
     }
   };
 
+    const previewRows = useMemo(() => {
+    if (selectedIds.size === 0) return [];
+    return computedRows.filter(r => selectedIds.has(r._id)).map(r => {
+      // Use the computed row 'r' so we include any dynamically calculated values like 'Billing Amount'
+      const amt = parseFloat(String(r['BILLING AMOUNT'] || '').replace(/,/g, '')) ||
+            parseFloat(String(r['Billing Amount'] || '').replace(/,/g, '')) ||
+            parseFloat(String(r['BILLING ER 95%'] || '').replace(/,/g, '')) ||
+            parseFloat(String(r['AMOUNT'] || '').replace(/,/g, '')) || 0;
+      return { ...r, _previewAmt: amt };
+    });
+  }, [showPreviousScreen, selectedIds, computedRows, bulkBillInput.billType]);
+
+  const previewTotals = useMemo(() => {
+    let totalMT = 0;
+    let totalAmt = 0;
+    previewRows.forEach(r => {
+      const mt = parseFloat(String(r.MT || 0).replace(/,/g, '')) || 0;
+      totalMT += mt;
+      totalAmt += r._previewAmt || 0;
+    });
+    return { totalMT, totalAmt };
+  }, [previewRows]);
+
   useShortcut('ctrl+s', handleSave);
   useShortcut('ctrl+r', () => fetchData());
   useShortcut('ctrl+e', handleExport);
@@ -1012,6 +1050,168 @@ export default function CementRegister({ onBack }) {
     );
   }
 
+
+
+  if (showPreviousScreen) {
+    return (
+      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3, height: '100vh', bgcolor: '#f1f5f9', overflow: 'hidden' }}>
+        {/* Header */}
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+          <Box display="flex" alignItems="center" gap={2}>
+            {!generatedBillsPreview ? (
+              <Button
+                variant="contained"
+                onClick={() => {
+                  setShowPreviousScreen(false);
+                  setIsBillingModalOpen(true);
+                }}
+                sx={{
+                  bgcolor: '#ffffff', color: '#334155', border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                  fontWeight: 600, px: 2.5, py: 1, borderRadius: '8px', textTransform: 'none',
+                  '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' }
+                }}
+              >
+                ← Previous
+              </Button>
+            ) : null}
+            <Box>
+              <Typography variant="h5" fontWeight={800} color={generatedBillsPreview ? "#15803d" : "#0f172a"} sx={{ letterSpacing: '-0.5px', display: 'flex', alignItems: 'center', gap: 1 }}>
+                {generatedBillsPreview ? '✅ Bill Generated Successfully' : 'Preview Selected Shipments'}
+              </Typography>
+              <Typography variant="body2" color="#64748b" fontWeight={500}>
+                {generatedBillsPreview 
+                  ? `Generated Bill(s): ${generatedBillsPreview.join(', ')}`
+                  : 'Final verification before bill generation'}
+              </Typography>
+            </Box>
+          </Box>
+          
+          <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mb: 0.5, letterSpacing: '0.5px' }}>BILL TYPE</Typography>
+              <Box sx={{ px: 2.5, py: 0.75, bgcolor: '#e0e7ff', color: '#4338ca', borderRadius: '6px', fontWeight: 800, border: '1px solid #c7d2fe' }}>
+                {bulkBillInput.billType ? `${bulkBillInput.billType} Bill` : 'Not Selected'}
+              </Box>
+            </Box>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mb: 0.5, letterSpacing: '0.5px' }}>BILL DATE</Typography>
+              <Box sx={{ px: 2.5, py: 0.75, bgcolor: '#f1f5f9', color: '#334155', borderRadius: '6px', fontWeight: 800, border: '1px solid #e2e8f0' }}>
+                {bulkBillInput.billDate ? new Date(bulkBillInput.billDate).toLocaleDateString('en-GB') : 'Not Set'}
+              </Box>
+            </Box>
+          </Box>
+
+          {generatedBillsPreview ? (
+            <Button
+              variant="contained"
+              onClick={onBack}
+              sx={{
+                bgcolor: '#16a34a', color: '#fff', fontWeight: 700, px: 4, py: 1.5, borderRadius: '8px', textTransform: 'none',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.3)',
+                '&:hover': { bgcolor: '#15803d' }
+              }}
+            >
+              ← BACK TO HOME PAGE
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleFinalGenerateBatchBill}
+              sx={{
+                bgcolor: '#0f172a', color: '#fff', fontWeight: 700, px: 4, py: 1.5, borderRadius: '8px', textTransform: 'none',
+                boxShadow: '0 4px 12px rgba(15, 23, 42, 0.3)',
+                '&:hover': { bgcolor: '#1e293b' }
+              }}
+            >
+              FINAL BILL GENERATE
+            </Button>
+          )}
+        </Box>
+
+        {/* Table Container */}
+        <Box sx={{
+          flex: 1, bgcolor: '#ffffff', borderRadius: '12px', overflow: 'hidden',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.03), 0 1px 3px rgba(0,0,0,0.02)',
+          border: '1px solid #e2e8f0'
+        }}>
+          <Box sx={{ overflowX: 'auto', flex: 1 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1000px' }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                <tr>
+                  {['Shipment Number', 'Vehicle Number', 'Invoice Number', 'Trip Date', 'Party Name', 'Destination', 'MT', 'BILLING AMOUNT'].map((h, i) => (
+                    <th key={h} style={{
+                      padding: '12px 16px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0',
+                      textAlign: i >= 6 ? 'right' : 'left',
+                      fontSize: '11.5px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px'
+                    }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {previewRows.map((r, idx) => {
+                  const amt = r._previewAmt || 0;
+                  const mt = parseFloat(String(r.MT || 0).replace(/,/g, '')) || 0;
+
+                  return (
+                    <tr
+                      key={idx}
+                      style={{
+                        borderBottom: '1px solid #f1f5f9',
+                        background: idx % 2 === 0 ? '#ffffff' : '#fafafa',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{r['SHIPMENT NO'] || r['SL NO'] || '—'}</td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontFamily: 'monospace' }}>{r['VEHICLE NUMBER'] || r['VEHICLE'] || '—'}</td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155' }}>{r['INVOICE NO'] || r['Invoice No'] || '—'}</td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                        {r['LOADING DT'] || r['LOADING DATE'] || r['INVOICE DATE'] || '—'}
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155' }}>{r['SITE'] || r['PARTY NAME'] || '—'}</td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155' }}>{r['DESTINATION'] || '—'}</td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 600, color: '#0f172a', textAlign: 'right' }}>
+                        {mt}
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#15803d', textAlign: 'right' }}>
+                        ₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Box>
+          
+          {/* Summary Area */}
+          <Box sx={{ 
+            p: 3, 
+            borderTop: '1px solid #e2e8f0', 
+            bgcolor: '#f8fafc',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6
+          }}>
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Shipments</Typography>
+              <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 800 }}>{previewRows.length}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total MT</Typography>
+              <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 800 }}>{Math.round(previewTotals.totalMT * 100) / 100} MT</Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Billing Amount</Typography>
+              <Typography variant="h6" sx={{ color: '#15803d', fontWeight: 800 }}>₹{previewTotals.totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
@@ -1895,19 +2095,20 @@ export default function CementRegister({ onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {[...selectedIds].map(id => {
-                  const row = computedRows.find(r => r._id === id);
-                  if (!row) return null;
+                {previewRows.map((row) => {
+                  const amt = row._previewAmt || 0;
                   return (
-                    <tr key={id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SHIPMENT NO'] || ''}</td>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['VEHICLE NUMBER'] || ''}</td>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['INVOICE NO'] || ''}</td>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['LOADING DT'] || row['LOADING DATE'] || ''}</td>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['PARTY NAME'] || ''}</td>
+                    <tr key={row._id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SHIPMENT NO'] || row['SL NO'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['VEHICLE NUMBER'] || row['VEHICLE'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['INVOICE NO'] || row['Invoice No'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['LOADING DT'] || row['LOADING DATE'] || row['INVOICE DATE'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SITE'] || row['PARTY NAME'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['DESTINATION'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['MT'] || ''}</td>
-                      <td style={{ padding: '8px' }}>{row['Billing Amount'] || ''}</td>
+                      <td style={{ padding: '8px' }}>
+                        {amt > 0 ? `₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                      </td>
                     </tr>
                   );
                 })}
@@ -1930,20 +2131,20 @@ export default function CementRegister({ onBack }) {
               {(() => {
                 const selectedRowsArray = [...selectedIds].map(id => computedRows.find(r => r._id === id)).filter(Boolean);
                 const totalSelected = selectedRowsArray.length;
-                
+
                 const hasFreightCount = selectedRowsArray.filter(r => r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== '')).length;
                 const hasUnloadingCount = selectedRowsArray.filter(r => r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== '')).length;
-                
+
                 const isFreightDisabled = hasFreightCount > 0;
                 const isUnloadingDisabled = hasUnloadingCount > 0;
-                
+
                 let freightHelperText = '';
                 if (hasFreightCount === totalSelected && totalSelected > 0) {
                   freightHelperText = "Freight Bill already generated for the selected records.";
                 } else if (hasFreightCount > 0) {
                   freightHelperText = "Some selected records already have Freight Bills. Please select only eligible records.";
                 }
-                
+
                 let unloadingHelperText = '';
                 if (hasUnloadingCount === totalSelected && totalSelected > 0) {
                   unloadingHelperText = "Unloading Bill already generated for the selected records.";
@@ -1951,8 +2152,8 @@ export default function CementRegister({ onBack }) {
                   unloadingHelperText = "Some selected records already have Unloading Bills. Please select only eligible records.";
                 }
 
-                const isConfirmDisabled = !bulkBillInput.billDate || !bulkBillInput.billType || 
-                  (bulkBillInput.billType === 'Freight' && isFreightDisabled) || 
+                const isConfirmDisabled = !bulkBillInput.billDate || !bulkBillInput.billType ||
+                  (bulkBillInput.billType === 'Freight' && isFreightDisabled) ||
                   (bulkBillInput.billType === 'Unloading' && isUnloadingDisabled);
 
                 return (
@@ -1969,7 +2170,7 @@ export default function CementRegister({ onBack }) {
                       <MenuItem value="Freight" disabled={isFreightDisabled}>Freight</MenuItem>
                       <MenuItem value="Unloading" disabled={isUnloadingDisabled}>Unloading</MenuItem>
                     </SearchableSelect>
-                    
+
                     {(freightHelperText || unloadingHelperText) && (
                       <Box sx={{ mt: 1 }}>
                         {freightHelperText && <Typography variant="caption" color="error" sx={{ display: 'block', fontWeight: 600 }}>• {freightHelperText}</Typography>}
@@ -1986,15 +2187,15 @@ export default function CementRegister({ onBack }) {
         </DialogContent>
         <DialogActions sx={{ p: 3, pt: 1, borderTop: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
           <Button onClick={() => setIsBillingModalOpen(false)} sx={{ color: '#64748b', fontWeight: 600 }}>Cancel</Button>
-          <Button 
-            variant="contained" 
-            onClick={handleBulkBillApply} 
+          <Button
+            variant="contained"
+            onClick={handlePreviewBatchBill}
             disabled={(() => {
               const selectedRowsArray = [...selectedIds].map(id => computedRows.find(r => r._id === id)).filter(Boolean);
               const isFreightDisabled = selectedRowsArray.some(r => r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== ''));
               const isUnloadingDisabled = selectedRowsArray.some(r => r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== ''));
-              return !bulkBillInput.billDate || !bulkBillInput.billType || 
-                (bulkBillInput.billType === 'Freight' && isFreightDisabled) || 
+              return !bulkBillInput.billDate || !bulkBillInput.billType ||
+                (bulkBillInput.billType === 'Freight' && isFreightDisabled) ||
                 (bulkBillInput.billType === 'Unloading' && isUnloadingDisabled);
             })()}
             sx={{ bgcolor: '#0f172a', fontWeight: 700, px: 3, borderRadius: '8px', boxShadow: 'none', '&.Mui-disabled': { bgcolor: '#cbd5e1', color: '#94a3b8' } }}
