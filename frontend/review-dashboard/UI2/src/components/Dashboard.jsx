@@ -49,7 +49,7 @@ const _dashSocket = io(SOCKET_URL, {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports }) => {
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
     const [invoices, setInvoices] = useState([]);
@@ -697,6 +697,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             {[
                                 { title: 'CEMENT REGISTER', subtitle: 'Trip & Freight Logic', icon: <LocalShippingIcon sx={{ fontSize: 24 }} />, bg: '#0369a1', onClick: onOpenCementRegister },
                                 { title: 'BILL REGISTER', subtitle: 'Pending & Cleared Bills', icon: <TableChartIcon sx={{ fontSize: 24 }} />, bg: '#0f172a', onClick: onOpenFYDetails },
+                                { title: 'TOTAL INCOMING & OUTGOING PAYMENT REPORTS', subtitle: 'Financial Transactions', icon: <AccountBalanceWalletIcon sx={{ fontSize: 24 }} />, bg: '#1e293b', onClick: onOpenTotalPaymentReports },
                                 { title: 'PARTY PAYMENT DETAILS', subtitle: 'Aggregated Monthly Ledger', icon: <AccountBalanceWalletIcon sx={{ fontSize: 24 }} />, bg: '#1d4ed8', onClick: onOpenPartyPayment }
                             ].map((item, idx) => (
                                 <Grid item xs={12} md={4} key={idx}>

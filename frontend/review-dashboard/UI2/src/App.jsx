@@ -13,6 +13,7 @@ import LorryHireSlipReview from './components/LorryHireSlipReview';
 import FuelSlipReview from './components/FuelSlipReview';
 import VoucherEntry from './components/VoucherEntry';
 import CementRegister from './pages/CementRegister';
+import TotalPaymentReports from './pages/TotalPaymentReports';
 import VoucherRegister from './pages/VoucherRegister';
 import GSTPortalRegister from './pages/GSTPortalRegister';
 import MainCashbook from './pages/MainCashbook';
@@ -227,6 +228,10 @@ function AppContent() {
     return <FinancialYearDetails onBack={() => setCurrentView('dashboard')} />;
   }
 
+  if (currentView === 'totalPaymentReports') {
+    return <TotalPaymentReports onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentView === 'accountDetails') {
     return <AccountDetails onBack={() => setCurrentView('dashboard')} />;
   }
@@ -321,6 +326,7 @@ function AppContent() {
         onOpenPumpPaymentRegister={() => setCurrentView('pumpPaymentRegister')}
         onOpenPartyPayment={() => setCurrentView('partyPayment')}
         onOpenFYDetails={() => setCurrentView('fyDetails')}
+        onOpenTotalPaymentReports={() => setCurrentView('totalPaymentReports')}
         onOpenFuelRateSettings={() => setCurrentView('fuelRateSettings')}
         onOpenAccountDetails={() => setCurrentView('accountDetails')}
         onOpenAccountApprovals={() => setCurrentView('accountApprovals')}
