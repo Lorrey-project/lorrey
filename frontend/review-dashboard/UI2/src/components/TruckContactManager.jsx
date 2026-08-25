@@ -35,7 +35,7 @@ function TabPanel({ value, index, children }) {
 function SectionLabel({ icon: Icon, label }) {
   return (
     <Box display="flex" alignItems="center" gap={1} mb={2} mt={1}>
-      <Box sx={{ p: 0.75, bgcolor: '#f1f5f9', borderRadius: '8px', display: 'flex', alignItems: 'center' }}>
+      <Box sx={{ p: 0.75, bgcolor: 'background.default', borderRadius: '8px', display: 'flex', alignItems: 'center' }}>
         <Icon sx={{ fontSize: 16, color: '#475569' }} />
       </Box>
       <Typography variant="caption" fontWeight={800} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase' }}>
@@ -735,10 +735,10 @@ export default function TruckContactManager({ open, onClose }) {
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 2,
           px: 3, py: 2,
-          bgcolor: '#fff',
+          bgcolor: 'background.paper',
           borderBottom: '1px solid #e2e8f0',
         }}>
-          <Box sx={{ width: 40, height: 40, borderRadius: '10px', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box sx={{ width: 40, height: 40, borderRadius: '10px', bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <LocalShippingIcon sx={{ color: '#475569' }} />
           </Box>
           <Box flex={1}>
@@ -749,7 +749,7 @@ export default function TruckContactManager({ open, onClose }) {
         </Box>
 
         {/* ── Tabs — matches Modern ERP style ── */}
-        <Box sx={{ bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', px: 3 }}>
+        <Box sx={{ bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', px: 3 }}>
           <Tabs
             value={tab}
             onChange={(_, v) => {
@@ -802,7 +802,7 @@ export default function TruckContactManager({ open, onClose }) {
                 </Box>
 
                 {/* ─── FIXED PRIMARY HEADER ─── */}
-                <Box sx={{ bgcolor: '#f8fafc', p: 2.5, borderRadius: '20px', mb: 3, border: '1px solid #e2e8f0', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
+                <Box sx={{ bgcolor: 'background.default', p: 2.5, borderRadius: '20px', mb: 3, border: '1px solid #e2e8f0', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr 1fr' }, gap: 3, alignItems: 'center' }}>
                     <Box>
                       <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
@@ -842,15 +842,15 @@ export default function TruckContactManager({ open, onClose }) {
                 </Box>
 
                 {/* ─── NESTED FORM TABS ─── */}
-                <Box sx={{ bgcolor: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.02)' }}>
+                <Box sx={{ bgcolor: 'background.paper', borderRadius: '16px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.02)' }}>
                   <Tabs
                     value={formTab}
                     onChange={(_, v) => setFormTab(v)}
                     variant="fullWidth"
                     sx={{
-                      bgcolor: '#f8fafc',
+                      bgcolor: 'background.default',
                       '& .MuiTab-root': { fontWeight: 900, fontSize: '13px', py: 2, minHeight: 60, textTransform: 'none', color: '#64748b' },
-                      '& .Mui-selected': { color: '#0f172a !important', bgcolor: '#fff' },
+                      '& .Mui-selected': { color: '#0f172a !important', bgcolor: 'background.paper' },
                       '& .MuiTabs-indicator': { backgroundColor: '#0f172a', height: 4, borderRadius: '4px 4px 0 0' }
                     }}
                   >
@@ -1063,8 +1063,8 @@ export default function TruckContactManager({ open, onClose }) {
                 {form.truckNo ? (
                   <Box sx={{ animation: 'fadeIn 0.3s' }}>
                     {/* Display Current Owner info (Read Only) */}
-                    <Box sx={{ p: 2.5, bgcolor: '#f8fafc', borderRadius: '20px', mb: 3, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Box sx={{ width: 45, height: 45, bgcolor: '#fff', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0' }}>
+                    <Box sx={{ p: 2.5, bgcolor: 'background.default', borderRadius: '20px', mb: 3, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Box sx={{ width: 45, height: 45, bgcolor: 'background.paper', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0' }}>
                         <PersonIcon sx={{ color: '#475569' }} />
                       </Box>
                       <Box flex={1}>
@@ -1099,7 +1099,7 @@ export default function TruckContactManager({ open, onClose }) {
                     {/* Full Digital Document Vault for Temp Driver */}
                     <Box sx={{ mt: 2 }}>
                       <SectionLabel icon={CloudUploadIcon} label="Verification Vault" />
-                      <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '16px', overflow: 'hidden', bgcolor: '#fff' }}>
+                      <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '16px', overflow: 'hidden', bgcolor: 'background.paper' }}>
                         {docs.map((doc, idx) => (
                           <Box key={doc.id} sx={{
                             display: 'flex', alignItems: 'center', gap: 2, p: 1.5,
@@ -1147,7 +1147,7 @@ export default function TruckContactManager({ open, onClose }) {
                   </Box>
                 ) : (
                   <Box sx={{ textAlign: 'center', py: 10, px: 4, bgcolor: '#fbfbff', borderRadius: '24px', border: '2px dashed #e2e8f0' }}>
-                    <Box sx={{ width: 64, height: 64, bgcolor: '#fff', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
+                    <Box sx={{ width: 64, height: 64, bgcolor: 'background.paper', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
                       <BadgeIcon sx={{ fontSize: 32, color: '#94a3b8' }} />
                     </Box>
                     <Typography fontWeight={800} color="#64748b" gutterBottom>No Vehicle Selected</Typography>
@@ -1163,8 +1163,8 @@ export default function TruckContactManager({ open, onClose }) {
             <TabPanel value={tab} index={2}>
               <Box sx={{ p: 3 }}>
                 <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#ffffff', display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <PersonIcon sx={{ color: '#475569' }} />
                     </Box>
                     <Box>
@@ -1172,7 +1172,7 @@ export default function TruckContactManager({ open, onClose }) {
                       <Typography variant="h6" fontWeight={800} color="#0f172a">{uniqueOwners.length}</Typography>
                     </Box>
                   </Box>
-                  <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#ffffff', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <LocalShippingIcon sx={{ color: '#10b981' }} />
                     </Box>
@@ -1197,13 +1197,13 @@ export default function TruckContactManager({ open, onClose }) {
                     <Table stickyHeader size="small">
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 50 }}>#</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 120 }}>Vehicle No</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 150 }}>Owner Name</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 150 }}>Driver Name</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 120 }}>Phone</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 120 }}>PAN</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569', minWidth: 100 }}>Actions</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 50 }}>#</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 120 }}>Vehicle No</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 150 }}>Owner Name</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 150 }}>Driver Name</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 120 }}>Phone</TableCell>
+                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 120 }}>PAN</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 100 }}>Actions</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -1254,7 +1254,7 @@ export default function TruckContactManager({ open, onClose }) {
 
                   {approvalLoading ? <CircularProgress sx={{ display: 'block', mx: 'auto', mt: 4 }} /> :
                     approvals.length === 0 ? (
-                      <Box sx={{ textAlign: 'center', py: 10, bgcolor: '#f8fafc', borderRadius: '16px', border: '1px dashed #cbd5e1' }}>
+                      <Box sx={{ textAlign: 'center', py: 10, bgcolor: 'background.default', borderRadius: '16px', border: '1px dashed #cbd5e1' }}>
                         <CheckCircleIcon sx={{ fontSize: 48, color: '#10b981', mb: 2, opacity: 0.5 }} />
                         <Typography color="text.secondary" fontWeight={600}>All clear! No pending approvals found.</Typography>
                       </Box>
@@ -1263,11 +1263,11 @@ export default function TruckContactManager({ open, onClose }) {
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Requested Date</TableCell>
-                              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Type</TableCell>
-                              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Vehicle No</TableCell>
-                              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Owner / Driver</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 800, bgcolor: '#f8fafc', color: '#475569' }}>Action</TableCell>
+                              <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Requested Date</TableCell>
+                              <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Type</TableCell>
+                              <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Vehicle No</TableCell>
+                              <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Owner / Driver</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Action</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>

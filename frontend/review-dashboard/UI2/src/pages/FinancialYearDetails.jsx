@@ -1218,7 +1218,7 @@ export default function FinancialYearDetails({ onBack }) {
   const paidBills = finalFilteredRows.filter(r => num(r.paymentAmount) >= num(r.receivable) && num(r.receivable) > 0).length;
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
       
       {/* ── Premium Header ───────────────────────────────────────────── */}
       <Box sx={{
@@ -1276,13 +1276,13 @@ export default function FinancialYearDetails({ onBack }) {
       <Box sx={{
         px: { xs: 2, md: 4 }, py: 2,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0',
+        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0',
         gap: 2, flexWrap: 'wrap'
       }}>
         {/* Filters Left Side */}
         <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
           <Box display="flex" alignItems="center" sx={{
-            bgcolor: '#f1f5f9', borderRadius: '12px', px: 2, py: 1, border: '1px solid #e2e8f0',
+            bgcolor: 'background.default', borderRadius: '12px', px: 2, py: 1, border: '1px solid #e2e8f0',
             '&:focus-within': { borderColor: '#7c3aed', boxShadow: '0 0 0 2px rgba(124,58,237,0.1)' }, width: 260
           }}>
             <span style={{ marginRight: 8, opacity: 0.5 }}>🔍</span>
@@ -1303,7 +1303,7 @@ export default function FinancialYearDetails({ onBack }) {
               value={siteFilter}
               onChange={(e) => handleSiteFilter(e.target.value)}
               size="small"
-              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: '#f8fafc', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: 'background.default', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
             >
               <MenuItem value="All" sx={{ fontSize: '12px' }}>All Sites ({computedRows.length})</MenuItem>
               <MenuItem value="NVCL" sx={{ fontSize: '12px' }}>NVCL ({computedRows.filter(r => isNVCL(r.site)).length})</MenuItem>
@@ -1323,12 +1323,12 @@ export default function FinancialYearDetails({ onBack }) {
           )}
 
           <Button size="small" variant="outlined" startIcon={<AddIcon sx={{ fontSize: '1rem' }} />} onClick={handleAddRow}
-            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' } }}>
             Add Row
           </Button>
 
           <Button size="small" variant="outlined" startIcon={<UploadIcon sx={{ fontSize: '1rem' }} />} onClick={() => setDocModalOpen(true)}
-            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' } }}>
             PDF Docs ({pageDocuments.length})
           </Button>
 
@@ -1342,7 +1342,7 @@ export default function FinancialYearDetails({ onBack }) {
           )}
 
           <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
-            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' } }}>
             Export
           </Button>
 
@@ -1361,13 +1361,13 @@ export default function FinancialYearDetails({ onBack }) {
           </Button>
 
           <Tooltip title="Print Register">
-            <IconButton size="small" onClick={() => window.print()} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', '&:hover': { bgcolor: '#f1f5f9' }, p: 0.75, borderRadius: '10px' }}>
+            <IconButton size="small" onClick={() => window.print()} sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0', '&:hover': { bgcolor: 'background.default' }, p: 0.75, borderRadius: '10px' }}>
               <PrintIcon sx={{ fontSize: '1.1rem', color: '#475569' }} />
             </IconButton>
           </Tooltip>
 
           <Tooltip title="Refresh Data">
-            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', '&:hover': { bgcolor: '#f1f5f9' }, p: 0.75, borderRadius: '10px' }}>
+            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0', '&:hover': { bgcolor: 'background.default' }, p: 0.75, borderRadius: '10px' }}>
               <RefreshIcon sx={{ fontSize: '1.1rem', color: '#475569' }} />
             </IconButton>
           </Tooltip>
@@ -1376,7 +1376,7 @@ export default function FinancialYearDetails({ onBack }) {
       
       {/* 4. Table Container */}
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', p: { xs: 1, md: 2 } }}>
-        <Box sx={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'auto', bgcolor: '#fff', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+        <Box sx={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'auto', bgcolor: 'background.paper', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
           <table style={{ borderCollapse: 'collapse', whiteSpace: 'normal', fontFamily: 'Inter,sans-serif', fontSize: 13, width: 'max-content', minWidth: '100%' }}>
               <thead>
                 <tr>
@@ -1413,7 +1413,7 @@ export default function FinancialYearDetails({ onBack }) {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <Box sx={{ p: 2, bgcolor: '#fff', borderTop: '1px solid #e2e8f0', display: 'flex', gap: 2, alignItems: 'center', justifyContent: 'space-between' }}>
+        <Box sx={{ p: 2, bgcolor: 'background.paper', borderTop: '1px solid #e2e8f0', display: 'flex', gap: 2, alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
             Showing {page * PAGE_SIZE + 1} – {Math.min((page + 1) * PAGE_SIZE, filteredRows.length)} of {filteredRows.length} records
           </Typography>
@@ -1430,8 +1430,8 @@ export default function FinancialYearDetails({ onBack }) {
         <DialogTitle sx={{ fontWeight: 800 }}>Group Payment Details</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
           <Typography variant="body2" color="text.secondary">Applying to {selectedIds.length} invoices.</Typography>
-          <TextField label="Receivable Amount (Auto-Calculated)" fullWidth value={paymentForm.receivableAmount || 0} InputProps={{ readOnly: true }} type="number" sx={{ bgcolor: '#f8fafc' }} />
-          <TextField label="Payment Amount (Paid - Auto synced)" fullWidth value={paymentForm.paymentAmount} InputProps={{ readOnly: true }} type="number" sx={{ bgcolor: '#f8fafc' }} />
+          <TextField label="Receivable Amount (Auto-Calculated)" fullWidth value={paymentForm.receivableAmount || 0} InputProps={{ readOnly: true }} type="number" sx={{ bgcolor: 'background.default' }} />
+          <TextField label="Payment Amount (Paid - Auto synced)" fullWidth value={paymentForm.paymentAmount} InputProps={{ readOnly: true }} type="number" sx={{ bgcolor: 'background.default' }} />
           <TextField label="TDS Provision" fullWidth value={paymentForm.tdsProvision} onChange={e => setPaymentForm({ ...paymentForm, tdsProvision: e.target.value })} type="number" />
           <TextField label="Payment Date" fullWidth value={paymentForm.paymentDate} onChange={e => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} type="date" InputLabelProps={{ shrink: true }} />
           <TextField label="Reference No" fullWidth value={paymentForm.referenceNo} onChange={e => setPaymentForm({ ...paymentForm, referenceNo: e.target.value })} />
@@ -1466,7 +1466,7 @@ export default function FinancialYearDetails({ onBack }) {
             </Typography>
           ) : (
             pageDocuments.map(doc => (
-              <Box key={doc._id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1.5, border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: '#f8fafc' }}>
+              <Box key={doc._id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1.5, border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: 'background.default' }}>
                 <Box>
                   <Typography variant="body2" fontWeight={600} sx={{ wordBreak: 'break-all' }}>
                     {doc.fileName}
@@ -1754,7 +1754,7 @@ export default function FinancialYearDetails({ onBack }) {
                                 <Box sx={{ 
                                   display: 'flex', flexDirection: 'column', alignItems: 'stretch', mb: 1.5,
                                   border: '1px solid #e2e8f0', borderRadius: 2, p: 1.5,
-                                  bgcolor: '#f8fafc', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                                  bgcolor: 'background.default', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
                                   minWidth: 260 
                                 }}>
                                   <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#475569', letterSpacing: 0.5, textAlign: 'center', mb: 1.5, borderBottom: '1px solid #e2e8f0', pb: 0.5 }}>
@@ -1923,7 +1923,7 @@ export default function FinancialYearDetails({ onBack }) {
         PaperProps={{
           sx: {
             borderRadius: '24px',
-            bgcolor: '#ffffff',
+            bgcolor: 'background.paper',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
             maxHeight: '90vh',
             fontFamily: 'Inter, sans-serif',
@@ -1981,7 +1981,7 @@ export default function FinancialYearDetails({ onBack }) {
               ))}
             </SearchableSelect>
 
-            <IconButton onClick={() => setDashboardOpen(false)} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <IconButton onClick={() => setDashboardOpen(false)} sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
               ✕
             </IconButton>
           </Box>
@@ -1992,7 +1992,7 @@ export default function FinancialYearDetails({ onBack }) {
           <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap={3}>
             {/* Card 1: Total Bills */}
             <Box sx={{
-              p: 3, borderRadius: '16px', bgcolor: '#f8fafc', border: '1px solid #f1f5f9',
+              p: 3, borderRadius: '16px', bgcolor: 'background.default', border: '1px solid #f1f5f9',
               boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: 0.5
             }}>
               <Typography variant="caption" fontWeight={700} color="#64748b" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bills</Typography>

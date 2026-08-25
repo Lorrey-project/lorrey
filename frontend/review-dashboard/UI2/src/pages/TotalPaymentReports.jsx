@@ -13,7 +13,7 @@ export default function TotalPaymentReports({ onBack }) {
   };
 
   return (
-    <Box sx={{ p: 3, height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f1f5f9' }}>
+    <Box sx={{ p: 3, height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -40,7 +40,7 @@ export default function TotalPaymentReports({ onBack }) {
       <Paper sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)' }}>
         
         {/* Tabs */}
-        <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff' }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
           <Tabs 
             value={activeTab} 
             onChange={handleTabChange} 
@@ -56,7 +56,7 @@ export default function TotalPaymentReports({ onBack }) {
         </Box>
 
         {/* Tab Panels */}
-        <Box sx={{ flex: 1, bgcolor: '#f8fafc', p: 4, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <Box sx={{ flex: 1, bgcolor: 'background.default', p: 4, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
           {activeTab === 0 && (
             <Box sx={{ textAlign: 'center', color: '#64748b' }}>
               <CallReceivedIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />

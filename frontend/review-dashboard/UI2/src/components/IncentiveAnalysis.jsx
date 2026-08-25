@@ -1389,7 +1389,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           size="small"
           sx={{
             fontWeight: 700,
-            bgcolor: '#f1f5f9',
+            bgcolor: 'background.default',
             color: '#475569',
             border: '1px solid #e2e8f0',
             fontFamily: 'Inter, system-ui, sans-serif',
@@ -1739,16 +1739,16 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif' }}>
 
       {/* ── Top Bar ─────────────────────────────────────────────────────── */}
       <Box sx={{
         px: 2.5, py: 1.2,
         display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: '#fff', borderBottom: '1px solid #e2e8f0',
+        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0',
         boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flexShrink: 0,
       }}>
-        <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+        <IconButton onClick={onBack} size="small" sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
           <ArrowBackIcon fontSize="small" />
         </IconButton>
         <Box display="flex" alignItems="center" gap={1.5} flexWrap="wrap">
@@ -1778,7 +1778,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 fontSize: '11px',
                 fontWeight: 700,
                 color: '#0f172a',
-                bgcolor: '#f8fafc',
+                bgcolor: 'background.default',
                 '& .MuiOutlinedInput-notchedOutline': {
                   borderColor: '#e2e8f0',
                 },
@@ -1813,7 +1813,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 fontSize: '11px',
                 fontWeight: 700,
                 color: '#0f172a',
-                bgcolor: '#f8fafc',
+                bgcolor: 'background.default',
                 '& .MuiOutlinedInput-notchedOutline': {
                   borderColor: '#e2e8f0',
                 },
@@ -1869,7 +1869,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
             sx={{
               fontWeight: 700, borderRadius: 2, px: 1.5, fontSize: '11px',
               borderColor: '#cbd5e1', color: '#475569',
-              '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' }
+              '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' }
             }}>
             Upload PDF
             <input type="file" accept="application/pdf" hidden onChange={async (e) => {
@@ -1944,7 +1944,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
               borderColor: '#cbd5e1', color: '#475569',
               textTransform: 'none',
               cursor: saveCompleted ? 'default' : 'pointer',
-              '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' },
+              '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' },
               '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' }
             }}>
             Upload Incentive Excel
@@ -2222,7 +2222,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
         {(uploadedPdfUrl || uploadedExcelData) && (
           <Box sx={{ mt: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
             {uploadedPdfUrl && (
-              <Box sx={{ p: 2, bgcolor: '#fff', borderRadius: 2, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                   <Typography variant="subtitle2" fontWeight={700} sx={{ color: '#1e293b' }}>PDF Preview</Typography>
                   <Button size="small" color="error" onClick={() => setUploadedPdfUrl(null)}>Close</Button>
@@ -2232,7 +2232,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
             )}
 
             {uploadedExcelData && (
-              <Box sx={{ p: 2, bgcolor: '#fff', borderRadius: 2, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                   <Typography variant="subtitle2" fontWeight={700} sx={{ color: '#1e293b' }}>Excel Preview: {uploadedExcelName}</Typography>
                   <Button size="small" color="error" onClick={() => { setUploadedExcelData(null); setUploadedExcelName(null); }}>Close</Button>
@@ -2264,8 +2264,8 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
       </Box>
 
       {/* ── Comparison Modal ── */}
-      <Dialog open={comparisonModalOpen} onClose={() => setComparisonModalOpen(false)} maxWidth="xl" fullWidth PaperProps={{ sx: { height: '95vh', bgcolor: '#f8fafc', m: 2 } }}>
-        <DialogTitle sx={{ fontWeight: 800, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+      <Dialog open={comparisonModalOpen} onClose={() => setComparisonModalOpen(false)} maxWidth="xl" fullWidth PaperProps={{ sx: { height: '95vh', bgcolor: 'background.default', m: 2 } }}>
+        <DialogTitle sx={{ fontWeight: 800, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', bgcolor: 'background.paper' }}>
           Incentive Comparison View — {monthLabel}
           <Box display="flex" gap={1}>
             {uploadedExcelData && (
@@ -2276,12 +2276,12 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
             <Button size="small" variant="outlined" color="error" onClick={() => setComparisonModalOpen(false)}>Close View</Button>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 0, bgcolor: '#f1f5f9', display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <DialogContent sx={{ p: 0, bgcolor: 'background.default', display: 'flex', flexDirection: 'column', height: '100%' }}>
           {uploadedExcelData ? (
             <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
               {/* ── Summary Dashboard Bar ── */}
               <Box sx={{
-                display: 'flex', gap: 2, p: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0',
+                display: 'flex', gap: 2, p: 2, bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0',
                 flexWrap: 'wrap', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', flexShrink: 0
               }}>
                 {[
@@ -2310,8 +2310,8 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
               <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, p: 2, overflow: 'hidden' }}>
                 
                 {/* 1. Top Section - System Generated Data */}
-                <Box sx={{ flex: '1 1 48%', display: 'flex', flexDirection: 'column', bgcolor: '#fff', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-                  <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                <Box sx={{ flex: '1 1 48%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+                  <Box sx={{ p: 1.5, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
                     <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#0f172a', display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Box sx={{ width: 4, height: 16, bgcolor: '#3b82f6', borderRadius: 1 }} />
                       1. System Generated Data (Calculated from Cement Register)
@@ -2456,8 +2456,8 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 </Box>
 
                 {/* 2. Bottom Section - Uploaded Excel Data */}
-                <Box sx={{ flex: '1 1 48%', display: 'flex', flexDirection: 'column', bgcolor: '#fff', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-                  <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                <Box sx={{ flex: '1 1 48%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+                  <Box sx={{ p: 1.5, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
                     <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#0f172a', display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Box sx={{ width: 4, height: 16, bgcolor: '#10b981', borderRadius: 1 }} />
                       2. Uploaded Incentive (Plant) Excel Data
@@ -2536,10 +2536,10 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
             </Box>
           ) : uploadedPdfUrl ? (
             <Box sx={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-              <Box sx={{ width: '45%', borderRight: '2px solid #cbd5e1', height: '100%', bgcolor: '#fff' }}>
+              <Box sx={{ width: '45%', borderRight: '2px solid #cbd5e1', height: '100%', bgcolor: 'background.paper' }}>
                 <iframe src={uploadedPdfUrl} width="100%" height="100%" style={{ border: 'none' }} title="Client PDF Mail" />
               </Box>
-              <Box sx={{ width: '55%', height: '100%', overflow: 'auto', p: 2, bgcolor: '#f8fafc' }}>
+              <Box sx={{ width: '55%', height: '100%', overflow: 'auto', p: 2, bgcolor: 'background.default' }}>
                 <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 2, color: '#0f172a' }}>Our System Calculation Results</Typography>
                 <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '11px', whiteSpace: 'nowrap' }}>
                   <thead>
@@ -2575,7 +2575,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 </table>
 
                 {/* ── Summary Comparison Section ── */}
-                <Box sx={{ mt: 3, p: 3, bgcolor: '#fff', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+                <Box sx={{ mt: 3, p: 3, bgcolor: 'background.paper', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
                   <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 2.5, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Box sx={{ width: 4, height: 18, bgcolor: '#3b82f6', borderRadius: 1 }} />
                     Manual Total Validation (Mail Entry)
@@ -2651,7 +2651,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }} onClick={() => setConfirmDelete(false)}>
           <Box sx={{
-            bgcolor: '#fff', borderRadius: 3, p: 4, maxWidth: 420, width: '90%',
+            bgcolor: 'background.paper', borderRadius: 3, p: 4, maxWidth: 420, width: '90%',
             boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
           }} onClick={e => e.stopPropagation()}>
             <Typography variant="h6" fontWeight={800} color="error.main" mb={1}>

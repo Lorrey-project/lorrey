@@ -419,7 +419,7 @@ export default function PumpPaymentRegister({ onBack }) {
             bgcolor: 'white',
             boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
             border: '1px solid #e2e8f0',
-            '&:hover': { bgcolor: '#f8fafc', transform: 'scale(1.05)' },
+            '&:hover': { bgcolor: 'background.default', transform: 'scale(1.05)' },
             transition: 'all 0.2s'
           }}
         >
@@ -440,7 +440,7 @@ export default function PumpPaymentRegister({ onBack }) {
         borderRadius: '16px',
         boxShadow: '0 4px 20px -2px rgba(0,0,0,0.04), 0 2px 6px -1px rgba(0,0,0,0.02)',
         border: '1px solid #e2e8f0',
-        bgcolor: '#ffffff',
+        bgcolor: 'background.paper',
         overflow: 'hidden'
       }}>
         <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
@@ -502,7 +502,7 @@ export default function PumpPaymentRegister({ onBack }) {
                   sx={{
                     borderRadius: '10px', textTransform: 'none', fontWeight: 700, borderColor: '#cbd5e1',
                     color: '#475569', bgcolor: 'white', height: '40px', px: 2,
-                    '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' }
+                    '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' }
                   }}
                 >
                   Refresh
@@ -515,7 +515,7 @@ export default function PumpPaymentRegister({ onBack }) {
                   sx={{
                     borderRadius: '10px', textTransform: 'none', fontWeight: 700, borderColor: '#cbd5e1',
                     color: '#475569', bgcolor: 'white', height: '40px', px: 2,
-                    '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' }
+                    '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' }
                   }}
                 >
                   Export CSV
@@ -595,7 +595,7 @@ export default function PumpPaymentRegister({ onBack }) {
                   <Table stickyHeader sx={{ minWidth: 2000, '& .MuiTableCell-root': { py: 1.5, px: 1, borderBottom: '1px solid #f1f5f9' } }}>
                     <TableHead>
                       <TableRow>
-                        <TableCell padding="checkbox" sx={{ bgcolor: '#f8fafc', width: 50, borderBottom: '2px solid #e2e8f0' }}>
+                        <TableCell padding="checkbox" sx={{ bgcolor: 'background.default', width: 50, borderBottom: '2px solid #e2e8f0' }}>
                           <Checkbox
                             indeterminate={selectedIds.size > 0 && selectedIds.size < isSelectableRows.length}
                             checked={isSelectableRows.length > 0 && selectedIds.size === isSelectableRows.length}
@@ -644,7 +644,7 @@ export default function PumpPaymentRegister({ onBack }) {
                             selected={isSelected}
                             sx={{
                               transition: 'background-color 0.2s',
-                              '&:hover': { bgcolor: '#f8fafc' },
+                              '&:hover': { bgcolor: 'background.default' },
                               '&.Mui-selected': { bgcolor: '#f0f9ff', '&:hover': { bgcolor: '#e0f2fe' } }
                             }}
                           >
@@ -763,7 +763,7 @@ export default function PumpPaymentRegister({ onBack }) {
                   rowsPerPageOptions={[10, 25, 50, 100]}
                   sx={{
                     borderTop: '1px solid #e2e8f0',
-                    bgcolor: '#ffffff',
+                    bgcolor: 'background.paper',
                     '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
                       fontFamily: 'inherit',
                       color: '#475569'

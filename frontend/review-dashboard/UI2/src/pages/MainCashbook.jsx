@@ -787,13 +787,13 @@ export default function MainCashbook({ onBack }) {
     </Box>
   );
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
 
       {/* ── Header ── */}
-      <Box sx={{ p: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 2, zIndex: 10 }}>
+      <Box sx={{ p: 2, bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 2, zIndex: 10 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <IconButton onClick={onBack} size="small" sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
             </IconButton>
             <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
@@ -810,7 +810,7 @@ export default function MainCashbook({ onBack }) {
       {/* ── Toolbar ── */}
       <Box sx={{
         px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', flexShrink: 0, zIndex: 9
+        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', flexShrink: 0, zIndex: 9
       }}>
         {/* Month selector */}
         <Box sx={{ minWidth: 140 }}>
@@ -829,7 +829,7 @@ export default function MainCashbook({ onBack }) {
         <Chip
           label={`${computedRows.length} entries`}
           size="small"
-          sx={{ bgcolor: '#f1f5f9', fontWeight: 700, color: '#475569' }}
+          sx={{ bgcolor: 'background.default', fontWeight: 700, color: '#475569' }}
         />
 
         {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ fontWeight: 700, bgcolor: '#fef08a', color: '#854d0e' }} />}
@@ -863,7 +863,7 @@ export default function MainCashbook({ onBack }) {
             + Add Row
           </Button>
           <Tooltip title="Discard & reload">
-            <IconButton size="small" onClick={() => fetchData(selMonth, selYear)} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <IconButton size="small" onClick={() => fetchData(selMonth, selYear)} sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
             </IconButton>
           </Tooltip>
@@ -1115,7 +1115,7 @@ export default function MainCashbook({ onBack }) {
 
       {/* ── Import Modal ── */}
       <Dialog open={importModalOpen} onClose={() => !importing && setImportModalOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0' }}>
           Import Excel (Multi-Month)
         </DialogTitle>
         <DialogContent sx={{ py: 3, display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
@@ -1180,7 +1180,7 @@ export default function MainCashbook({ onBack }) {
           background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center'
         }} onClick={() => setConfirmDel(false)}>
-          <Box sx={{ bgcolor: '#fff', borderRadius: 3, p: 4, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+          <Box sx={{ bgcolor: 'background.paper', borderRadius: 3, p: 4, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
             <Typography variant="h6" fontWeight={800} color="error" mb={1}>Delete {selectedIds.size} Row(s)?</Typography>
             <Typography color="text.secondary" mb={3}>This action cannot be undone.</Typography>
             <Box display="flex" gap={1.5} justifyContent="flex-end">

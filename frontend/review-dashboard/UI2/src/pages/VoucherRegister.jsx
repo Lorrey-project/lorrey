@@ -210,16 +210,16 @@ export default function VoucherRegister({ onBack }) {
   }
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
 
       {/* ── Top Bar ─────────────────────────────────────────────────────────── */}
       <Box sx={{
         px: 2.5, py: 1.2,
         display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: '#fff', borderBottom: '1px solid #e2e8f0',
+        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0',
         boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flexShrink: 0
       }}>
-        <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+        <IconButton onClick={onBack} size="small" sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
           <ArrowBackIcon fontSize="small" />
         </IconButton>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -256,7 +256,7 @@ export default function VoucherRegister({ onBack }) {
             >Delete ({selectedIds.size})</Button>
           )}
           <Tooltip title="Reload">
-            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: '#f1f5f9' }}>
+            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: 'background.default' }}>
               <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -472,7 +472,7 @@ export default function VoucherRegister({ onBack }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }} onClick={() => setConfirmDel(false)}>
           <Box sx={{
-            bgcolor: '#fff', borderRadius: 3, p: 4, maxWidth: 420, width: '90%',
+            bgcolor: 'background.paper', borderRadius: 3, p: 4, maxWidth: 420, width: '90%',
             boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
           }} onClick={e => e.stopPropagation()}>
             <Typography variant="h6" fontWeight={800} color="error.main" mb={1}>

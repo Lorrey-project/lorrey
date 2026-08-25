@@ -996,7 +996,7 @@ export default function CementRegister({ onBack }) {
           size="small"
           sx={{
             fontWeight: 700,
-            bgcolor: '#f1f5f9',
+            bgcolor: 'background.default',
             color: '#475569',
             border: '1px solid #e2e8f0',
             fontFamily: 'Inter, system-ui, sans-serif',
@@ -1054,7 +1054,7 @@ export default function CementRegister({ onBack }) {
 
   if (showPreviousScreen) {
     return (
-      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3, height: '100vh', bgcolor: '#f1f5f9', overflow: 'hidden' }}>
+      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3, height: '100vh', bgcolor: 'background.default', overflow: 'hidden' }}>
         {/* Header */}
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
           <Box display="flex" alignItems="center" gap={2}>
@@ -1066,9 +1066,9 @@ export default function CementRegister({ onBack }) {
                   setIsBillingModalOpen(true);
                 }}
                 sx={{
-                  bgcolor: '#ffffff', color: '#334155', border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                  bgcolor: 'background.paper', color: '#334155', border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                   fontWeight: 600, px: 2.5, py: 1, borderRadius: '8px', textTransform: 'none',
-                  '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' }
+                  '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' }
                 }}
               >
                 ← Previous
@@ -1095,7 +1095,7 @@ export default function CementRegister({ onBack }) {
             </Box>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mb: 0.5, letterSpacing: '0.5px' }}>BILL DATE</Typography>
-              <Box sx={{ px: 2.5, py: 0.75, bgcolor: '#f1f5f9', color: '#334155', borderRadius: '6px', fontWeight: 800, border: '1px solid #e2e8f0' }}>
+              <Box sx={{ px: 2.5, py: 0.75, bgcolor: 'background.default', color: '#334155', borderRadius: '6px', fontWeight: 800, border: '1px solid #e2e8f0' }}>
                 {bulkBillInput.billDate ? new Date(bulkBillInput.billDate).toLocaleDateString('en-GB') : 'Not Set'}
               </Box>
             </Box>
@@ -1131,7 +1131,7 @@ export default function CementRegister({ onBack }) {
 
         {/* Table Container */}
         <Box sx={{
-          flex: 1, bgcolor: '#ffffff', borderRadius: '12px', overflow: 'hidden',
+          flex: 1, bgcolor: 'background.paper', borderRadius: '12px', overflow: 'hidden',
           display: 'flex', flexDirection: 'column',
           boxShadow: '0 4px 20px rgba(0,0,0,0.03), 0 1px 3px rgba(0,0,0,0.02)',
           border: '1px solid #e2e8f0'
@@ -1190,7 +1190,7 @@ export default function CementRegister({ onBack }) {
           <Box sx={{ 
             p: 3, 
             borderTop: '1px solid #e2e8f0', 
-            bgcolor: '#f8fafc',
+            bgcolor: 'background.default',
             display: 'flex',
             alignItems: 'center',
             gap: 6
@@ -1214,7 +1214,7 @@ export default function CementRegister({ onBack }) {
   }
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
 
       {/* ── Premium Header ───────────────────────────────────────────── */}
       <Box sx={{
@@ -1298,13 +1298,13 @@ export default function CementRegister({ onBack }) {
       <Box sx={{
         px: { xs: 2, md: 4 }, py: 2,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0',
+        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0',
         gap: 2, flexWrap: 'wrap'
       }}>
         {/* Filters Left Side */}
         <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
           <Box display="flex" alignItems="center" sx={{
-            bgcolor: '#f1f5f9', borderRadius: '12px', px: 2, py: 1, border: '1px solid #e2e8f0',
+            bgcolor: 'background.default', borderRadius: '12px', px: 2, py: 1, border: '1px solid #e2e8f0',
             '&:focus-within': { borderColor: '#7c3aed', boxShadow: '0 0 0 2px rgba(124,58,237,0.1)' }, width: 260
           }}>
             <span style={{ marginRight: 8, opacity: 0.5 }}>🔍</span>
@@ -1325,7 +1325,7 @@ export default function CementRegister({ onBack }) {
               value={filterBillingStatus}
               onChange={(e) => setFilterBillingStatus(e.target.value)}
               size="small"
-              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: '#f8fafc', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: 'background.default', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
             >
               <MenuItem value="All" sx={{ fontSize: '12px' }}>All Billing Status</MenuItem>
               <MenuItem value="Billed" sx={{ fontSize: '12px' }}>Billed Only</MenuItem>
@@ -1336,7 +1336,7 @@ export default function CementRegister({ onBack }) {
               value={filterChallanStatus}
               onChange={(e) => setFilterChallanStatus(e.target.value)}
               size="small"
-              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: '#f8fafc', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: 'background.default', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
             >
               <MenuItem value="All" sx={{ fontSize: '12px' }}>All Challan Status</MenuItem>
               <MenuItem value="Stamped" sx={{ fontSize: '12px' }}>Stamped Only</MenuItem>
@@ -1380,7 +1380,7 @@ export default function CementRegister({ onBack }) {
           <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
 
           <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
-            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' } }}>
             Export
           </Button>
 
@@ -1424,7 +1424,7 @@ export default function CementRegister({ onBack }) {
           </Button>
 
           <Tooltip title="Refresh Data">
-            <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', '&:hover': { bgcolor: '#f1f5f9' }, p: 0.75, borderRadius: '10px' }}>
+            <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0', '&:hover': { bgcolor: 'background.default' }, p: 0.75, borderRadius: '10px' }}>
               <RefreshIcon sx={{ fontSize: '1.1rem', color: '#475569' }} />
             </IconButton>
           </Tooltip>
@@ -1432,7 +1432,7 @@ export default function CementRegister({ onBack }) {
       </Box>
 
       {/* ── Group header row ─────────────────────────────────────────────── */}
-      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: '#fff' }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: 'background.paper' }}>
         <table style={{
           borderCollapse: 'collapse', minWidth: '100%',
           tableLayout: 'auto', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
@@ -1652,7 +1652,7 @@ export default function CementRegister({ onBack }) {
         }} onClick={() => !wizardImporting && (setShowExcelWizard(false), setWizardStep(1), setWizardPreview(null), setValidationResult({ errors: [], warnings: [] }), setAcceptWarnings(false))}>
 
           <Box sx={{
-            bgcolor: '#fff', borderRadius: '20px',
+            bgcolor: 'background.paper', borderRadius: '20px',
             maxWidth: 680, width: '100%',
             boxShadow: '0 32px 100px rgba(0,0,0,0.4)',
             overflow: 'hidden', display: 'flex', flexDirection: 'column',
@@ -1748,7 +1748,7 @@ export default function CementRegister({ onBack }) {
 
                 {/* Next: pick file */}
                 <Box sx={{
-                  bgcolor: '#f8fafc', border: '2px dashed #c4b5fd', borderRadius: '14px', p: 3, textAlign: 'center', cursor: 'pointer',
+                  bgcolor: 'background.default', border: '2px dashed #c4b5fd', borderRadius: '14px', p: 3, textAlign: 'center', cursor: 'pointer',
                   '&:hover': { bgcolor: '#f5f3ff', borderColor: '#7c3aed' }, transition: 'all 0.2s'
                 }}
                   onClick={() => wizardFileRef.current?.click()}
@@ -1935,7 +1935,7 @@ export default function CementRegister({ onBack }) {
                         </tbody>
                       </table>
                       {wizardPreview.filteredRows.length > 8 && (
-                        <Box sx={{ px: 2, py: 1, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+                        <Box sx={{ px: 2, py: 1, bgcolor: 'background.default', borderTop: '1px solid #e2e8f0' }}>
                           <Typography fontSize="11px" color="#64748b">+ {wizardPreview.filteredRows.length - 8} more rows…</Typography>
                         </Box>
                       )}
@@ -1989,7 +1989,7 @@ export default function CementRegister({ onBack }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }} onClick={() => setConfirmDel(false)}>
           <Box sx={{
-            bgcolor: '#fff', borderRadius: 3, p: 4, maxWidth: 420, width: '90%',
+            bgcolor: 'background.paper', borderRadius: 3, p: 4, maxWidth: 420, width: '90%',
             boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
           }} onClick={e => e.stopPropagation()}>
             <Typography variant="h6" fontWeight={800} color="error.main" mb={1}>
@@ -2021,7 +2021,7 @@ export default function CementRegister({ onBack }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }} onClick={() => setConfirmOverwrite(false)}>
           <Box sx={{
-            bgcolor: '#fff', borderRadius: 3, p: 4, maxWidth: 460, width: '90%',
+            bgcolor: 'background.paper', borderRadius: 3, p: 4, maxWidth: 460, width: '90%',
             boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
           }} onClick={e => e.stopPropagation()}>
             <Typography variant="h6" fontWeight={800} color="warning.main" mb={1} display="flex" alignItems="center" gap={1}>
@@ -2072,7 +2072,7 @@ export default function CementRegister({ onBack }) {
 
       {/* ── Billing Confirmation Modal ──────────────────────────────────── */}
       <Dialog open={isBillingModalOpen} onClose={() => setIsBillingModalOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#0f172a' }}>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0', color: '#0f172a' }}>
           Billing Confirmation
         </DialogTitle>
         <DialogContent sx={{ mt: 2, p: 3 }}>
@@ -2164,7 +2164,7 @@ export default function CementRegister({ onBack }) {
                       fullWidth
                       size="small"
                       displayEmpty
-                      sx={{ borderRadius: '8px', bgcolor: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#cbd5e1' } }}
+                      sx={{ borderRadius: '8px', bgcolor: 'background.paper', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#cbd5e1' } }}
                     >
                       <MenuItem value="" disabled>Select Bill Type</MenuItem>
                       <MenuItem value="Freight" disabled={isFreightDisabled}>Freight</MenuItem>
@@ -2185,7 +2185,7 @@ export default function CementRegister({ onBack }) {
             </Box>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ p: 3, pt: 1, borderTop: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
+        <DialogActions sx={{ p: 3, pt: 1, borderTop: '1px solid #e2e8f0', bgcolor: 'background.default' }}>
           <Button onClick={() => setIsBillingModalOpen(false)} sx={{ color: '#64748b', fontWeight: 600 }}>Cancel</Button>
           <Button
             variant="contained"

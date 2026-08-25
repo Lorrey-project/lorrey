@@ -573,7 +573,7 @@ export default function AttendancePanel({ onBack }) {
 
     if (showMgmtPage && user.role === 'HEAD_OFFICE') {
         return (
-            <Box sx={{ minHeight: '100vh', bgcolor: '#f4f7f9', py: 4 }}>
+            <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', py: 4 }}>
                 <Container maxWidth="lg">
                     {/* Header Row for Attendance Management Page */}
                     <Box display="flex" justifyContent="space-between" alignItems="center" gap={2} mb={4} flexDirection={{ xs: 'column', sm: 'row' }}>
@@ -589,7 +589,7 @@ export default function AttendancePanel({ onBack }) {
                                     borderColor: '#cbd5e1',
                                     color: '#334155',
                                     bgcolor: 'white',
-                                    '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
+                                    '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' }
                                 }}
                             >
                                 Back
@@ -774,7 +774,7 @@ export default function AttendancePanel({ onBack }) {
                                                             <TableCell>
                                                                 <Typography variant="body2" fontWeight={500}>{log.reason || 'Succeeded validation.'}</Typography>
                                                                 {log.previousValue && (
-                                                                    <Box mt={1} sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.75rem' }}>
+                                                                    <Box mt={1} sx={{ p: 1, bgcolor: 'background.default', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.75rem' }}>
                                                                         {log.previousValue.checkInTime !== undefined && (
                                                                             <div><strong>Prev Check-In:</strong> {formatDateTime(log.previousValue.checkInTime)} | <strong>Prev Check-Out:</strong> {formatDateTime(log.previousValue.checkOutTime)}</div>
                                                                         )}
@@ -882,7 +882,7 @@ export default function AttendancePanel({ onBack }) {
     }
 
     return (
-        <Box sx={{ minHeight: '100vh', bgcolor: '#f4f7f9', py: 4 }}>
+        <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', py: 4 }}>
             <Container maxWidth="lg">
                 {/* Header Row */}
                 <Box display="flex" justifyContent="space-between" alignItems="center" gap={2} mb={4} flexDirection={{ xs: 'column', sm: 'row' }}>
@@ -898,7 +898,7 @@ export default function AttendancePanel({ onBack }) {
                                 borderColor: '#cbd5e1',
                                 color: '#334155',
                                 bgcolor: 'white',
-                                '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
+                                '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' }
                             }}
                         >
                             Back
@@ -959,7 +959,7 @@ export default function AttendancePanel({ onBack }) {
                                     </TextField>
 
                                     {selectedLocation && (
-                                        <Box sx={{ mb: 3, p: 2, bgcolor: '#f8fafc', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+                                        <Box sx={{ mb: 3, p: 2, bgcolor: 'background.default', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
                                             <Typography variant="body2" color="#0f172a" fontWeight={700}>
                                                 Selected Location: {selectedLocation}
                                             </Typography>
@@ -1036,7 +1036,7 @@ export default function AttendancePanel({ onBack }) {
 
                                         return (
                                             <>
-                                                <Box sx={{ mt: 3, p: 2, bgcolor: '#f1f5f9', borderRadius: '16px', border: '1px solid #cbd5e1' }}>
+                                                <Box sx={{ mt: 3, p: 2, bgcolor: 'background.default', borderRadius: '16px', border: '1px solid #cbd5e1' }}>
                                                     <Typography variant="subtitle2" fontWeight={800} color="#0f172a" mb={1}>Current GPS:</Typography>
                                                     {gpsError ? (
                                                         <Typography variant="body2" color="error" fontWeight={650}>{gpsError}</Typography>

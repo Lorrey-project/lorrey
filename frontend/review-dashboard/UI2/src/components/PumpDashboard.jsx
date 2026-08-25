@@ -48,7 +48,7 @@ const PumpDashboard = () => {
     };
 
     return (
-        <Box sx={{ minHeight: '100vh', bgcolor: '#f4f7f9', pb: 10 }}>
+        <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: 10 }}>
             <Container maxWidth="xl" sx={{ pt: { xs: 2, md: 4 }, px: { xs: 1, sm: 2, md: 3 } }}>
 
                 {/* ── Header ─────────────────────────────────────────────────────────────── */}

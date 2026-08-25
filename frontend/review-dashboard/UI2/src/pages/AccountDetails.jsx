@@ -878,7 +878,7 @@ export default function AccountDetails({ onBack }) {
   }
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f4f7f9', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
       <style>{`
         .erp-table-row { transition: background-color 0.15s ease; }
         .erp-table-row:hover { background-color: #f1f5f9 !important; }
@@ -886,9 +886,9 @@ export default function AccountDetails({ onBack }) {
       `}</style>
 
       {/* ── Premium ERP Header & Dashboard Cards ── */}
-      <Box sx={{ bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', flexShrink: 0, pb: 2 }}>
+      <Box sx={{ bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', flexShrink: 0, pb: 2 }}>
         <Box sx={{ px: 3, py: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-          <IconButton onClick={onBack} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', '&:hover': { bgcolor: '#f1f5f9' } }}>
+          <IconButton onClick={onBack} sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0', '&:hover': { bgcolor: 'background.default' } }}>
             <ArrowBackIcon />
           </IconButton>
           <Box>
@@ -919,7 +919,7 @@ export default function AccountDetails({ onBack }) {
       {/* ── ERP Toolbar ── */}
       <Box sx={{
         px: 3, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', flexShrink: 0
+        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', flexShrink: 0
       }}>
         {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" color="warning" sx={{ fontWeight: 700 }} />}
         {selectedIds.size > 0 && (
@@ -947,7 +947,7 @@ export default function AccountDetails({ onBack }) {
           />
           <Box sx={{ width: 1, height: 28, bgcolor: '#e2e8f0', mx: 0.5 }} />
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#f8fafc', p: '4px 8px', borderRadius: 2, border: '1px solid #e2e8f0' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'background.default', p: '4px 8px', borderRadius: 2, border: '1px solid #e2e8f0' }}>
             <FilterListIcon sx={{ color: '#64748b', fontSize: 18 }} />
             <input
               type="date"
@@ -971,12 +971,12 @@ export default function AccountDetails({ onBack }) {
 
         <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Tooltip title="Reload data">
-            <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+            <IconButton size="small" onClick={() => fetchData()} sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0' }}>
               <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
             </IconButton>
           </Tooltip>
           <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}
-            sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px', color: '#475569', borderColor: '#cbd5e1', '&:hover': { bgcolor: '#f1f5f9' } }}>
+            sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px', color: '#475569', borderColor: '#cbd5e1', '&:hover': { bgcolor: 'background.default' } }}>
             Export
           </Button>
 
@@ -1081,7 +1081,7 @@ export default function AccountDetails({ onBack }) {
                                 <IconButton
                                   size="small"
                                   component="label"
-                                  sx={{ bgcolor: '#f1f5f9', width: 24, height: 24, '&:hover': { bgcolor: '#e2e8f0' } }}
+                                  sx={{ bgcolor: 'background.default', width: 24, height: 24, '&:hover': { bgcolor: '#e2e8f0' } }}
                                 >
                                   <RefreshIcon sx={{ fontSize: '14px', color: '#64748b' }} />
                                   <input type="file" hidden onChange={(e) => handleRowRemittanceUpload(row._id, e)} />
@@ -1230,7 +1230,7 @@ export default function AccountDetails({ onBack }) {
                             border: '1px solid transparent',
                             transition: 'border 0.2s, background 0.2s',
                             '&:hover': { border: '1px solid #cbd5e1' },
-                            '&.Mui-focused': { border: '1px solid #3b82f6', bgcolor: '#fff' },
+                            '&.Mui-focused': { border: '1px solid #3b82f6', bgcolor: 'background.paper' },
                             '& .MuiAutocomplete-inputRoot': { padding: 0, width: '100%' },
                             '& .MuiAutocomplete-input': { padding: '0 !important' },
                             '& .MuiAutocomplete-endAdornment': { display: 'none' }
@@ -1481,7 +1481,7 @@ export default function AccountDetails({ onBack }) {
                 Preview Import: {wizardPreview.fileName}
               </Typography>
 
-              <Box sx={{ bgcolor: '#fff', borderRadius: 2, border: '1px solid #e2e8f0', p: 2, mb: 3 }}>
+              <Box sx={{ bgcolor: 'background.paper', borderRadius: 2, border: '1px solid #e2e8f0', p: 2, mb: 3 }}>
                 <Typography variant="body2" color="#475569" mb={1}>
                   Total rows found: <strong>{wizardPreview.totalRows}</strong>
                 </Typography>
@@ -1551,10 +1551,10 @@ export default function AccountDetails({ onBack }) {
       </Dialog>
 
       <Dialog open={pendingBillsModal.open} onClose={() => setPendingBillsModal(prev => ({ ...prev, open: false }))} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0' }}>
           Select Pending Bills for {pendingBillsModal.party}
         </DialogTitle>
-        <DialogContent sx={{ p: 0, bgcolor: '#fff' }}>
+        <DialogContent sx={{ p: 0, bgcolor: 'background.paper' }}>
           {pendingBillsModal.loading ? (
             <Box p={4} display="flex" justifyContent="center"><CircularProgress /></Box>
           ) : pendingBillsModal.bills.length === 0 ? (
@@ -1623,7 +1623,7 @@ export default function AccountDetails({ onBack }) {
             </TableContainer>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+        <DialogActions sx={{ p: 2, bgcolor: 'background.default', borderTop: '1px solid #e2e8f0' }}>
           <Typography sx={{ mr: 'auto', fontWeight: 600 }}>
             {pendingBillsModal.selectedBills.length} bills selected (Total Allocated: ₹{pendingBillsModal.selectedBills.reduce((s, b) => s + num(pendingBillsModal.allocations[b.rawBillNumber]), 0).toLocaleString('en-IN')})
           </Typography>
@@ -1635,10 +1635,10 @@ export default function AccountDetails({ onBack }) {
       </Dialog>
 
       <Dialog open={pumpPaymentModal.open} onClose={() => setPumpPaymentModal(prev => ({ ...prev, open: false }))} maxWidth="lg" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0' }}>
           Select Pending Pump Bills for {pumpPaymentModal.month}
         </DialogTitle>
-        <DialogContent sx={{ p: 0, bgcolor: '#fff' }}>
+        <DialogContent sx={{ p: 0, bgcolor: 'background.paper' }}>
           {pumpPaymentModal.loading ? (
             <Box p={4} display="flex" justifyContent="center"><Typography>Loading pending bills...</Typography></Box>
           ) : pumpPaymentModal.bills.length === 0 ? (
@@ -1648,16 +1648,16 @@ export default function AccountDetails({ onBack }) {
               <Table stickyHeader size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell padding="checkbox" sx={{ bgcolor: '#f8fafc' }}></TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>BILL NO</TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>PERIOD/DATE</TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>PUMP NAME</TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>LITRE</TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>BILL AMT</TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>CD</TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>PAYABLE AMT</TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>DUE AMT</TableCell>
-                    <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 700 }}>STATUS</TableCell>
+                    <TableCell padding="checkbox" sx={{ bgcolor: 'background.default' }}></TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>BILL NO</TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>PERIOD/DATE</TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>PUMP NAME</TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>LITRE</TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>BILL AMT</TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>CD</TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>PAYABLE AMT</TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>DUE AMT</TableCell>
+                    <TableCell sx={{ bgcolor: 'background.default', fontWeight: 700 }}>STATUS</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1687,7 +1687,7 @@ export default function AccountDetails({ onBack }) {
             </TableContainer>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+        <DialogActions sx={{ p: 2, bgcolor: 'background.default', borderTop: '1px solid #e2e8f0' }}>
           <Typography sx={{ mr: 'auto', fontWeight: 600 }}>
             {pumpPaymentModal.selectedBills.length} bill(s) selected
           </Typography>

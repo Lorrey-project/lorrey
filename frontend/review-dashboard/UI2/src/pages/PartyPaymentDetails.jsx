@@ -454,14 +454,14 @@ export default function PartyPaymentDetails({ onBack }) {
   // delete not applicable here
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f4f7f9', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
 
       {/* ── Header ── */}
-      <Box sx={{ p: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 2, zIndex: 10 }}>
+      <Box sx={{ p: 2, bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 2, zIndex: 10 }}>
         {/* Top Row: Title and Global Actions */}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <IconButton onClick={onBack} size="small" sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
             </IconButton>
             <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
@@ -480,7 +480,7 @@ export default function PartyPaymentDetails({ onBack }) {
       </Box>
 
       {/* ── Toolbar ── */}
-      <Box sx={{ px: 2, py: 1.5, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', zIndex: 9 }}>
+      <Box sx={{ px: 2, py: 1.5, bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', zIndex: 9 }}>
         <SearchableSelect sx={{ minWidth: 140 }} value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}>
           {MONTH_NAMES.map((m, i) => <MenuItem key={i} value={i + 1}>{m}</MenuItem>)}
         </SearchableSelect>
@@ -491,7 +491,7 @@ export default function PartyPaymentDetails({ onBack }) {
         <Chip
           label={`${computedRows.length} vehicles`}
           size="small"
-          sx={{ bgcolor: '#f1f5f9', fontWeight: 700, color: '#475569' }}
+          sx={{ bgcolor: 'background.default', fontWeight: 700, color: '#475569' }}
         />
         {dirtyCount > 0 && (
           <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ fontWeight: 700, bgcolor: '#fef08a', color: '#854d0e' }} />
@@ -499,7 +499,7 @@ export default function PartyPaymentDetails({ onBack }) {
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
           <Tooltip title="Reload from Cement Register & database">
-            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
             </IconButton>
           </Tooltip>
@@ -691,7 +691,7 @@ export default function PartyPaymentDetails({ onBack }) {
                                     whiteSpace: 'pre-wrap'
                                   } : {}),
                                   '&:focus': {
-                                    bgcolor: '#fff',
+                                    bgcolor: 'background.paper',
                                     boxShadow: 'inset 0 0 0 1px #3b82f6'
                                   },
                                   // remove ugly calendar picker default styles when empty

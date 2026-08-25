@@ -677,7 +677,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
 
       {/* ── Toolbar ── */}
       <Box sx={{
-        px: 2, py: 1, bgcolor: '#fff', borderBottom: '2px solid #0891b2',
+        px: 2, py: 1, bgcolor: 'background.paper', borderBottom: '2px solid #0891b2',
         boxShadow: '0 2px 8px rgba(8,145,178,0.1)', flexShrink: 0
       }}>
 
@@ -789,7 +789,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
 
       {/* ── Pump Admin Tabs ── */}
       {isPumpAdmin && (
-        <Box sx={{ px: 2, py: 1.5, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: 2 }}>
+        <Box sx={{ px: 2, py: 1.5, bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: 2 }}>
           <Button
             onClick={() => setPumpTab('all')}
             variant={pumpTab === 'all' ? 'contained' : 'outlined'}
@@ -1342,7 +1342,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
           </Box>
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">
-              <TableHead sx={{ bgcolor: '#f1f5f9' }}>
+              <TableHead sx={{ bgcolor: 'background.default' }}>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>SL No</TableCell>
                   <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Pump Name</TableCell>
@@ -1375,7 +1375,7 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
             </Table>
           </TableContainer>
         </DialogContent>
-        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc' }}>
+        <DialogActions sx={{ p: 2, bgcolor: 'background.default' }}>
           <Button
             onClick={() => setBatchDialogOpen(false)}
             disabled={batchBillingSaving}

@@ -21,7 +21,7 @@ const highlightSx = {
 
 // Frozen transporter field style
 const frozenSx = {
-  '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' },
+  '& .MuiOutlinedInput-root': { bgcolor: 'background.default' },
   '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' },
 };
 
@@ -170,7 +170,7 @@ export default function SupplyDetails({ data, errors, onChange }) {
           <TextField fullWidth label="Lorrey Receipt" name="lorrey_receipt_number" value={data?.lorrey_receipt_number || ''} onChange={handleChange} variant="outlined" />
 
           {/* ── Transporter (frozen) ── */}
-          <Box sx={{ p: 2, border: '1.5px dashed #94a3b8', borderRadius: 2, bgcolor: '#f8fafc' }}>
+          <Box sx={{ p: 2, border: '1.5px dashed #94a3b8', borderRadius: 2, bgcolor: 'background.default' }}>
             <Box display="flex" alignItems="center" gap={1} mb={2}>
               <LockIcon sx={{ fontSize: 14, color: '#94a3b8' }} />
               <Box component="span" sx={{ fontSize: 12, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>

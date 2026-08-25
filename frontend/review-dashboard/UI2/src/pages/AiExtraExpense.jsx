@@ -184,7 +184,7 @@ const VehicleDetailsModal = ({ open, vehicle: v, onClose, selectedMonth, current
         </Box>
       </DialogTitle>
       
-      <DialogContent sx={{ p: 4, bgcolor: '#f8fafc' }}>
+      <DialogContent sx={{ p: 4, bgcolor: 'background.default' }}>
         <Grid container spacing={4} mb={5} mt={0}>
           <Grid item xs={12} md={4}>
             <Card sx={{ borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
@@ -251,17 +251,17 @@ const VehicleDetailsModal = ({ open, vehicle: v, onClose, selectedMonth, current
         <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', maxHeight: 400, overflowY: 'auto' }}>
           <Table size="small" stickyHeader>
             <TableHead>
-              <TableRow sx={{ bgcolor: '#f1f5f9' }}>
-                <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f8fafc' }}>DATE</TableCell>
-                <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f8fafc' }}>INV</TableCell>
-                <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f8fafc' }}>DESTINATION</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f8fafc' }}>EXP FUEL</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f8fafc' }}>ACT FUEL</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 800, color: '#b45309', bgcolor: '#f8fafc' }}>EXC FUEL</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f8fafc' }}>EXP ADV</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f8fafc' }}>ACT ADV</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 800, color: '#b91c1c', bgcolor: '#f8fafc' }}>EXC ADV</TableCell>
-                {currentTab !== 3 && <TableCell align="center" sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f8fafc' }}>TRIP STATUS</TableCell>}
+              <TableRow sx={{ bgcolor: 'background.default' }}>
+                <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>DATE</TableCell>
+                <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>INV</TableCell>
+                <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>DESTINATION</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>EXP FUEL</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>ACT FUEL</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 800, color: '#b45309', bgcolor: 'background.default' }}>EXC FUEL</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>EXP ADV</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>ACT ADV</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 800, color: '#b91c1c', bgcolor: 'background.default' }}>EXC ADV</TableCell>
+                {currentTab !== 3 && <TableCell align="center" sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>TRIP STATUS</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -292,7 +292,7 @@ const VehicleDetailsModal = ({ open, vehicle: v, onClose, selectedMonth, current
         </TableContainer>
 
       </DialogContent>
-      <DialogActions sx={{ p: 3, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+      <DialogActions sx={{ p: 3, bgcolor: 'background.default', borderTop: '1px solid #e2e8f0' }}>
         <Button onClick={onClose} variant="contained" sx={{ bgcolor: '#0f172a', borderRadius: '8px', px: 4, fontWeight: 700, '&:hover': { bgcolor: '#334155' } }}>
           CLOSE WINDOW
         </Button>
@@ -509,10 +509,10 @@ const AiExtraExpense = ({ onBack }) => {
     <Box sx={{ minHeight: '100vh', bgcolor: '#f4f6f8', pb: 6, fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif' }}>
       
       {/* ── HERO HEADER (AI Command Center) ── */}
-      <Box sx={{ bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', pt: { xs: 4, md: 5 }, pb: { xs: 4, md: 5 }, px: { xs: 2, md: 6 }, position: 'relative' }}>
+      <Box sx={{ bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', pt: { xs: 4, md: 5 }, pb: { xs: 4, md: 5 }, px: { xs: 2, md: 6 }, position: 'relative' }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={3}>
           <Box display="flex" alignItems="center">
-            <IconButton onClick={onBack} sx={{ mr: 3, border: '1px solid #e2e8f0', color: '#475569', '&:hover': { bgcolor: '#f8fafc' } }}>
+            <IconButton onClick={onBack} sx={{ mr: 3, border: '1px solid #e2e8f0', color: '#475569', '&:hover': { bgcolor: 'background.default' } }}>
               <ArrowBackIcon />
             </IconButton>
             <Box>
@@ -658,7 +658,7 @@ const AiExtraExpense = ({ onBack }) => {
           <Typography variant="subtitle1" fontWeight={700} color="#0f172a">Vehicle List</Typography>
           <TextField 
             size="small" placeholder="Search vehicle..." variant="outlined" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-            sx={{ width: { xs: '100%', sm: 300 }, '& .MuiOutlinedInput-root': { borderRadius: '8px', bgcolor: '#fff', '& fieldset': { borderColor: '#e2e8f0' } } }}
+            sx={{ width: { xs: '100%', sm: 300 }, '& .MuiOutlinedInput-root': { borderRadius: '8px', bgcolor: 'background.paper', '& fieldset': { borderColor: '#e2e8f0' } } }}
           />
         </Box>
 
@@ -673,7 +673,7 @@ const AiExtraExpense = ({ onBack }) => {
               <TableContainer>
                 <Table>
                   <TableHead>
-                    <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                    <TableRow sx={{ bgcolor: 'background.default' }}>
                       <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2, pl: 4 }}>VEHICLE NUMBER</TableCell>
                       <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2 }}>TOTAL TRIPS</TableCell>
                       
@@ -722,10 +722,10 @@ const AiExtraExpense = ({ onBack }) => {
                           hover 
                           onClick={() => handleVehicleClick(row)}
                           sx={{ 
-                            bgcolor: '#ffffff', 
+                            bgcolor: 'background.paper', 
                             cursor: 'pointer',
                             transition: 'all 0.2s',
-                            '&:hover': { bgcolor: '#f8fafc' }
+                            '&:hover': { bgcolor: 'background.default' }
                           }}
                         >
                           <TableCell sx={{ pl: 4, borderBottom: '1px solid #f1f5f9' }}>

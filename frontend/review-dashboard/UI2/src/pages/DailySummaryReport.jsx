@@ -384,13 +384,13 @@ function DailySummaryTab({
       {/* --- Sticky Header --- */}
       <Box sx={{
         position: 'sticky', top: 0, zIndex: 10,
-        bgcolor: '#ffffff', color: '#0f172a',
+        bgcolor: 'background.paper', color: '#0f172a',
         px: { xs: 2, md: 4 }, py: 2,
         boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1)',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center'
       }}>
         <Box display="flex" alignItems="center" gap={1.5}>
-          <IconButton onClick={onBack} sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+          <IconButton onClick={onBack} sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
             <ArrowBackIcon />
           </IconButton>
           <Box>
@@ -434,7 +434,7 @@ function DailySummaryTab({
             <Select
               value={financialYear}
               onChange={(e) => setFinancialYear(e.target.value)}
-              sx={{ bgcolor: '#f8fafc', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: 120 }}
+              sx={{ bgcolor: 'background.default', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: 120 }}
             >
               {fyOptions.map(fy => <MenuItem key={fy} value={fy} sx={{ fontWeight: 600 }}>{fy}</MenuItem>)}
             </Select>
@@ -444,7 +444,7 @@ function DailySummaryTab({
             <Select
               value={month}
               onChange={(e) => setMonth(e.target.value)}
-              sx={{ bgcolor: '#f8fafc', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: 120 }}
+              sx={{ bgcolor: 'background.default', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: 120 }}
             >
               {monthOptions.map(m => <MenuItem key={m} value={m} sx={{ fontWeight: 600 }}>{m}</MenuItem>)}
             </Select>
@@ -455,7 +455,7 @@ function DailySummaryTab({
             variant="outlined"
             endIcon={<CalendarTodayIcon />}
             sx={{
-              bgcolor: '#f8fafc', 
+              bgcolor: 'background.default', 
               borderRadius: '8px', 
               borderColor: '#e2e8f0', 
               color: '#0f172a',
@@ -463,7 +463,7 @@ function DailySummaryTab({
               minWidth: 130,
               textTransform: 'none',
               px: 2,
-              '&:hover': { bgcolor: '#f1f5f9', borderColor: '#cbd5e1' }
+              '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' }
             }}
           >
             {date === 'ALL' ? 'ALL' : (dateOptions.find(d => d.value === date)?.display?.split('-')[0] + ' ' + month.substring(0,3))}
@@ -478,7 +478,7 @@ function DailySummaryTab({
             PaperProps={{
               sx: {
                 mt: 1, p: 2, borderRadius: '16px', boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
-                border: '1px solid #e2e8f0', width: '320px', bgcolor: '#fff'
+                border: '1px solid #e2e8f0', width: '320px', bgcolor: 'background.paper'
               }
             }}
           >
@@ -535,7 +535,7 @@ function DailySummaryTab({
             </Grid>
           </Popover>
           <Tooltip title="Refresh Data">
-            <IconButton onClick={() => fetchData(date)} sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <IconButton onClick={() => fetchData(date)} sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -792,8 +792,8 @@ function DailySummaryTab({
           {/* ==========================================
               SECTION 6: LIVE TRENDS / ANALYTICS
              ========================================== */}
-          <Card sx={{ width: '100%', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', mb: 5, bgcolor: '#fff', overflow: 'hidden' }}>
-            <Box sx={{ bgcolor: '#f8fafc', px: { xs: 2, md: 4 }, py: 2.5, borderBottom: '1px solid #e2e8f0' }}>
+          <Card sx={{ width: '100%', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', mb: 5, bgcolor: 'background.paper', overflow: 'hidden' }}>
+            <Box sx={{ bgcolor: 'background.default', px: { xs: 2, md: 4 }, py: 2.5, borderBottom: '1px solid #e2e8f0' }}>
               <Typography variant="subtitle2" fontWeight={800} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                 6. Live Trends / Analytics
               </Typography>
@@ -809,37 +809,37 @@ function DailySummaryTab({
                   </Typography>
                   <Grid container spacing={2}>
                     <Grid item xs={6} md={4} lg={2}>
-                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: 'background.default' }}>
                         <Typography variant="body2" color="text.secondary" fontWeight={700}>Total Lifting</Typography>
                         <Typography variant="h6" fontWeight={800} color="#0f172a">{metrics.cementMT} MT</Typography>
                       </Paper>
                     </Grid>
                     <Grid item xs={6} md={4} lg={2}>
-                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: 'background.default' }}>
                         <Typography variant="body2" color="text.secondary" fontWeight={700}>Total L/A Given</Typography>
                         <Typography variant="h6" fontWeight={800} color="#ef4444">₹{metrics.loadingAdvanceAmt.toLocaleString()}</Typography>
                       </Paper>
                     </Grid>
                     <Grid item xs={6} md={4} lg={2}>
-                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: 'background.default' }}>
                         <Typography variant="body2" color="text.secondary" fontWeight={700}>Cash Opening</Typography>
                         <Typography variant="h6" fontWeight={800} color="#0f172a">₹{metrics.cashOpeningBalance.toLocaleString()}</Typography>
                       </Paper>
                     </Grid>
                     <Grid item xs={6} md={4} lg={2}>
-                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: 'background.default' }}>
                         <Typography variant="body2" color="text.secondary" fontWeight={700}>Total Expense</Typography>
                         <Typography variant="h6" fontWeight={800} color="#f59e0b">₹{metrics.miscExpenses.toLocaleString()}</Typography>
                       </Paper>
                     </Grid>
                     <Grid item xs={6} md={4} lg={2}>
-                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: 'background.default' }}>
                         <Typography variant="body2" color="text.secondary" fontWeight={700}>Cash Closing</Typography>
                         <Typography variant="h6" fontWeight={800} color={metrics.closingAdvanceBalance >= 0 ? '#10b981' : '#ef4444'}>₹{metrics.closingAdvanceBalance.toLocaleString()}</Typography>
                       </Paper>
                     </Grid>
                     <Grid item xs={6} md={4} lg={2}>
-                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: '#f8fafc' }}>
+                      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: '8px', bgcolor: 'background.default' }}>
                         <Typography variant="body2" color="text.secondary" fontWeight={700}>Total Fuel Issued</Typography>
                         <Typography variant="h6" fontWeight={800} color="#3b82f6">{metrics.fuelLtr} LTR</Typography>
                       </Paper>
@@ -849,7 +849,7 @@ function DailySummaryTab({
 
                 {/* MONTHLY / YEARLY PERFORMANCE */}
                 <Grid item xs={12}>
-                  <Box sx={{ p: 4, borderRadius: '16px', border: '1px solid #e2e8f0', bgcolor: '#ffffff', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
+                  <Box sx={{ p: 4, borderRadius: '16px', border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
                     <Typography variant="h5" fontWeight={800} color="#0f172a" mb={1} align="center">
                       MONTHLY / YEARLY PERFORMANCE
                     </Typography>
@@ -921,7 +921,7 @@ function DailySummaryTab({
 
           {/* --- Detail Sections (Registers) --- */}
           <Paper sx={{ borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff' }}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
               <Tabs
                 value={tabValue}
                 onChange={(e, v) => setTabValue(v)}
@@ -948,7 +948,7 @@ function DailySummaryTab({
                 ) : (
                   <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
                     <Table size="small">
-                      <TableHead sx={{ bgcolor: '#f8fafc' }}>
+                      <TableHead sx={{ bgcolor: 'background.default' }}>
                         <TableRow>
                           <TableCell sx={{ fontWeight: 800, color: '#475569' }}>GCN NO</TableCell>
                           <TableCell sx={{ fontWeight: 800, color: '#475569' }}>BILL NO</TableCell>
@@ -987,7 +987,7 @@ function DailySummaryTab({
                 ) : (
                   <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
                     <Table size="small">
-                      <TableHead sx={{ bgcolor: '#f8fafc' }}>
+                      <TableHead sx={{ bgcolor: 'background.default' }}>
                         <TableRow>
                           <TableCell sx={{ fontWeight: 800, color: '#475569' }}>PUMP NAME</TableCell>
                           <TableCell sx={{ fontWeight: 800, color: '#475569' }}>VEHICLE NUMBER</TableCell>
@@ -1026,19 +1026,19 @@ function DailySummaryTab({
           sx: { borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', minHeight: '60vh' }
         }}
       >
-        <DialogTitle sx={{ p: 3, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <DialogTitle sx={{ p: 3, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box display="flex" alignItems="center" gap={1.5}>
             <span style={{ fontSize: '24px' }}>📋</span>
             <Typography variant="h6" fontWeight={800} color="#0f172a">
               Total Bill Breakdown
             </Typography>
           </Box>
-          <IconButton onClick={() => setBillBreakdownOpen(false)} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+          <IconButton onClick={() => setBillBreakdownOpen(false)} sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
             ✕
           </IconButton>
         </DialogTitle>
         <DialogContent sx={{ p: 0 }}>
-          <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', px: 3, pt: 2 }}>
+          <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, pt: 2 }}>
             <Tabs
               value={billTabValue}
               onChange={(e, v) => setBillTabValue(v)}
@@ -1076,13 +1076,13 @@ function DailySummaryTab({
               <Table stickyHeader size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}>Bill Number</TableCell>
-                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}>Invoice Number</TableCell>
-                    {billTabValue === 0 && <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}>Invoice Date</TableCell>}
-                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}>Vehicle Number</TableCell>
-                    {billTabValue === 0 && <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}>Party Name</TableCell>}
-                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}>Bill Amount</TableCell>
-                    <TableCell sx={{ fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}>Status</TableCell>
+                    <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Bill Number</TableCell>
+                    <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Invoice Number</TableCell>
+                    {billTabValue === 0 && <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Invoice Date</TableCell>}
+                    <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Vehicle Number</TableCell>
+                    {billTabValue === 0 && <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Party Name</TableCell>}
+                    <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Bill Amount</TableCell>
+                    <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569' }}>Status</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1126,8 +1126,8 @@ function DailySummaryTab({
       </Dialog>
 
       {/* --- Dynamic Alert Detail Dialog --- */}
-      <Dialog open={alertModalOpen} onClose={() => setAlertModalOpen(false)} maxWidth="lg" fullWidth PaperProps={{ sx: { borderRadius: '16px', bgcolor: '#f8fafc' } }}>
-        <DialogTitle sx={{ bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', px: 3, py: 2.5 }}>
+      <Dialog open={alertModalOpen} onClose={() => setAlertModalOpen(false)} maxWidth="lg" fullWidth PaperProps={{ sx: { borderRadius: '16px', bgcolor: 'background.default' } }}>
+        <DialogTitle sx={{ bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', px: 3, py: 2.5 }}>
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Typography variant="h6" fontWeight={800} color="#0f172a">
               {alertModalTitle}
@@ -1139,7 +1139,7 @@ function DailySummaryTab({
           <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)', border: '1px solid #e2e8f0' }}>
             <Table size="small">
               <TableHead>
-                <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+                <TableRow sx={{ bgcolor: 'background.default' }}>
                   <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2 }}>SL</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#475569' }}>VEHICLE</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#475569' }}>DATE</TableCell>
@@ -1253,17 +1253,17 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
   });
 
   return (
-    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', pb: 6 }}>
+    <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pb: 6 }}>
       {/* --- Sticky Header --- */}
       <Box sx={{
         position: 'sticky', top: 0, zIndex: 10,
-        bgcolor: '#ffffff', color: '#0f172a',
+        bgcolor: 'background.paper', color: '#0f172a',
         px: { xs: 2, md: 4 }, py: 2,
         boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1)',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center'
       }}>
         <Box display="flex" alignItems="center" gap={1.5}>
-          <IconButton onClick={onBack} sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+          <IconButton onClick={onBack} sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
             <ArrowBackIcon />
           </IconButton>
           <Box>
@@ -1306,7 +1306,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
 
         <Box sx={{ width: 170 }}>
           <Tooltip title="Refresh Data">
-            <IconButton onClick={fetchParties} sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <IconButton onClick={fetchParties} sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -1330,7 +1330,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
                 </InputAdornment>
               ),
             }}
-            sx={{ width: 350, bgcolor: '#fff', borderRadius: 2, '& fieldset': { borderColor: '#e2e8f0' } }}
+            sx={{ width: 350, bgcolor: 'background.paper', borderRadius: 2, '& fieldset': { borderColor: '#e2e8f0' } }}
           />
         </Box>
 
@@ -1393,7 +1393,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
                         </Box>
                       </Box>
                     </AccordionSummary>
-                    <AccordionDetails sx={{ p: 0, bgcolor: '#fff', borderTop: '1px solid #e2e8f0' }}>
+                    <AccordionDetails sx={{ p: 0, bgcolor: 'background.paper', borderTop: '1px solid #e2e8f0' }}>
                       <List disablePadding>
                         {vehicles.length === 0 ? (
                           <ListItem sx={{ py: 3, px: 3 }}>
@@ -1402,7 +1402,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
                         ) : (
                           vehicles.map((v, i) => (
                             <React.Fragment key={v}>
-                              <ListItem sx={{ py: 2, px: { xs: 2, md: 4 }, display: 'flex', justifyContent: 'space-between', '&:hover': { bgcolor: '#f8fafc' }, transition: 'background-color 0.2s' }}>
+                              <ListItem sx={{ py: 2, px: { xs: 2, md: 4 }, display: 'flex', justifyContent: 'space-between', '&:hover': { bgcolor: 'background.default' }, transition: 'background-color 0.2s' }}>
                                 <Box display="flex" alignItems="center" gap={2}>
                                   <LocalShippingIcon sx={{ color: '#94a3b8', fontSize: 24 }} />
                                   <Typography variant="body1" fontWeight={700} color="#1e293b" sx={{ letterSpacing: '0.5px' }}>
@@ -1415,7 +1415,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
                                   onClick={() => { setSelectedParty(party); setSelectedVehicle(v); }}
                                   sx={{
                                     borderRadius: '8px', fontWeight: 800, textTransform: 'none', py: 0.5, px: 2,
-                                    bgcolor: '#fff', color: '#0f172a', border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                                    bgcolor: 'background.paper', color: '#0f172a', border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                                     '&:hover': { bgcolor: '#0f172a', color: '#fff', borderColor: '#0f172a' }
                                   }}
                                 >
@@ -1432,7 +1432,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
                 );
               })}
               {filteredParties.length === 0 && (
-                <Card sx={{ p: 8, textAlign: 'center', borderRadius: '16px', border: '1px dashed #cbd5e1', boxShadow: 'none', bgcolor: '#fff' }}>
+                <Card sx={{ p: 8, textAlign: 'center', borderRadius: '16px', border: '1px dashed #cbd5e1', boxShadow: 'none', bgcolor: 'background.paper' }}>
                   <Typography variant="h6" color="text.secondary" fontWeight={700}>
                     No results found
                   </Typography>

@@ -381,7 +381,7 @@ export default function GSTPortalRegister({ onBack }) {
   });
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
 
       {/* Hidden file input */}
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,application/pdf" onChange={onFileSelected} />
@@ -390,10 +390,10 @@ export default function GSTPortalRegister({ onBack }) {
       <Box sx={{
         px: 2.5, py: 1.2,
         display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: '#fff', borderBottom: '1px solid #e2e8f0',
+        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0',
         boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flexShrink: 0
       }}>
-        <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+        <IconButton onClick={onBack} size="small" sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
           <ArrowBackIcon fontSize="small" />
         </IconButton>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -416,7 +416,7 @@ export default function GSTPortalRegister({ onBack }) {
               size="small"
               value={filterMonth}
               onChange={e => setFilterMonth(e.target.value)}
-              sx={{ fontSize: '12px', fontWeight: 700, bgcolor: '#fff', borderRadius: 2, height: 32 }}
+              sx={{ fontSize: '12px', fontWeight: 700, bgcolor: 'background.paper', borderRadius: 2, height: 32 }}
             >
               {MONTH_NAMES.map((m, i) => <MenuItem key={i + 1} value={i + 1}>{m}</MenuItem>)}
             </SearchableSelect>
@@ -424,7 +424,7 @@ export default function GSTPortalRegister({ onBack }) {
               size="small"
               value={filterYear}
               onChange={e => setFilterYear(e.target.value)}
-              sx={{ fontSize: '12px', fontWeight: 700, bgcolor: '#fff', borderRadius: 2, height: 32 }}
+              sx={{ fontSize: '12px', fontWeight: 700, bgcolor: 'background.paper', borderRadius: 2, height: 32 }}
             >
               {years.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
             </SearchableSelect>
@@ -478,7 +478,7 @@ export default function GSTPortalRegister({ onBack }) {
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>New Row</Button>
 
           <Tooltip title="Reload">
-            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: '#f1f5f9' }}>
+            <IconButton size="small" onClick={fetchData} sx={{ bgcolor: 'background.default' }}>
               <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -488,7 +488,7 @@ export default function GSTPortalRegister({ onBack }) {
       </Box>
 
       {/* ── Tabs Section ─────────────────────────────────────────────────── */}
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', px: 2 }}>
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 2 }}>
         <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} aria-label="gst portal tabs"
           sx={{
             '& .MuiTab-root': { fontWeight: 800, fontSize: '13px', textTransform: 'none', minWidth: 100 },
@@ -782,7 +782,7 @@ export default function GSTPortalRegister({ onBack }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }} onClick={() => setConfirmDel(false)}>
           <Box sx={{
-            bgcolor: '#fff', borderRadius: 3, p: 4, maxWidth: 420, width: '90%',
+            bgcolor: 'background.paper', borderRadius: 3, p: 4, maxWidth: 420, width: '90%',
             boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
           }} onClick={e => e.stopPropagation()}>
             <Typography variant="h6" fontWeight={800} color="error.main" mb={1}>
