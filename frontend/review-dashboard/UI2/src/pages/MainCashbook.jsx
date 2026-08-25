@@ -42,10 +42,13 @@ function fmt2(n) { return Math.round(num(n) * 100) / 100; }
 const normalizeDate = (dStr) => {
   if (!dStr) return '';
   const parts = String(dStr).trim().split(/[-\/]/);
-  if (parts.length === 3) {
-    return `${parseInt(parts[0], 10)}-${parseInt(parts[1], 10)}-${parts[2]}`;
+  if (parts.length >= 3) {
+    const d = String(parseInt(parts[0], 10)).padStart(2, '0');
+    const m = String(parseInt(parts[1], 10)).padStart(2, '0');
+    const y = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+    return `${d}-${m}-${y}`;
   }
-  return dStr;
+  return String(dStr).trim();
 };
 
 const COLUMNS = [
@@ -279,18 +282,9 @@ export default function MainCashbook({ onBack }) {
   useEffect(() => {
     const handler = ({ date, sExpense, oExpense, oDetails }) => {
       if (!date) return;
-      // Normalise date to DD-MM-YYYY for comparison
-      const normDate = (() => {
-        const p = String(date).trim().split(/[-\/]/);
-        if (p.length === 3) return `${p[0].padStart(2, '0')}-${p[1].padStart(2, '0')}-${p[2]}`;
-        return date;
-      })();
+      const normDate = normalizeDate(date);
       setEntries(prev => prev.map(row => {
-        const rDate = (() => {
-          const p = String(row.DATE || '').trim().split(/[-\/]/);
-          if (p.length === 3) return `${p[0].padStart(2, '0')}-${p[1].padStart(2, '0')}-${p[2]}`;
-          return row.DATE;
-        })();
+        const rDate = normalizeDate(row.DATE);
         if (rDate !== normDate) return row;
         return { ...row, S_EXPENSE: sExpense, O_EXPENSE: oExpense, REMARKS_EXP: oDetails || '' };
       }));
@@ -315,19 +309,79 @@ export default function MainCashbook({ onBack }) {
   // NOTE: S_OPENING on the first row is intentionally kept manual (not auto-filled)
   // P_OPENING and O_OPENING on first row still auto-carry from previous month if not typed.
   const computedRows = useMemo(() => {
+    // 1. Determine actual days in the selected month
+    const fyStart = parseInt(String(selYear).split('-')[0], 10);
+    const actualYear = selMonth >= 4 ? fyStart : fyStart + 1;
+    const daysInMonth = new Date(actualYear, selMonth, 0).getDate();
+
+    // 2. Group imported entries by normalized date arrays (supports multiple rows per date)
     const importMap = {};
     importedEntries.forEach(row => {
       if (row.DATE) {
-        importMap[normalizeDate(row.DATE)] = row;
+        const norm = normalizeDate(row.DATE);
+        if (!importMap[norm]) importMap[norm] = [];
+        importMap[norm].push(row);
       }
     });
 
-    const rawList = entries.map(row => {
-      const normDate = normalizeDate(row.DATE);
-      const importedRow = importMap[normDate] || {};
-      const localRow = localData[row._id] || {};
-      return { ...row, ...importedRow, ...localRow };
+    // 3. Group DB entries by normalized date arrays
+    const dbMap = {};
+    entries.forEach(row => {
+      const norm = normalizeDate(row.DATE);
+      if (!dbMap[norm]) dbMap[norm] = [];
+      dbMap[norm].push(row);
     });
+
+    let rawList = [];
+    
+    // 4. Generate rows exactly for days 1 to daysInMonth for this month
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dStr = `${String(d).padStart(2, '0')}-${String(selMonth).padStart(2, '0')}-${actualYear}`;
+      
+      const dbRows = dbMap[dStr] || [];
+      const impRows = importMap[dStr] || [];
+      
+      // Determine how many rows are needed for this day (at least 1)
+      const maxRows = Math.max(1, dbRows.length, impRows.length);
+      
+      for (let i = 0; i < maxRows; i++) {
+        // If there's no DB row, create a virtual one for display
+        const dbRow = dbRows[i] || (i === 0 ? { DATE: dStr, _id: `auto-${dStr}` } : null);
+        const impRow = impRows[i] || null;
+        const locRow = (dbRow && dbRow._id) ? (localData[dbRow._id] || {}) : {};
+        
+        let merged;
+        if (!dbRow && impRow) {
+          merged = { DATE: dStr, ...impRow }; // extra imported row
+        } else if (dbRow && impRow) {
+          merged = { ...dbRow, ...impRow, ...locRow }; // matching row
+        } else if (dbRow && !impRow) {
+          merged = { ...dbRow, ...locRow }; // just db row + edits
+        }
+        rawList.push(merged);
+      }
+    }
+
+    // 5. Strict Chronological Sort based on the actual date
+    rawList.sort((a, b) => {
+      const parseMs = (dStr) => {
+        if (!dStr) return 0;
+        const [d, m, y] = String(dStr).split('-');
+        return new Date(`${y}-${m}-${d}`).getTime();
+      };
+      
+      const timeA = parseMs(a.DATE);
+      const timeB = parseMs(b.DATE);
+      
+      if (timeA === timeB) {
+         // Preserve SL NO order if same date
+         const slA = num(a['SL NO'], Infinity);
+         const slB = num(b['SL NO'], Infinity);
+         return slA - slB;
+      }
+      return timeA - timeB;
+    });
+
     const result = [];
     for (let i = 0; i < rawList.length; i++) {
       const r = { ...rawList[i] };
@@ -348,7 +402,7 @@ export default function MainCashbook({ onBack }) {
       result.push(applyCalcs(r));
     }
     return result;
-  }, [entries, localData, importedEntries, prevClosing]);
+  }, [entries, localData, importedEntries, prevClosing, selMonth, selYear]);
 
   // Monthly column totals for summary row
   const monthSums = useMemo(() => {
@@ -1075,24 +1129,24 @@ export default function MainCashbook({ onBack }) {
             </SearchableSelect>
           </Box>
           <Box sx={{ width: '100%' }}>
-            <SearchableSelect
+            <Select
               multiple
-              value={importMonths}
+              value={importMonths || []}
               onChange={e => {
                 setImportMonths(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value);
                 setImportPreview(null); // Reset preview
                 setImportFile(null);
               }}
               input={<OutlinedInput label="Select Months" />}
-              renderValue={(selected) => selected.map(s => MONTH_NAMES[s - 1]).join(', ')}
+              renderValue={(selected) => (selected || []).map(s => MONTH_NAMES[s - 1]).join(', ')}
             >
               {MONTH_NAMES.map((name, i) => (
                 <MenuItem key={i + 1} value={i + 1}>
-                  <Checkbox checked={importMonths.indexOf(i + 1) > -1} />
+                  <Checkbox checked={(importMonths || []).indexOf(i + 1) > -1} />
                   <ListItemText primary={name} />
                 </MenuItem>
               ))}
-            </SearchableSelect>
+            </Select>
           </Box>
 
           <Button variant="outlined" component="label" sx={{ py: 3, borderStyle: 'dashed' }}>

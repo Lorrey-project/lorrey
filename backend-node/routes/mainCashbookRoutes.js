@@ -69,13 +69,13 @@ router.get("/", auth, async (req, res) => {
         const existingEntries = await col.find(filter).project({ DATE: 1 }).toArray();
         const existingDates = new Set(existingEntries.map(e => {
           const parts = (e.DATE || '').split('-');
-          if (parts.length === 3) return `${parseInt(parts[0])}-${parseInt(parts[1])}-${parseInt(parts[2])}`;
+          if (parts.length === 3) return `${String(parseInt(parts[0])).padStart(2, '0')}-${String(parseInt(parts[1])).padStart(2, '0')}-${parseInt(parts[2])}`;
           return String(e.DATE).trim();
         }));
         
         const newDocs = [];
         for (let day = 1; day <= targetDays; day++) {
-          const dateStr = `${day}-${filter.month}-${filter.year}`;
+          const dateStr = `${String(day).padStart(2, '0')}-${String(filter.month).padStart(2, '0')}-${filter.year}`;
           if (!existingDates.has(dateStr)) {
             newDocs.push({
               DATE: dateStr,
