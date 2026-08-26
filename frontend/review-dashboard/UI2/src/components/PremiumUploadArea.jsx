@@ -114,7 +114,7 @@ export default function PremiumUploadArea({
           <IconButton 
             onClick={onBack}
             sx={{ 
-              bgcolor: '#f1f5f9', 
+              bgcolor: 'background.default', 
               color: '#475569',
               '&:hover': { bgcolor: '#e2e8f0' }
             }}
@@ -177,7 +177,7 @@ export default function PremiumUploadArea({
                 borderRadius: '10px',
                 px: 4,
                 py: 1.2,
-                bgcolor: '#ffffff',
+                bgcolor: 'background.paper',
                 color: '#3b82f6',
                 border: '1px solid #bfdbfe',
                 fontWeight: 600,
@@ -202,7 +202,7 @@ export default function PremiumUploadArea({
                 fontWeight: 600,
                 borderColor: '#e2e8f0',
                 color: '#64748b',
-                '&:hover': { bgcolor: '#f1f5f9', borderColor: '#cbd5e1' }
+                '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' }
               }}
             >
               Scan
@@ -227,7 +227,7 @@ export default function PremiumUploadArea({
           {currentFile && (
             <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
               <Box display="flex" alignItems="center" gap={2}>
-                <Box sx={{ p: 2, bgcolor: '#f1f5f9', borderRadius: 3, display: 'flex' }}>
+                <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 3, display: 'flex' }}>
                   <InsertDriveFileOutlinedIcon sx={{ color: '#3b82f6', fontSize: 32 }} />
                 </Box>
                 <Box>
@@ -242,8 +242,8 @@ export default function PremiumUploadArea({
               
               {!isProcessing && (
                 <Box display="flex" gap={1}>
-                  <Button size="small" variant="outlined" startIcon={<VisibilityOutlinedIcon />} onClick={() => window.open(currentFile.url, '_blank')} sx={{ borderRadius: 2, color: '#64748b', borderColor: '#e2e8f0', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>View</Button>
-                  <Button size="small" variant="outlined" startIcon={<RefreshIcon />} onClick={onReplace} sx={{ borderRadius: 2, color: '#64748b', borderColor: '#e2e8f0', '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' } }}>Replace</Button>
+                  <Button size="small" variant="outlined" startIcon={<VisibilityOutlinedIcon />} onClick={() => window.open(currentFile.url, '_blank')} sx={{ borderRadius: 2, color: '#64748b', borderColor: '#e2e8f0', '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' } }}>View</Button>
+                  <Button size="small" variant="outlined" startIcon={<RefreshIcon />} onClick={onReplace} sx={{ borderRadius: 2, color: '#64748b', borderColor: '#e2e8f0', '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' } }}>Replace</Button>
                   <Button size="small" variant="outlined" color="error" startIcon={<DeleteOutlineIcon />} onClick={onRemove} sx={{ borderRadius: 2, '&:hover': { bgcolor: '#fef2f2' } }}>Remove</Button>
                 </Box>
               )}
@@ -267,13 +267,13 @@ export default function PremiumUploadArea({
                 sx={{ 
                   height: 8, 
                   borderRadius: 4, 
-                  bgcolor: '#f1f5f9',
+                  bgcolor: 'background.default',
                   '& .MuiLinearProgress-bar': { borderRadius: 4, backgroundImage: 'linear-gradient(90deg, #3b82f6, #60a5fa)' }
                 }} 
               />
 
               <Box sx={{ mt: 4, display: 'flex', justifyContent: 'space-between', position: 'relative' }}>
-                <Box sx={{ position: 'absolute', top: 12, left: '5%', right: '5%', height: 2, bgcolor: '#f1f5f9', zIndex: 0 }} />
+                <Box sx={{ position: 'absolute', top: 12, left: '5%', right: '5%', height: 2, bgcolor: 'background.default', zIndex: 0 }} />
                 <Box sx={{ position: 'absolute', top: 12, left: '5%', right: '5%', height: 2, bgcolor: '#3b82f6', zIndex: 0, width: `${(processingStep / (processingSteps.length - 1)) * 100}%`, transition: 'width 1s ease' }} />
                 
                 {processingSteps.map((step, idx) => {
@@ -316,7 +316,7 @@ export default function PremiumUploadArea({
                   {status.message}
                 </Typography>
                 {(status.type === 'error') && (
-                  <Button size="small" variant="outlined" color="error" onClick={() => document.getElementById('file-upload-input')?.click()} sx={{ bgcolor: '#fff', '&:hover': { bgcolor: '#fef2f2' } }}>
+                  <Button size="small" variant="outlined" color="error" onClick={() => document.getElementById('file-upload-input')?.click()} sx={{ bgcolor: 'background.paper', '&:hover': { bgcolor: '#fef2f2' } }}>
                     Retry
                   </Button>
                 )}

@@ -145,7 +145,7 @@ export default function ItemsTable({ items = [], amountSummary = {}, onChange, e
                                         variant="outlined"
                                         InputProps={{ readOnly: true }}
                                         sx={{
-                                            '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' },
+                                            '& .MuiOutlinedInput-root': { bgcolor: 'background.default' },
                                             '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed', fontStyle: 'italic', fontWeight: 700 }
                                         }}
                                     />

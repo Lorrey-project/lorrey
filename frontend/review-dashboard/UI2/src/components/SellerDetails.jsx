@@ -10,7 +10,7 @@ export default function SellerDetails({ data, errors, onChange }) {
   };
 
   return (
-    <Card sx={{ mb: 3, border: '1.5px solid #94a3b8', bgcolor: '#f8fafc' }}>
+    <Card sx={{ mb: 3, border: '1.5px solid #94a3b8', bgcolor: 'background.default' }}>
       <CardHeader
         title={
           <Box display="flex" alignItems="center" gap={1}>
@@ -19,7 +19,7 @@ export default function SellerDetails({ data, errors, onChange }) {
             <Chip label="Seller Name Editable · Others Fixed" size="small" sx={{ fontSize: 10, bgcolor: '#e2e8f0', color: '#475569', fontWeight: 700 }} />
           </Box>
         }
-        sx={{ bgcolor: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}
+        sx={{ bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0' }}
       />
       <CardContent>
         <Box display="flex" flexDirection="column" gap={3}>
@@ -29,7 +29,7 @@ export default function SellerDetails({ data, errors, onChange }) {
             value={data?.seller_name === 'NVL' || data?.seller_name === 'NVCL' ? data.seller_name : ''}
             onChange={handleChange}
             label="Seller Name"
-            sx={{ bgcolor: '#fff' }}
+            sx={{ bgcolor: 'background.paper' }}
             size="medium"
           >
             <MenuItem value="" disabled><em>— Select Seller Name —</em></MenuItem>
@@ -37,12 +37,12 @@ export default function SellerDetails({ data, errors, onChange }) {
             <MenuItem value="NVCL">NUVOCO VISTAS CORP. LTD</MenuItem>
           </SearchableSelect>
 
-          <TextField fullWidth label="Seller Address" name="seller_address" value="PANAGARH INDUSTRIAL PARK, KOTAGRAM, BURDWAN" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
-          <TextField fullWidth label="State" name="seller_state" value="WEST BENGAL" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
-          <TextField fullWidth label="State Code" name="seller_state_code" value="19" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
-          <TextField fullWidth label="Pincode" name="seller_pincode" value="713148" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
-          <TextField fullWidth label="GSTIN" name="seller_gstin" value="19AAACL4159L1Z5" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
-          <TextField fullWidth label="PAN" name="seller_pan" value="AAACL4159L" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f1f5f9' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
+          <TextField fullWidth label="Seller Address" name="seller_address" value="PANAGARH INDUSTRIAL PARK, KOTAGRAM, BURDWAN" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.default' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
+          <TextField fullWidth label="State" name="seller_state" value="WEST BENGAL" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.default' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
+          <TextField fullWidth label="State Code" name="seller_state_code" value="19" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.default' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
+          <TextField fullWidth label="Pincode" name="seller_pincode" value="713148" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.default' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
+          <TextField fullWidth label="GSTIN" name="seller_gstin" value="19AAACL4159L1Z5" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.default' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
+          <TextField fullWidth label="PAN" name="seller_pan" value="AAACL4159L" variant="outlined" InputProps={{ readOnly: true }} sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.default' }, '& .MuiInputBase-input': { color: '#475569', cursor: 'not-allowed' } }} />
         </Box>
       </CardContent>
     </Card>

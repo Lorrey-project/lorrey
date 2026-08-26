@@ -296,9 +296,9 @@ export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
   };
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: '#f8fafc', flex: 1, height: '100%', overflowY: 'auto', fontFamily: 'Inter, sans-serif' }}>
+    <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: 'background.default', flex: 1, height: '100%', overflowY: 'auto', fontFamily: 'Inter, sans-serif' }}>
 
-      <Box sx={{ maxWidth: 1280, margin: '0 auto', bgcolor: '#fff', p: 4, border: '1px solid #e2e8f0' }}>
+      <Box sx={{ maxWidth: 1280, margin: '0 auto', bgcolor: 'background.paper', p: 4, border: '1px solid #e2e8f0' }}>
 
         {/* ─── Top Header & Save Bar ────────────────────────────────────────────── */}
         <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={4}>
@@ -308,7 +308,7 @@ export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
             <Typography variant="subtitle1" fontWeight={700} mt={1} color="#1e293b">Details of outward supplies of goods or services</Typography>
           </Box>
           <Box display="flex" gap={2} alignItems="center">
-            <Paper elevation={0} sx={{ p: 1.5, px: 3, display: 'flex', gap: 3, border: '1px solid #cbd5e1', bgcolor: '#f1f5f9' }}>
+            <Paper elevation={0} sx={{ p: 1.5, px: 3, display: 'flex', gap: 3, border: '1px solid #cbd5e1', bgcolor: 'background.default' }}>
               <Box>
                 <Typography fontSize="11px" fontWeight={700} color="#64748b" textTransform="uppercase">Financial Year</Typography>
                 <Typography fontSize="14px" fontWeight={800} color="#0f172a">{fyStr}</Typography>
@@ -342,7 +342,7 @@ export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
             { label: 'Total CESS', value: summary.cess, isCurrency: true },
           ].map((item, idx) => (
             <Grid item xs={12} sm={4} md={2} key={idx}>
-              <Box sx={{ border: '1px solid #cbd5e1', p: 2, bgcolor: '#f8fafc' }}>
+              <Box sx={{ border: '1px solid #cbd5e1', p: 2, bgcolor: 'background.default' }}>
                 <Typography fontSize="11px" fontWeight={700} color="#64748b" textTransform="uppercase">{item.label}</Typography>
                 <Typography fontSize="16px" fontWeight={800} color="#0f172a" mt={0.5}>
                   {item.isCurrency ? '₹ ' : ''}{formatMoney(item.value)}

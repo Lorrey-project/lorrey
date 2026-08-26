@@ -306,7 +306,7 @@ const MobileDashboard = ({
     return (
         <Box sx={{
             minHeight: '100vh',
-            bgcolor: '#f8fafc', // Light slate background
+            bgcolor: 'background.default', // Light slate background
             color: '#1e293b',
             pb: 10,
             fontFamily: '"Outfit", sans-serif'
@@ -333,7 +333,7 @@ const MobileDashboard = ({
             {isPump && (
                 <Box sx={{ px: 2, mt: 1 }}>
                     <Paper elevation={0} sx={{
-                        p: 1.5, borderRadius: 3, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
+                        p: 1.5, borderRadius: 3, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                     }}>
                         <Box>
@@ -396,7 +396,7 @@ const MobileDashboard = ({
                         width: '100%', justifyContent: 'space-between'
                     }}>
                         <Card onClick={onUploadNew} sx={{
-                            flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
+                            flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
                             display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
                             boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
                             '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
@@ -409,7 +409,7 @@ const MobileDashboard = ({
 
                         {isOffice && (
                             <Card onClick={onOpenFuelRateSettings} sx={{
-                                flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
+                                flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
                                 display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
                                 boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
                                 '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
@@ -424,7 +424,7 @@ const MobileDashboard = ({
                         {/* Contacts Card */}
                         {isOffice && (
                             <Card onClick={() => setTruckManagerOpen(true)} sx={{
-                                flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
+                                flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
                                 display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
                                 boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
                                 '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
@@ -439,7 +439,7 @@ const MobileDashboard = ({
                         {/* Vouchers Card */}
                         {(isOffice || isSite) && onOpenVouchers && (
                             <Card onClick={() => setVoucherDialogOpen(true)} sx={{
-                                flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
+                                flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
                                 display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
                                 boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
                                 '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
@@ -452,7 +452,7 @@ const MobileDashboard = ({
                         )}
 
                         <Card onClick={fetchInvoices} sx={{
-                            flex: 1, p: 1, borderRadius: 4, bgcolor: '#fff', border: '1px solid rgba(0,0,0,0.05)',
+                            flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
                             display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
                             boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
                             '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
@@ -590,7 +590,7 @@ const MobileDashboard = ({
 
                     {/* Filters */}
                     <Box display="flex" gap={1.5} mb={2} mt={1}>
-                        <FormControl size="small" sx={{ flex: 1, bgcolor: '#fff', borderRadius: 2 }}>
+                        <FormControl size="small" sx={{ flex: 1, bgcolor: 'background.paper', borderRadius: 2 }}>
                             <InputLabel sx={{ fontSize: 13, fontWeight: 600 }}>Month</InputLabel>
                             <SearchableSelect
                                 value={filterMonth}
@@ -605,7 +605,7 @@ const MobileDashboard = ({
                             </SearchableSelect>
                         </FormControl>
 
-                        <FormControl size="small" sx={{ flex: 1, bgcolor: '#fff', borderRadius: 2 }}>
+                        <FormControl size="small" sx={{ flex: 1, bgcolor: 'background.paper', borderRadius: 2 }}>
                             <InputLabel sx={{ fontSize: 13, fontWeight: 600 }}>Year</InputLabel>
                             <SearchableSelect
                                 value={filterYear}
@@ -625,7 +625,7 @@ const MobileDashboard = ({
                     {filteredInvoices.length > 0 && (
                         <Box sx={{
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                            mb: 2, p: 0.5, borderRadius: 3, bgcolor: '#fff',
+                            mb: 2, p: 0.5, borderRadius: 3, bgcolor: 'background.paper',
                             border: '1px solid rgba(0,0,0,0.05)'
                         }}>
                             <Button
@@ -657,7 +657,7 @@ const MobileDashboard = ({
                             </Paper>
                         ) : displayedInvoices.map((inv) => (
                             <Card key={inv._id} elevation={0} sx={{
-                                borderRadius: 4, bgcolor: '#fff',
+                                borderRadius: 4, bgcolor: 'background.paper',
                                 border: '1px solid rgba(0,0,0,0.06)',
                                 p: 0, overflow: 'hidden',
                                 boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
@@ -708,7 +708,7 @@ const MobileDashboard = ({
                                             size="small" variant="contained" disableElevation
                                             onClick={() => window.open(inv.softcopy_url, '_blank')}
                                             disabled={!inv.softcopy_url}
-                                            sx={{ flex: '1 1 auto', bgcolor: '#f1f5f9', color: '#334155', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#e2e8f0' } }}
+                                            sx={{ flex: '1 1 auto', bgcolor: 'background.default', color: '#334155', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#e2e8f0' } }}
                                         >
                                             INV
                                         </Button>
@@ -744,7 +744,7 @@ const MobileDashboard = ({
 
             {/* ── Navigation Drawer ───────────────────────────────────── */}
             <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)} sx={{
-                '& .MuiDrawer-paper': { bgcolor: '#fff', color: '#1e293b', width: 280, borderRight: 'none', boxShadow: '20px 0 60px rgba(0,0,0,0.05)' }
+                '& .MuiDrawer-paper': { bgcolor: 'background.paper', color: '#1e293b', width: 280, borderRight: 'none', boxShadow: '20px 0 60px rgba(0,0,0,0.05)' }
             }}>
                 <Box p={3}>
                     <Typography variant="h5" fontWeight="900" sx={{ mb: 4, letterSpacing: '-1px' }}>
@@ -801,7 +801,7 @@ const MobileDashboard = ({
             </Drawer>
 
             {/* ── Bottom Nav ─────────────────────────────────────────── */}
-            <Paper sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, bgcolor: '#fff', borderTop: '1px solid rgba(0,0,0,0.05)', zIndex: 1000 }} elevation={10}>
+            <Paper sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, bgcolor: 'background.paper', borderTop: '1px solid rgba(0,0,0,0.05)', zIndex: 1000 }} elevation={10}>
                 <BottomNavigation
                     showLabels
                     value={navValue}
@@ -827,7 +827,7 @@ const MobileDashboard = ({
                         variant="contained" 
                         color="inherit" 
                         onClick={handleBulkDelete}
-                        sx={{ color: '#ef4444', bgcolor: '#fff', fontWeight: 900, borderRadius: 3, '&:hover': { bgcolor: '#f8fafc' } }}
+                        sx={{ color: '#ef4444', bgcolor: 'background.paper', fontWeight: 900, borderRadius: 3, '&:hover': { bgcolor: 'background.default' } }}
                     >
                         Delete
                     </Button>
@@ -861,7 +861,7 @@ const MobileDashboard = ({
                         </Alert>
                     )}
 
-                    <Box sx={{ bgcolor: '#f8fafc', p: 2, borderRadius: 3, border: '1px dashed #e2e8f0' }}>
+                    <Box sx={{ bgcolor: 'background.default', p: 2, borderRadius: 3, border: '1px dashed #e2e8f0' }}>
                         <Typography variant="caption" fontWeight={800} color="primary" sx={{ display: 'block', mb: 1 }}>DEVICE TRUSTED</Typography>
                         <Typography variant="body2" fontWeight={600}>{navigator.userAgent.split(' ')[0]} Mobile Interface</Typography>
                     </Box>

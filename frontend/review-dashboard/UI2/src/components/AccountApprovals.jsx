@@ -148,7 +148,7 @@ const AccountApprovals = ({ onCountChange }) => {
             {!loading && requests.length === 0 && (
                 <Box sx={{
                     textAlign: 'center', py: 6, px: 3,
-                    border: '1.5px dashed #e2e8f0', borderRadius: '16px', bgcolor: '#f8fafc'
+                    border: '1.5px dashed #e2e8f0', borderRadius: '16px', bgcolor: 'background.default'
                 }}>
                     <CheckCircleIcon sx={{ fontSize: 40, color: '#86efac', mb: 1 }} />
                     <Typography fontWeight={700} color="text.secondary">All caught up!</Typography>
@@ -165,7 +165,7 @@ const AccountApprovals = ({ onCountChange }) => {
                     <Card key={req._id} elevation={0} sx={{
                         mb: 2, borderRadius: '16px',
                         border: '1.5px solid #e2e8f0',
-                        bgcolor: '#fff',
+                        bgcolor: 'background.paper',
                         transition: 'box-shadow 0.2s',
                         '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.06)' }
                     }}>
@@ -202,7 +202,7 @@ const AccountApprovals = ({ onCountChange }) => {
                                         sx={{ bgcolor: '#dcfce7', color: '#059669', fontWeight: 700, fontSize: 11 }} />
                                 )}
                                 <Chip label={`Applied ${fmtDate(req.createdAt)}`} size="small"
-                                    sx={{ bgcolor: '#f1f5f9', color: '#64748b', fontWeight: 600, fontSize: 10 }} />
+                                    sx={{ bgcolor: 'background.default', color: '#64748b', fontWeight: 600, fontSize: 10 }} />
                             </Box>
 
                             <Divider sx={{ mb: 2 }} />

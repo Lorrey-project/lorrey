@@ -485,18 +485,18 @@ export default function PartyReportView({ partyName, selectedVehicle, ownerDetai
   }
 
   return (
-    <Box sx={{ bgcolor: '#fff', minHeight: '100vh', pb: 8, display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ bgcolor: 'background.paper', minHeight: '100vh', pb: 8, display: 'flex', flexDirection: 'column' }}>
 
       {/* ── Toolbar & Quick Filters (Print hidden) ────────────────────────────────────── */}
       <Box sx={{
         '@media print': { display: 'none' },
         px: { xs: 2, md: 4 }, py: 2,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0',
+        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0',
         gap: 2, flexWrap: 'wrap'
       }}>
         <Box display="flex" alignItems="center" gap={2}>
-          <IconButton onClick={onBack} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' }, p: 1, borderRadius: '12px' }}>
+          <IconButton onClick={onBack} sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 1, borderRadius: '12px' }}>
             <ArrowBackIcon fontSize="small" sx={{ color: '#0f172a' }} />
           </IconButton>
           <Box>
@@ -626,11 +626,11 @@ export default function PartyReportView({ partyName, selectedVehicle, ownerDetai
             FREIGHT SUMMARY <span style={{ color: '#4f46e5' }}>{titleMonth}</span>
           </Typography>
           <Box display="flex" gap={2} flexWrap="wrap" justifyContent="center">
-            <Box sx={{ bgcolor: '#f1f5f9', border: '1px solid #e2e8f0', px: 2.5, py: 1, borderRadius: '10px', display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0', px: 2.5, py: 1, borderRadius: '10px', display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Typography variant="caption" color="#64748b" fontWeight={700}>FINANCIAL YEAR:</Typography>
               <Typography variant="body2" color="#0f172a" fontWeight={800}>{financialYear}</Typography>
             </Box>
-            <Box sx={{ bgcolor: '#f1f5f9', border: '1px solid #e2e8f0', px: 2.5, py: 1, borderRadius: '10px', display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0', px: 2.5, py: 1, borderRadius: '10px', display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Typography variant="caption" color="#64748b" fontWeight={700}>MONTH:</Typography>
               <Typography variant="body2" color="#0f172a" fontWeight={800}>{month.toUpperCase()}</Typography>
             </Box>
@@ -646,7 +646,7 @@ export default function PartyReportView({ partyName, selectedVehicle, ownerDetai
         ) : (
           <>
             {/* Table Container exactly like Cement Register */}
-            <Box ref={tableContainerRef} sx={{ overflow: 'auto', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: '#fff', '@media print': { borderRadius: 0, border: 'none', boxShadow: 'none' } }}>
+            <Box ref={tableContainerRef} sx={{ overflow: 'auto', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: 'background.paper', '@media print': { borderRadius: 0, border: 'none', boxShadow: 'none' } }}>
               <table style={{
                 borderCollapse: 'collapse', minWidth: '100%',
                 tableLayout: 'auto', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'

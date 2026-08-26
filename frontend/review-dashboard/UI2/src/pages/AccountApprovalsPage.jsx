@@ -195,7 +195,7 @@ const AccountApprovalsPage = ({ onBack }) => {
     };
 
     return (
-        <Box sx={{ minHeight: '100vh', bgcolor: '#f4f7f9', fontFamily: '"Outfit", "Inter", system-ui, sans-serif' }}>
+        <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', fontFamily: '"Outfit", "Inter", system-ui, sans-serif' }}>
             {/* ── Top Bar ───────────────────────────────────────── */}
             <Box sx={{
                 background: 'linear-gradient(135deg, #1e0a3c 0%, #3b0764 50%, #6d28d9 100%)',
@@ -235,7 +235,7 @@ const AccountApprovalsPage = ({ onBack }) => {
             </Box>
 
             {/* ── Custom Tab Nav ────────────────────────────────────── */}
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', px: { xs: 1, md: 4 }, position: 'sticky', top: 0, zIndex: 10 }}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 1, md: 4 }, position: 'sticky', top: 0, zIndex: 10 }}>
                 <Tabs 
                     value={tabIndex} 
                     onChange={(e, v) => setTabIndex(v)} 
@@ -287,7 +287,7 @@ const AccountApprovalsPage = ({ onBack }) => {
                                 onChange={(e) => setSearchQ(e.target.value)}
                                 InputProps={{
                                     startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: '#94a3b8' }} /></InputAdornment>,
-                                    sx: { borderRadius: 3, bgcolor: '#fff' }
+                                    sx: { borderRadius: 3, bgcolor: 'background.paper' }
                                 }}
                                 sx={{ minWidth: 300, flex: 1 }}
                             />
@@ -295,7 +295,7 @@ const AccountApprovalsPage = ({ onBack }) => {
                                 <Select
                                     value={filterType}
                                     onChange={(e) => setFilterType(e.target.value)}
-                                    sx={{ borderRadius: 3, bgcolor: '#fff', fontSize: 14, fontWeight: 600 }}
+                                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 14, fontWeight: 600 }}
                                 >
                                     {typeOptions.map(t => <MenuItem key={t} value={t} sx={{ fontSize: 14 }}>{t}</MenuItem>)}
                                 </Select>
@@ -306,13 +306,13 @@ const AccountApprovalsPage = ({ onBack }) => {
                             <Table stickyHeader>
                                 <TableHead>
                                     <TableRow>
-                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9' }}>Approval Type</TableCell>
-                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9' }}>Date &amp; Time</TableCell>
-                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9' }}>Requested By</TableCell>
-                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9' }}>Vehicle Number</TableCell>
-                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9' }}>Owner Name</TableCell>
-                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9' }}>Remarks</TableCell>
-                                        <TableCell align="center" sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9' }}>Actions</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Approval Type</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Date &amp; Time</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Requested By</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Vehicle Number</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Owner Name</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Remarks</TableCell>
+                                        <TableCell align="center" sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Actions</TableCell>
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
@@ -325,7 +325,7 @@ const AccountApprovalsPage = ({ onBack }) => {
                                         </TableRow>
                                     ) : (
                                         filteredRequests.map((req) => (
-                                            <TableRow key={req._id} hover sx={{ '&:hover': { bgcolor: '#f8fafc' } }}>
+                                            <TableRow key={req._id} hover sx={{ '&:hover': { bgcolor: 'background.default' } }}>
                                                 <TableCell>
                                                     <Chip label={req.type} size="small" sx={{ fontWeight: 700, bgcolor: req.source === 'user' ? '#ede9fe' : '#e0f2fe', color: req.source === 'user' ? '#7c3aed' : '#0369a1' }} />
                                                 </TableCell>
@@ -382,7 +382,7 @@ const AccountApprovalsPage = ({ onBack }) => {
                                             </Box>
                                         </Box>
                                         <Box display="flex" gap={1} mb={3} flexWrap="wrap">
-                                            <Chip label={user.role} size="small" sx={{ bgcolor: '#f1f5f9', fontWeight: 700, fontSize: 11 }} />
+                                            <Chip label={user.role} size="small" sx={{ bgcolor: 'background.default', fontWeight: 700, fontSize: 11 }} />
                                             {user.pumpName && <Chip label={user.pumpName} size="small" color="primary" variant="outlined" sx={{ fontWeight: 700, fontSize: 11 }} />}
                                         </Box>
                                         <Box mt="auto">
@@ -400,7 +400,7 @@ const AccountApprovalsPage = ({ onBack }) => {
 
             {/* ── Details Modal ── */}
             <Dialog open={detailsModalOpen} onClose={() => setDetailsModalOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4 } }}>
-                <DialogTitle sx={{ fontWeight: 900, borderBottom: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
+                <DialogTitle sx={{ fontWeight: 900, borderBottom: '1px solid #e2e8f0', bgcolor: 'background.default' }}>
                     Approval Request Details
                 </DialogTitle>
                 <DialogContent sx={{ py: 3 }}>
@@ -446,7 +446,7 @@ const AccountApprovalsPage = ({ onBack }) => {
                             
                             <Grid item xs={12}>
                                 <Typography variant="caption" color="text.secondary" fontWeight={700}>Remarks / Extra Info</Typography>
-                                <Box sx={{ p: 2, bgcolor: '#f1f5f9', borderRadius: 2, mt: 0.5, maxHeight: 150, overflowY: 'auto' }}>
+                                <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 2, mt: 0.5, maxHeight: 150, overflowY: 'auto' }}>
                                     <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
                                         {selectedRequest.remarks !== '-' ? selectedRequest.remarks : JSON.stringify(selectedRequest.raw, null, 2)}
                                     </Typography>
@@ -455,7 +455,7 @@ const AccountApprovalsPage = ({ onBack }) => {
                         </Grid>
                     )}
                 </DialogContent>
-                <DialogActions sx={{ p: 3, borderTop: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
+                <DialogActions sx={{ p: 3, borderTop: '1px solid #e2e8f0', bgcolor: 'background.default' }}>
                     <Button onClick={() => setDetailsModalOpen(false)} variant="outlined" sx={{ borderRadius: 2, fontWeight: 700 }}>Close</Button>
                     <Box sx={{ flex: 1 }} />
                     <Button variant="outlined" color="error" onClick={() => handleReject(selectedRequest?._id, selectedRequest?.source)} disabled={!selectedRequest || actionId === selectedRequest._id} sx={{ borderRadius: 2, fontWeight: 700 }}>

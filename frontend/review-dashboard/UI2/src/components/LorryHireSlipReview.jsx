@@ -94,7 +94,7 @@ const InfoRow = ({ label, value, mono }) => (
             py: 1,
             borderBottom: '1px solid #f8fafc',
             transition: 'background-color 0.2s',
-            '&:hover': { bgcolor: '#f1f5f9' },
+            '&:hover': { bgcolor: 'background.default' },
             px: 1,
         }}>
             <Typography variant="body2" sx={{ color: '#64748b', flexShrink: 0, fontWeight: 600, fontSize: '0.85rem' }}>
@@ -128,7 +128,7 @@ const SectionCard = ({ icon, title, color = '#3b82f6', children }) => (
         }
     }}>
         <Box sx={{ 
-            bgcolor: '#ffffff',
+            bgcolor: 'background.paper',
             px: 2.5, 
             py: 2,
             borderBottom: '1px solid #f8fafc',
@@ -375,7 +375,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
 
     if (step === 0) {
         return (
-            <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', pb: 8, fontFamily: '"Inter", sans-serif' }}>
+            <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pb: 8, fontFamily: '"Inter", sans-serif' }}>
                  {/* Glassy Header */}
                 <Box sx={{ 
                     position: 'sticky', top: 0, zIndex: 50,
@@ -383,7 +383,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                     borderBottom: '1px solid rgba(226,232,240,0.8)', px: { xs: 2, md: 4 }, py: 2, 
                     display: 'flex', alignItems: 'center', gap: { xs: 1.5, md: 3 } 
                 }}>
-                    <IconButton onClick={() => window.location.href = '/'} size="small" sx={{ bgcolor: '#f1f5f9', color: '#475569', '&:hover': { bgcolor: '#e2e8f0', color: '#0f172a' }, flexShrink: 0, boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                    <IconButton onClick={() => window.location.href = '/'} size="small" sx={{ bgcolor: 'background.default', color: '#475569', '&:hover': { bgcolor: '#e2e8f0', color: '#0f172a' }, flexShrink: 0, boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
                         <ArrowBackIcon fontSize="small" />
                     </IconButton>
                     <Box flex={1} sx={{ minWidth: 0 }}>
@@ -406,7 +406,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                         variant="outlined"
                         size="small"
                         onClick={() => window.location.href = '/'}
-                        sx={{ ml: 'auto', borderRadius: 2, px: { xs: 2, sm: 2.5 }, py: { xs: 0.5, sm: 0.8 }, color: '#334155', borderColor: '#cbd5e1', fontWeight: 700, '&:hover': { bgcolor: '#f1f5f9' }, whiteSpace: 'nowrap', display: 'flex' }}
+                        sx={{ ml: 'auto', borderRadius: 2, px: { xs: 2, sm: 2.5 }, py: { xs: 0.5, sm: 0.8 }, color: '#334155', borderColor: '#cbd5e1', fontWeight: 700, '&:hover': { bgcolor: 'background.default' }, whiteSpace: 'nowrap', display: 'flex' }}
                     >
                         Home
                     </Button>
@@ -446,7 +446,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                 borderRadius: 4,
                                 position: { xs: 'static', lg: 'sticky' },
                                 top: 100,
-                                bgcolor: '#ffffff',
+                                bgcolor: 'background.paper',
                                 boxShadow: '0 12px 40px rgba(0,0,0,0.04)',
                                 border: '1px solid #f1f5f9',
                             }} elevation={0}>
@@ -512,7 +512,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                         InputLabelProps={{ sx: { fontWeight: 600, color: '#64748b' } }}
                                         InputProps={{ 
                                             startAdornment: <Typography sx={{ mr: 1, color: '#0f172a', fontSize: '1.1rem', fontWeight: 700 }}>₹</Typography>,
-                                            sx: { borderRadius: 3, bgcolor: '#f8fafc', fontWeight: 700, fontSize: '1.1rem', '&:hover': { bgcolor: '#f1f5f9' }, transition: 'background-color 0.2s', '&.Mui-focused': { bgcolor: '#ffffff' } } 
+                                            sx: { borderRadius: 3, bgcolor: 'background.default', fontWeight: 700, fontSize: '1.1rem', '&:hover': { bgcolor: 'background.default' }, transition: 'background-color 0.2s', '&.Mui-focused': { bgcolor: 'background.paper' } } 
                                         }} 
                                     />
                                     
@@ -528,7 +528,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                         InputLabelProps={{ sx: { fontWeight: 600, color: '#64748b' } }}
                                         InputProps={{ 
                                             endAdornment: <LocalGasStationIcon sx={{ color: '#94a3b8' }} />,
-                                            sx: { borderRadius: 3, bgcolor: '#f8fafc', fontWeight: 700, fontSize: '1.1rem', '&:hover': { bgcolor: '#f1f5f9' }, transition: 'background-color 0.2s', '&.Mui-focused': { bgcolor: '#ffffff' } }
+                                            sx: { borderRadius: 3, bgcolor: 'background.default', fontWeight: 700, fontSize: '1.1rem', '&:hover': { bgcolor: 'background.default' }, transition: 'background-color 0.2s', '&.Mui-focused': { bgcolor: 'background.paper' } }
                                         }}
                                     />
                                 </Box>

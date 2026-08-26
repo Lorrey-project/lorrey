@@ -6,6 +6,7 @@ import {
     Snackbar, Alert, Badge, TextField
 } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import PieChartIcon from '@mui/icons-material/PieChart';
 import DownloadIcon from '@mui/icons-material/Download';
 import AddIcon from '@mui/icons-material/Add';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -49,7 +50,7 @@ const _dashSocket = io(SOCKET_URL, {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart }) => {
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
     const [invoices, setInvoices] = useState([]);
@@ -488,22 +489,28 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
 
     return (
         <>
-            <Container maxWidth="xl" sx={{ mt: { xs: 2, md: 4 }, mb: 4, px: { xs: 1, sm: 2, md: 3 } }}>
+            <style>{`
+                @keyframes lightSweep {
+                    0% { left: -100%; }
+                    100% { left: 200%; }
+                }
+                /* Hide scrollbar for cleaner look if desired, though scrollability is maintained */
+            `}</style>
+            <Container maxWidth="xl" sx={{ mt: { xs: 2, md: 4 }, mb: 4, px: { xs: 1, sm: 2, md: 3 }, position: 'relative', zIndex: 10 }}>
 
                 {/* ── Header ─────────────────────────────────────────────── */}
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={4}
                     sx={{ flexDirection: { xs: 'column', md: 'row' }, gap: { xs: 3, md: 2 } }}>
                     <Box sx={{ width: { xs: '100%', md: 'auto' } }}>
-                        <Typography variant="h3" fontWeight="900" color="primary"
-                            sx={{ letterSpacing: '-1.5px', fontSize: { xs: '2rem', sm: '2.4rem', md: '2.8rem' }, textAlign: { xs: 'center', md: 'left' } }}>
-                            DIPALI ASSOCIATES &amp; CO
+                        <Typography variant="h3" fontWeight="900" sx={{ letterSpacing: '-1px', fontSize: { xs: '2rem', sm: '2.4rem', md: '2.8rem' }, textAlign: { xs: 'center', md: 'left' }, color: '#F5F7FA' }}>
+                            DIPALI ASSOCIATES & CO
                         </Typography>
                         <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mt: 0.5, justifyContent: { xs: 'center', md: 'flex-start' } }}>
-                            <Typography variant="subtitle1" color="text.secondary" fontWeight="500" sx={{ opacity: 0.8 }}>
-                                Premium Slip &amp; Invoice Management Portal [Role: {user?.role === 'OFFICE' ? 'Site-office' : (user?.role === 'HEAD_OFFICE' ? 'Head-office' : user?.role) || 'NONE'}]
+                            <Typography variant="subtitle1" fontWeight="500" sx={{ color: '#AAB4C0' }}>
+                                Premium Slip & Invoice Management Portal [Role: {user?.role === 'OFFICE' ? 'Site-office' : (user?.role === 'HEAD_OFFICE' ? 'Head-office' : user?.role) || 'NONE'}]
                             </Typography>
                             {user?.role === 'HEAD_OFFICE' && portalStatuses.length > 0 && (
-                                <Box sx={{ display: 'flex', gap: 1, borderLeft: { xs: 'none', md: '2px solid #e2e8f0' }, pl: { xs: 0, md: 1.5 } }}>
+                                <Box sx={{ display: 'flex', gap: 1, borderLeft: { xs: 'none', md: '1px solid rgba(255,255,255,0.2)' }, pl: { xs: 0, md: 1.5 } }}>
                                     {portalStatuses.map(ps => (
                                         <Tooltip key={ps.id} title={`${ps.name} is ${ps.active ? 'Online' : 'Offline'}`}>
                                             <Chip 
@@ -511,9 +518,10 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                                 label={ps.name.split(' ')[0]} 
                                                 sx={{ 
                                                     height: 20, fontSize: '0.65rem', fontWeight: 800,
-                                                    bgcolor: ps.active ? '#dcfce7' : '#fee2e2',
-                                                    color: ps.active ? '#166534' : '#991b1b',
-                                                    border: `1px solid ${ps.active ? '#bbf7d0' : '#fecaca'}`,
+                                                    bgcolor: ps.active ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                                    color: ps.active ? '#86efac' : '#fca5a5',
+                                                    border: `1px solid ${ps.active ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                                                    backdropFilter: 'blur(4px)',
                                                     '& .MuiChip-label': { px: 1 }
                                                 }}
                                             />
@@ -525,8 +533,13 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                     </Box>
                     <Box display="flex" gap={2}
                         sx={{ width: { xs: '100%', md: 'auto' }, justifyContent: { xs: 'center', md: 'flex-end' } }}>
-                        <Button variant="outlined" color="primary" startIcon={<FingerprintIcon />} onClick={handleRegisterBiometrics}
-                            sx={{ borderRadius: '12px', px: { xs: 2.5, sm: 3 }, fontWeight: 700, flex: { xs: 1, md: 'none' } }}>
+                        <Button variant="outlined" startIcon={<FingerprintIcon />} onClick={handleRegisterBiometrics}
+                            sx={{ 
+                                borderRadius: '8px', px: { xs: 2.5, sm: 3 }, fontWeight: 700, flex: { xs: 1, md: 'none' },
+                                color: '#F5F7FA', borderColor: 'rgba(255,255,255,0.2)', bgcolor: 'rgba(20,24,28,0.5)',
+                                backdropFilter: 'blur(10px)',
+                                '&:hover': { borderColor: 'rgba(255,255,255,0.4)', bgcolor: 'rgba(20,24,28,0.7)', boxShadow: '0 0 10px rgba(255,255,255,0.1)' }
+                            }}>
                             Register Biometrics
                         </Button>
 
@@ -538,409 +551,252 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <IconButton
                                         onClick={onOpenAccountApprovals}
                                         sx={{
-                                            bgcolor: pendingCount > 0 ? '#ede9fe' : '#f1f5f9',
-                                            border: pendingCount > 0 ? '2px solid #7c3aed' : '2px solid #e2e8f0',
-                                            borderRadius: '12px',
+                                            bgcolor: 'rgba(20,24,28,0.5)',
+                                            border: pendingCount > 0 ? '1px solid #c084fc' : '1px solid rgba(255,255,255,0.2)',
+                                            borderRadius: '8px',
+                                            backdropFilter: 'blur(10px)',
                                             transition: 'all 0.2s',
-                                            '&:hover': { bgcolor: '#ede9fe', borderColor: '#7c3aed' }
+                                            '&:hover': { bgcolor: 'rgba(20,24,28,0.8)', borderColor: '#c084fc', boxShadow: '0 0 10px rgba(192, 132, 252, 0.3)' }
                                         }}>
-                                        <PersonAddAlt1Icon sx={{ color: pendingCount > 0 ? '#7c3aed' : '#94a3b8', fontSize: 22 }} />
+                                        <PersonAddAlt1Icon sx={{ color: pendingCount > 0 ? '#c084fc' : '#AAB4C0', fontSize: 22 }} />
                                     </IconButton>
                                 </Badge>
                             </Tooltip>
                         )}
-
-                        <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={logout}
-                            sx={{ borderRadius: '12px', px: { xs: 2.5, sm: 3 }, fontWeight: 700, flex: { xs: 1, md: 'none' } }}>
-                            Logout
-                        </Button>
-
-                        <Button variant="contained" size="large" startIcon={<AddIcon />} onClick={onUploadNew}
-                            sx={{
-                                borderRadius: '12px', px: { xs: 2.5, sm: 4 }, py: 1.5,
-                                fontWeight: 800, flex: { xs: 1, md: 'none' },
-                                boxShadow: '0 10px 20px rgba(26,115,232,0.2)',
-                                background: 'linear-gradient(45deg, #1a73e8 30%, #4285f4 90%)',
+                        <IconButton onClick={logout} sx={{ 
+                            bgcolor: 'rgba(20,24,28,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fca5a5', borderRadius: '8px', backdropFilter: 'blur(10px)', 
+                            '&:hover': { bgcolor: 'rgba(239, 68, 68, 0.2)', borderColor: 'rgba(239, 68, 68, 0.4)' } 
+                        }}>
+                            <LogoutIcon />
+                        </IconButton>
+                        <Button variant="contained" startIcon={<AddIcon />} onClick={onUploadNew}
+                            sx={{ 
+                                borderRadius: '8px', px: { xs: 2.5, sm: 3 }, fontWeight: 700, flex: { xs: 1, md: 'none' },
+                                bgcolor: 'rgba(37, 99, 235, 0.8)', color: '#fff', backdropFilter: 'blur(10px)', border: '1px solid rgba(96, 165, 250, 0.5)',
+                                boxShadow: '0 4px 14px 0 rgba(37, 99, 235, 0.3)',
+                                '&:hover': { bgcolor: 'rgba(37, 99, 235, 1)', boxShadow: '0 4px 20px 0 rgba(37, 99, 235, 0.5)' }
                             }}>
-                            New Slip
+                            New Trip
                         </Button>
                     </Box>
                 </Box>
-                <Box display="flex" flexDirection="column" gap={4}>
-                <Box display="flex" flexDirection="column" gap={4}>
 
-                    {/* ── Hero Section (Invoices & Daily Summary) ─────────────────────────── */}
-                    <Box sx={{
-                        display: 'grid',
-                        gridTemplateColumns: { xs: '1fr', lg: '7fr 5fr' },
-                        gap: 3, alignItems: 'stretch'
-                    }}>
-                        {/* Invoice Hero Panel */}
+                {/* ── Hero Section ─────────────────────────────────────────────── */}
+                <Grid container spacing={4} sx={{ mb: 6 }}>
+                    <Grid item xs={12} md={8}>
                         <Card sx={{
-                            borderRadius: '24px',
-                            background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
-                            border: '1px solid #cbd5e1',
-                            boxShadow: '0 20px 40px rgba(0,0,0,0.05)',
-                            position: 'relative',
-                            overflow: 'hidden'
+                            borderRadius: '16px', color: '#F5F7FA', height: '100%',
+                            background: 'rgba(20, 24, 28, 0.65)', backdropFilter: 'blur(16px)',
+                            border: '1px solid rgba(255,255,255,0.1)', borderTop: '1px solid rgba(255,255,255,0.2)',
+                            boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+                            display: 'flex', flexDirection: 'column', justifyContent: 'center'
                         }}>
-                            <Box sx={{
-                                position: 'absolute', right: -40, top: -40,
-                                width: 200, height: 200, borderRadius: '50%',
-                                background: 'radial-gradient(circle, rgba(26,115,232,0.1) 0%, transparent 70%)'
-                            }} />
-                            <CardContent sx={{ p: { xs: 3, md: 4 }, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                                <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', letterSpacing: 1.5, mb: 1 }}>
-                                    CORE OPERATIONS
-                                </Typography>
-                                <Typography variant="h3" fontWeight={900} sx={{ color: '#0f172a', mb: 1, letterSpacing: '-1px' }}>
-                                    Invoice Management
-                                </Typography>
-                                <Typography variant="body1" sx={{ color: '#475569', mb: 4, maxWidth: 500, fontWeight: 500 }}>
-                                    Upload, process, and manage all your slips and invoices. 
-                                    Our AI automatically extracts data for you.
+                            <CardContent sx={{ p: { xs: 3, md: 5 } }}>
+                                <Typography variant="h4" fontWeight={900} mb={1} sx={{ letterSpacing: '0.5px' }}>INVOICE MANAGEMENT</Typography>
+                                <Typography variant="subtitle1" mb={4} sx={{ maxWidth: '600px', color: '#AAB4C0' }}>
+                                    Upload, manage and process new logistics trips. Verify trip metrics, compute distances and securely store your invoices in the vault.
                                 </Typography>
                                 <Box display="flex" gap={2}>
-                                    <Button variant="contained" size="large" startIcon={<AddIcon />} onClick={onUploadNew}
-                                        sx={{
-                                            borderRadius: '14px', px: 4, py: 1.5, fontWeight: 900,
-                                            boxShadow: '0 10px 20px rgba(26,115,232,0.25)',
-                                            background: 'linear-gradient(45deg, #1a73e8 30%, #4285f4 90%)',
-                                            '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 14px 28px rgba(26,115,232,0.35)' },
-                                            transition: 'all 0.2s'
+                                    <Button variant="contained" startIcon={<AddIcon />} onClick={onUploadNew}
+                                        sx={{ 
+                                            borderRadius: '8px', px: 4, py: 1.5, fontWeight: 700,
+                                            bgcolor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                                            boxShadow: 'none',
+                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
                                         }}>
-                                        Upload New Slip
+                                        Upload New Trip
                                     </Button>
-                                    <Button variant="outlined" size="large" startIcon={<StorageIcon />} onClick={() => setVaultModalOpen(true)}
-                                        sx={{
-                                            borderRadius: '14px', px: 4, py: 1.5, fontWeight: 800,
-                                            color: '#334155', borderColor: '#cbd5e1',
-                                            bgcolor: 'white',
-                                            '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
+                                    <Button variant="outlined" startIcon={<StorageIcon />} onClick={() => setVaultModalOpen(true)}
+                                        sx={{ 
+                                            borderRadius: '8px', px: 4, py: 1.5, fontWeight: 700,
+                                            color: '#F5F7FA', borderColor: 'rgba(255,255,255,0.15)',
+                                            '&:hover': { borderColor: 'rgba(255,255,255,0.3)', bgcolor: 'rgba(255,255,255,0.05)' }
                                         }}>
                                         Open Vault
                                     </Button>
                                 </Box>
                             </CardContent>
                         </Card>
-
-                        {/* Daily Summary Report Dashboard Card */}
+                    </Grid>
+                    <Grid item xs={12} md={4}>
                         <Card sx={{
-                            borderRadius: '24px',
-                            background: 'linear-gradient(135deg, #4c1d95 0%, #6d28d9 100%)',
-                            color: '#fff',
-                            boxShadow: '0 20px 40px rgba(109,40,217,0.3)',
-                            position: 'relative', overflow: 'hidden',
-                            cursor: 'pointer',
-                            transition: 'all 0.3s ease',
-                            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 24px 48px rgba(109,40,217,0.45)' }
-                        }} onClick={onOpenDailySummaryReport}>
-                            <Box sx={{
-                                position: 'absolute', top: -30, right: -30,
-                                width: 150, height: 150, borderRadius: '50%',
-                                bgcolor: 'rgba(255,255,255,0.05)',
-                            }} />
-                            <CardContent sx={{ p: { xs: 3, md: 4 }, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
-                                <Box display="flex" alignItems="flex-start" gap={2} mb={2}>
-                                    <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '12px' }}>
-                                        <AssignmentIcon sx={{ fontSize: 32 }} />
+                            borderRadius: '16px', color: '#F5F7FA', height: '100%',
+                            background: 'rgba(20, 24, 28, 0.65)', backdropFilter: 'blur(16px)',
+                            border: '1px solid rgba(255,255,255,0.1)', borderTop: '1px solid rgba(167, 139, 250, 0.4)',
+                            boxShadow: '0 12px 40px rgba(0,0,0,0.5), inset 0 20px 40px -20px rgba(167, 139, 250, 0.1)',
+                            display: 'flex', flexDirection: 'column', justifyContent: 'space-between'
+                        }}>
+                            <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                                <Box display="flex" alignItems="center" gap={2} mb={2}>
+                                    <Box sx={{ p: 1.5, background: 'linear-gradient(135deg, rgba(167, 139, 250, 0.2), rgba(167, 139, 250, 0.05))', borderRadius: '12px', border: '1px solid rgba(167, 139, 250, 0.2)' }}>
+                                        <AssignmentIcon sx={{ fontSize: 32, color: '#ddd6fe' }} />
                                     </Box>
-                                    <Box>
-                                        <Typography variant="h5" fontWeight={900} sx={{ letterSpacing: 0.5, mb: 0.5 }}>
-                                            SUMMARY REPORTS
-                                        </Typography>
-                                        <Typography variant="body2" sx={{ opacity: 0.8, fontWeight: 500 }}>
-                                            Live operational overview for today
-                                        </Typography>
-                                    </Box>
+                                    <Typography variant="h5" fontWeight={900} sx={{ letterSpacing: '0.5px' }}>SUMMARY REPORTS</Typography>
                                 </Box>
+                                <Typography variant="body2" sx={{ color: '#AAB4C0', mb: 3 }}>
+                                    Live operational overview and statistics for today's transactions.
+                                </Typography>
                                 {todayStats && (
                                     <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 3 }}>
                                         <Box>
-                                            <Typography variant="caption" sx={{ opacity: 0.7, fontWeight: 700 }}>Invoices Uploaded</Typography>
+                                            <Typography variant="caption" sx={{ color: '#7F8A96', fontWeight: 700 }}>Invoices Uploaded</Typography>
                                             <Typography variant="h4" fontWeight={900}>{todayStats?.invoiceStats?.totalUploaded || 0}</Typography>
                                         </Box>
                                         <Box>
-                                            <Typography variant="caption" sx={{ opacity: 0.7, fontWeight: 700 }}>Pending Review</Typography>
-                                            <Typography variant="h4" fontWeight={900} color={todayStats?.invoiceStats?.pendingInvoices > 0 ? '#fbbf24' : 'inherit'}>
+                                            <Typography variant="caption" sx={{ color: '#7F8A96', fontWeight: 700 }}>Pending Review</Typography>
+                                            <Typography variant="h4" fontWeight={900} color={todayStats?.invoiceStats?.pendingInvoices > 0 ? '#fcd34d' : 'inherit'}>
                                                 {todayStats?.invoiceStats?.pendingInvoices || 0}
                                             </Typography>
                                         </Box>
                                     </Box>
                                 )}
-                                <Box sx={{ mt: 'auto' }}>
-                                    <Button
-                                        fullWidth variant="contained"
-                                        startIcon={<VisibilityIcon />}
-                                        onClick={(e) => { e.stopPropagation(); onOpenDailySummaryReport(); }}
-                                        sx={{
-                                            borderRadius: '12px', py: 1.5, fontWeight: 900, fontSize: '1rem',
-                                            bgcolor: '#fff', color: '#6d28d9',
-                                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                                            '&:hover': { bgcolor: '#f8fafc', transform: 'scale(1.02)' },
-                                            transition: 'all 0.2s',
-                                        }}
-                                    >
-                                        Open Today's Dashboard
-                                    </Button>
-                                </Box>
+                                <Button
+                                    fullWidth variant="contained"
+                                    startIcon={<VisibilityIcon />}
+                                    onClick={(e) => { e.stopPropagation(); onOpenDailySummaryReport(); }}
+                                    sx={{
+                                        borderRadius: '8px', py: 1.5, fontWeight: 800,
+                                        bgcolor: 'rgba(167, 139, 250, 0.15)', color: '#ddd6fe', border: '1px solid rgba(167, 139, 250, 0.3)',
+                                        boxShadow: 'none',
+                                        '&:hover': { bgcolor: 'rgba(167, 139, 250, 0.25)', boxShadow: '0 0 15px rgba(167, 139, 250, 0.2)' }
+                                    }}
+                                >
+                                    Open Today's Dashboard
+                                </Button>
                             </CardContent>
                         </Card>
-                    </Box>
+                    </Grid>
+                </Grid>
 
-                    {/* ── High Priority Registers ─────────────────────────── */}
-                    <Box>
-                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
-                            HIGH PRIORITY REGISTERS
-                        </Typography>
-                        <Grid container spacing={3}>
-                            {[
-                                { title: 'CEMENT REGISTER', subtitle: 'Trip & Freight Logic', icon: <LocalShippingIcon sx={{ fontSize: 24 }} />, bg: '#0369a1', onClick: onOpenCementRegister },
-                                { title: 'BILL REGISTER', subtitle: 'Pending & Cleared Bills', icon: <TableChartIcon sx={{ fontSize: 24 }} />, bg: '#0f172a', onClick: onOpenFYDetails },
-                                { title: 'TOTAL INCOMING & OUTGOING PAYMENT REPORTS', subtitle: 'Financial Transactions', icon: <AccountBalanceWalletIcon sx={{ fontSize: 24 }} />, bg: '#1e293b', onClick: onOpenTotalPaymentReports },
-                                { title: 'PARTY PAYMENT DETAILS', subtitle: 'Aggregated Monthly Ledger', icon: <AccountBalanceWalletIcon sx={{ fontSize: 24 }} />, bg: '#1d4ed8', onClick: onOpenPartyPayment }
-                            ].map((item, idx) => (
-                                <Grid item xs={12} md={4} key={idx}>
-                                    <Card sx={{
-                                        borderRadius: '20px', bgcolor: item.bg, color: '#fff',
-                                        boxShadow: `0 10px 20px rgba(0,0,0,0.15)`,
-                                        border: '1px solid rgba(255,255,255,0.1)',
-                                        cursor: 'pointer', transition: 'all 0.2s',
-                                        '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.25)` }
-                                    }} onClick={item.onClick}>
-                                        <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                            <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '12px' }}>
-                                                {item.icon}
-                                            </Box>
-                                            <Box>
-                                                <Typography variant="subtitle1" fontWeight={900}>{item.title}</Typography>
-                                                <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>{item.subtitle}</Typography>
-                                            </Box>
-                                        </CardContent>
-                                    </Card>
-                                </Grid>
-                            ))}
-                        </Grid>
-                    </Box>
+                {/* ── Helper Component for Cards ─────────────────────────────────────────────── */}
+                {(() => {
+                    const SectionHeading = ({ title, accentColor }) => (
+                        <Box mb={3} display="flex" alignItems="center" gap={2}>
+                            <Box sx={{ width: 20, height: '2px', bgcolor: accentColor || '#6366f1', borderRadius: 1 }} />
+                            <Typography variant="overline" sx={{ color: '#F5F7FA', letterSpacing: '2px', fontWeight: 800, fontSize: '0.85rem' }}>
+                                {title}
+                            </Typography>
+                            <Box sx={{ flex: 1, height: '1px', background: `linear-gradient(90deg, ${accentColor || '#6366f1'}, transparent)` }} />
+                        </Box>
+                    );
 
-                    {/* ── Financial Section ─────────────────────────── */}
-                    <Box>
-                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
-                            FINANCIAL MANAGEMENT
-                        </Typography>
-                        <Grid container spacing={3}>
-                            {[
-                                { title: 'BANK BOOK', subtitle: 'Transactions & Balances', icon: <AccountBalanceWalletIcon sx={{ fontSize: 24 }} />, bg: '#0f766e', onClick: onOpenAccountDetails },
-                                { title: 'MAIN CASHBOOK', subtitle: 'Daily Cash Flow', icon: <DescriptionIcon sx={{ fontSize: 24 }} />, bg: '#047857', onClick: onOpenMainCashbook },
-                                { title: 'PUMP PAYMENT DETAILS', subtitle: 'Clear pump dues', icon: <LocalGasStationIcon sx={{ fontSize: 24 }} />, bg: '#0ea5e9', onClick: onOpenPumpPayment },
-                                { title: 'PUMP PAYMENT REGISTER', subtitle: 'Record payments', icon: <ReceiptLongIcon sx={{ fontSize: 24 }} />, bg: '#0284c7', onClick: onOpenPumpPaymentRegister }
-                            ].map((item, idx) => (
-                                <Grid item xs={12} sm={6} md={3} key={idx}>
-                                    <Card sx={{
-                                        borderRadius: '20px', bgcolor: item.bg, color: '#fff',
-                                        boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
-                                        border: '1px solid rgba(255,255,255,0.1)',
-                                        cursor: 'pointer', transition: 'all 0.2s',
-                                        '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
-                                    }} onClick={item.onClick}>
-                                        <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                            <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                                {item.icon}
-                                            </Box>
-                                            <Box>
-                                                <Typography variant="subtitle2" fontWeight={900}>{item.title}</Typography>
-                                                <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>{item.subtitle}</Typography>
-                                            </Box>
-                                        </CardContent>
-                                    </Card>
-                                </Grid>
-                            ))}
-                            {/* Incentive Calculation Sheet Placeholder */}
-                            <Grid item xs={12} sm={6} md={3}>
-                                <Card sx={{
-                                    borderRadius: '20px', bgcolor: 'white', color: '#1e293b',
-                                    border: '1px solid #e2e8f0',
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.02)',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s ease',
-                                    '&:hover': {
-                                        transform: 'translateY(-2px)',
-                                        boxShadow: '0 8px 24px rgba(0,0,0,0.06)',
-                                        borderColor: '#94a3b8'
+                    const ActionCard = ({ title, subtitle, icon, accentColor, onClick }) => (
+                        <Grid item xs={12} sm={6} md={4} lg={3}>
+                            <Card sx={{
+                                borderRadius: '16px',
+                                background: 'rgba(20, 24, 28, 0.65)',
+                                backdropFilter: 'blur(16px)',
+                                border: '1px solid rgba(255,255,255,0.08)',
+                                borderTop: `1px solid ${accentColor ? accentColor + '66' : 'rgba(255,255,255,0.15)'}`,
+                                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                                color: '#F5F7FA',
+                                cursor: 'onClick' in {onClick} ? 'pointer' : 'default',
+                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                position: 'relative',
+                                overflow: 'hidden',
+                                '&::before': {
+                                    content: '""',
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: '-150%',
+                                    width: '100%',
+                                    height: '100%',
+                                    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent)',
+                                    transform: 'skewX(-20deg)',
+                                },
+                                '&:hover': onClick ? {
+                                    transform: 'translateY(-4px)',
+                                    boxShadow: `0 12px 40px rgba(0, 0, 0, 0.6), 0 0 20px ${accentColor ? accentColor + '22' : 'rgba(255,255,255,0.03)'}`,
+                                    borderColor: 'rgba(255,255,255,0.2)',
+                                    '&::before': {
+                                        animation: 'lightSweep 0.6s ease-out',
+                                    },
+                                    '& .card-icon-container': {
+                                        boxShadow: `0 0 15px ${accentColor ? accentColor + '88' : 'rgba(255,255,255,0.3)'}`,
+                                        transform: 'scale(1.05)',
+                                        borderColor: accentColor ? accentColor + '88' : 'rgba(255,255,255,0.3)'
                                     }
-                                }} onClick={onOpenIncentiveSheet}>
-                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <Box sx={{ p: 1.5, bgcolor: '#f1f5f9', borderRadius: '12px', color: '#64748b' }}>
-                                            <PersonIcon sx={{ fontSize: 24 }} />
-                                        </Box>
-                                        <Box>
-                                            <Typography variant="subtitle2" fontWeight={800}>INCENTIVE SHEET</Typography>
-                                            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 500 }}>Compare ATO/MKT</Typography>
-                                        </Box>
-                                    </CardContent>
-                                </Card>
-                            </Grid>
+                                } : {},
+                                '&:active': onClick ? {
+                                    transform: 'scale(0.97)',
+                                    boxShadow: '0 4px 16px rgba(0,0,0,0.4)'
+                                } : {}
+                            }} onClick={onClick}>
+                                <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                    <Box className="card-icon-container" sx={{ 
+                                        p: 1.5, 
+                                        background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.02) 100%)', 
+                                        borderRadius: '12px', 
+                                        color: '#fff',
+                                        border: '1px solid rgba(255,255,255,0.05)',
+                                        transition: 'all 0.3s ease'
+                                    }}>
+                                        {icon}
+                                    </Box>
+                                    <Box>
+                                        <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#F5F7FA' }}>{title}</Typography>
+                                        <Typography variant="caption" sx={{ color: '#AAB4C0', fontWeight: 500 }}>{subtitle}</Typography>
+                                    </Box>
+                                </CardContent>
+                            </Card>
                         </Grid>
-                    </Box>
+                    );
 
-                    {/* ── AI & Analytics ─────────────────────────── */}
-                    <Box>
-                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
-                            AI & ANALYTICS
-                        </Typography>
-                        <Grid container spacing={3}>
-                            <Grid item xs={12} sm={6} md={3}>
-                                <Card sx={{
-                                    borderRadius: '20px', bgcolor: '#5b21b6', color: '#fff',
-                                    boxShadow: '0 10px 20px rgba(0,0,0,0.15)',
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                    cursor: 'pointer', transition: 'all 0.2s',
-                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 14px 28px rgba(0,0,0,0.25)' }
-                                }} onClick={onOpenAiExtraExpense}>
-                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <Box sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '12px' }}>
-                                            <AutoAwesomeIcon sx={{ fontSize: 24 }} />
-                                        </Box>
-                                        <Box>
-                                            <Typography variant="subtitle1" fontWeight={900}>THE AI with EXTRA EXPENSE</Typography>
-                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>AI Expense Management</Typography>
-                                        </Box>
-                                    </CardContent>
-                                </Card>
-                            </Grid>
-                        </Grid>
-                    </Box>
-
-                    {/* ── Master Data & Operations ─────────────────────────── */}
-                    <Box>
-                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
-                            MASTER DATA & SETTINGS
-                        </Typography>
-                        <Grid container spacing={3}>
-                            {/* GST Portal Details */}
-                            <Grid item xs={12} sm={6} md={3}>
-                                <Card sx={{
-                                    borderRadius: '20px', bgcolor: '#be123c', color: '#fff',
-                                    boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                    cursor: 'pointer', transition: 'all 0.2s',
-                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
-                                }} onClick={onOpenGSTPortalRegister}>
-                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                            <ReceiptIcon sx={{ fontSize: 24 }} />
-                                        </Box>
-                                        <Box>
-                                            <Typography variant="subtitle2" fontWeight={900}>GST INFORMATION</Typography>
-                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Tax Portal Ledger</Typography>
-                                        </Box>
-                                    </CardContent>
-                                </Card>
-                            </Grid>
-
-                            {/* Vehicle Information */}
-                            <Grid item xs={12} sm={6} md={3}>
-                                <Card sx={{
-                                    borderRadius: '20px', bgcolor: '#b45309', color: '#fff',
-                                    boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                    cursor: 'pointer', transition: 'all 0.2s',
-                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
-                                }} onClick={() => setTruckManagerOpen(true)}>
-                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                            <LocalShippingIcon sx={{ fontSize: 24 }} />
-                                        </Box>
-                                        <Box>
-                                            <Typography variant="subtitle2" fontWeight={900}>OWNER & VEHICLES</Typography>
-                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Fleet Directory</Typography>
-                                        </Box>
-                                    </CardContent>
-                                </Card>
-                            </Grid>
-
-                            {/* Vouchers Block */}
-                            <Grid item xs={12} sm={6} md={3}>
-                                <Card sx={{
-                                    borderRadius: '20px', bgcolor: '#1e293b', color: '#fff',
-                                    boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                    cursor: 'pointer', transition: 'all 0.2s',
-                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
-                                }} onClick={() => { setVoucherDialogTab(1); setVoucherDialogOpen(true); }}>
-                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                            <HistoryIcon sx={{ fontSize: 24 }} />
-                                        </Box>
-                                        <Box>
-                                            <Typography variant="subtitle2" fontWeight={900}>VOUCHER HISTORY</Typography>
-                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Approved Payouts</Typography>
-                                        </Box>
-                                    </CardContent>
-                                </Card>
-                            </Grid>
-
-                            {/* Fuel Rate Settings */}
-                            {user?.role === 'HEAD_OFFICE' && (
-                                <Grid item xs={12} sm={6} md={3}>
-                                    <Card sx={{
-                                        borderRadius: '20px', bgcolor: '#0f4c6e', color: '#fff',
-                                        boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
-                                        border: '1px solid rgba(255,255,255,0.1)',
-                                        cursor: 'pointer', transition: 'all 0.2s',
-                                        '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
-                                    }} onClick={onOpenFuelRateSettings}>
-                                        <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                            <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px' }}>
-                                                <LocalGasStationIcon sx={{ fontSize: 24 }} />
-                                            </Box>
-                                            <Box>
-                                                <Typography variant="subtitle2" fontWeight={900}>FUEL RATE AND CASH DISCOUNT SETTINGS</Typography>
-                                                <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Admin Config</Typography>
-                                            </Box>
-                                        </CardContent>
-                                    </Card>
+                    return (
+                        <>
+                            {/* ── High Priority Registers ─────────────────────────── */}
+                            <Box mb={6}>
+                                <SectionHeading title="HIGH PRIORITY REGISTERS" accentColor="#3b82f6" />
+                                <Grid container spacing={3}>
+                                    <ActionCard title="CEMENT REGISTER" subtitle="Trip & Freight Logic" icon={<LocalShippingIcon />} accentColor="#3b82f6" onClick={onOpenCementRegister} />
+                                    <ActionCard title="BILL REGISTER" subtitle="Pending & Cleared Bills" icon={<TableChartIcon />} accentColor="#94a3b8" onClick={onOpenFYDetails} />
+                                    <ActionCard title="PARTY PAYMENT DETAILS" subtitle="Aggregated Monthly Ledger" icon={<AccountBalanceWalletIcon />} accentColor="#f43f5e" onClick={onOpenPartyPayment} />
                                 </Grid>
-                            )}
-                        </Grid>
-                    </Box>
+                            </Box>
 
-                    {/* ── Attendance Section ─────────────────────────── */}
-                    <Box>
-                        <Typography variant="overline" fontWeight={900} sx={{ color: '#64748b', ml: 1, letterSpacing: 1.2, mb: 1, display: 'block' }}>
-                            ATTENDANCE
-                        </Typography>
-                        <Grid container spacing={3}>
-                            <Grid item xs={12} sm={6} md={3}>
-                                <Card sx={{
-                                    borderRadius: '20px', bgcolor: '#4f46e5', color: '#fff',
-                                    boxShadow: `0 10px 20px rgba(0,0,0,0.1)`,
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                    cursor: 'pointer', transition: 'all 0.2s',
-                                    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 14px 28px rgba(0,0,0,0.2)` }
-                                }} onClick={onOpenAttendancePanel}>
-                                    <CardContent sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '10px', display: 'flex', alignItems: 'center' }}>
-                                            <LocationOnIcon sx={{ fontSize: 24 }} />
-                                        </Box>
-                                        <Box>
-                                            <Typography variant="subtitle2" fontWeight={900}>ATTENDANCE PANEL</Typography>
-                                            <Typography variant="caption" sx={{ opacity: 0.8, fontWeight: 500 }}>Location-Based Attendance</Typography>
-                                        </Box>
-                                    </CardContent>
-                                </Card>
-                            </Grid>
-                        </Grid>
-                    </Box>
-                </Box>
-                    {/* ── Fuel Rate Update Dialog ──────────────────────────── */}
+                            {/* ── Financial Management ─────────────────────────── */}
+                            <Box mb={6}>
+                                <SectionHeading title="FINANCIAL MANAGEMENT" accentColor="#10b981" />
+                                <Grid container spacing={3}>
+                                    <ActionCard title="BANK BOOK" subtitle="Transactions & Balances" icon={<AccountBalanceWalletIcon />} accentColor="#10b981" onClick={onOpenAccountDetails} />
+                                    <ActionCard title="MAIN CASH BOOK" subtitle="Daily Cash Flow" icon={<DescriptionIcon />} accentColor="#06b6d4" onClick={onOpenMainCashbook} />
+                                    <ActionCard title="PUMP PAYMENT DETAILS" subtitle="Clear Pump Dues" icon={<LocalGasStationIcon />} accentColor="#0ea5e9" onClick={onOpenPumpPayment} />
+                                    <ActionCard title="PUMP PAYMENT REGISTER" subtitle="Payment Register" icon={<ReceiptLongIcon />} accentColor="#38bdf8" onClick={onOpenPumpPaymentRegister} />
+                                    <ActionCard title="INCENTIVE ENTRY" subtitle="Complete/Manage Incentives" icon={<PersonIcon />} accentColor="#d946ef" onClick={onOpenIncentiveSheet} />
+                                </Grid>
+                            </Box>
+
+                            {/* ── Reports / Data & Services ─────────────────────────── */}
+                            <Box mb={6}>
+                                <SectionHeading title="REPORTS / DATA & SERVICES" accentColor="#a855f7" />
+                                <Grid container spacing={3}>
+                                    <ActionCard title="GST / GSTR-1" subtitle="Tax Portal Ledger" icon={<ReceiptIcon />} accentColor="#d946ef" onClick={onOpenGSTPortalRegister} />
+                                    <ActionCard title="TOTAL INCOMING & OUTGOING" subtitle="Payment Reports" icon={<AccountBalanceWalletIcon />} accentColor="#14b8a6" onClick={onOpenTotalPaymentReports} />
+                                    <ActionCard title="PIE CHART" subtitle="Financial Analytics" icon={<PieChartIcon />} accentColor="#8b5cf6" onClick={onOpenPieChart} />
+                                    <ActionCard title="AI EXTRA EXPENSE" subtitle="AI Expense Management" icon={<AutoAwesomeIcon />} accentColor="#6366f1" onClick={onOpenAiExtraExpense} />
+                                    <ActionCard title="OWNER & VEHICLES" subtitle="Fleet Directory" icon={<LocalShippingIcon />} accentColor="#f59e0b" onClick={() => setTruckManagerOpen(true)} />
+                                    <ActionCard title="VOUCHER HISTORY" subtitle="Approved Payouts" icon={<HistoryIcon />} accentColor="#f43f5e" onClick={() => { setVoucherDialogTab(1); setVoucherDialogOpen(true); }} />
+                                    {user?.role === 'HEAD_OFFICE' && (
+                                        <ActionCard title="FUEL RATE SETTINGS" subtitle="Global Station Pricing" icon={<LocalGasStationIcon />} accentColor="#ef4444" onClick={onOpenFuelRateSettings} />
+                                    )}
+                                    {user?.role === 'HEAD_OFFICE' && (
+                                        <ActionCard title="ACCOUNT APPROVALS" subtitle="Manage Staff Requests" icon={<PersonAddAlt1Icon />} accentColor="#10b981" onClick={onOpenAccountApprovals} />
+                                    )}
+                                    <ActionCard title="ATTENDANCE PANEL" subtitle="Daily Clock Ins" icon={<PersonIcon />} accentColor="#3b82f6" onClick={onOpenAttendancePanel} />
+                                </Grid>
+                            </Box>
+                        </>
+                    );
+                })()}
+            </Container>
+
                     <Dialog
                         open={fuelRateModalOpen}
                         onClose={() => setFuelRateModalOpen(false)}
                         PaperProps={{
                             sx: {
                                 borderRadius: '20px',
-                                background: 'linear-gradient(135deg, #0c3547 0%, #0f4c6e 80%, #1565c0 100%)',
+                                background: 'linear-gradient(135deg, #020617 0%, #0f172a 80%, #1e3a8a 100%)',
                                 color: '#fff',
                                 p: 1,
                                 minWidth: { xs: '90vw', sm: 420 },
@@ -1544,8 +1400,6 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             </Box>
                         </DialogContent>
                     </Dialog>
-                </Box>
-            </Container>
 
             {/* ── Delete confirmation dialog ── */}
             <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}>
