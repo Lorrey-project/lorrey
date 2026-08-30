@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
+const auth = require('../middleware/authMiddleware');
 const FinancialYearPayment = require('../models/FinancialYearPayment');
 const FinancialYearRow = require('../models/FinancialYearRow');
 const BillRegisterDocument = require('../models/BillRegisterDocument');
@@ -1197,6 +1198,13 @@ router.get('/trips', async (req, res) => {
     formatted.sort((a, b) => parseCustomDate(a.tripDate) - parseCustomDate(b.tripDate));
 
     const finalFormatted = formatted.map((t, idx) => ({ ...t, tripNumber: idx + 1 }));
+    res.json(finalFormatted);
+  } catch (err) {
+    console.error('[FYDetails] /trips error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 function getBillSubmissionFromType(billType) {
   if (!billType) return '';
   const bt = String(billType).trim().toUpperCase();
