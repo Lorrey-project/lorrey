@@ -165,6 +165,7 @@ export default function FinancialYearDetails({ onBack }) {
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   const [selYear, setSelYear] = useState('2026-2027');
+  const [saving, setSaving] = useState(false);
 
   // Payment Status Dashboard States
   const [dashboardOpen, setDashboardOpen] = useState(false);
@@ -246,9 +247,11 @@ export default function FinancialYearDetails({ onBack }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const [dataRes, docsRes] = await Promise.all([
-        axios.get(`${API_URL}/fy-details/data`, { params: { fy: selYear } }),
-        axios.get(`${API_URL}/fy-details/documents`)
+        axios.get(`${API_URL}/fy-details/data`, { params: { fy: selYear }, headers }),
+        axios.get(`${API_URL}/fy-details/documents`, { headers })
       ]);
       setRows(dataRes.data.rows || []);
       setPayments(dataRes.data.payments || []);
@@ -257,14 +260,15 @@ export default function FinancialYearDetails({ onBack }) {
       setDirtyRows(new Set());
       setDirtyGroups(new Set());
       setPage(0);
-    } catch {
+    } catch (err) {
+      console.error('[FinancialYearDetails] fetchData error:', err);
       setSnack({ severity: 'error', msg: 'Failed to load details' });
     } finally { setLoading(false); }
   }, [selYear]);
 
-  // Listen to WebSocket events (e.g. batch bills generated)
+  // Listen to WebSocket events
   useEffect(() => {
-    socket.on('cementUpdates', (data) => {
+    const handleCementUpdate = (data) => {
       console.log('socket event cementUpdates', data);
       if (data?.action === 'batchBillsGenerated') {
         setPage(0);
@@ -281,9 +285,16 @@ export default function FinancialYearDetails({ onBack }) {
       } else if (data?.action === 'paymentMapped') {
         fetchData();
       }
-    });
+    };
+    const handleFyUpdate = () => {
+      fetchData();
+    };
+
+    socket.on('cementUpdates', handleCementUpdate);
+    socket.on('fyDetailsUpdates', handleFyUpdate);
     return () => {
-      socket.off('cementUpdates');
+      socket.off('cementUpdates', handleCementUpdate);
+      socket.off('fyDetailsUpdates', handleFyUpdate);
     };
   }, [fetchData, selYear]);
 
@@ -816,8 +827,10 @@ export default function FinancialYearDetails({ onBack }) {
 
   const saveAllChanges = async () => {
     if (dirtyRows.size === 0 && dirtyGroups.size === 0) return;
-    setLoading(true);
+    setSaving(true);
     try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const rowP = Array.from(dirtyRows).map(inv => {
         const r = rows.find(x => x.invoiceNumber === inv); if (!r) return Promise.resolve();
         return axios.post(`${API_URL}/fy-details/save-row`, {
@@ -835,7 +848,7 @@ export default function FinancialYearDetails({ onBack }) {
           damageTrips: r.damageTrips || [],
           damageVehicleAmounts: r.damageVehicleAmounts || {},
           slNo: r.slNo
-        });
+        }, { headers });
       });
       const payP = Array.from(dirtyGroups).map(gid => {
         const p = payments.find(x => x.id === gid); if (!p) return Promise.resolve();
@@ -848,18 +861,17 @@ export default function FinancialYearDetails({ onBack }) {
           debitAmount: num(p.debitAmount),
           remarks: p.remarks || '',
           tdsProvision: num(p.tdsProvision)
-        });
+        }, { headers });
       });
       await Promise.all([...rowP, ...payP]);
       setSnack({ severity: 'success', msg: 'All changes saved successfully!' });
       setDirtyRows(new Set());
       setDirtyGroups(new Set());
-      // Refresh to confirm persisted data
       await fetchData();
     } catch (err) {
       console.error('[saveAllChanges] error:', err);
       setSnack({ severity: 'error', msg: 'Failed to save: ' + (err.response?.data?.error || err.message) });
-    } finally { setLoading(false); }
+    } finally { setSaving(false); }
   };
 
   const handleDeleteRows = async () => {
@@ -1348,8 +1360,8 @@ export default function FinancialYearDetails({ onBack }) {
 
           <Button
             size="small" variant="contained"
-            startIcon={loading ? <CircularProgress size={14} color="inherit" /> : <SaveIcon sx={{ fontSize: '1.1rem' }} />}
-            onClick={saveAllChanges} disabled={(dirtyRows.size === 0 && dirtyGroups.size === 0) || loading}
+            startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon sx={{ fontSize: '1.1rem' }} />}
+            onClick={saveAllChanges} disabled={(dirtyRows.size === 0 && dirtyGroups.size === 0) || saving}
             sx={{
               fontWeight: 700, borderRadius: '10px', px: 2.5, fontSize: '0.85rem', textTransform: 'none',
               background: (dirtyRows.size > 0 || dirtyGroups.size > 0) ? 'linear-gradient(135deg,#10b981,#059669)' : '#f1f5f9',
@@ -1357,7 +1369,7 @@ export default function FinancialYearDetails({ onBack }) {
               boxShadow: (dirtyRows.size > 0 || dirtyGroups.size > 0) ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'none',
               '&:hover': { background: (dirtyRows.size > 0 || dirtyGroups.size > 0) ? 'linear-gradient(135deg,#059669,#047857)' : '#f1f5f9' },
             }}>
-            {loading ? 'Saving...' : `Save${(dirtyRows.size + dirtyGroups.size) > 0 ? ` (${dirtyRows.size + dirtyGroups.size})` : ''}`}
+            {saving ? 'Saving...' : `Save${(dirtyRows.size + dirtyGroups.size) > 0 ? ` (${dirtyRows.size + dirtyGroups.size})` : ''}`}
           </Button>
 
           <Tooltip title="Print Register">
