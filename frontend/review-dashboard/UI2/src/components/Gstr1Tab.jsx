@@ -94,24 +94,62 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
           gstEntries = entries.filter(e => e.type === 'gstr1');
         }
 
-        let sourceRows = [];
-        if (gstEntries.length > 0) {
-          sourceRows = gstEntries.map(g => ({
-            invoiceNumber: g['Invoice Number'] || g.sourceBillId,
-            displayInvoiceNumber: g['Invoice Number'],
-            invoiceDate: g['Invoice Date'],
-            month: g['Month'],
-            site: g['SITE'],
-            billType: g['BILL'] || g.billType,
-            amount: parseAmount(g['Amount']),
-            cgst: parseAmount(g['CGST']),
-            sgst: parseAmount(g['SGST']),
-            totalAmount: parseAmount(g['Total Amount']),
-            billSubmissionThrough: g['Bill Submission'],
-            sentToGST: true
-          }));
-        } else {
-          sourceRows = allFyRows;
+        const gstMap = {};
+        gstEntries.forEach(g => {
+          const invKey = String(g['Invoice Number'] || g.sourceBillId || '').trim();
+          if (invKey) gstMap[invKey] = g;
+        });
+
+        const seenInvoices = new Set();
+        const sourceRows = [];
+
+        // 1. Include ALL Bill Register bills (Primary Source of Truth)
+        for (const r of allFyRows) {
+          const invKey = String(r.displayInvoiceNumber || r.invoiceNumber || '').trim();
+          if (invKey) seenInvoices.add(invKey);
+
+          const matchedGst = gstMap[invKey] || {};
+          const billTypeVal = r.billType || r.bill || matchedGst['BILL'] || matchedGst.billType || 'FREIGHT';
+          const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || matchedGst['Bill Submission'] || r.billSubmissionThrough || 'PORTAL';
+
+          sourceRows.push({
+            invoiceNumber: invKey,
+            displayInvoiceNumber: invKey,
+            invoiceDate: r.invoiceDate || matchedGst['Invoice Date'] || '',
+            month: r.month || matchedGst['Month'] || '',
+            site: r.site || matchedGst['SITE'] || '',
+            billType: billTypeVal,
+            billSubmissionThrough: calculatedSubmission,
+            amount: parseAmount(r.amount !== undefined ? r.amount : matchedGst['Amount']),
+            cgst: parseAmount(r.cgst !== undefined ? r.cgst : matchedGst['CGST']),
+            sgst: parseAmount(r.sgst !== undefined ? r.sgst : matchedGst['SGST']),
+            totalAmount: parseAmount(r.totalAmount !== undefined ? r.totalAmount : matchedGst['Total Amount']),
+            sentToGST: !!(r.sentToGST || matchedGst.sourceBillId)
+          });
+        }
+
+        // 2. Append any GSTR-1 portal entries not present in Bill Register
+        for (const g of gstEntries) {
+          const invKey = String(g['Invoice Number'] || g.sourceBillId || '').trim();
+          if (invKey && !seenInvoices.has(invKey)) {
+            seenInvoices.add(invKey);
+            const billTypeVal = g['BILL'] || g.billType || 'FREIGHT';
+            const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || g['Bill Submission'] || 'PORTAL';
+            sourceRows.push({
+              invoiceNumber: invKey,
+              displayInvoiceNumber: invKey,
+              invoiceDate: g['Invoice Date'] || '',
+              month: g['Month'] || '',
+              site: g['SITE'] || '',
+              billType: billTypeVal,
+              billSubmissionThrough: calculatedSubmission,
+              amount: parseAmount(g['Amount']),
+              cgst: parseAmount(g['CGST']),
+              sgst: parseAmount(g['SGST']),
+              totalAmount: parseAmount(g['Total Amount']),
+              sentToGST: true
+            });
+          }
         }
 
         const mappedRows = sourceRows.map((r, i) => {
