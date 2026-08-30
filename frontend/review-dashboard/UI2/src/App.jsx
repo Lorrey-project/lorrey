@@ -32,6 +32,7 @@ import PumpPaymentRegister from './pages/PumpPaymentRegister';
 import IncentiveCalculationSheet from './pages/IncentiveCalculationSheet';
 import AttendancePanel from './pages/AttendancePanel';
 import AiExtraExpense from './pages/AiExtraExpense';
+import TdsReportsPage from './pages/TdsReportsPage';
 import VantaTrunkBackground from './components/VantaTrunkBackground';
 
 
@@ -288,6 +289,10 @@ function AppContent() {
     return <AttendancePanel onBack={() => handleViewChange('dashboard')} />;
   }
 
+  if (currentView === 'tdsReports') {
+    return <TdsReportsPage onBack={() => handleViewChange('dashboard')} />;
+  }
+
   if (currentView === 'dashboard') {
     if (isMobile) {
       if (user.role === 'PETROL PUMP') {
@@ -355,6 +360,7 @@ function AppContent() {
         onOpenAiExtraExpense={() => handleViewChange('aiExtraExpense')}
         onOpenIncentiveSheet={() => handleViewChange('incentiveCalculationSheet')}
         onOpenAttendancePanel={() => handleViewChange('attendancePanel')}
+        onOpenTdsReports={() => handleViewChange('tdsReports')}
       />
     );
   }
