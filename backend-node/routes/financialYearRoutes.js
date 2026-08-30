@@ -353,6 +353,8 @@ router.get('/data', async (req, res) => {
         damageTrip: ov.damageTrip,
         isManual: false,
         slNo: ov.slNo,
+        sentToGST: !!ov.sentToGST,
+        sentToGSTAt: ov.sentToGSTAt,
         // Convert sets to arrays
         invoiceNos: Array.from(r.invoiceNos).filter(Boolean),
         vehicleNumbers: Array.from(r.vehicleNumbers).filter(Boolean),
@@ -399,6 +401,8 @@ router.get('/data', async (req, res) => {
         damageTrip: ov.damageTrip,
         isManual: true,
         slNo: ov.slNo,
+        sentToGST: !!ov.sentToGST,
+        sentToGSTAt: ov.sentToGSTAt,
         invoiceNos: [],
         vehicleNumbers: [],
         partyNames: []
@@ -1204,4 +1208,183 @@ router.get('/trips', async (req, res) => {
   }
 });
 
+// ── POST /fy-details/send-to-gst ──────────────────────────────────────────
+router.post('/send-to-gst', auth, async (req, res) => {
+  try {
+    const { billIds } = req.body;
+    if (!billIds || !Array.isArray(billIds) || billIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'Please select at least one bill to send to GST.' });
+    }
+
+    // 1. Fetch current bill overrides & cement register details to build exact bill records
+    const [rowOverrides, allCement] = await Promise.all([
+      FinancialYearRow.find({}).lean(),
+      getCementCol().find({}, { projection: { 
+        'BILL NO': 1, 'UNLOADING BILL NO': 1, 'SITE': 1, 'BILL DATE': 1, 'LOADING DT': 1, 'LOADING DATE': 1, 
+        'BILLING AMOUNT': 1, 'Billing Amount': 1, 'BILLING ER 95%': 1, 'AMOUNT': 1, 'EXTRA UNLOADING': 1,
+        'month': 1, 'Month': 1
+      }}).toArray()
+    ]);
+
+    const rowMap = {};
+    for (const r of rowOverrides) rowMap[r.billNo] = r;
+
+    // Aggregate cement register bills
+    const aggregated = {};
+    const addBill = (invNo, invDate, amount, row, defaultBillType) => {
+      if (!invNo) return;
+      invNo = String(invNo).trim();
+      const rawSite = normalizeSite(row['SITE']);
+      if (rawSite !== 'NVCL' && rawSite !== 'NVL') return;
+      const prefix = rawSite === 'NVCL' ? 'NVCL-' : 'DAC-';
+      const cleanInvNo = invNo.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-');
+      const finalInvNo = `${prefix}${cleanInvNo}`;
+
+      if (!aggregated[finalInvNo]) {
+        let monthStr = '';
+        const rawMonth = parseInt(row.month || row.Month, 10);
+        if (rawMonth >= 1 && rawMonth <= 12) {
+          monthStr = MONTH_NAMES[rawMonth - 1];
+        } else {
+          const dObj = parseDate(invDate);
+          if (dObj) {
+            const m = dObj.getMonth();
+            const yy = String(dObj.getFullYear()).slice(-2);
+            monthStr = `${MONTH_NAMES[m]} '${yy}`;
+          }
+        }
+        aggregated[finalInvNo] = {
+          invoiceDate: invDate,
+          invoiceNumber: finalInvNo,
+          month: monthStr,
+          site: rawSite,
+          amount: 0,
+          billType: defaultBillType
+        };
+      }
+      aggregated[finalInvNo].amount += amount;
+    };
+
+    for (const row of allCement) {
+      if (row['BILL NO']) {
+        const fAmt = parseFloat(row['BILLING AMOUNT']) || parseFloat(row['Billing Amount']) || parseFloat(row['BILLING ER 95%']) || parseFloat(row['AMOUNT']) || 0;
+        const fDate = row['BILL DATE'] || row['LOADING DT'] || row['LOADING DATE'] || '';
+        addBill(row['BILL NO'], fDate, fAmt, row, 'FREIGHT');
+      }
+      if (row['UNLOADING BILL NO']) {
+        const uAmt = parseFloat(row['EXTRA UNLOADING']) || 0;
+        const uDate = row['UNLOADING BILL DATE'] || '';
+        addBill(row['UNLOADING BILL NO'], uDate, uAmt, row, 'UNLOADING');
+      }
+    }
+
+    const gstCol = mongoose.connection.useDb("gst_portal").collection("entries");
+    const sentBillIds = [];
+    const failedBillIds = [];
+
+    for (const billId of billIds) {
+      try {
+        // Backend DB-level duplicate protection: Check if already sent
+        const ov = rowMap[billId] || {};
+        if (ov.sentToGST) {
+          console.log(`[SendToGST] Bill ${billId} has already been sent to GST.`);
+          failedBillIds.push(billId);
+          continue;
+        }
+
+        const existingGstRecord = await gstCol.findOne({ type: 'gstr1', sourceBillId: billId });
+        if (existingGstRecord) {
+          // Already in GSTR-1, ensure FinancialYearRow reflects sentToGST
+          await FinancialYearRow.updateOne(
+            { billNo: billId },
+            { $set: { sentToGST: true, sentToGSTAt: existingGstRecord._sync_at || new Date() } },
+            { upsert: true }
+          );
+          failedBillIds.push(billId);
+          continue;
+        }
+
+        // Construct full bill details
+        const aggBill = aggregated[billId] || {};
+        const finalInvNo = ov.editedInvoiceNumber || aggBill.invoiceNumber || billId;
+        const invDate = ov.editedInvoiceDate || aggBill.invoiceDate || '';
+        const monthStr = ov.editedMonth || aggBill.month || '';
+        const siteStr = normalizeSite(ov.editedSite || aggBill.site || 'NVCL');
+        const billType = ov.billType || aggBill.billType || 'FREIGHT';
+        const amt = parseFloat(ov.editedAmount !== undefined ? ov.editedAmount : (aggBill.amount || 0));
+
+        let cgst = Math.round(amt * 0.09);
+        let sgst = Math.round(amt * 0.09);
+        const totalAmt = Math.round(amt * 1.18);
+
+        let filterMonth = 8;
+        let filterYear = 2026;
+        const dObj = parseDate(invDate);
+        if (dObj) {
+          filterMonth = dObj.getMonth() + 1;
+          filterYear = dObj.getFullYear();
+        }
+
+        // 1. Create/link record in GSTR-1 (gst_portal.entries) FIRST
+        const gstr1Payload = {
+          type: 'gstr1',
+          sourceBillId: billId,
+          'Invoice Date': invDate,
+          'Invoice Number': finalInvNo,
+          'Month': monthStr,
+          'SITE': siteStr,
+          'Bill Submission': 'PORTAL',
+          'BILL': billType,
+          'Amount': amt,
+          'CGST': cgst,
+          'SGST': sgst,
+          'Total Amount': totalAmt,
+          filterMonth,
+          filterYear,
+          _sync_source: 'bill-register',
+          _sync_at: new Date()
+        };
+
+        await gstCol.updateOne(
+          { type: 'gstr1', sourceBillId: billId },
+          { $set: gstr1Payload },
+          { upsert: true }
+        );
+
+        // 2. ONLY AFTER GSTR-1 creation succeeds, update Bill Register DB
+        await FinancialYearRow.updateOne(
+          { billNo: billId },
+          { $set: { sentToGST: true, sentToGSTAt: new Date() } },
+          { upsert: true }
+        );
+
+        sentBillIds.push(billId);
+      } catch (err) {
+        console.error(`[SendToGST] Failed to process bill ${billId}:`, err);
+        failedBillIds.push(billId);
+      }
+    }
+
+    try {
+      const { getIO } = require('../socket');
+      getIO().emit('gstPortalUpdates', { action: 'sendToGST', count: sentBillIds.length });
+      getIO().emit('fyDetailsUpdates', { action: 'sendToGST', count: sentBillIds.length });
+    } catch (e) {
+      console.log('Socket notification warning:', e.message);
+    }
+
+    res.json({
+      success: true,
+      sentCount: sentBillIds.length,
+      failedCount: failedBillIds.length,
+      sentBillIds,
+      failedBillIds
+    });
+  } catch (error) {
+    console.error('[SendToGST] Error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Server error' });
+  }
+});
+
 module.exports = router;
+

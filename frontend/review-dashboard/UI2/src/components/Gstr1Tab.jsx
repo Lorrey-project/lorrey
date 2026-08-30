@@ -3,6 +3,10 @@ import { Box, Typography, Button, Snackbar, Alert, CircularProgress, Tooltip, Se
 import SaveIcon from '@mui/icons-material/Save';
 import InfoIcon from '@mui/icons-material/Info';
 import axios from 'axios';
+import { io } from 'socket.io-client';
+
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, { autoConnect: true, transports: ["websocket", "polling"] });
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -67,16 +71,35 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
       if (!fyYearStr) return;
       setLoading(true);
       try {
-        const { data } = await axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr } });
-        const allRows = data?.rows || [];
-        
-        // Do not filter out rows by 'filterMonth' initially, so we can generate the dynamic dropdown for the entire FY
-        
-        // Map the Bill Register data to the exact GSTR-1 structure requested
-        const mappedRows = allRows.map((r, i) => {
+        const [gstDataRes, fyDataRes] = await Promise.all([
+          axios.get(`${API_URL}/gst-portal`),
+          axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr } })
+        ]);
+
+        const gstPortalEntries = (gstDataRes.data?.entries || []).filter(e => e.type === 'gstr1');
+        const allFyRows = fyDataRes.data?.rows || [];
+
+        let sourceRows = [];
+        if (gstPortalEntries.length > 0) {
+          sourceRows = gstPortalEntries.map(g => ({
+            invoiceNumber: g['Invoice Number'] || g.sourceBillId,
+            displayInvoiceNumber: g['Invoice Number'],
+            invoiceDate: g['Invoice Date'],
+            month: g['Month'],
+            site: g['SITE'],
+            billType: g['BILL'],
+            amount: parseAmount(g['Amount']),
+            cgst: parseAmount(g['CGST']),
+            sgst: parseAmount(g['SGST']),
+            totalAmount: parseAmount(g['Total Amount']),
+            sentToGST: true
+          }));
+        } else {
+          sourceRows = allFyRows;
+        }
+
+        const mappedRows = sourceRows.map((r, i) => {
           const amt = parseAmount(r.amount);
-          
-          // Bill Register already stores accurate cgst/sgst, fallback to recalculation if missing/zero but amount exists
           let c = parseAmount(r.cgst);
           let s = parseAmount(r.sgst);
           
@@ -95,9 +118,9 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
             invoiceDateObj: parsedDate,
             monthYearStr: monthYearStr,
             invoiceNumber: r.displayInvoiceNumber || r.invoiceNumber || '',
-            month: r.month || '', // Fallback to provided month if any
+            month: r.month || '',
             site: r.site || '',
-            billSubmissionThrough: 'PORTAL', // Hardcoded logic as per requirements
+            billSubmissionThrough: 'PORTAL',
             bill: r.billType || '',
             billType: r.billType || '',
             amount: amt,
@@ -117,6 +140,16 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
     };
 
     fetchBillRegisterData();
+
+    const handler = () => {
+      fetchBillRegisterData();
+    };
+    socket.on('gstPortalUpdates', handler);
+    socket.on('fyDetailsUpdates', handler);
+    return () => {
+      socket.off('gstPortalUpdates', handler);
+      socket.off('fyDetailsUpdates', handler);
+    };
   }, [fyYearStr, filterMonth]);
 
   const availableMonths = useMemo(() => {

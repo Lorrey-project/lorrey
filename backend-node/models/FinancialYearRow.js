@@ -20,7 +20,9 @@ const fyRowSchema = new mongoose.Schema({
   damageTrips: { type: mongoose.Schema.Types.Mixed, default: [] },
   damageVehicleAmounts: { type: mongoose.Schema.Types.Mixed, default: {} },
   slNo: { type: Number },
-  hidden: { type: Boolean, default: false }
+  hidden: { type: Boolean, default: false },
+  sentToGST: { type: Boolean, default: false },
+  sentToGSTAt: { type: Date }
 }, { timestamps: true });
 
 module.exports = mongoose.model('FinancialYearRow', fyRowSchema);

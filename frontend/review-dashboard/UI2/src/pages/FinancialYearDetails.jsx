@@ -17,6 +17,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
+import SendIcon from '@mui/icons-material/Send';
 
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -165,6 +166,7 @@ export default function FinancialYearDetails({ onBack }) {
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   const [selYear, setSelYear] = useState('2026-2027');
+  const [sendingGST, setSendingGST] = useState(false);
 
   // Payment Status Dashboard States
   const [dashboardOpen, setDashboardOpen] = useState(false);
@@ -259,8 +261,75 @@ export default function FinancialYearDetails({ onBack }) {
       setPage(0);
     } catch {
       setSnack({ severity: 'error', msg: 'Failed to load details' });
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, [selYear]);
+
+  // Live auto-refresh when Bill Register or GST Portal data changes
+  useEffect(() => {
+    const handler = () => {
+      fetchData();
+    };
+    socket.on('fyDetailsUpdates', handler);
+    socket.on('gstPortalUpdates', handler);
+    return () => {
+      socket.off('fyDetailsUpdates', handler);
+      socket.off('gstPortalUpdates', handler);
+    };
+  }, [fetchData]);
+
+  // ── SEND TO GST Handler ──────────────────────────────────────────────
+  const handleSendToGST = async () => {
+    if (selectedIds.length === 0) {
+      setSnack({ severity: 'warning', msg: 'Please select at least one bill to send to GST.' });
+      return;
+    }
+
+    const eligibleSelected = rows.filter(r => selectedIds.includes(r.invoiceNumber) && !r.sentToGST);
+
+    if (eligibleSelected.length === 0) {
+      setSnack({ severity: 'info', msg: 'All selected bills have already been sent to GST.' });
+      return;
+    }
+
+    setSendingGST(true);
+    try {
+      const billIds = eligibleSelected.map(r => r.invoiceNumber);
+      const { data } = await axios.post(`${API_URL}/fy-details/send-to-gst`, { billIds });
+
+      if (data.success) {
+        const sentSet = new Set(data.sentBillIds || []);
+        setRows(prevRows => prevRows.map(r => {
+          if (sentSet.has(r.invoiceNumber)) {
+            return { ...r, sentToGST: true, sentToGSTAt: new Date() };
+          }
+          return r;
+        }));
+
+        setSelectedIds([]);
+
+        if (data.failedCount > 0) {
+          setSnack({ 
+            severity: 'warning', 
+            msg: `${data.sentCount} bill(s) successfully sent to GSTR-1. ${data.failedCount} bill(s) failed or were already sent.` 
+          });
+        } else {
+          setSnack({ 
+            severity: 'success', 
+            msg: 'Selected bill(s) successfully sent to GSTR-1.' 
+          });
+        }
+      } else {
+        setSnack({ severity: 'error', msg: data.error || 'Unable to send the selected bill(s) to GST. Please try again.' });
+      }
+    } catch (err) {
+      console.error('Send to GST error:', err);
+      setSnack({ severity: 'error', msg: 'Unable to send the selected bill(s) to GST. Please try again.' });
+    } finally {
+      setSendingGST(false);
+    }
+  };
 
   // Listen to WebSocket events (e.g. batch bills generated)
   useEffect(() => {
@@ -995,16 +1064,16 @@ export default function FinancialYearDetails({ onBack }) {
 
           {/* Select */}
           <td style={td({ textAlign: 'center', position: 'sticky', left: 50, zIndex: 4, background: baseBg, borderRight: '1px solid #cbd5e1' })}>
-            <Tooltip title={r.isLocked ? "Auto-generated bills cannot be deleted here" : ""}>
+            <Tooltip title={r.sentToGST ? "Already sent to GST" : ""}>
               <span>
                 <input 
                   type="checkbox" 
                   checked={selectedIds.includes(r.invoiceNumber)} 
                   onChange={() => {
-                    if (!r.isLocked) toggleSelect(r.invoiceNumber);
+                    if (!r.sentToGST) toggleSelect(r.invoiceNumber);
                   }} 
-                  disabled={r.isLocked}
-                  style={{ cursor: r.isLocked ? 'not-allowed' : 'pointer', width: 14, height: 14, opacity: r.isLocked ? 0.5 : 1 }} 
+                  disabled={r.sentToGST === true}
+                  style={{ cursor: r.sentToGST ? 'not-allowed' : 'pointer', width: 14, height: 14, opacity: r.sentToGST ? 0.4 : 1 }} 
                 />
               </span>
             </Tooltip>
@@ -1025,6 +1094,26 @@ export default function FinancialYearDetails({ onBack }) {
                 style={{ ...iStyle, fontWeight: 700, width: '100%', color: r.isLocked ? '#0369a1' : 'inherit' }} 
               />
             </Box>
+          </td>
+
+          {/* GST Status */}
+          <td style={td({ textAlign: 'center', background: baseBg })}>
+            {r.sentToGST ? (
+              <span style={{
+                display: 'inline-block', padding: '3px 8px', borderRadius: '6px', fontSize: '10px',
+                fontWeight: 800, background: '#ffffff', color: '#475569', border: '1px solid #cbd5e1',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+              }}>
+                SENT TO GST
+              </span>
+            ) : (
+              <span style={{
+                display: 'inline-block', padding: '3px 8px', borderRadius: '6px', fontSize: '10px',
+                fontWeight: 800, background: 'rgba(249, 115, 22, 0.12)', color: '#ea580c', border: '1px solid #f97316'
+              }}>
+                SEND TO GST
+              </span>
+            )}
           </td>
 
           {/* Invoice Date */}
@@ -1360,6 +1449,21 @@ export default function FinancialYearDetails({ onBack }) {
             {loading ? 'Saving...' : `Save${(dirtyRows.size + dirtyGroups.size) > 0 ? ` (${dirtyRows.size + dirtyGroups.size})` : ''}`}
           </Button>
 
+          <Button
+            size="small" variant="contained"
+            startIcon={sendingGST ? <CircularProgress size={14} color="inherit" /> : <SendIcon sx={{ fontSize: '1.1rem' }} />}
+            onClick={handleSendToGST} disabled={sendingGST}
+            sx={{
+              fontWeight: 700, borderRadius: '10px', px: 2.5, fontSize: '0.85rem', textTransform: 'none',
+              background: sendingGST ? '#ffffff' : 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+              color: sendingGST ? '#94a3b8' : '#ffffff',
+              boxShadow: sendingGST ? 'none' : '0 4px 12px rgba(249, 115, 22, 0.35)',
+              '&:hover': { background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' },
+              ml: 0.5
+            }}>
+            {sendingGST ? 'Processing GST...' : 'SEND TO GST'}
+          </Button>
+
           <Tooltip title="Print Register">
             <IconButton size="small" onClick={() => window.print()} sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0', '&:hover': { bgcolor: 'background.default' }, p: 0.75, borderRadius: '10px' }}>
               <PrintIcon sx={{ fontSize: '1.1rem', color: '#475569' }} />
@@ -1381,8 +1485,25 @@ export default function FinancialYearDetails({ onBack }) {
               <thead>
                 <tr>
                   <th style={thStyle({ minWidth: 50, position: 'sticky', left: 0, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Sl No</th>
-                  <th style={thStyle({ minWidth: 50, position: 'sticky', left: 50, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Select</th>
+                  <th style={thStyle({ minWidth: 50, position: 'sticky', left: 50, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>
+                    <Tooltip title="Select all eligible (unsent) bills">
+                      <input
+                        type="checkbox"
+                        checked={visibleRows.filter(r => !r.sentToGST).length > 0 && visibleRows.filter(r => !r.sentToGST).every(r => selectedIds.includes(r.invoiceNumber))}
+                        onChange={(e) => {
+                          const eligibleInvoices = visibleRows.filter(r => !r.sentToGST).map(r => r.invoiceNumber);
+                          if (e.target.checked) {
+                            setSelectedIds(prev => Array.from(new Set([...prev, ...eligibleInvoices])));
+                          } else {
+                            setSelectedIds(prev => prev.filter(id => !eligibleInvoices.includes(id)));
+                          }
+                        }}
+                        style={{ cursor: 'pointer', width: 14, height: 14 }}
+                      />
+                    </Tooltip>
+                  </th>
                   <th style={thStyle({ minWidth: 170, position: 'sticky', left: 100, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Invoice Number</th>
+                  <th style={thStyle({ minWidth: 120 })}>GST Status</th>
                   <th style={thStyle({ minWidth: 120 })}>Invoice Date</th>
                   <th style={thStyle({ minWidth: 150 })}>Shipment Number</th>
                   <th style={thStyle({ minWidth: 220 })}>Month</th>
