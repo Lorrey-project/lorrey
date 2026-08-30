@@ -17,7 +17,6 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
-import SendIcon from '@mui/icons-material/Send';
 
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -26,8 +25,8 @@ import { exportToCsv } from '../utils/exportCsv';
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 const socket = io(SOCKET_URL, {
-    autoConnect: true,
-    transports: ["websocket", "polling"]
+  autoConnect: true,
+  transports: ["websocket", "polling"]
 });
 const PAGE_SIZE = 100;
 
@@ -98,10 +97,10 @@ const getMonthIndexFromDate = (dateStr) => {
 const formatDateForInput = (dateStr) => {
   if (!dateStr) return '';
   if (String(dateStr).includes('T')) return String(dateStr).split('T')[0];
-  
+
   const normalizedStr = String(dateStr).replace(/\//g, '-');
   const parts = normalizedStr.split('-');
-  
+
   if (parts.length === 3) {
     if (parts[2].length >= 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
     if (parts[0].length >= 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
@@ -158,7 +157,7 @@ export default function FinancialYearDetails({ onBack }) {
   const [dirtyGroups, setDirtyGroups] = useState(new Set());
   const [page, setPage] = useState(0);
   const [siteFilter, setSiteFilter] = useState('All'); // 'All' | 'NVCL' | 'NVL'
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBillType, setFilterBillType] = useState('All');
   const [filterPartyName, setFilterPartyName] = useState('All');
@@ -166,7 +165,6 @@ export default function FinancialYearDetails({ onBack }) {
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   const [selYear, setSelYear] = useState('2026-2027');
-  const [sendingGST, setSendingGST] = useState(false);
 
   // Payment Status Dashboard States
   const [dashboardOpen, setDashboardOpen] = useState(false);
@@ -204,7 +202,7 @@ export default function FinancialYearDetails({ onBack }) {
     }
 
     const tempId = `TEMP-${Date.now()}`;
-    
+
     // Determine default month
     let defaultMonthStr = '';
     if (selRow && selRow.month) {
@@ -239,7 +237,7 @@ export default function FinancialYearDetails({ onBack }) {
     setRows(newRows);
 
     setDirtyRows(prev => new Set(prev).add(tempId));
-    const msg = selectedIds.length === 1 
+    const msg = selectedIds.length === 1
       ? 'New blank row inserted below selection. Click Save Details to persist.'
       : 'New blank row added to the end. Click Save Details to persist.';
     setSnack({ severity: 'success', msg });
@@ -261,75 +259,8 @@ export default function FinancialYearDetails({ onBack }) {
       setPage(0);
     } catch {
       setSnack({ severity: 'error', msg: 'Failed to load details' });
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, [selYear]);
-
-  // Live auto-refresh when Bill Register or GST Portal data changes
-  useEffect(() => {
-    const handler = () => {
-      fetchData();
-    };
-    socket.on('fyDetailsUpdates', handler);
-    socket.on('gstPortalUpdates', handler);
-    return () => {
-      socket.off('fyDetailsUpdates', handler);
-      socket.off('gstPortalUpdates', handler);
-    };
-  }, [fetchData]);
-
-  // ── SEND TO GST Handler ──────────────────────────────────────────────
-  const handleSendToGST = async () => {
-    if (selectedIds.length === 0) {
-      setSnack({ severity: 'warning', msg: 'Please select at least one bill to send to GST.' });
-      return;
-    }
-
-    const eligibleSelected = rows.filter(r => selectedIds.includes(r.invoiceNumber) && !r.sentToGST);
-
-    if (eligibleSelected.length === 0) {
-      setSnack({ severity: 'info', msg: 'All selected bills have already been sent to GST.' });
-      return;
-    }
-
-    setSendingGST(true);
-    try {
-      const billIds = eligibleSelected.map(r => r.invoiceNumber);
-      const { data } = await axios.post(`${API_URL}/fy-details/send-to-gst`, { billIds });
-
-      if (data.success) {
-        const sentSet = new Set(data.sentBillIds || []);
-        setRows(prevRows => prevRows.map(r => {
-          if (sentSet.has(r.invoiceNumber)) {
-            return { ...r, sentToGST: true, sentToGSTAt: new Date() };
-          }
-          return r;
-        }));
-
-        setSelectedIds([]);
-
-        if (data.failedCount > 0) {
-          setSnack({ 
-            severity: 'warning', 
-            msg: `${data.sentCount} bill(s) successfully sent to GSTR-1. ${data.failedCount} bill(s) failed or were already sent.` 
-          });
-        } else {
-          setSnack({ 
-            severity: 'success', 
-            msg: 'Selected bill(s) successfully sent to GSTR-1.' 
-          });
-        }
-      } else {
-        setSnack({ severity: 'error', msg: data.error || 'Unable to send the selected bill(s) to GST. Please try again.' });
-      }
-    } catch (err) {
-      console.error('Send to GST error:', err);
-      setSnack({ severity: 'error', msg: 'Unable to send the selected bill(s) to GST. Please try again.' });
-    } finally {
-      setSendingGST(false);
-    }
-  };
 
   // Listen to WebSocket events (e.g. batch bills generated)
   useEffect(() => {
@@ -420,7 +351,7 @@ export default function FinancialYearDetails({ onBack }) {
     const gid = damageTarget.groupId;
 
     const targetAmt = Math.max(0, num(damageTarget.difference));
-    
+
     // Sum amounts keyed by invoiceNo (one per trip-row)
     // Wait, the validation should sum ALL allocations for the group, not just the currently selected trips!
     const groupRows = computedRows.filter(cr => cr.groupId === gid);
@@ -435,7 +366,7 @@ export default function FinancialYearDetails({ onBack }) {
       setSnack({ severity: 'error', msg: `Total allocated amount (₹${groupAllocatedAmt}) cannot exceed the Difference (₹${targetAmt}).` });
       return;
     }
-    
+
     const calculatedDebitAmount = Math.max(0, targetAmt - groupAllocatedAmt);
 
     try {
@@ -473,7 +404,7 @@ export default function FinancialYearDetails({ onBack }) {
         else if (suffix === 'RFID Deduction / Charges') suffix = 'RFID Deduction';
         return `${suffix}: ₹${amt}`;
       }).filter(Boolean);
-      
+
       const reasonStr = parts.length > 0 ? ` - ${parts.join(', ')}` : '';
       return `${monthCap}-${t.vehicle}-Trip No. ${t.tripNumber} (${t.tripDate})${reasonStr}`;
     }).join('\n');
@@ -720,18 +651,18 @@ export default function FinancialYearDetails({ onBack }) {
         const groupTotalRecv = computedRows.filter(cr => cr.groupId === computedR.groupId).reduce((s, x) => s + x.receivable, 0);
         const groupDiff = groupTotalRecv - num(computedR.groupData?.paymentAmount) - num(computedR.groupData?.tdsProvision);
         setDamageTarget({ invoiceNumber: invoiceNumber, groupId: computedR.groupId, reasons: newReasons, difference: groupDiff });
-        
+
         // Pre-fill modal state if there are existing deductions
         setDamageYear(r.damageYear || selYear);
         setDamageMonth(r.damageMonth || '');
         setDamageSelectedVehicles(r.damageVehicles || []);
-        
+
         // If we have an existing month, fetch vehicles for that month
         if (r.damageMonth && (r.damageYear || selYear)) {
           const monthIdx = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].findIndex(m => r.damageMonth.startsWith(m)) + 1;
           axios.get(`${API_URL}/fy-details/vehicles?month=${monthIdx}&fy=${r.damageYear || selYear}`)
             .then(res => setDamageVehicles(res.data || []))
-            .catch(() => {});
+            .catch(() => { });
         } else {
           setDamageVehicles([]);
         }
@@ -952,15 +883,15 @@ export default function FinancialYearDetails({ onBack }) {
     exportToCsv('FinancialYearDetails.xls', computedRows.map(r => {
       const g = r.groupData || {};
       const groupTotalRecv = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((s, x) => s + (x.receivable || 0), 0) : 0;
-      
+
       const groupDiff = g.id ? groupTotalRecv - num(g.paymentAmount) - num(g.tdsProvision) : 0;
-      
+
       const groupAlloc = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((total, cr) => {
         return total + Object.values(cr.damageVehicleAmounts || {}).reduce((tripSum, tripObj) => {
           return tripSum + Object.values(tripObj || {}).reduce((s, v) => s + num(v), 0);
         }, 0);
       }, 0) : 0;
-      
+
       const calcDebit = g.id ? Math.max(0, groupDiff - groupAlloc) : 0;
 
       return { 'Invoice Date': r.invoiceDate, 'Invoice Number': r.invoiceNumber, 'Shipment Number': r.shipmentNos?.join(', ') || '', 'Month': r.month, 'SITE': r.site, 'BILL': r.billType, 'Amount': r.amount, 'CGST': r.cgst, 'SGST': r.sgst, 'Total Amount': r.totalAmount, 'Tds @2%': r.tds, 'Receivable': r.receivable, 'Payment Amount': g.paymentAmount || 0, 'TDS Provision': g.tdsProvision || 0, 'Difference': groupDiff, 'Payment Date': g.paymentDate || '', 'Reference No': g.referenceNo || '', 'Debit Amount': calcDebit, 'Debit Reasons(Deduction)': (r.debitReasons || []).join(', ') || 'None', 'Remarks': g.remarks || '' };
@@ -980,20 +911,20 @@ export default function FinancialYearDetails({ onBack }) {
       : 0;
 
     const groupDiff = isGroupStart ? groupTotalRecv - num(gd.paymentAmount) - num(gd.tdsProvision) : 0;
-    
+
     const groupAlloc = isGroupStart ? computedRows.filter(cr => cr.groupId === gid).reduce((total, cr) => {
       return total + Object.values(cr.damageVehicleAmounts || {}).reduce((tripSum, tripObj) => {
         return tripSum + Object.values(tripObj || {}).reduce((s, v) => s + num(v), 0);
       }, 0);
     }, 0) : 0;
-    
+
     const calcDebit = isGroupStart ? Math.max(0, groupDiff - groupAlloc) : 0;
 
     // Row styling logic matched perfectly to Cement Register
     const hasDraft = dirtyRows.has(r.invoiceNumber) || (gid && dirtyGroups.has(gid));
     const isSelected = selectedIds.includes(r.invoiceNumber);
     const isMatch = !!searchQuery;
-    
+
     let baseBg = r.isLocked ? '#f8fafc' : isMatch
       ? '#f1f5f9'
       : isSelected
@@ -1007,11 +938,11 @@ export default function FinancialYearDetails({ onBack }) {
     const financeBg = baseBg;
 
     const td = (extra = {}) => {
-      return { 
-        padding: '10px 6px', borderRight: '1px solid rgba(0,0,0,0.05)', borderBottom: '1px solid #e2e8f0', 
-        fontSize: 11, verticalAlign: 'middle', background: baseBg, 
+      return {
+        padding: '10px 6px', borderRight: '1px solid rgba(0,0,0,0.05)', borderBottom: '1px solid #e2e8f0',
+        fontSize: 11, verticalAlign: 'middle', background: baseBg,
         color: '#1e293b',
-        ...extra 
+        ...extra
       };
     };
 
@@ -1024,11 +955,11 @@ export default function FinancialYearDetails({ onBack }) {
       [curM, curY] = rawMonth.split(' ');
       if (curY?.startsWith("'")) curY = '20' + curY.substring(1);
     } else { curM = rawMonth; }
-    
+
     const matchFull = MONTH_NAMES_FULL.find(m => m && m.toUpperCase() === curM.toUpperCase());
     if (matchFull) curM = matchFull;
     else curM = '';
-    
+
     if (!YEARS.includes(curY)) curY = '';
 
     const handleMonthYearChange = (type, val) => {
@@ -1037,7 +968,7 @@ export default function FinancialYearDetails({ onBack }) {
 
       const mIndex = MONTH_NAMES_FULL.indexOf(newM) - 1;
       const now = new Date();
-      const curMonthIndex = now.getMonth(); 
+      const curMonthIndex = now.getMonth();
       const curYear = now.getFullYear();
 
       if (parseInt(newY) > curYear) {
@@ -1064,16 +995,16 @@ export default function FinancialYearDetails({ onBack }) {
 
           {/* Select */}
           <td style={td({ textAlign: 'center', position: 'sticky', left: 50, zIndex: 4, background: baseBg, borderRight: '1px solid #cbd5e1' })}>
-            <Tooltip title={r.sentToGST ? "Already sent to GST" : ""}>
+            <Tooltip title={r.isLocked ? "Auto-generated bills cannot be deleted here" : ""}>
               <span>
-                <input 
-                  type="checkbox" 
-                  checked={selectedIds.includes(r.invoiceNumber)} 
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(r.invoiceNumber)}
                   onChange={() => {
-                    if (!r.sentToGST) toggleSelect(r.invoiceNumber);
-                  }} 
-                  disabled={r.sentToGST === true}
-                  style={{ cursor: r.sentToGST ? 'not-allowed' : 'pointer', width: 14, height: 14, opacity: r.sentToGST ? 0.4 : 1 }} 
+                    if (!r.isLocked) toggleSelect(r.invoiceNumber);
+                  }}
+                  disabled={r.isLocked}
+                  style={{ cursor: r.isLocked ? 'not-allowed' : 'pointer', width: 14, height: 14, opacity: r.isLocked ? 0.5 : 1 }}
                 />
               </span>
             </Tooltip>
@@ -1087,33 +1018,13 @@ export default function FinancialYearDetails({ onBack }) {
                   <LockIcon sx={{ fontSize: 14, color: '#0284c7' }} />
                 </Tooltip>
               )}
-              <input 
-                value={r.displayInvoiceNumber || ''} 
-                onChange={e => handleRowEdit(r.invoiceNumber, 'displayInvoiceNumber', e.target.value)} 
+              <input
+                value={r.displayInvoiceNumber || ''}
+                onChange={e => handleRowEdit(r.invoiceNumber, 'displayInvoiceNumber', e.target.value)}
                 disabled={r.isLocked}
-                style={{ ...iStyle, fontWeight: 700, width: '100%', color: r.isLocked ? '#0369a1' : 'inherit' }} 
+                style={{ ...iStyle, fontWeight: 700, width: '100%', color: r.isLocked ? '#0369a1' : 'inherit' }}
               />
             </Box>
-          </td>
-
-          {/* GST Status */}
-          <td style={td({ textAlign: 'center', background: baseBg })}>
-            {r.sentToGST ? (
-              <span style={{
-                display: 'inline-block', padding: '3px 8px', borderRadius: '6px', fontSize: '10px',
-                fontWeight: 800, background: '#ffffff', color: '#475569', border: '1px solid #cbd5e1',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-              }}>
-                SENT TO GST
-              </span>
-            ) : (
-              <span style={{
-                display: 'inline-block', padding: '3px 8px', borderRadius: '6px', fontSize: '10px',
-                fontWeight: 800, background: 'rgba(249, 115, 22, 0.12)', color: '#ea580c', border: '1px solid #f97316'
-              }}>
-                SEND TO GST
-              </span>
-            )}
           </td>
 
           {/* Invoice Date */}
@@ -1279,7 +1190,7 @@ export default function FinancialYearDetails({ onBack }) {
     ...extra
   });
 
-  
+
 
   const finalFilteredRows = computedRows.filter(r => {
     if (searchQuery) {
@@ -1308,7 +1219,7 @@ export default function FinancialYearDetails({ onBack }) {
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
-      
+
       {/* ── Premium Header ───────────────────────────────────────────── */}
       <Box sx={{
         px: { xs: 2, md: 4 }, py: 2,
@@ -1424,10 +1335,10 @@ export default function FinancialYearDetails({ onBack }) {
           <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
 
           {selectedIds.length > 0 && (
-             <Button variant="contained" size="small" onClick={openPaymentModal}
-               sx={{ fontWeight: 700, borderRadius: '10px', bgcolor: '#3b82f6', color: '#fff', textTransform: 'none', boxShadow: '0 4px 10px rgba(59,130,246,0.3)', '&:hover': { bgcolor: '#2563eb' } }}>
-               Group Payment
-             </Button>
+            <Button variant="contained" size="small" onClick={openPaymentModal}
+              sx={{ fontWeight: 700, borderRadius: '10px', bgcolor: '#3b82f6', color: '#fff', textTransform: 'none', boxShadow: '0 4px 10px rgba(59,130,246,0.3)', '&:hover': { bgcolor: '#2563eb' } }}>
+              Group Payment
+            </Button>
           )}
 
           <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
@@ -1449,21 +1360,6 @@ export default function FinancialYearDetails({ onBack }) {
             {loading ? 'Saving...' : `Save${(dirtyRows.size + dirtyGroups.size) > 0 ? ` (${dirtyRows.size + dirtyGroups.size})` : ''}`}
           </Button>
 
-          <Button
-            size="small" variant="contained"
-            startIcon={sendingGST ? <CircularProgress size={14} color="inherit" /> : <SendIcon sx={{ fontSize: '1.1rem' }} />}
-            onClick={handleSendToGST} disabled={sendingGST}
-            sx={{
-              fontWeight: 700, borderRadius: '10px', px: 2.5, fontSize: '0.85rem', textTransform: 'none',
-              background: sendingGST ? '#ffffff' : 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-              color: sendingGST ? '#94a3b8' : '#ffffff',
-              boxShadow: sendingGST ? 'none' : '0 4px 12px rgba(249, 115, 22, 0.35)',
-              '&:hover': { background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' },
-              ml: 0.5
-            }}>
-            {sendingGST ? 'Processing GST...' : 'SEND TO GST'}
-          </Button>
-
           <Tooltip title="Print Register">
             <IconButton size="small" onClick={() => window.print()} sx={{ bgcolor: 'background.default', border: '1px solid #e2e8f0', '&:hover': { bgcolor: 'background.default' }, p: 0.75, borderRadius: '10px' }}>
               <PrintIcon sx={{ fontSize: '1.1rem', color: '#475569' }} />
@@ -1477,59 +1373,42 @@ export default function FinancialYearDetails({ onBack }) {
           </Tooltip>
         </Box>
       </Box>
-      
+
       {/* 4. Table Container */}
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', p: { xs: 1, md: 2 } }}>
         <Box sx={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'auto', bgcolor: 'background.paper', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
           <table style={{ borderCollapse: 'collapse', whiteSpace: 'normal', fontFamily: 'Inter,sans-serif', fontSize: 13, width: 'max-content', minWidth: '100%' }}>
-              <thead>
-                <tr>
-                  <th style={thStyle({ minWidth: 50, position: 'sticky', left: 0, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Sl No</th>
-                  <th style={thStyle({ minWidth: 50, position: 'sticky', left: 50, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>
-                    <Tooltip title="Select all eligible (unsent) bills">
-                      <input
-                        type="checkbox"
-                        checked={visibleRows.filter(r => !r.sentToGST).length > 0 && visibleRows.filter(r => !r.sentToGST).every(r => selectedIds.includes(r.invoiceNumber))}
-                        onChange={(e) => {
-                          const eligibleInvoices = visibleRows.filter(r => !r.sentToGST).map(r => r.invoiceNumber);
-                          if (e.target.checked) {
-                            setSelectedIds(prev => Array.from(new Set([...prev, ...eligibleInvoices])));
-                          } else {
-                            setSelectedIds(prev => prev.filter(id => !eligibleInvoices.includes(id)));
-                          }
-                        }}
-                        style={{ cursor: 'pointer', width: 14, height: 14 }}
-                      />
-                    </Tooltip>
-                  </th>
-                  <th style={thStyle({ minWidth: 170, position: 'sticky', left: 100, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Invoice Number</th>
-                  <th style={thStyle({ minWidth: 120 })}>GST Status</th>
-                  <th style={thStyle({ minWidth: 120 })}>Invoice Date</th>
-                  <th style={thStyle({ minWidth: 150 })}>Shipment Number</th>
-                  <th style={thStyle({ minWidth: 220 })}>Month</th>
-                  <th style={thStyle({ minWidth: 140 })}>SITE</th>
-                  <th style={thStyle({ minWidth: 160 })}>BILL</th>
-                  <th style={thStyle({ minWidth: 100 })}>Amount</th>
-                  <th style={thStyle({ minWidth: 80 })}>CGST</th>
-                  <th style={thStyle({ minWidth: 80 })}>SGST</th>
-                  <th style={thStyle({ minWidth: 110 })}>Total Amount</th>
-                  <th style={thStyle({ minWidth: 90 })}>TDS @2%</th>
-                  <th style={thStyle({ minWidth: 130 })}>Receivable</th>
-                  <th style={thStyle({ minWidth: 150 })}>Payment Amount<br/>(Paid)</th>
-                  <th style={thStyle({ minWidth: 100 })}>TDS Provision</th>
-                  <th style={thStyle({ minWidth: 100 })}>Difference</th>
-                  <th style={thStyle({ minWidth: 130 })}>Payment Date</th>
-                  <th style={thStyle({ minWidth: 100 })}>Reference No</th>
-                  <th style={thStyle({ minWidth: 110 })}>Debit Amount</th>
-                  <th style={thStyle({ minWidth: 240 })}>Debit Reasons(Deduction)</th>
-                  <th style={thStyle({ minWidth: 350, borderRight: 'none' })}>Remarks</th>
-                </tr>
-              </thead>
-              <tbody style={{ '& > tr:hover': { background: '#f8fafc' } }}>
-                {visibleRows.map((r, ri) => renderRow(r, ri))}
-              </tbody>
-            </table>
-          </Box>
+            <thead>
+              <tr>
+                <th style={thStyle({ minWidth: 50, position: 'sticky', left: 0, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Sl No</th>
+                <th style={thStyle({ minWidth: 50, position: 'sticky', left: 50, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Select</th>
+                <th style={thStyle({ minWidth: 170, position: 'sticky', left: 100, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Invoice Number</th>
+                <th style={thStyle({ minWidth: 120 })}>Invoice Date</th>
+                <th style={thStyle({ minWidth: 150 })}>Shipment Number</th>
+                <th style={thStyle({ minWidth: 220 })}>Month</th>
+                <th style={thStyle({ minWidth: 140 })}>SITE</th>
+                <th style={thStyle({ minWidth: 160 })}>BILL</th>
+                <th style={thStyle({ minWidth: 100 })}>Amount</th>
+                <th style={thStyle({ minWidth: 80 })}>CGST</th>
+                <th style={thStyle({ minWidth: 80 })}>SGST</th>
+                <th style={thStyle({ minWidth: 110 })}>Total Amount</th>
+                <th style={thStyle({ minWidth: 90 })}>TDS @2%</th>
+                <th style={thStyle({ minWidth: 130 })}>Receivable</th>
+                <th style={thStyle({ minWidth: 150 })}>Payment Amount<br />(Paid)</th>
+                <th style={thStyle({ minWidth: 100 })}>TDS Provision</th>
+                <th style={thStyle({ minWidth: 100 })}>Difference</th>
+                <th style={thStyle({ minWidth: 130 })}>Payment Date</th>
+                <th style={thStyle({ minWidth: 100 })}>Reference No</th>
+                <th style={thStyle({ minWidth: 110 })}>Debit Amount</th>
+                <th style={thStyle({ minWidth: 240 })}>Debit Reasons(Deduction)</th>
+                <th style={thStyle({ minWidth: 350, borderRight: 'none' })}>Remarks</th>
+              </tr>
+            </thead>
+            <tbody style={{ '& > tr:hover': { background: '#f8fafc' } }}>
+              {visibleRows.map((r, ri) => renderRow(r, ri))}
+            </tbody>
+          </table>
+        </Box>
       </Box>
 
       {/* Pagination */}
@@ -1546,7 +1425,7 @@ export default function FinancialYearDetails({ onBack }) {
       )}
 
       {/* Payment Modal */}
-{/* Payment Modal */}
+      {/* Payment Modal */}
       <Dialog open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 800 }}>Group Payment Details</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
@@ -1781,7 +1660,7 @@ export default function FinancialYearDetails({ onBack }) {
                                 <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#4f46e5', fontFamily: 'monospace', fontSize: 10.5, fontWeight: 500 }}>
                                   {t.invoiceNo}
                                 </td>
-                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#334155', fontWeight: 600, maxWidth: 180 , whiteSpace: 'normal' }}>
+                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#334155', fontWeight: 600, maxWidth: 180, whiteSpace: 'normal' }}>
                                   <span style={{ color: '#94a3b8', fontWeight: 400 }}>{t.plant} </span>
                                   <span style={{ color: '#cbd5e1' }}>→ </span>
                                   {t.destination}
@@ -1821,7 +1700,7 @@ export default function FinancialYearDetails({ onBack }) {
                 </Typography>
                 {(() => {
                   const target = Math.max(0, num(damageTarget?.difference || 0));
-                  
+
                   // In the modal, we show remaining based on the group's difference and the entire group's allocations
                   const groupRows = computedRows.filter(cr => cr.groupId === damageTarget?.groupId);
                   const alloc = groupRows.reduce((total, cr) => {
@@ -1842,7 +1721,7 @@ export default function FinancialYearDetails({ onBack }) {
               </Box>
 
               {/* Per-trip-row amount table */}
-              <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2,  }}>
+              <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2, }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: '#f8fafc' }}>
@@ -1872,11 +1751,11 @@ export default function FinancialYearDetails({ onBack }) {
                           {(damageTarget?.reasons || []).map(reason => (
                             <td key={reason} style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right', verticalAlign: 'bottom' }}>
                               {reason === 'Damage / Shortage' && (
-                                <Box sx={{ 
+                                <Box sx={{
                                   display: 'flex', flexDirection: 'column', alignItems: 'stretch', mb: 1.5,
                                   border: '1px solid #e2e8f0', borderRadius: 2, p: 1.5,
                                   bgcolor: 'background.default', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
-                                  minWidth: 260 
+                                  minWidth: 260
                                 }}>
                                   <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#475569', letterSpacing: 0.5, textAlign: 'center', mb: 1.5, borderBottom: '1px solid #e2e8f0', pb: 0.5 }}>
                                     DAMAGE / SHORTAGE INFORMATION
@@ -2188,7 +2067,7 @@ export default function FinancialYearDetails({ onBack }) {
                         }}
                       >
                         <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{b.billNo}</td>
-                        <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155', maxWidth: '200px' , whiteSpace: 'normal' }} title={b.invoiceNo}>{b.invoiceNo}</td>
+                        <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155', maxWidth: '200px', whiteSpace: 'normal' }} title={b.invoiceNo}>{b.invoiceNo}</td>
                         <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
                           {b.invoiceDate ? (() => {
                             const p = b.invoiceDate.split('-');

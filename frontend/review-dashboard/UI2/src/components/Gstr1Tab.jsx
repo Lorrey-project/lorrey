@@ -3,10 +3,6 @@ import { Box, Typography, Button, Snackbar, Alert, CircularProgress, Tooltip, Se
 import SaveIcon from '@mui/icons-material/Save';
 import InfoIcon from '@mui/icons-material/Info';
 import axios from 'axios';
-import { io } from 'socket.io-client';
-
-const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
-const socket = io(SOCKET_URL, { autoConnect: true, transports: ["websocket", "polling"] });
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -25,6 +21,16 @@ const formatAmount = (val) => {
   return Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+const getBillSubmissionFromType = (billType) => {
+  if (!billType) return '';
+  const bt = String(billType).trim().toUpperCase();
+  if (bt === 'FREIGHT') return 'PORTAL';
+  if (bt === 'TOLL') return 'EXCEL';
+  if (bt === 'UNLOADING') return 'EXCEL';
+  if (bt === 'INCENTIVE') return 'EXCEL';
+  return '';
+};
+
 const parseInvoiceDate = (dateStr) => {
   if (!dateStr) return null;
   // Check format: YYYY-MM-DD
@@ -37,7 +43,7 @@ const parseInvoiceDate = (dateStr) => {
   if (parts.length === 3 && parts[2].length === 4) {
     return new Date(parts[2], parts[1] - 1, parts[0]);
   }
-  
+
   const d = new Date(dateStr);
   return isNaN(d.getTime()) ? null : d;
 };
@@ -71,34 +77,13 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
       if (!fyYearStr) return;
       setLoading(true);
       try {
-        const [gstDataRes, fyDataRes] = await Promise.all([
-          axios.get(`${API_URL}/gst-portal`),
-          axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr } })
-        ]);
+        const { data } = await axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr } });
+        const allRows = data?.rows || [];
 
-        const gstPortalEntries = (gstDataRes.data?.entries || []).filter(e => e.type === 'gstr1');
-        const allFyRows = fyDataRes.data?.rows || [];
+        // Do not filter out rows by 'filterMonth' initially, so we can generate the dynamic dropdown for the entire FY
 
-        let sourceRows = [];
-        if (gstPortalEntries.length > 0) {
-          sourceRows = gstPortalEntries.map(g => ({
-            invoiceNumber: g['Invoice Number'] || g.sourceBillId,
-            displayInvoiceNumber: g['Invoice Number'],
-            invoiceDate: g['Invoice Date'],
-            month: g['Month'],
-            site: g['SITE'],
-            billType: g['BILL'],
-            amount: parseAmount(g['Amount']),
-            cgst: parseAmount(g['CGST']),
-            sgst: parseAmount(g['SGST']),
-            totalAmount: parseAmount(g['Total Amount']),
-            sentToGST: true
-          }));
-        } else {
-          sourceRows = allFyRows;
-        }
-
-        const mappedRows = sourceRows.map((r, i) => {
+        // Map the Bill Register data to the exact GSTR-1 structure requested
+        const mappedRows = allRows.map((r, i) => {
           const amt = parseAmount(r.amount);
           let c = parseAmount(r.cgst);
           let s = parseAmount(r.sgst);
@@ -111,6 +96,9 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
           const parsedDate = parseInvoiceDate(r.invoiceDate);
           const monthYearStr = getMonthYearStr(parsedDate);
 
+          const billTypeVal = r.billType || r.bill || r['BILL'] || '';
+          const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || r.billSubmissionThrough || r['Bill Submission'] || 'PORTAL';
+
           return {
             id: r.invoiceNumber || `temp-${i}`,
             slNo: i + 1,
@@ -118,11 +106,11 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
             invoiceDateObj: parsedDate,
             monthYearStr: monthYearStr,
             invoiceNumber: r.displayInvoiceNumber || r.invoiceNumber || '',
-            month: r.month || '',
+            month: r.month || '', // Fallback to provided month if any
             site: r.site || '',
-            billSubmissionThrough: 'PORTAL',
-            bill: r.billType || '',
-            billType: r.billType || '',
+            billSubmissionThrough: calculatedSubmission,
+            bill: billTypeVal,
+            billType: billTypeVal,
             amount: amt,
             cgst: c,
             sgst: s,
@@ -140,16 +128,6 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
     };
 
     fetchBillRegisterData();
-
-    const handler = () => {
-      fetchBillRegisterData();
-    };
-    socket.on('gstPortalUpdates', handler);
-    socket.on('fyDetailsUpdates', handler);
-    return () => {
-      socket.off('gstPortalUpdates', handler);
-      socket.off('fyDetailsUpdates', handler);
-    };
   }, [fyYearStr, filterMonth]);
 
   const availableMonths = useMemo(() => {
@@ -201,7 +179,7 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
   const CellDisplay = ({ value, align = "left", isNumeric = false }) => {
     const displayValue = isNumeric ? (typeof value === 'number' ? formatAmount(value) : value) : value;
     return (
-      <Box sx={{ 
+      <Box sx={{
         width: '100%', boxSizing: 'border-box', padding: '8px 6px',
         fontSize: '13px', fontFamily: 'inherit', textAlign: align,
         color: '#334155', backgroundColor: 'transparent',
@@ -239,7 +217,7 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, height: '100%', bgcolor: '#f8fafc', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      
+
       {/* Page Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
         <Box>
@@ -281,10 +259,10 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
               ))}
             </Select>
           </Box>
-          <Button 
-            variant="contained" 
-            color="primary" 
-            startIcon={<SaveIcon />} 
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<SaveIcon />}
             disabled={true} // Disabled because data comes from the Bill Register
             sx={{ px: 4, py: 1.5, fontWeight: 'bold', borderRadius: 1, opacity: 0.7 }}
           >
@@ -294,10 +272,10 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
       </Box>
 
       {/* Table Container */}
-      <Box sx={{ 
-        flex: 1, 
-        overflow: 'auto', 
-        border: '1px solid #cbd5e1', 
+      <Box sx={{
+        flex: 1,
+        overflow: 'auto',
+        border: '1px solid #cbd5e1',
         borderRadius: '4px',
         backgroundColor: '#fff',
         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',

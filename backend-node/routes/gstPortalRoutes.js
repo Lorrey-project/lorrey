@@ -51,6 +51,16 @@ function normalizeSite(site) {
   return site.trim();
 }
 
+function getBillSubmissionFromType(billType) {
+  if (!billType) return '';
+  const bt = String(billType).trim().toUpperCase();
+  if (bt === 'FREIGHT') return 'PORTAL';
+  if (bt === 'TOLL') return 'EXCEL';
+  if (bt === 'UNLOADING') return 'EXCEL';
+  if (bt === 'INCENTIVE') return 'EXCEL';
+  return '';
+}
+
 function monthsMatch(m1, m2) {
   if (!m1 || !m2) return false;
   const norm = (s) => String(s).toUpperCase().replace(/['\s-]/g, "");
@@ -134,6 +144,7 @@ router.post("/sync-liabilities", auth, async (req, res) => {
       const amt = parseFloat(finalRow.amount || 0);
       const gst = Math.round(amt * 0.18);
       const totalAmount = amt + gst;
+      const billSubmission = getBillSubmissionFromType(finalRow.billType) || 'PORTAL';
 
       syncRows.push({
         type: 'liability',
@@ -144,6 +155,7 @@ router.post("/sync-liabilities", auth, async (req, res) => {
         'Month': finalRow.month,
         'SITE': finalRow.site,
         'BILL': finalRow.billType,
+        'Bill Submission': billSubmission,
         'Amount': amt,
         'GST(18%)': gst,
         'Total Amount': totalAmount,
