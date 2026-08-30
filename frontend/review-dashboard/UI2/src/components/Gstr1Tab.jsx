@@ -53,16 +53,13 @@ const getMonthYearStr = (dateObj) => {
   return `${MONTH_NAMES[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
 };
 
-export default function Gstr1Tab({ filterMonth, filterYear }) {
+export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
   const [rows, setRows] = useState([]);
   const [siteFilter, setSiteFilter] = useState('ALL');
   const [dateFilter, setDateFilter] = useState('ALL');
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState({ open: false, message: '', type: 'success' });
 
-  // Compute the Financial Year string for the Bill Register fetch
-  // E.g., if filterMonth=8 (August) and filterYear=2026, then it's part of FY 2026-2027
-  // If filterMonth=2 (February) and filterYear=2027, it's also FY 2026-2027
   const fyYearStr = useMemo(() => {
     if (!filterYear) return '';
     if (filterMonth >= 4) {
@@ -73,21 +70,55 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
   }, [filterMonth, filterYear]);
 
   useEffect(() => {
-    const fetchBillRegisterData = async () => {
+    const fetchGstr1Data = async () => {
       if (!fyYearStr) return;
       setLoading(true);
       try {
-        const { data } = await axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr } });
-        const allRows = data?.rows || [];
+        const token = localStorage.getItem('token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-        // Do not filter out rows by 'filterMonth' initially, so we can generate the dynamic dropdown for the entire FY
+        const [fyRes, gstRes] = await Promise.allSettled([
+          axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr }, headers }),
+          axios.get(`${API_URL}/gst-portal`, { headers })
+        ]);
 
-        // Map the Bill Register data to the exact GSTR-1 structure requested
-        const mappedRows = allRows.map((r, i) => {
+        let allFyRows = [];
+        if (fyRes.status === 'fulfilled' && fyRes.value?.data?.rows) {
+          allFyRows = fyRes.value.data.rows;
+        }
+
+        let gstEntries = [];
+        if (gstRes.status === 'fulfilled' && gstRes.value?.data?.entries) {
+          gstEntries = gstRes.value.data.entries.filter(e => e.type === 'gstr1');
+        } else if (Array.isArray(entries) && entries.length > 0) {
+          gstEntries = entries.filter(e => e.type === 'gstr1');
+        }
+
+        let sourceRows = [];
+        if (gstEntries.length > 0) {
+          sourceRows = gstEntries.map(g => ({
+            invoiceNumber: g['Invoice Number'] || g.sourceBillId,
+            displayInvoiceNumber: g['Invoice Number'],
+            invoiceDate: g['Invoice Date'],
+            month: g['Month'],
+            site: g['SITE'],
+            billType: g['BILL'] || g.billType,
+            amount: parseAmount(g['Amount']),
+            cgst: parseAmount(g['CGST']),
+            sgst: parseAmount(g['SGST']),
+            totalAmount: parseAmount(g['Total Amount']),
+            billSubmissionThrough: g['Bill Submission'],
+            sentToGST: true
+          }));
+        } else {
+          sourceRows = allFyRows;
+        }
+
+        const mappedRows = sourceRows.map((r, i) => {
           const amt = parseAmount(r.amount);
           let c = parseAmount(r.cgst);
           let s = parseAmount(r.sgst);
-          
+
           if (c === 0 && s === 0 && amt > 0) {
             c = Math.round(amt * 0.09);
             s = Math.round(amt * 0.09);
@@ -106,7 +137,7 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
             invoiceDateObj: parsedDate,
             monthYearStr: monthYearStr,
             invoiceNumber: r.displayInvoiceNumber || r.invoiceNumber || '',
-            month: r.month || '', // Fallback to provided month if any
+            month: r.month || '',
             site: r.site || '',
             billSubmissionThrough: calculatedSubmission,
             bill: billTypeVal,
@@ -120,15 +151,14 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
 
         setRows(mappedRows);
       } catch (err) {
-        console.error("Failed to fetch bill register data", err);
-        setNotification({ open: true, message: 'Failed to sync with Bill Register', type: 'error' });
+        console.error("Failed to fetch GSTR-1 data", err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchBillRegisterData();
-  }, [fyYearStr, filterMonth]);
+    fetchGstr1Data();
+  }, [fyYearStr, filterMonth, entries]);
 
   const availableMonths = useMemo(() => {
     const unique = new Set();
@@ -137,11 +167,14 @@ export default function Gstr1Tab({ filterMonth, filterYear }) {
         unique.add(r.monthYearStr);
       }
     });
-    // Sort descending by Year and then Month
     return Array.from(unique).sort((a, b) => {
-      const [monthA, yearA] = a.split(' ');
-      const [monthB, yearB] = b.split(' ');
-      if (yearA !== yearB) return Number(yearB) - Number(yearA);
+      const partsA = String(a || '').split(' ');
+      const partsB = String(b || '').split(' ');
+      const monthA = partsA[0] || '';
+      const yearA = partsA[1] || '';
+      const monthB = partsB[0] || '';
+      const yearB = partsB[1] || '';
+      if (yearA && yearB && yearA !== yearB) return Number(yearB) - Number(yearA);
       return MONTH_NAMES.indexOf(monthB) - MONTH_NAMES.indexOf(monthA);
     });
   }, [rows]);
