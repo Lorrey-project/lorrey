@@ -130,6 +130,69 @@ router.get("/", async (req, res) => {
   }
 });
 
+// ── GET /cement-register/pending-bills ─────────────────────────────────────
+// Fetch records from the previous 4 months that are pending (Freight or Unloading bill not generated)
+router.get("/pending-bills", async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    if (!month || !year) return res.status(400).json({ error: "Missing month/year" });
+    
+    const m = parseInt(month, 10);
+    const y = parseInt(year, 10);
+    
+    // Calculate previous 4 months
+    const prevMonths = [];
+    for (let i = 1; i <= 4; i++) {
+      let prevM = m - i;
+      let prevY = y;
+      if (prevM <= 0) {
+        prevM += 12;
+        prevY -= 1;
+      }
+      prevMonths.push({ month: prevM, year: prevY });
+    }
+    
+    const filter = {
+      $or: prevMonths.map(pm => ({ month: pm.month, year: pm.year }))
+    };
+    
+    const col = getCollection();
+    const entries = await col.find(filter).toArray();
+    
+    // Filter in JS: We only want pending records:
+    // Either Freight is pending (no BILL NO and Freight Generated != 'Yes')
+    // OR Unloading is pending (no UNLOADING BILL NO and Unloading Generated != 'Yes')
+    const pendingEntries = entries.filter(r => {
+       const fGen = r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== '');
+       const uGen = r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== '');
+       
+       return !fGen || !uGen; // at least one is pending
+    });
+    
+    // Sort chronologically by date
+    pendingEntries.sort((a, b) => {
+      const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"] || a["UNLOADING STATUS"]);
+      const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"] || b["UNLOADING STATUS"]);
+      if (dateA.getTime() !== dateB.getTime()) {
+        return dateA.getTime() - dateB.getTime();
+      }
+      const slA = parseInt(String(a["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+      const slB = parseInt(String(b["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+      return slA - slB;
+    });
+
+    const formattedEntries = pendingEntries.map((entry) => {
+      if (entry["LOADING DT"]) entry["LOADING DT"] = formatDateToDDMMYY(entry["LOADING DT"]);
+      if (entry["LOADING DATE"]) entry["LOADING DATE"] = formatDateToDDMMYY(entry["LOADING DATE"]);
+      return entry;
+    });
+
+    res.json({ success: true, count: formattedEntries.length, entries: formattedEntries });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ── GET /cement-register/lookup/:invoiceId ─────────────────────────────────────
 router.get('/lookup/:invoiceId', async (req, res) => {
   try {
@@ -677,6 +740,76 @@ router.post("/attach/:rowId/:attachType", auth, (req, res, next) => {
     io.emit("cementUpdates", { action: "attach", rowId, field, url, attachType });
 
     res.json({ success: true, url, field });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── POST /cement-register/backfill-month-year ─────────────────────────────────
+// One-time migration: fix all existing auto-synced records that are missing
+// the 'month' and 'year' fields. Parses LOADING DT to derive calendar month/year.
+// Safe to run multiple times — skips records that already have both fields set.
+router.post("/backfill-month-year", auth, async (req, res) => {
+  try {
+    const col = getCollection();
+
+    // Find all records missing month OR year
+    const orphans = await col.find({
+      $or: [
+        { month: { $exists: false } },
+        { year: { $exists: false } },
+        { month: null },
+        { year: null }
+      ]
+    }).toArray();
+
+    if (orphans.length === 0) {
+      return res.json({ success: true, updated: 0, message: "All records already have month/year — nothing to backfill." });
+    }
+
+    // Helper: parse LOADING DT (dd-mm-yyyy or dd.mm.yy or ISO) to { month, year }
+    const parseDT = (dStr) => {
+      if (!dStr) return null;
+      const s = String(dStr).trim();
+
+      // dd.mm.yy or dd-mm-yyyy or dd/mm/yyyy
+      const m1 = s.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})$/);
+      if (m1) {
+        let year = parseInt(m1[3], 10);
+        if (year < 100) year += 2000;
+        return { month: parseInt(m1[2], 10), year };
+      }
+      // yyyy-mm-dd (ISO)
+      const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m2) return { month: parseInt(m2[2], 10), year: parseInt(m2[1], 10) };
+      // Try native Date parse as fallback
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return { month: d.getMonth() + 1, year: d.getFullYear() };
+      return null;
+    };
+
+    const bulkOps = [];
+    let skipped = 0;
+    for (const doc of orphans) {
+      const dateStr = doc["LOADING DT"] || doc["LOADING DATE"] || doc["BILL DATE"] || doc["RECEIVING DATE"];
+      const parsed = parseDT(dateStr);
+      if (!parsed) { skipped++; continue; }
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: doc._id },
+          update: { $set: { month: parsed.month, year: parsed.year } }
+        }
+      });
+    }
+
+    let updated = 0;
+    if (bulkOps.length > 0) {
+      const result = await col.bulkWrite(bulkOps);
+      updated = result.modifiedCount;
+    }
+
+    console.log(`[backfill-month-year] Updated ${updated}, skipped ${skipped} (no parseable date)`);
+    res.json({ success: true, updated, skipped, total: orphans.length });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

@@ -359,6 +359,7 @@ const validateImportData = (rows, existingEntries) => {
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function CementRegister({ onBack }) {
   const [entries, setEntries] = useState([]);
+  const [pendingEntries, setPendingEntries] = useState([]);
   const [localData, setLocalData] = useState({});   // { rowId: { field: val } }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -422,24 +423,50 @@ export default function CementRegister({ onBack }) {
 
 
 
+  const [errorMsg, setErrorMsg] = useState('');
+
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (silent = false) => {
+    setErrorMsg('');
+    console.log('fetchData called', { silent, selectedMonth, selectedYear });
+    
+    // STEP 1: Render Current Data Immediately
     try {
       if (!silent) setLoading(true);
       const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
+      
+      // Fetch normal data first!
       const res = await axios.get(`${API_URL}/cement-register`, {
-        params: {
-          month: selectedMonth,
-          year: calendarYear
-        }
+        params: { month: selectedMonth, year: calendarYear, _t: Date.now() }
       });
-      if (res.data.success) {
-        setEntries(res.data.entries);
+      
+      if (res.data && res.data.success) {
+        setEntries(res.data.entries || []);
         setLocalData({});
-        setSaveCompleted(res.data.entries.length > 0);
+        setSaveCompleted((res.data.entries || []).length > 0);
+      } else {
+        const preview = typeof res.data === 'string' ? res.data.substring(0, 50) : JSON.stringify(res.data || 'undefined');
+        setErrorMsg(`API Response Success is falsy. Data: ${preview}`);
       }
+      
+      // We have normal data, stop main loading spinner
+      setLoading(false);
+
+      // STEP 2 & 3: Fetch pending bills asynchronously without blocking
+      axios.get(`${API_URL}/cement-register/pending-bills`, {
+        params: { month: selectedMonth, year: calendarYear, _t: Date.now() }
+      }).then(pendingRes => {
+        if (pendingRes.data && pendingRes.data.success) {
+           setPendingEntries(pendingRes.data.entries || []);
+        }
+      }).catch(err => {
+        console.error('Failed to fetch pending bills:', err);
+        // Do not crash the main page
+      });
+
     } catch (e) {
       console.error('Fetch failed:', e);
+      setErrorMsg(e.message || 'Unknown network error');
     } finally {
       setLoading(false);
     }
@@ -458,6 +485,7 @@ export default function CementRegister({ onBack }) {
         }
         return prev.filter(r => r._invoiceId !== msg.invoiceId);
       });
+      setPendingEntries(prev => prev.filter(r => r._invoiceId !== msg.invoiceId));
       setLiveMsg('🗑️ Entry removed — invoice was deleted');
       fetchData(true);
     } else {
@@ -509,39 +537,81 @@ export default function CementRegister({ onBack }) {
     }));
   }, [entries, unsavedImportRows, localData]);
 
-  const filteredRows = useMemo(() => {
-    let result = computedRows;
-    if (filterBillingStatus !== 'All') {
-      if (filterBillingStatus === 'Billed') result = result.filter(r => r['Billing Completed'] === 'Yes');
-      if (filterBillingStatus === 'Pending') result = result.filter(r => r['Billing Completed'] !== 'Yes');
-    }
-    if (filterChallanStatus !== 'All') {
-      if (filterChallanStatus === 'Stamped') result = result.filter(r => String(r['CHALLAN STATUS']).toUpperCase() === 'STAMP');
-      if (filterChallanStatus === 'Non-Stamped') result = result.filter(r => String(r['CHALLAN STATUS']).toUpperCase() === 'NON STAMP');
-      if (filterChallanStatus === 'Empty') result = result.filter(r => !r['CHALLAN STATUS']);
-    }
+  // ── Pending merged rows with calcs ─────────────────────────────────────────
+  const pendingComputedRows = useMemo(() => {
+    let rows = pendingEntries.map(row => {
+      const merged = { ...row, ...(localData[row._id] || {}) };
+      return applyCalcs(merged);
+    });
 
-    if (!searchQuery) return result;
-    const q = searchQuery.toLowerCase();
-    return result.filter(row => Object.values(row).some(val => String(val || '').toLowerCase().includes(q)));
-  }, [computedRows, searchQuery, filterBillingStatus, filterChallanStatus]);
+    // Sort chronologically by date
+    rows.sort((a, b) => {
+      const dateA = parseToDate(a['LOADING DT'] || a['LOADING DATE']);
+      const dateB = parseToDate(b['LOADING DT'] || b['LOADING DATE']);
+      if (dateA.getTime() !== dateB.getTime()) {
+        return dateA.getTime() - dateB.getTime();
+      }
+      return 0; // Maintain existing order if dates match
+    });
+
+    return rows.map((r, index) => ({
+      ...r,
+      'isPending': true,
+      'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
+    }));
+  }, [pendingEntries, localData]);
+
+  const filteredRows = useMemo(() => {
+    const applyFilters = (rowsArray) => {
+      let result = rowsArray;
+      if (filterBillingStatus !== 'All') {
+        if (filterBillingStatus === 'Billed') result = result.filter(r => r['Billing Completed'] === 'Yes');
+        if (filterBillingStatus === 'Pending') result = result.filter(r => r['Billing Completed'] !== 'Yes');
+      }
+      if (filterChallanStatus !== 'All') {
+        if (filterChallanStatus === 'Stamped') result = result.filter(r => String(r['CHALLAN STATUS']).toUpperCase() === 'STAMP');
+        if (filterChallanStatus === 'Non-Stamped') result = result.filter(r => String(r['CHALLAN STATUS']).toUpperCase() === 'NON STAMP');
+        if (filterChallanStatus === 'Empty') result = result.filter(r => !r['CHALLAN STATUS']);
+      }
+  
+      if (!searchQuery) return result;
+      const q = searchQuery.toLowerCase();
+      return result.filter(row => Object.values(row).some(val => String(val || '').toLowerCase().includes(q)));
+    };
+
+    return {
+      normal: applyFilters(computedRows),
+      pending: applyFilters(pendingComputedRows)
+    };
+  }, [computedRows, pendingComputedRows, searchQuery, filterBillingStatus, filterChallanStatus]);
+
+  const allRecords = useMemo(() => {
+    return [
+      ...filteredRows.pending.map(r => ({ ...r, _isPending: true })),
+      ...filteredRows.normal.map(r => ({ ...r, _isPending: false }))
+    ];
+  }, [filteredRows]);
+
+  const paginatedRecords = useMemo(() => {
+    return allRecords.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  }, [allRecords, page, rowsPerPage]);
 
   const monthlyTotals = useMemo(() => {
     const totals = {};
     NUMERIC_KEYS.forEach(key => {
       let sum = 0;
-      filteredRows.forEach(row => {
+      filteredRows.normal.forEach(row => {
         sum += num(row[key]);
       });
       totals[key] = sum;
     });
     return totals;
-  }, [filteredRows]);
+  }, [filteredRows.normal]);
 
 
 
   const unbilledRows = computedRows.filter(r => String(r['CHALLAN STATUS']).toUpperCase().trim() !== 'BILLED');
-  const allSelected = unbilledRows.length > 0 && selectedIds.size === unbilledRows.length;
+  const allSelected = unbilledRows.length > 0 && selectedIds.size === (unbilledRows.length + pendingComputedRows.length);
   const someSelected = selectedIds.size > 0 && !allSelected;
 
   const toggleSelect = (id) => setSelectedIds(prev => {
@@ -553,7 +623,7 @@ export default function CementRegister({ onBack }) {
     if (allSelected || someSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(unbilledRows.map(r => r._id)));
+      setSelectedIds(new Set([...unbilledRows.map(r => r._id), ...pendingComputedRows.map(r => r._id)]));
     }
   };
   // ── Cell edit (local draft) ────────────────────────────────────────────────
@@ -726,7 +796,8 @@ export default function CementRegister({ onBack }) {
 
     // Ensure none of the selected records are already billed for the same type
     const isAlreadyGenerated = ids.some(id => {
-      const r = computedRows.find(row => row._id === id);
+      let r = computedRows.find(row => row._id === id);
+      if (!r) r = pendingComputedRows.find(row => row._id === id);
       if (!r) return false;
       const fGen = r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== '');
       const uGen = r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== '');
@@ -1041,14 +1112,14 @@ export default function CementRegister({ onBack }) {
     }
   });
 
-  if (loading) {
-    return (
-      <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
-        <CircularProgress size={48} thickness={4} sx={{ color: '#7c3aed' }} />
-        <Typography color="text.secondary" fontWeight={600}>Loading Cement Register…</Typography>
-      </Box>
-    );
-  }
+  // if (loading) {
+  //   return (
+  //     <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
+  //       <CircularProgress size={48} thickness={4} sx={{ color: '#7c3aed' }} />
+  //       <Typography color="text.secondary" fontWeight={600}>Loading Cement Register…</Typography>
+  //     </Box>
+  //   );
+  // }
 
 
 
@@ -1232,11 +1303,9 @@ export default function CementRegister({ onBack }) {
               Cement Register
             </Typography>
             <Box display="flex" alignItems="center" gap={1.5} mt={0.5}>
-              <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
-                Total Records: <span style={{ color: '#e2e8f0' }}>{filteredRows.length}</span>
-              </Typography>
-              <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: '#475569' }} />
-              <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+              <Typography variant="body2" color="text.secondary">
+                Total Records: <span style={{ color: '#e2e8f0' }}>{filteredRows.normal.length + filteredRows.pending.length}</span>
+                <span style={{ margin: '0 8px', color: '#64748b' }}>•</span>
                 Period: <span style={{ color: '#e2e8f0' }}>{MONTHS[selectedMonth - 1]} {selectedYear}</span>
               </Typography>
             </Box>
@@ -1348,6 +1417,11 @@ export default function CementRegister({ onBack }) {
           <Box display="flex" gap={1} alignItems="center">
             {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700, bgcolor: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' }} />}
             {selectedIds.size > 0 && <Chip label={`${selectedIds.size} selected`} size="small" sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700, bgcolor: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' }} />}
+            {saveCompleted && <Chip size="small" color="success" label="✅ Synced with DB" />}
+            {errorMsg && <Chip size="small" color="error" label={`Error: ${errorMsg}`} />}
+            {!saveCompleted && !loading && !errorMsg && entries.length === 0 && (
+              <Chip size="small" color="default" label="ℹ️ No data loaded" />
+            )}
           </Box>
         </Box>
 
@@ -1432,10 +1506,24 @@ export default function CementRegister({ onBack }) {
       </Box>
 
       {/* ── Group header row ─────────────────────────────────────────────── */}
-      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, m: { xs: 1, md: 2 }, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: 'background.paper' }}>
+      <Box ref={tableContainerRef} sx={{ 
+        overflow: 'auto', 
+        flex: 1, 
+        minHeight: 0, // Fix vertical flex overflow
+        minWidth: 0,  // Fix horizontal flex overflow
+        m: { xs: 1, md: 2 }, 
+        borderRadius: '12px', 
+        border: '1px solid #e2e8f0', 
+        boxShadow: '0 4px 15px rgba(0,0,0,0.03)', 
+        bgcolor: 'background.paper' 
+      }}>
         <table style={{
-          borderCollapse: 'collapse', minWidth: '100%',
-          tableLayout: 'auto', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
+          borderCollapse: 'separate', 
+          borderSpacing: 0,
+          minWidth: '100%',
+          tableLayout: 'auto', 
+          fontFamily: 'Inter, system-ui, sans-serif', 
+          fontSize: '11px'
         }}>
           {/* Col widths */}
           <colgroup>
@@ -1448,7 +1536,7 @@ export default function CementRegister({ onBack }) {
             <tr>
               {/* Select-all checkbox */}
               <th style={{
-                position: 'sticky', top: 0, zIndex: 3, width: 40, minWidth: 40,
+                position: 'sticky', top: 0, left: 0, zIndex: 20, width: 40, minWidth: 40,
                 background: '#0f172a',
                 textAlign: 'center', padding: '10px 4px',
                 borderRight: '1px solid rgba(255,255,255,0.1)',
@@ -1475,7 +1563,7 @@ export default function CementRegister({ onBack }) {
                   <th key={col.key}
                     title={col.hint || col.label}
                     style={{
-                      position: 'sticky', top: 0, zIndex: 2,
+                      position: 'sticky', top: 0, zIndex: 10,
                       ...typeStyle,
                       padding: '10px 6px',
                       textAlign: 'center',
@@ -1492,10 +1580,11 @@ export default function CementRegister({ onBack }) {
                 );
               })}
             </tr>
+            <div style={{ height: 2, background: 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)' }} />
           </thead>
 
           <tbody>
-            {computedRows.length === 0 && (
+            {filteredRows.normal.length === 0 && filteredRows.pending.length === 0 && (
               <tr>
                 <td colSpan={VISIBLE_COLS.length + 1} style={{
                   textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px'
@@ -1504,81 +1593,111 @@ export default function CementRegister({ onBack }) {
                 </td>
               </tr>
             )}
-            {filteredRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((row, index) => {
-              const ri = page * rowsPerPage + index;
+            
+            {paginatedRecords.map((row, index) => {
+              const prevRow = page * rowsPerPage + index > 0 ? allRecords[page * rowsPerPage + index - 1] : null;
+              const showPendingDivider = row._isPending && (!prevRow || !prevRow._isPending);
+              const showNormalDivider = !row._isPending && (!prevRow || prevRow._isPending);
+
+              const isRowSelected = selectedIds.has(row._id);
+              const isRowUnbilled = String(row['CHALLAN STATUS']).toUpperCase().trim() !== 'BILLED';
               const hasDraft = !!localData[row._id];
-              const isSelected = selectedIds.has(row._id);
-
               const isMatch = !!searchQuery;
-
               const isLocked = row['Billing Completed'] === 'Yes';
 
-              return (
-                <tr key={row._id} style={{
-                  background: isLocked ? '#f8fafc' : isMatch
-                    ? '#f1f5f9'
-                    : isSelected
-                      ? '#f5f3ff'
-                      : row.isUnsavedImport
-                        ? '#fdf4ff'
-                        : hasDraft ? '#fffbeb'
-                          : ri % 2 === 0 ? '#ffffff' : '#fafafa',
-                  outline: isMatch ? '2px solid #cbd5e1' : (isSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'),
-                  transition: 'background 0.2s, opacity 0.2s',
-                  opacity: isLocked ? 0.85 : 1,
-                  boxShadow: isLocked ? 'inset 0 0 0 9999px rgba(226,232,240,0.3)' : 'none'
-                }} className="table-row-hover">
-                  {/* Row checkbox */}
-                  <td style={{
-                    width: 40, minWidth: 40, textAlign: 'center',
-                    border: '1px solid #e2e8f0', padding: '4px',
-                    background: isSelected ? 'rgba(124,58,237,0.06)' : 'transparent',
-                  }}>
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      disabled={isLocked}
-                      onChange={() => toggleSelect(row._id)}
-                      style={{
-                        cursor: isLocked ? 'not-allowed' : 'pointer',
-                        width: 13, height: 13, accentColor: '#7c3aed'
-                      }}
-                    />
-                  </td>
-                  {VISIBLE_COLS.map((col) => {
-                    const rawVal = row[col.key];
-                    const localVal = localData[row._id]?.[col.key];
-                    const displayVal = localVal !== undefined
-                      ? localVal
-                      : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
-                    const isDirty = localVal !== undefined;
-                    const gc = GROUP_COLORS[col.group] || GROUP_COLORS.id;
+              // Styles
+              const background = row._isPending 
+                 ? (isRowSelected ? '#e0f2fe' : hasDraft ? '#fef3c7' : '#fafafa')
+                 : (isLocked ? '#f8fafc' : isMatch ? '#f1f5f9' : isRowSelected ? '#f5f3ff' : row.isUnsavedImport ? '#fdf4ff' : hasDraft ? '#fffbeb' : ((page * rowsPerPage + index) % 2 === 0 ? '#ffffff' : '#fafafa'));
+              
+              const outline = row._isPending ? 'none' : (isMatch ? '2px solid #cbd5e1' : (isRowSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'));
+              const opacity = row._isPending ? 1 : (isLocked ? 0.85 : 1);
+              const boxShadow = row._isPending ? 'none' : (isLocked ? 'inset 0 0 0 9999px rgba(226,232,240,0.3)' : 'none');
 
-                    return (
-                      <CellRenderer
-                        key={col.key}
-                        col={col}
-                        value={displayVal}
-                        isDirty={isDirty}
-                        rowIndex={ri}
-                        row={row}
-                        onChange={(val) => handleCellEdit(row._id, col.key, val)}
-                        onAttachSaved={(field, url) => {
-                          const billNo = row['BILL NO'];
-                          setEntries(prev => prev.map(r => {
-                            if (field === 'BILL_PDF_URL' && billNo && r['BILL NO'] === billNo) {
-                              return { ...r, [field]: url };
-                            }
-                            return r._id === row._id ? { ...r, [field]: url } : r;
-                          }));
+              return (
+                <React.Fragment key={row._id}>
+                  {showPendingDivider && (
+                    <tr style={{ background: '#f8fafc' }}>
+                      <td colSpan={VISIBLE_COLS.length + 1} style={{ padding: '12px 16px', fontWeight: 'bold', fontSize: '13px', color: '#0f172a' }}>
+                        PENDING PREVIOUS-MONTH BILLS ({filteredRows.pending.length})
+                      </td>
+                    </tr>
+                  )}
+                  {showNormalDivider && (
+                    <tr style={{ background: '#f8fafc' }}>
+                      <td colSpan={VISIBLE_COLS.length + 1} style={{ padding: '12px 16px', fontWeight: 'bold', fontSize: '13px', color: '#0f172a', borderTop: '2px solid #e2e8f0' }}>
+                        CURRENT MONTH — {MONTHS[selectedMonth - 1]?.toUpperCase()} {selectedYear}
+                      </td>
+                    </tr>
+                  )}
+                  <tr
+                    onClick={() => row._isPending && isRowUnbilled && toggleSelect(row._id)}
+                    style={{
+                      background,
+                      outline,
+                      transition: 'background 0.2s, opacity 0.2s',
+                      opacity,
+                      boxShadow,
+                      cursor: row._isPending ? (isRowUnbilled ? 'pointer' : 'default') : 'default',
+                      height: row._isPending ? 38 : 'auto'
+                    }}
+                    className={!row._isPending ? "table-row-hover" : ""}
+                  >
+                    <td style={{
+                      position: 'sticky', left: 0, zIndex: 5,
+                      width: 40, minWidth: 40, textAlign: 'center',
+                      borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0',
+                      borderTop: row._isPending ? 'none' : '1px solid #e2e8f0',
+                      borderLeft: row._isPending ? 'none' : '1px solid #e2e8f0',
+                      padding: row._isPending ? '0 8px' : '4px',
+                      background: 'inherit',
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={isRowSelected}
+                        disabled={row._isPending ? !isRowUnbilled : isLocked}
+                        onChange={(e) => {
+                          if (row._isPending) e.stopPropagation();
+                          toggleSelect(row._id);
+                        }}
+                        style={{ 
+                          cursor: (row._isPending ? isRowUnbilled : !isLocked) ? 'pointer' : (row._isPending ? 'default' : 'not-allowed'), 
+                          width: row._isPending ? 14 : 13, height: row._isPending ? 14 : 13, accentColor: row._isPending ? '#3b82f6' : '#7c3aed' 
                         }}
                       />
-                    );
-                  })}
-                </tr>
+                    </td>
+                    {VISIBLE_COLS.map(col => {
+                      const rawVal = row[col.key];
+                      const localVal = localData[row._id]?.[col.key];
+                      const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
+                      const isDirty = localVal !== undefined;
+
+                      return (
+                        <CellRenderer
+                          key={col.key}
+                          col={col}
+                          value={displayVal}
+                          isDirty={isDirty}
+                          rowIndex={row._isPending ? index : (page * rowsPerPage + index)}
+                          row={row}
+                          onChange={row._isPending ? () => {} : ((val) => handleCellEdit(row._id, col.key, val))} 
+                          onAttachSaved={row._isPending ? () => {} : ((field, url) => {
+                            const billNo = row['BILL NO'];
+                            setEntries(prev => prev.map(r => {
+                              if (field === 'BILL_PDF_URL' && billNo && r['BILL NO'] === billNo) {
+                                return { ...r, [field]: url };
+                              }
+                              return r._id === row._id ? { ...r, [field]: url } : r;
+                            }));
+                          })}
+                        />
+                      );
+                    })}
+                  </tr>
+                </React.Fragment>
               );
             })}
-            {filteredRows.length > 0 && (
+            {filteredRows.normal.length > 0 && (
               <tr style={{
                 fontWeight: 900,
                 borderTop: '2px double #cbd5e1',
@@ -1587,7 +1706,7 @@ export default function CementRegister({ onBack }) {
                 <td style={{
                   border: '1px solid #cbd5e1', padding: '10px 6px', textAlign: 'center',
                   color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px',
-                  position: 'sticky', bottom: 0, zIndex: 10,
+                  position: 'sticky', bottom: 0, left: 0, zIndex: 20,
                   background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
                   boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
                 }}>
@@ -1628,7 +1747,7 @@ export default function CementRegister({ onBack }) {
       </Box>
       <TablePagination
         component="div"
-        count={filteredRows.length}
+        count={filteredRows.normal.length + filteredRows.pending.length}
         page={page}
         onPageChange={handleChangePage}
         rowsPerPage={rowsPerPage}
@@ -2129,7 +2248,11 @@ export default function CementRegister({ onBack }) {
             <Box sx={{ flex: 1, minWidth: 200 }}>
               <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', mb: 0.5, display: 'block' }}>BILL TYPE</Typography>
               {(() => {
-                const selectedRowsArray = [...selectedIds].map(id => computedRows.find(r => r._id === id)).filter(Boolean);
+                const selectedRowsArray = [...selectedIds].map(id => {
+                   let r = computedRows.find(row => row._id === id);
+                   if (!r) r = pendingComputedRows.find(row => row._id === id);
+                   return r;
+                }).filter(Boolean);
                 const totalSelected = selectedRowsArray.length;
 
                 const hasFreightCount = selectedRowsArray.filter(r => r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== '')).length;
@@ -2191,7 +2314,11 @@ export default function CementRegister({ onBack }) {
             variant="contained"
             onClick={handlePreviewBatchBill}
             disabled={(() => {
-              const selectedRowsArray = [...selectedIds].map(id => computedRows.find(r => r._id === id)).filter(Boolean);
+              const selectedRowsArray = [...selectedIds].map(id => {
+                let r = computedRows.find(row => row._id === id);
+                if (!r) r = pendingComputedRows.find(row => row._id === id);
+                return r;
+              }).filter(Boolean);
               const isFreightDisabled = selectedRowsArray.some(r => r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== ''));
               const isUnloadingDisabled = selectedRowsArray.some(r => r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== ''));
               return !bulkBillInput.billDate || !bulkBillInput.billType ||

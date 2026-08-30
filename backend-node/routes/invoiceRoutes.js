@@ -565,26 +565,11 @@ router.get("/all", async (req, res) => {
     try {
         const invoices = await Invoice.find().sort({ created_at: -1 }).lean();
 
-        // Parallel check for S3 existence using SDK v3
         const verifiedInvoices = await Promise.all(invoices.map(async (inv) => {
             const populatedInv = await populateDriverAndVehicle(inv);
-            if (populatedInv.softcopy_url) {
-                try {
-                    const url = new URL(populatedInv.softcopy_url);
-                    const key = decodeURIComponent(url.pathname.substring(1));
-
-                    await s3.send(new HeadObjectCommand({
-                        Bucket: process.env.AWS_BUCKET_NAME || "lorreyproject",
-                        Key: key
-                    }));
-
-                    return { ...populatedInv, s3_exists: true };
-                } catch (err) {
-                    console.warn("S3 headObject failed for", populatedInv._id, ":", err.name || err.message);
-                    return { ...populatedInv, s3_exists: false };
-                }
-            }
-            return { ...populatedInv, s3_exists: false };
+            // Optimisation: Skip the extremely expensive S3 HeadObject check for all records on load
+            // Just assume it exists if softcopy_url is present.
+            return { ...populatedInv, s3_exists: !!populatedInv.softcopy_url };
         }));
 
         res.json(verifiedInvoices);

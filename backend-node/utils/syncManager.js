@@ -91,6 +91,29 @@ function fmt2(n) {
   return Math.round(num(n) * 100) / 100;
 }
 
+/** Parse any date string (including DD/MM/YYYY, DD-MM-YYYY, ISO) to Date object */
+function parseToDate(val) {
+  if (!val) return new Date();
+  if (val instanceof Date && !isNaN(val.getTime())) return val;
+  if (typeof val === 'number') return new Date(val);
+
+  if (typeof val === 'string') {
+    const s = val.trim();
+    const match = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if (match) {
+      const dd = parseInt(match[1], 10);
+      const mm = parseInt(match[2], 10) - 1;
+      let yyyy = parseInt(match[3], 10);
+      if (yyyy < 100) yyyy += 2000;
+      const d = new Date(yyyy, mm, dd);
+      if (!isNaN(d.getTime())) return d;
+    }
+  }
+
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
 /** Format any date value to dd-mm-yyyy */
 function fmtDate(val) {
   if (!val) return "";
@@ -108,8 +131,7 @@ function fmtDate(val) {
     }
   }
 
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return String(val);
+  const d = parseToDate(val);
   const dd = String(d.getDate()).padStart(2, "0");
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const yyyy = d.getFullYear();
@@ -118,7 +140,7 @@ function fmtDate(val) {
 
 /** Get current financial year string: e.g. "25-26" */
 function getFinancialYear(date) {
-  const d = new Date(date || Date.now());
+  const d = parseToDate(date);
   const year = d.getFullYear();
   const month = d.getMonth(); // 0-indexed
   if (month >= 3) { // April → March
@@ -146,7 +168,7 @@ async function getOrAssignGcnNo(col, invoiceId, loadingDate) {
   const existing = await col.findOne({ _invoiceId: invoiceId.toString() });
   if (existing && existing["GCN NO"]) return existing["GCN NO"];
 
-  const date = new Date(loadingDate || Date.now());
+  const date = parseToDate(loadingDate);
   const fy = getFinancialYear(date);
   const prefix = `DAC-${fy}-`;
 
@@ -176,7 +198,7 @@ async function getOrAssignGcnNo(col, invoiceId, loadingDate) {
 async function generateHsdBillNo(pumpName, loadingDate, invoiceId) {
   if (!pumpName) return "";
   const col = getCementCol();
-  const date = new Date(loadingDate || Date.now());
+  const date = parseToDate(loadingDate);
   const fy = getFinancialYear(date);
   const prefix = pumpName.trim().toUpperCase().split(" ")[0]; // e.g. "SAS"
 
@@ -204,8 +226,8 @@ async function generateHsdBillNo(pumpName, loadingDate, invoiceId) {
 async function getFuelRate(pumpName, dateVal) {
   try {
     const col = mongoose.connection.useDb("pump_payment").collection("fuel_rates");
-    const d = new Date(dateVal);
-    if (!pumpName || isNaN(d.getTime())) return 91.99;
+    const d = parseToDate(dateVal);
+    if (!pumpName) return 91.99;
 
     // Find latest rate effective on or before this date
     const record = await col.find({
@@ -225,8 +247,8 @@ async function getFuelRate(pumpName, dateVal) {
 async function getCashDiscountRate(pumpName, dateVal) {
   try {
     const col = mongoose.connection.useDb("pump_payment").collection("cash_discounts");
-    const d = new Date(dateVal);
-    if (!pumpName || isNaN(d.getTime())) return 0.80; // default cash discount
+    const d = parseToDate(dateVal);
+    if (!pumpName) return 0.80; // default cash discount
 
     // Find latest discount effective on or before this date
     const record = await col.find({
@@ -373,9 +395,9 @@ async function pushToRegister(invoiceId, overrides) {
     let siteCashProofUrl = "";
     let officeCashProofUrl = "";
     if (vehicleNumber) {
-      const vStart = new Date(loadingDate);
+      const vStart = parseToDate(loadingDate);
       vStart.setHours(0, 0, 0, 0);
-      const vEnd = new Date(loadingDate);
+      const vEnd = parseToDate(loadingDate);
       vEnd.setHours(23, 59, 59, 999);
 
       const baseQuery = {
@@ -485,6 +507,14 @@ async function pushToRegister(invoiceId, overrides) {
     const dedicated = isATO ? fmt2(billingAmt * 0.095) : fmt2(partyRate * mt * 0.085);
     const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(billingAmt * 0.085) : 0;
 
+    // ── Derive month/year from loadingDate for Cement Register filter ─────
+    // These fields are REQUIRED: the GET /cement-register endpoint filters by
+    // { month: X, year: Y }. Without them, auto-synced invoices are invisible.
+    const loadingDateObj = parseToDate(loadingDate);
+    // Use calendar month/year (not financial year)
+    const entryMonth = loadingDateObj.getMonth() + 1; // 1-12
+    const entryYear = loadingDateObj.getFullYear();
+
     // ── Compose final document ───────────────────────────────────────────
     const payload = {
       "_invoiceId": invoiceId.toString(),
@@ -541,6 +571,9 @@ async function pushToRegister(invoiceId, overrides) {
       "_is_ato": isATO,
       "_source": "auto",
       "_auto_updated_at": new Date(),
+      // ── CRITICAL: month/year required for Cement Register GET filter ──
+      "month": entryMonth,
+      "year": entryYear,
     };
 
     // Keep existing manually-entered fields — only overwrite non-empty auto values
@@ -687,6 +720,11 @@ async function syncVoucherDummy(voucherId) {
 
     const slNo = await getOrAssignSlNo(col, dummyId);
 
+    // Derive month/year from voucher date so dummy rows appear in Cement Register filter
+    const voucherDateObj = new Date(voucher.date || Date.now());
+    const dummyMonth = voucherDateObj.getMonth() + 1; // 1-12 calendar month
+    const dummyYear = voucherDateObj.getFullYear();
+
     const dummyPayload = {
       _invoiceId: dummyId,
       "SL NO": slNo,
@@ -704,6 +742,10 @@ async function syncVoucherDummy(voucherId) {
       "OFFICE CASH": officeCash,
       "SITE_CASH_PROOF_URL": siteCashProofUrl,
       "OFFICE_CASH_PROOF_URL": officeCashProofUrl,
+
+      // CRITICAL: month/year required for Cement Register GET filter
+      month: dummyMonth,
+      year: dummyYear,
 
       _source: "auto_dummy",
       _auto_updated_at: new Date()

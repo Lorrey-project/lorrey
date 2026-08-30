@@ -54,7 +54,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
     const [invoices, setInvoices] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [expanded, setExpanded] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleting, setDeleting] = useState(false);
@@ -123,8 +123,9 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
     };
 
     useEffect(() => { 
-        fetchInvoices(); 
-        fetchVouchers(); 
+        // Optimization: Do not fetch all invoices/vouchers on initial load.
+        // fetchInvoices(); 
+        // fetchVouchers(); 
         fetchFuelRates(); 
         fetchTodayStats();
         
@@ -225,6 +226,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
     };
 
     const fetchInvoices = async () => {
+        setLoading(true);
         try {
             const token = localStorage.getItem('token');
             const response = await axios.get(`${API_URL}/invoice/all`, { headers: { Authorization: `Bearer ${token}` } });
@@ -234,6 +236,11 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleOpenVault = () => {
+        setVaultModalOpen(true);
+        fetchInvoices();
     };
 
     const handleDeleteConfirm = async () => {
@@ -606,7 +613,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                         }}>
                                         Upload New Trip
                                     </Button>
-                                    <Button variant="outlined" startIcon={<StorageIcon />} onClick={() => setVaultModalOpen(true)}
+                                    <Button variant="outlined" startIcon={<StorageIcon />} onClick={handleOpenVault}
                                         sx={{ 
                                             borderRadius: '8px', px: 4, py: 1.5, fontWeight: 700,
                                             color: '#F5F7FA', borderColor: 'rgba(255,255,255,0.15)',
@@ -951,21 +958,30 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <Typography variant="h5" fontWeight="900" sx={{ letterSpacing: '-0.5px' }}>Slips Management</Typography>
                                     <Typography variant="caption" color="text.secondary" fontWeight={700}>System health: Optimized</Typography>
                                 </Box>
-                                <Chip
-                                    label={`${invoices.length} Total Records`}
-                                    size="medium"
-                                    sx={{ ml: { xs: 0, sm: 'auto' }, fontWeight: 900, borderRadius: 2, bgcolor: '#f0f6ff', color: '#1a73e8', border: '1px solid rgba(26,115,232,0.1)' }}
-                                />
-                                <TablePagination
-                                    component="div"
-                                    count={invoices.length}
-                                    page={page}
-                                    onPageChange={handleChangePage}
-                                    rowsPerPage={rowsPerPage}
-                                    onRowsPerPageChange={handleChangeRowsPerPage}
-                                    rowsPerPageOptions={[10, 20, 50, 100]}
-                                    sx={{ borderBottom: 'none', '.MuiTablePagination-toolbar': { minHeight: 40, p: 0 } }}
-                                />
+                                {invoices.length === 0 && !loading && (
+                                    <Button size="small" variant="outlined" onClick={() => { setLoading(true); fetchInvoices(); }} sx={{ ml: 'auto', borderRadius: 2 }}>
+                                        Load Invoices
+                                    </Button>
+                                )}
+                                {invoices.length > 0 && (
+                                    <>
+                                        <Chip
+                                            label={`${invoices.length} Total Records`}
+                                            size="medium"
+                                            sx={{ ml: { xs: 0, sm: 'auto' }, fontWeight: 900, borderRadius: 2, bgcolor: '#f0f6ff', color: '#1a73e8', border: '1px solid rgba(26,115,232,0.1)' }}
+                                        />
+                                        <TablePagination
+                                            component="div"
+                                            count={invoices.length}
+                                            page={page}
+                                            onPageChange={handleChangePage}
+                                            rowsPerPage={rowsPerPage}
+                                            onRowsPerPageChange={handleChangeRowsPerPage}
+                                            rowsPerPageOptions={[10, 20, 50, 100]}
+                                            sx={{ borderBottom: 'none', '.MuiTablePagination-toolbar': { minHeight: 40, p: 0 } }}
+                                        />
+                                    </>
+                                )}
                             </Box>
 
                             {/* ── Selection toolbar ── */}

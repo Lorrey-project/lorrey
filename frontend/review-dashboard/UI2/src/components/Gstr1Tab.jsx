@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Box, Typography, Button, Paper, Snackbar, Alert, Grid } from '@mui/material';
+import { Box, Typography, Button, Snackbar, Alert, CircularProgress, Tooltip, Select, MenuItem, FormControl } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
+import InfoIcon from '@mui/icons-material/Info';
+import axios from 'axios';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -9,557 +11,339 @@ const MONTH_NAMES = [
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-const parseNum = (val) => parseFloat(val) || 0;
-const formatMoney = (val) => Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const parseAmount = (val) => {
+  if (val === null || val === undefined || val === '') return 0;
+  const num = parseFloat(String(val).replace(/,/g, ''));
+  return isNaN(num) ? 0 : num;
+};
 
-const defaultRowState = { count: '0', docType: '', val: '0.00', igst: '0.00', cgst: '0.00', sgst: '0.00', cess: '0.00' };
+const formatAmount = (val) => {
+  return Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
-export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
-  const monthName = MONTH_NAMES[filterMonth - 1] || '';
-  const fyStr = filterMonth >= 4 ? `${filterYear}-${String(filterYear + 1).slice(-2)}` : `${filterYear - 1}-${String(filterYear).slice(-2)}`;
+const parseInvoiceDate = (dateStr) => {
+  if (!dateStr) return null;
+  // Check format: YYYY-MM-DD
+  let parts = String(dateStr).split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+  // Check format: DD.MM.YYYY or DD-MM-YYYY
+  parts = String(dateStr).split(/[.-]/);
+  if (parts.length === 3 && parts[2].length === 4) {
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+  }
+  
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+};
 
-  // ─── State Management ───────────────────────────────────────────────────────
-  const [formData, setFormData] = useState({});
-  const [savedDocId, setSavedDocId] = useState(null);
-  const [isSaving, setIsSaving] = useState(false);
+const getMonthYearStr = (dateObj) => {
+  if (!dateObj) return null;
+  return `${MONTH_NAMES[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
+};
+
+export default function Gstr1Tab({ filterMonth, filterYear }) {
+  const [rows, setRows] = useState([]);
+  const [siteFilter, setSiteFilter] = useState('ALL');
+  const [dateFilter, setDateFilter] = useState('ALL');
+  const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState({ open: false, message: '', type: 'success' });
 
-  // Load existing form data when entries/month/year changes
-  useEffect(() => {
-    const existingDoc = entries.find(e => e.type === 'gstr1_form' && e.filterMonth === filterMonth && e.filterYear === filterYear);
-    if (existingDoc && existingDoc.formData) {
-      setFormData(existingDoc.formData);
-      setSavedDocId(existingDoc._id);
+  // Compute the Financial Year string for the Bill Register fetch
+  // E.g., if filterMonth=8 (August) and filterYear=2026, then it's part of FY 2026-2027
+  // If filterMonth=2 (February) and filterYear=2027, it's also FY 2026-2027
+  const fyYearStr = useMemo(() => {
+    if (!filterYear) return '';
+    if (filterMonth >= 4) {
+      return `${filterYear}-${filterYear + 1}`;
     } else {
-      setFormData({});
-      setSavedDocId(null);
+      return `${filterYear - 1}-${filterYear}`;
     }
-  }, [entries, filterMonth, filterYear]);
+  }, [filterMonth, filterYear]);
 
-  // Handle cell changes
-  const updateField = (rowId, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [rowId]: {
-        ...(prev[rowId] || defaultRowState),
-        [field]: value
-      }
-    }));
-  };
-
-  const getRow = (rowId) => formData[rowId] || defaultRowState;
-
-  // ─── Save Functionality ─────────────────────────────────────────────────────
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const payload = {
-        type: 'gstr1_form',
-        filterMonth,
-        filterYear,
-        formData
-      };
-
-      const token = localStorage.getItem('token');
-      const headers = {
-        'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` })
-      };
-
-      if (savedDocId) {
-        // Update existing
-        await fetch(`${API_URL}/gst-portal/${savedDocId}`, {
-          method: 'PUT',
-          headers,
-          body: JSON.stringify(payload)
-        });
-      } else {
-        // Create new
-        const res = await fetch(`${API_URL}/gst-portal`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (data.success && data.entry) {
-          setSavedDocId(data.entry._id);
-        }
-      }
-      setNotification({ open: true, message: 'GSTR-1 data saved successfully!', type: 'success' });
-    } catch (err) {
-      console.error(err);
-      setNotification({ open: true, message: 'Failed to save data.', type: 'error' });
-    }
-    setIsSaving(false);
-  };
-
-  // ─── Summary Calculations ───────────────────────────────────────────────────
-  const summary = useMemo(() => {
-    let invoices = 0, val = 0, igst = 0, cgst = 0, sgst = 0, cess = 0;
-    Object.values(formData).forEach(row => {
-      val += parseNum(row.val);
-      igst += parseNum(row.igst);
-      cgst += parseNum(row.cgst);
-      sgst += parseNum(row.sgst);
-      cess += parseNum(row.cess);
-      invoices += parseNum(row.count);
-    });
-    return { invoices, val, igst, cgst, sgst, cess };
-  }, [formData]);
-
-  // ─── UI Components ──────────────────────────────────────────────────────────
-
-  const inputStyle = {
-    width: '100%',
-    boxSizing: 'border-box',
-    border: '1px solid transparent',
-    backgroundColor: 'transparent',
-    fontSize: '13px',
-    fontFamily: 'inherit',
-    fontWeight: 500,
-    color: '#0f172a',
-    outline: 'none',
-    padding: '4px 6px',
-    transition: 'all 0.1s',
-  };
-
-  const inputHoverStyle = {
-    border: '1px solid #cbd5e1',
-    backgroundColor: '#f8fafc',
-    borderRadius: '2px',
-  };
-
-  const inputFocusStyle = {
-    border: '1px solid #3b82f6',
-    backgroundColor: '#fff',
-    borderRadius: '2px',
-    boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.2)',
-  };
-
-  const EditableCell = ({ value, onChange, align = 'left', isNumeric = true, isCurrency = false }) => {
-    const [isHovered, setIsHovered] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-
-    const handleChange = (e) => {
-      let val = e.target.value;
-      if (isNumeric) {
-        if (val === '' || val === '-' || /^-?\d*\.?\d*$/.test(val)) {
-          onChange(val);
-        }
-      } else {
-        onChange(val);
-      }
-    };
-
-    const handleBlur = () => {
-      setIsFocused(false);
-      if (isNumeric) {
-        if (value === '' || value === '-' || isNaN(parseFloat(value))) {
-          onChange(isCurrency ? '0.00' : '0');
-        } else {
-          const num = parseFloat(value);
-          if (isCurrency) {
-            onChange(num.toFixed(2));
-          } else {
-            onChange(num.toString());
+  useEffect(() => {
+    const fetchBillRegisterData = async () => {
+      if (!fyYearStr) return;
+      setLoading(true);
+      try {
+        const { data } = await axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr } });
+        const allRows = data?.rows || [];
+        
+        // Do not filter out rows by 'filterMonth' initially, so we can generate the dynamic dropdown for the entire FY
+        
+        // Map the Bill Register data to the exact GSTR-1 structure requested
+        const mappedRows = allRows.map((r, i) => {
+          const amt = parseAmount(r.amount);
+          
+          // Bill Register already stores accurate cgst/sgst, fallback to recalculation if missing/zero but amount exists
+          let c = parseAmount(r.cgst);
+          let s = parseAmount(r.sgst);
+          
+          if (c === 0 && s === 0 && amt > 0) {
+            c = Math.round(amt * 0.09);
+            s = Math.round(amt * 0.09);
           }
-        }
+
+          const parsedDate = parseInvoiceDate(r.invoiceDate);
+          const monthYearStr = getMonthYearStr(parsedDate);
+
+          return {
+            id: r.invoiceNumber || `temp-${i}`,
+            slNo: i + 1,
+            invoiceDate: r.invoiceDate || '',
+            invoiceDateObj: parsedDate,
+            monthYearStr: monthYearStr,
+            invoiceNumber: r.displayInvoiceNumber || r.invoiceNumber || '',
+            month: r.month || '', // Fallback to provided month if any
+            site: r.site || '',
+            billSubmissionThrough: 'PORTAL', // Hardcoded logic as per requirements
+            bill: r.billType || '',
+            billType: r.billType || '',
+            amount: amt,
+            cgst: c,
+            sgst: s,
+            totalAmount: amt + c + s
+          };
+        });
+
+        setRows(mappedRows);
+      } catch (err) {
+        console.error("Failed to fetch bill register data", err);
+        setNotification({ open: true, message: 'Failed to sync with Bill Register', type: 'error' });
+      } finally {
+        setLoading(false);
       }
     };
 
-    let displayValue = value;
-    if (!isFocused && isNumeric && value !== '' && value !== '-') {
-      const num = parseFloat(value);
-      if (!isNaN(num)) {
-        if (isCurrency) {
-          displayValue = num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        } else {
-          displayValue = num.toString();
-        }
-      }
-    }
+    fetchBillRegisterData();
+  }, [fyYearStr, filterMonth]);
 
+  const availableMonths = useMemo(() => {
+    const unique = new Set();
+    rows.forEach(r => {
+      if (r.monthYearStr) {
+        unique.add(r.monthYearStr);
+      }
+    });
+    // Sort descending by Year and then Month
+    return Array.from(unique).sort((a, b) => {
+      const [monthA, yearA] = a.split(' ');
+      const [monthB, yearB] = b.split(' ');
+      if (yearA !== yearB) return Number(yearB) - Number(yearA);
+      return MONTH_NAMES.indexOf(monthB) - MONTH_NAMES.indexOf(monthA);
+    });
+  }, [rows]);
+
+  // Reset dateFilter to ALL if the currently selected filter is no longer available after an update
+  useEffect(() => {
+    if (dateFilter !== 'ALL' && !availableMonths.includes(dateFilter)) {
+      setDateFilter('ALL');
+    }
+  }, [availableMonths, dateFilter]);
+
+  const filteredRows = useMemo(() => {
+    let result = rows;
+    if (siteFilter !== 'ALL') {
+      result = result.filter(r => (r.site || '').trim().toUpperCase() === siteFilter.toUpperCase());
+    }
+    if (dateFilter !== 'ALL') {
+      result = result.filter(r => r.monthYearStr === dateFilter);
+    }
+    return result;
+  }, [rows, siteFilter, dateFilter]);
+
+  // Calculate overall totals
+  const totals = useMemo(() => {
+    let amount = 0, cgst = 0, sgst = 0, totalAmount = 0;
+    filteredRows.forEach(row => {
+      amount += row.amount;
+      cgst += row.cgst;
+      sgst += row.sgst;
+      totalAmount += row.totalAmount;
+    });
+    return { amount, cgst, sgst, totalAmount };
+  }, [filteredRows]);
+
+  const CellDisplay = ({ value, align = "left", isNumeric = false }) => {
+    const displayValue = isNumeric ? (typeof value === 'number' ? formatAmount(value) : value) : value;
     return (
-      <input
-        type="text"
-        value={isFocused ? value : displayValue}
-        onChange={handleChange}
-        onFocus={() => setIsFocused(true)}
-        onBlur={handleBlur}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        style={{
-          ...inputStyle,
-          textAlign: align,
-          ...(isHovered && !isFocused ? inputHoverStyle : {}),
-          ...(isFocused ? inputFocusStyle : {})
-        }}
-      />
+      <Box sx={{ 
+        width: '100%', boxSizing: 'border-box', padding: '8px 6px',
+        fontSize: '13px', fontFamily: 'inherit', textAlign: align,
+        color: '#334155', backgroundColor: 'transparent',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+      }}>
+        {displayValue || '-'}
+      </Box>
     );
   };
 
-  const tableStyle = {
-    width: '100%',
-    borderCollapse: 'collapse',
-    border: '1px solid #cbd5e1',
-    marginBottom: '28px',
-    backgroundColor: '#fff'
-  };
-
   const thStyle = {
+    position: 'sticky',
+    top: 0,
     backgroundColor: '#f1f5f9',
-    color: '#334155',
-    padding: '8px 12px',
+    color: '#1e293b',
+    padding: '12px 8px',
     borderBottom: '2px solid #cbd5e1',
     borderRight: '1px solid #e2e8f0',
     fontSize: '12px',
     fontWeight: 700,
     textTransform: 'uppercase',
-    letterSpacing: '0.3px',
-    textAlign: 'left'
+    textAlign: 'center',
+    zIndex: 10,
+    whiteSpace: 'normal',
+    wordWrap: 'break-word',
+    boxShadow: '0 2px 2px -1px rgba(0,0,0,0.1)'
   };
-
-  const thStyleCenter = { ...thStyle, textAlign: 'center' };
-  const thStyleRight = { ...thStyle, textAlign: 'right' };
 
   const tdStyle = {
-    padding: '6px 12px',
+    padding: '2px 4px',
     borderBottom: '1px solid #e2e8f0',
     borderRight: '1px solid #e2e8f0',
-    fontSize: '13px',
-    color: '#1e293b'
-  };
-
-  const tdStyleRight = { ...tdStyle, textAlign: 'right' };
-  const tdStyleCenter = { ...tdStyle, textAlign: 'center' };
-
-  const TableHeaderRow = () => (
-    <thead>
-      <tr>
-        <th style={{ ...thStyle, width: '25%' }}>Description</th>
-        <th style={{ ...thStyleCenter, width: '10%' }}>No. of<br />records</th>
-        <th style={{ ...thStyleCenter, width: '15%' }}>Document Type</th>
-        <th style={{ ...thStyleRight, width: '12.5%' }}>Value (₹)</th>
-        <th style={{ ...thStyleRight, width: '12.5%' }}>Integrated Tax (₹)</th>
-        <th style={{ ...thStyleRight, width: '12.5%' }}>Central Tax (₹)</th>
-        <th style={{ ...thStyleRight, width: '12.5%' }}>State/UT Tax (₹)</th>
-        <th style={{ ...thStyleRight, width: '12.5%' }}>Cess (₹)</th>
-      </tr>
-    </thead>
-  );
-
-  const SectionBar = ({ title }) => (
-    <Typography
-      variant="subtitle2"
-      sx={{
-        bgcolor: '#e2e8f0',
-        color: '#0f172a',
-        p: '8px 12px',
-        fontWeight: 700,
-        border: '1px solid #cbd5e1',
-        borderBottom: 'none'
-      }}
-    >
-      {title}
-    </Typography>
-  );
-
-  const SectionRow = ({ rowId, label, isTotal = false }) => {
-    const row = getRow(rowId);
-    return (
-      <tr style={{ backgroundColor: isTotal ? '#f8fafc' : '#fff' }}>
-        <td style={{ ...tdStyle, fontWeight: isTotal ? 700 : 500, color: isTotal ? '#0f172a' : '#334155' }}>{label}</td>
-        <td style={tdStyle}>
-          <EditableCell value={row.count} onChange={(v) => updateField(rowId, 'count', v)} align="center" />
-        </td>
-        <td style={tdStyle}>
-          <EditableCell value={row.docType} onChange={(v) => updateField(rowId, 'docType', v)} align="center" isNumeric={false} />
-        </td>
-        <td style={tdStyle}>
-          <EditableCell value={row.val} onChange={(v) => updateField(rowId, 'val', v)} align="right" isCurrency={true} />
-        </td>
-        <td style={tdStyle}>
-          <EditableCell value={row.igst} onChange={(v) => updateField(rowId, 'igst', v)} align="right" isCurrency={true} />
-        </td>
-        <td style={tdStyle}>
-          <EditableCell value={row.cgst} onChange={(v) => updateField(rowId, 'cgst', v)} align="right" isCurrency={true} />
-        </td>
-        <td style={tdStyle}>
-          <EditableCell value={row.sgst} onChange={(v) => updateField(rowId, 'sgst', v)} align="right" isCurrency={true} />
-        </td>
-        <td style={tdStyle}>
-          <EditableCell value={row.cess} onChange={(v) => updateField(rowId, 'cess', v)} align="right" isCurrency={true} />
-        </td>
-      </tr>
-    );
+    backgroundColor: '#fff'
   };
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: 'background.default', flex: 1, height: '100%', overflowY: 'auto', fontFamily: 'Inter, sans-serif' }}>
-
-      <Box sx={{ maxWidth: 1280, margin: '0 auto', bgcolor: 'background.paper', p: 4, border: '1px solid #e2e8f0' }}>
-
-        {/* ─── Top Header & Save Bar ────────────────────────────────────────────── */}
-        <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={4}>
-          <Box>
-            <Typography variant="h5" fontWeight={800} color="#0f172a">FORM GSTR-1</Typography>
-            <Typography variant="subtitle2" fontWeight={600} color="#64748b">[See rule 59(1)]</Typography>
-            <Typography variant="subtitle1" fontWeight={700} mt={1} color="#1e293b">Details of outward supplies of goods or services</Typography>
+    <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, height: '100%', bgcolor: '#f8fafc', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      
+      {/* Page Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+        <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="h4" fontWeight="800" color="#0f172a">GSTR-1</Typography>
+            <Tooltip title="Data automatically sourced from Bill Register">
+              <InfoIcon color="primary" sx={{ opacity: 0.7 }} />
+            </Tooltip>
           </Box>
-          <Box display="flex" gap={2} alignItems="center">
-            <Paper elevation={0} sx={{ p: 1.5, px: 3, display: 'flex', gap: 3, border: '1px solid #cbd5e1', bgcolor: 'background.default' }}>
-              <Box>
-                <Typography fontSize="11px" fontWeight={700} color="#64748b" textTransform="uppercase">Financial Year</Typography>
-                <Typography fontSize="14px" fontWeight={800} color="#0f172a">{fyStr}</Typography>
-              </Box>
-              <Box>
-                <Typography fontSize="11px" fontWeight={700} color="#64748b" textTransform="uppercase">Tax Period</Typography>
-                <Typography fontSize="14px" fontWeight={800} color="#0f172a">{monthName}</Typography>
-              </Box>
-            </Paper>
-            <Button
-              variant="outlined"
-              color="primary"
-              startIcon={<SaveIcon />}
-              onClick={handleSave}
-              disabled={isSaving}
-              sx={{ px: 3, py: 1.5, fontWeight: 700, textTransform: 'none', border: '2px solid' }}
-            >
-              {isSaving ? 'Saving...' : 'Save Draft'}
-            </Button>
-          </Box>
+          <Typography variant="subtitle2" color="#64748b" fontWeight="600" mt={0.5}>
+            GST Return / Invoice Details (Synced with Bill Register)
+          </Typography>
         </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="subtitle2" fontWeight="700" color="#475569">SITE:</Typography>
+            <Select
+              size="small"
+              value={siteFilter}
+              onChange={(e) => setSiteFilter(e.target.value)}
+              sx={{ minWidth: 120, height: 36, backgroundColor: '#fff', fontSize: '13px', fontWeight: 600 }}
+            >
+              <MenuItem value="ALL">ALL</MenuItem>
+              <MenuItem value="NVL">NVL</MenuItem>
+              <MenuItem value="NVCL">NVCL</MenuItem>
+            </Select>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="subtitle2" fontWeight="700" color="#475569">INVOICE DATE:</Typography>
+            <Select
+              size="small"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              sx={{ minWidth: 160, height: 36, backgroundColor: '#fff', fontSize: '13px', fontWeight: 600 }}
+            >
+              <MenuItem value="ALL">ALL</MenuItem>
+              {availableMonths.map(m => (
+                <MenuItem key={m} value={m}>{m}</MenuItem>
+              ))}
+            </Select>
+          </Box>
+          <Button 
+            variant="contained" 
+            color="primary" 
+            startIcon={<SaveIcon />} 
+            disabled={true} // Disabled because data comes from the Bill Register
+            sx={{ px: 4, py: 1.5, fontWeight: 'bold', borderRadius: 1, opacity: 0.7 }}
+          >
+            SAVE GSTR-1
+          </Button>
+        </Box>
+      </Box>
 
-        {/* ─── Summary Area ────────────────────────────────────────────────── */}
-        <Grid container spacing={2} mb={4}>
-          {[
-            { label: 'Total Invoices', value: summary.invoices, isCurrency: false },
-            { label: 'Taxable Value', value: summary.val, isCurrency: true },
-            { label: 'Total IGST', value: summary.igst, isCurrency: true },
-            { label: 'Total CGST', value: summary.cgst, isCurrency: true },
-            { label: 'Total SGST', value: summary.sgst, isCurrency: true },
-            { label: 'Total CESS', value: summary.cess, isCurrency: true },
-          ].map((item, idx) => (
-            <Grid item xs={12} sm={4} md={2} key={idx}>
-              <Box sx={{ border: '1px solid #cbd5e1', p: 2, bgcolor: 'background.default' }}>
-                <Typography fontSize="11px" fontWeight={700} color="#64748b" textTransform="uppercase">{item.label}</Typography>
-                <Typography fontSize="16px" fontWeight={800} color="#0f172a" mt={0.5}>
-                  {item.isCurrency ? '₹ ' : ''}{formatMoney(item.value)}
-                </Typography>
-              </Box>
-            </Grid>
-          ))}
-        </Grid>
-
-        {/* ─── Registered Person ────────────────────────────────────────────────── */}
-        <table style={{ ...tableStyle, marginBottom: '32px' }}>
+      {/* Table Container */}
+      <Box sx={{ 
+        flex: 1, 
+        overflow: 'auto', 
+        border: '1px solid #cbd5e1', 
+        borderRadius: '4px',
+        backgroundColor: '#fff',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+        mb: 2,
+        position: 'relative'
+      }}>
+        {loading && (
+          <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.7)', zIndex: 20 }}>
+            <CircularProgress />
+          </Box>
+        )}
+        <table style={{ width: '100%', minWidth: '1350px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <thead>
+            <tr>
+              <th style={{ ...thStyle, width: '50px' }}>Sl No</th>
+              <th style={{ ...thStyle, width: '120px' }}>Invoice Date</th>
+              <th style={{ ...thStyle, width: '150px' }}>Invoice Number</th>
+              <th style={{ ...thStyle, width: '100px' }}>Month</th>
+              <th style={{ ...thStyle, width: '130px' }}>SITE</th>
+              <th style={{ ...thStyle, width: '180px' }}>BILL SUBMISSION THROUGH</th>
+              <th style={{ ...thStyle, width: '150px' }}>BILL</th>
+              <th style={{ ...thStyle, width: '150px' }}>BILL TYPE</th>
+              <th style={{ ...thStyle, width: '120px' }}>Amount</th>
+              <th style={{ ...thStyle, width: '110px' }}>CGST</th>
+              <th style={{ ...thStyle, width: '110px' }}>SGST</th>
+              <th style={{ ...thStyle, width: '130px' }}>Total Amount</th>
+            </tr>
+          </thead>
           <tbody>
-            <tr>
-              <td style={{ ...tdStyle, width: '40%', fontWeight: 700, backgroundColor: '#f8fafc' }}>1 GSTIN</td>
-              <td style={{ ...tdStyle, fontWeight: 600 }}>19AAHFD5294R1ZK</td>
-            </tr>
-            <tr>
-              <td style={{ ...tdStyle, fontWeight: 700, backgroundColor: '#f8fafc' }}>2 (a) Legal name of the registered person</td>
-              <td style={{ ...tdStyle }}>DIPALI NAYEK</td>
-            </tr>
-            <tr>
-              <td style={{ ...tdStyle, fontWeight: 700, backgroundColor: '#f8fafc' }}>(b) Trade name if any</td>
-              <td style={{ ...tdStyle }}>LORREY PROJECTS</td>
-            </tr>
-            <tr>
-              <td style={{ ...tdStyle, fontWeight: 700, backgroundColor: '#f8fafc' }}>(c) ARN</td>
-              <td style={{ ...tdStyle }}></td>
-            </tr>
-            <tr>
-              <td style={{ ...tdStyle, fontWeight: 700, backgroundColor: '#f8fafc' }}>(d) ARN date</td>
-              <td style={{ ...tdStyle }}></td>
-            </tr>
+            {filteredRows.length === 0 && !loading && (
+              <tr>
+                <td colSpan={12} style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                  No bills found in the Bill Register for this month and site.
+                </td>
+              </tr>
+            )}
+            {filteredRows.map((row) => (
+              <tr key={row.id} style={{ transition: 'background-color 0.2s', '&:hover': { backgroundColor: '#f1f5f9' } }}>
+                <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#475569', backgroundColor: '#f8fafc' }}>
+                  {row.slNo}
+                </td>
+                <td style={tdStyle}><CellDisplay value={row.invoiceDate} align="center" /></td>
+                <td style={tdStyle}><CellDisplay value={row.invoiceNumber} /></td>
+                <td style={tdStyle}><CellDisplay value={row.month} align="center" /></td>
+                <td style={tdStyle}><CellDisplay value={row.site} /></td>
+                <td style={tdStyle}><CellDisplay value={row.billSubmissionThrough} /></td>
+                <td style={tdStyle}><CellDisplay value={row.bill} /></td>
+                <td style={tdStyle}><CellDisplay value={row.billType} /></td>
+                <td style={tdStyle}><CellDisplay value={row.amount} isNumeric align="right" /></td>
+                <td style={tdStyle}><CellDisplay value={row.cgst} isNumeric align="right" /></td>
+                <td style={tdStyle}><CellDisplay value={row.sgst} isNumeric align="right" /></td>
+                <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '12px', fontWeight: 700, color: '#0f172a' }}>
+                  ₹{formatAmount(row.totalAmount)}
+                </td>
+              </tr>
+            ))}
+
+            {/* Total Row */}
+            {filteredRows.length > 0 && (
+              <tr style={{ backgroundColor: '#f1f5f9' }}>
+                <td colSpan={8} style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, paddingRight: '16px', fontSize: '13px', color: '#0f172a', backgroundColor: '#f8fafc' }}>
+                  TOTAL
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, paddingRight: '6px', fontSize: '13px', color: '#0f172a', backgroundColor: '#f8fafc' }}>
+                  ₹{formatAmount(totals.amount)}
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, paddingRight: '6px', fontSize: '13px', color: '#0f172a', backgroundColor: '#f8fafc' }}>
+                  ₹{formatAmount(totals.cgst)}
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, paddingRight: '6px', fontSize: '13px', color: '#0f172a', backgroundColor: '#f8fafc' }}>
+                  ₹{formatAmount(totals.sgst)}
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, paddingRight: '12px', fontSize: '13px', color: '#0f172a', backgroundColor: '#f8fafc' }}>
+                  ₹{formatAmount(totals.totalAmount)}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
-
-        {/* ─── GSTR-1 Sections ──────────────────────────────────────────────────── */}
-
-        <Box sx={{ overflowX: 'auto' }}>
-
-          <SectionBar title="4A - Taxable outward supplies made to registered persons (other than reverse charge supplies) including supplies made through e-commerce operator attracting TCS - B2B Regular" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody><SectionRow rowId="4A_total" label="Total" isTotal /></tbody>
-          </table>
-
-          <SectionBar title="4B - Taxable outward supplies made to registered persons attracting tax on reverse charge - B2B Reverse charge" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody><SectionRow rowId="4B_total" label="Total" isTotal /></tbody>
-          </table>
-
-          <SectionBar title="5 - Taxable outward inter-state supplies made to unregistered persons (where invoice value is more than Rs. 1 lakh) including supplies made through e-commerce operator, rate wise - B2CL (Large)" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody><SectionRow rowId="5_total" label="Total" isTotal /></tbody>
-          </table>
-
-          <SectionBar title="6A - Exports (with/without payment)" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <SectionRow rowId="6A_total" label="Total" isTotal />
-              <SectionRow rowId="6A_expwp" label="EXPWP" />
-              <SectionRow rowId="6A_expwop" label="EXPWOP" />
-            </tbody>
-          </table>
-
-          <SectionBar title="6B - Supplies made to SEZ unit or SEZ developer - SEZWP/SEZWOP" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <SectionRow rowId="6B_total" label="Total" isTotal />
-              <SectionRow rowId="6B_sezwp" label="SEZWP" />
-              <SectionRow rowId="6B_sezwop" label="SEZWOP" />
-            </tbody>
-          </table>
-
-          <SectionBar title="6C - Deemed Exports – DE" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody><SectionRow rowId="6C_total" label="Total" isTotal /></tbody>
-          </table>
-
-          <SectionBar title="7 - Taxable supplies (Net of debit and credit notes) to unregistered persons (other than the supplies covered in Table 5) including supplies made through e-commerce operator attracting TCS - B2CS (Others)" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <SectionRow rowId="7_total" label="Total" isTotal />
-              <SectionRow rowId="7_net" label="Net Value" />
-            </tbody>
-          </table>
-
-          <SectionBar title="8 - Nil rated, exempted and non GST outward supplies" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <SectionRow rowId="8_total" label="Total" isTotal />
-              <SectionRow rowId="8_nil" label="Nil" />
-              <SectionRow rowId="8_exempted" label="Exempted" />
-              <SectionRow rowId="8_nongst" label="Non-GST" />
-            </tbody>
-          </table>
-
-          <SectionBar title="9A - Amendments to Outward Supplies" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <tr><td colSpan={8} style={{ ...tdStyle, backgroundColor: '#f1f5f9', fontWeight: 700, color: '#334155' }}>B2B Regular</td></tr>
-              <SectionRow rowId="9A_b2b_reg_amended" label="Amended amount - Total" />
-              <SectionRow rowId="9A_b2b_reg_net" label="Net differential amount" />
-
-              <tr><td colSpan={8} style={{ ...tdStyle, backgroundColor: '#f1f5f9', fontWeight: 700, color: '#334155' }}>B2B Reverse charge</td></tr>
-              <SectionRow rowId="9A_b2b_rev_amended" label="Amended amount - Total" />
-              <SectionRow rowId="9A_b2b_rev_net" label="Net differential amount" />
-
-              <tr><td colSpan={8} style={{ ...tdStyle, backgroundColor: '#f1f5f9', fontWeight: 700, color: '#334155' }}>B2CL (Large)</td></tr>
-              <SectionRow rowId="9A_b2cl_amended" label="Amended amount - Total" />
-              <SectionRow rowId="9A_b2cl_net" label="Net differential amount" />
-            </tbody>
-          </table>
-
-          <SectionBar title="9B - Credit/Debit Notes" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <tr><td colSpan={8} style={{ ...tdStyle, backgroundColor: '#f1f5f9', fontWeight: 700, color: '#334155' }}>Registered (CDNR)</td></tr>
-              <SectionRow rowId="9B_cdnr_b2b_reg" label="B2B Regular" />
-              <SectionRow rowId="9B_cdnr_b2b_rev" label="B2B Reverse charge" />
-              <SectionRow rowId="9B_cdnr_sez" label="SEZWP/SEZWOP" />
-              <SectionRow rowId="9B_cdnr_de" label="DE" />
-              <SectionRow rowId="9B_cdnr_net" label="Net Total (Debit notes - Credit notes)" isTotal />
-
-              <tr><td colSpan={8} style={{ ...tdStyle, backgroundColor: '#f1f5f9', fontWeight: 700, color: '#334155' }}>Unregistered (CDNUR)</td></tr>
-              <SectionRow rowId="9B_cdnur_b2cl" label="B2CL" />
-              <SectionRow rowId="9B_cdnur_expwp" label="EXPWP" />
-              <SectionRow rowId="9B_cdnur_expwop" label="EXPWOP" />
-            </tbody>
-          </table>
-
-          <SectionBar title="11 - Advances" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <tr><td colSpan={8} style={{ ...tdStyle, backgroundColor: '#f1f5f9', fontWeight: 700, color: '#334155' }}>11A - Advances received for which invoice has not been issued</td></tr>
-              <SectionRow rowId="11A_total" label="Total" isTotal />
-              <tr><td colSpan={8} style={{ ...tdStyle, backgroundColor: '#f1f5f9', fontWeight: 700, color: '#334155' }}>11B - Advance amount received in earlier tax period and adjusted against supplies</td></tr>
-              <SectionRow rowId="11B_total" label="Total" isTotal />
-            </tbody>
-          </table>
-
-          <SectionBar title="12 - HSN-wise summary of outward supplies" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <SectionRow rowId="12_total" label="Total" isTotal />
-              <SectionRow rowId="12_b2b" label="B2B Total" />
-              <SectionRow rowId="12_b2c" label="B2C Total" />
-            </tbody>
-          </table>
-
-          <SectionBar title="13 - Documents issued" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <SectionRow rowId="13_total" label="Net issued documents" />
-            </tbody>
-          </table>
-
-          <SectionBar title="14 - Supplies made through E-Commerce Operators" />
-          <table style={tableStyle}>
-            <TableHeaderRow />
-            <tbody>
-              <SectionRow rowId="14_total" label="Total" isTotal />
-              <SectionRow rowId="14_a" label="(a) Liable to collect tax u/s 52" />
-              <SectionRow rowId="14_b" label="(b) Liable to pay tax u/s 9(5)" />
-            </tbody>
-          </table>
-
-          {/* Final Liability Row */}
-          <table style={{ ...tableStyle, border: '2px solid #0f172a', marginTop: '40px', marginBottom: '40px' }}>
-            <tbody>
-              <tr>
-                <td style={{ ...tdStyle, width: '35%', fontWeight: 800, fontSize: '14px', backgroundColor: '#e2e8f0', color: '#0f172a' }}>Total Liability (Outward supplies other than Reverse charge)</td>
-                <td style={{ ...tdStyle, width: '10%', backgroundColor: '#e2e8f0' }}></td>
-                <td style={{ ...tdStyle, width: '15%', backgroundColor: '#e2e8f0' }}></td>
-                <td style={{ ...tdStyleRight, width: '10%', fontWeight: 800, fontSize: '14px', backgroundColor: '#e2e8f0' }}>{formatMoney(summary.val)}</td>
-                <td style={{ ...tdStyleRight, width: '10%', fontWeight: 800, fontSize: '14px', backgroundColor: '#e2e8f0' }}>{formatMoney(summary.igst)}</td>
-                <td style={{ ...tdStyleRight, width: '10%', fontWeight: 800, fontSize: '14px', backgroundColor: '#e2e8f0' }}>{formatMoney(summary.cgst)}</td>
-                <td style={{ ...tdStyleRight, width: '10%', fontWeight: 800, fontSize: '14px', backgroundColor: '#e2e8f0' }}>{formatMoney(summary.sgst)}</td>
-                <td style={{ ...tdStyleRight, width: '10%', fontWeight: 800, fontSize: '14px', backgroundColor: '#e2e8f0' }}>{formatMoney(summary.cess)}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          {/* Verification */}
-          <Box mt={4} pt={4} borderTop="1px solid #cbd5e1">
-            <Typography variant="h6" fontWeight={800} color="#0f172a" mb={2}>Verification:</Typography>
-            <Typography variant="body2" color="#334155" mb={4} sx={{ lineHeight: 1.6 }}>
-              I hereby solemnly affirm and declare that the information given herein above is true and correct to the best of my knowledge and belief and nothing has been concealed therefrom and in case of any reduction in output tax liability the benefit thereof has been/will be passed on to the recipient of supply.
-            </Typography>
-
-            <Box display="flex" justifyContent="space-between" mt={4}>
-              <Box>
-                <Typography variant="body2" fontWeight={700} color="#64748b">Date</Typography>
-                <Typography variant="body2" fontWeight={700} mt={1} color="#64748b">Signature</Typography>
-              </Box>
-              <Box textAlign="right">
-                <Typography variant="body2" fontWeight={700} color="#64748b" textTransform="uppercase" fontSize="10px">Name of Authorized Signatory</Typography>
-                <Typography variant="subtitle1" fontWeight={800} color="#0f172a" mb={1}>DIPALI NAYEK</Typography>
-
-                <Typography variant="body2" fontWeight={700} color="#64748b" textTransform="uppercase" fontSize="10px">Designation/Status</Typography>
-                <Typography variant="subtitle2" fontWeight={800} color="#0f172a">PARTNER</Typography>
-              </Box>
-            </Box>
-          </Box>
-
-        </Box>
       </Box>
 
       <Snackbar
@@ -575,3 +359,5 @@ export default function Gstr1Tab({ entries, filterMonth, filterYear }) {
     </Box>
   );
 }
+
+

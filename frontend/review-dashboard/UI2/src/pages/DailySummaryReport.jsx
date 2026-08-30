@@ -31,10 +31,13 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PersonIcon from '@mui/icons-material/Person';
 
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 import PartyReportView from './PartyReportView';
 
 const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, { autoConnect: true, transports: ["websocket", "polling"] });
 
 const parseNum = (val) => parseFloat(String(val || 0).replace(/,/g, '')) || 0;
 
@@ -143,6 +146,19 @@ function DailySummaryTab({
     fetchData(date);
   }, [date, fetchData]);
 
+  // Live auto-refresh when Main Cashbook or Cement Register data changes
+  useEffect(() => {
+    const handler = () => {
+      fetchData(date);
+    };
+    socket.on('mainCashbookUpdates', handler);
+    socket.on('cementUpdates', handler);
+    return () => {
+      socket.off('mainCashbookUpdates', handler);
+      socket.off('cementUpdates', handler);
+    };
+  }, [date, fetchData]);
+
   const handleExportExcel = () => {
     if (!data) return;
 
@@ -238,12 +254,13 @@ function DailySummaryTab({
 
     const cb = data.cashbookEntry || {};
     const advData = data.advanceSummary || {};
+    const mainCb = data.mainCashbookData || {};
 
-    // Values from advanceSummary (from DB), fallback to basic calculation if missing
-    const cashRecv = advData.cashReceived ?? parseNum(cb["P_GIVEN_DAC"]);
-    const cashOpen = advData.openingBalance ?? 0;
-    const miscExp = advData.miscExpense ?? parseNum(cb["O_EXPENSE"]);
-    const closingAdv = advData.closingBalance ?? (cashRecv - cashOpen - advAmt - miscExp);
+    // Dynamic calculations from Main Cash Book (Source of Truth)
+    const cashRecv = mainCb.cashReceivedDAC ?? advData.cashReceived ?? parseNum(cb["P_GIVEN_DAC"]);
+    const cashOpen = mainCb.openingBalance ?? advData.openingBalance ?? 0;
+    const miscExp = mainCb.miscExpenses ?? advData.miscExpense ?? parseNum(cb["O_EXPENSE"]);
+    const closingAdv = (cashOpen + cashRecv) - advAmt - miscExp;
 
     return {
       cementMT: Math.round(cMT * 100) / 100,

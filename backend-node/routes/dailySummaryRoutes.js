@@ -34,6 +34,40 @@ function getDatePatterns(dateStr) {
   return Array.from(new Set(patterns));
 }
 
+// Helper to parse numbers
+const parseNum = (v) => {
+  if (v === undefined || v === null || v === '') return 0;
+  const n = parseFloat(String(v).replace(/,/g, ''));
+  return isNaN(n) ? 0 : n;
+};
+
+// Helper to parse date string into timestamp for chronological sorting & matching
+const parseDateToMs = (dStr) => {
+  if (!dStr) return 0;
+  const s = String(dStr).trim();
+  
+  // YYYY-MM-DD format
+  if (/^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}$/.test(s)) {
+    const parts = s.split(/[\/\-\.]/);
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    return new Date(year, month, day).getTime();
+  }
+
+  // DD-MM-YYYY or D-M-YYYY format
+  const parts = s.split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    let day = parseInt(parts[0], 10);
+    let month = parseInt(parts[1], 10) - 1;
+    let year = parseInt(parts[2], 10);
+    if (year < 100) year += 2000;
+    return new Date(year, month, day).getTime();
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+};
+
 router.get("/data", auth, async (req, res) => {
   try {
     const { date, fy, month } = req.query;
@@ -88,7 +122,7 @@ router.get("/data", auth, async (req, res) => {
           { "LOADING DATE": { $in: patterns } }
         ]
       };
-      // To be extremely precise, also scope it down to the exact month/year if they were passed
+      // Scope down to exact month/year if passed
       if (monthInt && yearInt) {
         cementFilter.month = monthInt;
         cementFilter.year = yearInt;
@@ -106,15 +140,107 @@ router.get("/data", auth, async (req, res) => {
     // Fetch Cement Register entries
     const cementEntries = await getCementCol().find(cementFilter).toArray();
 
-    // Fetch Main Cashbook entries
-    const cashbookEntries = await mongoose.connection.useDb("main_cashbook").collection("entries").find(cashbookFilter).toArray();
-    
+    // ── MAIN CASHBOOK DYNAMIC COMPUTATION (Source of Truth) ──────────────────
+    const allCashbookEntries = await mongoose.connection.useDb("main_cashbook").collection("entries").find({}).toArray();
+
+    allCashbookEntries.sort((a, b) => {
+      const tA = parseDateToMs(a.DATE);
+      const tB = parseDateToMs(b.DATE);
+      if (tA === tB) return (parseNum(a['SL NO']) || 0) - (parseNum(b['SL NO']) || 0);
+      return tA - tB;
+    });
+
+    let prevSClosing = 0;
+    let prevPClosing = 0;
+    let prevOClosing = 0;
+
+    const computedCashbookRows = [];
+    for (let i = 0; i < allCashbookEntries.length; i++) {
+      const e = allCashbookEntries[i];
+      const dateMs = parseDateToMs(e.DATE);
+
+      const pOpen = (e.P_OPENING !== undefined && e.P_OPENING !== '') ? parseNum(e.P_OPENING) : prevPClosing;
+      const sOpen = (e.S_OPENING !== undefined && e.S_OPENING !== '') ? parseNum(e.S_OPENING) : prevSClosing;
+      const oOpen = (e.O_OPENING !== undefined && e.O_OPENING !== '') ? parseNum(e.O_OPENING) : prevOClosing;
+
+      const pWith = parseNum(e.P_WITHDRAW);
+      const pDac  = parseNum(e.P_GIVEN_DAC);
+      const pOff  = parseNum(e.P_GIVEN_OFFICE);
+      const pOth  = parseNum(e.P_OTHERS);
+      const pClose = (pOpen + pWith) - pDac - pOff - pOth;
+
+      const sTransOff = parseNum(e.S_TRANS_OFFICE);
+      const sExp      = parseNum(e.S_EXPENSE);
+      const sClose    = (sOpen + pDac + sTransOff) - sExp;
+
+      const sTransToOff = parseNum(e.S_TRANS_TO_OFFICE);
+      const oExp        = parseNum(e.O_EXPENSE);
+      const oClose      = (oOpen + pOff + sTransToOff) - oExp;
+
+      computedCashbookRows.push({
+        DATE: e.DATE,
+        dateMs,
+        month: e.month,
+        year: e.year,
+        pDac,
+        sExp,
+        oExp,
+        miscExp: sExp + oExp,
+        sOpen,
+        sClose,
+        pOpen,
+        pClose,
+        oOpen,
+        oClose
+      });
+
+      prevPClosing = pClose;
+      prevSClosing = sClose;
+      prevOClosing = oClose;
+    }
+
+    let cashReceivedDAC = 0;
+    let openingBalance = 0;
+    let miscExpenses = 0;
+
+    if (date === 'ALL') {
+      const monthRows = computedCashbookRows.filter(r => r.month === monthInt && r.year === yearInt);
+      if (monthRows.length > 0) {
+        cashReceivedDAC = monthRows.reduce((s, r) => s + r.pDac, 0);
+        miscExpenses    = monthRows.reduce((s, r) => s + r.miscExp, 0);
+        openingBalance  = monthRows[0].sOpen;
+      }
+    } else {
+      const targetMs = parseDateToMs(date);
+      const todayRows = computedCashbookRows.filter(r => r.dateMs === targetMs);
+
+      if (todayRows.length > 0) {
+        cashReceivedDAC = todayRows.reduce((s, r) => s + r.pDac, 0);
+        miscExpenses    = todayRows.reduce((s, r) => s + r.miscExp, 0);
+        openingBalance  = todayRows[0].sOpen;
+      } else {
+        const priorRows = computedCashbookRows.filter(r => r.dateMs < targetMs);
+        if (priorRows.length > 0) {
+          const lastPriorRow = priorRows[priorRows.length - 1];
+          openingBalance = lastPriorRow.sClose;
+        }
+      }
+    }
+
+    const mainCashbookData = {
+      cashReceivedDAC,
+      openingBalance,
+      miscExpenses,
+      date
+    };
+
     let cashbookEntry = null;
+    const cashbookEntries = computedCashbookRows.filter(r => date === 'ALL' ? (r.month === monthInt && r.year === yearInt) : (r.dateMs === parseDateToMs(date)));
     if (cashbookEntries.length > 0) {
       cashbookEntry = {
-        OPENING_BALANCE: cashbookEntries[0].OPENING_BALANCE || cashbookEntries[0].O_OPENING,
-        RECEIVED_AMOUNT: cashbookEntries.reduce((s, e) => s + (parseFloat(String(e.RECEIVED_AMOUNT || e.P_GIVEN_DAC || 0).replace(/,/g, '')) || 0), 0),
-        PAYMENT_AMOUNT: cashbookEntries.reduce((s, e) => s + (parseFloat(String(e.PAYMENT_AMOUNT || e.P_WITHDRAW || e.S_EXPENSE || 0).replace(/,/g, '')) || 0), 0)
+        OPENING_BALANCE: openingBalance,
+        RECEIVED_AMOUNT: cashReceivedDAC,
+        PAYMENT_AMOUNT: miscExpenses
       };
     }
 
@@ -152,7 +278,8 @@ router.get("/data", auth, async (req, res) => {
       cement: cementEntries,
       pumpSlips,
       cashbookEntry,
-      advanceSummary
+      advanceSummary,
+      mainCashbookData
     });
 
   } catch (err) {
@@ -162,3 +289,4 @@ router.get("/data", auth, async (req, res) => {
 });
 
 module.exports = router;
+
