@@ -14,6 +14,7 @@ import LockIcon from '@mui/icons-material/Lock';
 import FunctionsIcon from '@mui/icons-material/Functions';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SyncIcon from '@mui/icons-material/Sync';
+import HistoryIcon from '@mui/icons-material/History';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
@@ -424,6 +425,65 @@ export default function CementRegister({ onBack }) {
 
 
   const [errorMsg, setErrorMsg] = useState('');
+  const [showUnbilledView, setShowUnbilledView] = useState(false);
+
+  const previousFourMonths = useMemo(() => {
+    const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
+    const list = [];
+    for (let i = 4; i >= 1; i--) {
+      let m = selectedMonth - i;
+      let y = calendarYear;
+      if (m <= 0) {
+        m += 12;
+        y -= 1;
+      }
+      list.push({
+        month: m,
+        year: y,
+        monthName: MONTHS[m - 1],
+        label: `${MONTHS[m - 1]?.toUpperCase() || ''} ${y}`
+      });
+    }
+    return list;
+  }, [selectedMonth, selectedYear]);
+
+  const unbilledByMonth = useMemo(() => {
+    const map = {};
+    previousFourMonths.forEach(pm => {
+      map[pm.label] = [];
+    });
+
+    pendingEntries.forEach(row => {
+      const merged = { ...row, ...(localData[row._id] || {}) };
+      const comp = applyCalcs(merged);
+
+      const rawDate = comp['LOADING DT'] || comp['LOADING DATE'] || comp['BILL DATE'] || comp['RECEIVING DATE'] || comp['INVOICE DATE'] || comp['UNLOADING STATUS'] || comp.date;
+      const rDate = parseToDate(rawDate);
+      let rMonth = comp.month;
+      let rYear = comp.year;
+      if (rDate.getTime() > 0) {
+        rMonth = rDate.getMonth() + 1;
+        rYear = rDate.getFullYear();
+      }
+
+      const matchPm = previousFourMonths.find(pm => pm.month === rMonth && pm.year === rYear);
+      if (matchPm) {
+        if (!map[matchPm.label]) map[matchPm.label] = [];
+        map[matchPm.label].push(comp);
+      }
+    });
+
+    return previousFourMonths.map(pm => ({
+      label: pm.label,
+      month: pm.month,
+      year: pm.year,
+      rows: (map[pm.label] || []).sort((a, b) => {
+        const dA = parseToDate(a['LOADING DT'] || a['LOADING DATE']);
+        const dB = parseToDate(b['LOADING DT'] || b['LOADING DATE']);
+        return dA.getTime() - dB.getTime();
+      })
+    }));
+  }, [pendingEntries, localData, previousFourMonths]);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (silent = false) => {
@@ -1072,17 +1132,23 @@ export default function CementRegister({ onBack }) {
     }
   };
 
-    const previewRows = useMemo(() => {
+  const previewRows = useMemo(() => {
     if (selectedIds.size === 0) return [];
-    return computedRows.filter(r => selectedIds.has(r._id)).map(r => {
-      // Use the computed row 'r' so we include any dynamically calculated values like 'Billing Amount'
+    const pendingCalcs = pendingEntries.map(r => {
+      const merged = { ...r, ...(localData[r._id] || {}) };
+      return applyCalcs(merged);
+    });
+
+    const allAvailable = [...computedRows, ...pendingCalcs];
+
+    return allAvailable.filter(r => selectedIds.has(r._id)).map(r => {
       const amt = parseFloat(String(r['BILLING AMOUNT'] || '').replace(/,/g, '')) ||
             parseFloat(String(r['Billing Amount'] || '').replace(/,/g, '')) ||
             parseFloat(String(r['BILLING ER 95%'] || '').replace(/,/g, '')) ||
             parseFloat(String(r['AMOUNT'] || '').replace(/,/g, '')) || 0;
       return { ...r, _previewAmt: amt };
     });
-  }, [showPreviousScreen, selectedIds, computedRows, bulkBillInput.billType]);
+  }, [showPreviousScreen, selectedIds, computedRows, pendingEntries, localData, bulkBillInput.billType]);
 
   const previewTotals = useMemo(() => {
     let totalMT = 0;
@@ -1114,6 +1180,243 @@ export default function CementRegister({ onBack }) {
   // }
 
 
+
+  if (showUnbilledView) {
+    const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
+    const totalUnbilledCount = pendingEntries.length;
+
+    return (
+      <Box sx={{
+        minHeight: '100vh',
+        bgcolor: 'background.default',
+        color: 'text.primary',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+        {/* Top Header */}
+        <Box sx={{
+          px: { xs: 2, md: 4 },
+          py: 2,
+          bgcolor: 'background.paper',
+          borderBottom: '1px solid #e2e8f0',
+          display: 'flex',
+          alignItems: 'center',
+          justify: 'space-between',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100
+        }}>
+          <Box display="flex" alignItems="center" gap={2}>
+            <Button
+              variant="outlined"
+              onClick={() => setShowUnbilledView(false)}
+              startIcon={<ArrowBackIcon />}
+              sx={{
+                fontWeight: 700, borderRadius: '10px', fontSize: '0.85rem',
+                color: '#334155', borderColor: '#cbd5e1', textTransform: 'none',
+                '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
+              }}
+            >
+              ← BACK TO CEMENT REGISTER
+            </Button>
+            <Box>
+              <Typography variant="h5" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
+                PREVIOUS ALL MONTHS UNBILLED
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Showing unbilled records for previous 4 months relative to <span style={{ fontWeight: 700, color: '#0f172a' }}>{MONTHS[selectedMonth - 1]} {calendarYear}</span>
+              </Typography>
+            </Box>
+          </Box>
+
+          <Box display="flex" alignItems="center" gap={2}>
+            <Chip
+              label={`${selectedIds.size} Selected`}
+              color={selectedIds.size > 0 ? "primary" : "default"}
+              sx={{ fontWeight: 800, fontSize: '0.8rem', px: 1.5, height: 32 }}
+            />
+            <Button
+              variant="contained"
+              disabled={selectedIds.size === 0}
+              onClick={() => {
+                setShowUnbilledView(false);
+                setIsBillingModalOpen(true);
+              }}
+              sx={{
+                fontWeight: 800, borderRadius: '10px', px: 3, py: 1, fontSize: '0.85rem',
+                background: selectedIds.size > 0 ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : '#e2e8f0',
+                color: selectedIds.size > 0 ? '#fff' : '#94a3b8',
+                boxShadow: selectedIds.size > 0 ? '0 4px 14px rgba(16, 185, 129, 0.35)' : 'none',
+                textTransform: 'none',
+                '&:hover': { background: selectedIds.size > 0 ? 'linear-gradient(135deg, #059669 0%, #047857 100%)' : '#e2e8f0' }
+              }}
+            >
+              RUN BATCH BILLING ({selectedIds.size})
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Content Area */}
+        <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, overflowY: 'auto' }}>
+          {totalUnbilledCount === 0 ? (
+            <Paper sx={{ p: 8, textAlign: 'center', borderRadius: '16px', border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+              <Typography variant="h6" fontWeight={700} color="#64748b" mb={1}>
+                🎉 No Unbilled Shipments Found
+              </Typography>
+              <Typography variant="body2" color="#94a3b8">
+                All shipments from the previous 4 months ({previousFourMonths.map(p => p.label).join(', ')}) have been fully billed.
+              </Typography>
+            </Paper>
+          ) : (
+            unbilledByMonth.map((group) => {
+              const groupIds = group.rows.map(r => r._id);
+              const allGroupSelected = groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
+              const someGroupSelected = groupIds.some(id => selectedIds.has(id)) && !allGroupSelected;
+
+              const toggleGroupSelect = () => {
+                setSelectedIds(prev => {
+                  const s = new Set(prev);
+                  if (allGroupSelected) {
+                    groupIds.forEach(id => s.delete(id));
+                  } else {
+                    groupIds.forEach(id => s.add(id));
+                  }
+                  return s;
+                });
+              };
+
+              return (
+                <Paper key={group.label} sx={{ mb: 4, borderRadius: '16px', overflow: 'hidden', border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
+                  {/* Month Header */}
+                  <Box sx={{
+                    px: 3, py: 2, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                  }}>
+                    <Box display="flex" alignItems="center" gap={1.5}>
+                      <input
+                        type="checkbox"
+                        checked={allGroupSelected}
+                        ref={el => { if (el) el.indeterminate = someGroupSelected; }}
+                        onChange={toggleGroupSelect}
+                        disabled={group.rows.length === 0}
+                        style={{ width: 18, height: 18, cursor: group.rows.length > 0 ? 'pointer' : 'default' }}
+                      />
+                      <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.3px' }}>
+                        {group.label}
+                      </Typography>
+                      <Chip
+                        label={`${group.rows.length} Unbilled`}
+                        size="small"
+                        sx={{ fontWeight: 800, fontSize: '0.75rem', bgcolor: group.rows.length > 0 ? '#fef3c7' : '#f1f5f9', color: group.rows.length > 0 ? '#b45309' : '#64748b' }}
+                      />
+                    </Box>
+                  </Box>
+
+                  {/* Table */}
+                  {group.rows.length === 0 ? (
+                    <Box sx={{ p: 4, textAlign: 'center', color: '#94a3b8', fontSize: '13px', fontWeight: 600 }}>
+                      No unbilled records for {group.label}.
+                    </Box>
+                  ) : (
+                    <Box sx={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9', color: '#475569', textAlign: 'left', fontWeight: 700 }}>
+                            <th style={{ padding: '10px 14px', width: 45, textAlign: 'center' }}>Select</th>
+                            <th style={{ padding: '10px 14px' }}>SL NO</th>
+                            <th style={{ padding: '10px 14px' }}>LOADING DT</th>
+                            <th style={{ padding: '10px 14px' }}>SITE</th>
+                            <th style={{ padding: '10px 14px' }}>VEHICLE NUMBER</th>
+                            <th style={{ padding: '10px 14px' }}>PARTY NAME</th>
+                            <th style={{ padding: '10px 14px' }}>DESTINATION</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'right' }}>BILLING</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'right' }}>MT</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'right' }}>GROSS AMOUNT</th>
+                            <th style={{ padding: '10px 14px' }}>FREIGHT BILL</th>
+                            <th style={{ padding: '10px 14px' }}>UNLOADING BILL</th>
+                            <th style={{ padding: '10px 14px' }}>CHALLAN STATUS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.rows.map((row, idx) => {
+                            const isSelected = selectedIds.has(row._id);
+                            const loadDt = formatDateToDDMMYY(row['LOADING DT'] || row['LOADING DATE'] || '');
+                            const freightGen = row['Freight Generated'] === 'Yes' || !!(row['BILL NO'] && String(row['BILL NO']).trim() !== '');
+                            const unloadingGen = row['Unloading Generated'] === 'Yes' || !!(row['UNLOADING BILL NO'] && String(row['UNLOADING BILL NO']).trim() !== '');
+
+                            return (
+                              <tr
+                                key={row._id}
+                                onClick={() => toggleSelect(row._id)}
+                                style={{
+                                  background: isSelected ? '#f5f3ff' : (idx % 2 === 0 ? '#ffffff' : '#fafafa'),
+                                  borderBottom: '1px solid #f1f5f9',
+                                  cursor: 'pointer',
+                                  transition: 'background 0.15s'
+                                }}
+                              >
+                                <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      toggleSelect(row._id);
+                                    }}
+                                    style={{ width: 16, height: 16, cursor: 'pointer' }}
+                                  />
+                                </td>
+                                <td style={{ padding: '10px 14px', fontWeight: 600, color: '#64748b' }}>{idx + 1}</td>
+                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a' }}>{loadDt}</td>
+                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#2563eb' }}>{row.SITE || '-'}</td>
+                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a' }}>{row['VEHICLE NUMBER'] || '-'}</td>
+                                <td style={{ padding: '10px 14px', color: '#334155' }}>{row['PARTY NAME'] || '-'}</td>
+                                <td style={{ padding: '10px 14px', color: '#334155' }}>{row['DESTINATION'] || '-'}</td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>{row.BILLING || '-'}</td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>{row.MT || '-'}</td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#059669' }}>
+                                  ₹{num(row['GROSS AMOUNT'] || row['NET AMOUNT']).toLocaleString()}
+                                </td>
+                                <td style={{ padding: '10px 14px' }}>
+                                  <Chip
+                                    label={freightGen ? `Bill #${row['BILL NO'] || 'Done'}` : 'Pending'}
+                                    size="small"
+                                    sx={{
+                                      fontSize: '11px', fontWeight: 700,
+                                      bgcolor: freightGen ? '#dcfce7' : '#fee2e2',
+                                      color: freightGen ? '#15803d' : '#b91c1c'
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ padding: '10px 14px' }}>
+                                  <Chip
+                                    label={unloadingGen ? `Bill #${row['UNLOADING BILL NO'] || 'Done'}` : 'Pending'}
+                                    size="small"
+                                    sx={{
+                                      fontSize: '11px', fontWeight: 700,
+                                      bgcolor: unloadingGen ? '#dcfce7' : '#fef3c7',
+                                      color: unloadingGen ? '#15803d' : '#b45309'
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>
+                                  {row['CHALLAN STATUS'] || 'NON STAMP'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </Box>
+                  )}
+                </Paper>
+              );
+            })
+          )}
+        </Box>
+      </Box>
+    );
+  }
 
   if (showPreviousScreen) {
     return (
@@ -1444,6 +1747,29 @@ export default function CementRegister({ onBack }) {
           )}
 
           <Box sx={{ width: '1px', height: '24px', bgcolor: '#e2e8f0', mx: 0.5, display: { xs: 'none', md: 'block' } }} />
+
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<HistoryIcon sx={{ fontSize: '1rem', color: '#0284c7' }} />}
+            onClick={() => setShowUnbilledView(true)}
+            sx={{
+              fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem',
+              color: '#0284c7', borderColor: '#bae6fd', bgcolor: '#f0f9ff',
+              textTransform: 'none',
+              '&:hover': { bgcolor: '#e0f2fe', borderColor: '#38bdf8' }
+            }}
+          >
+            PREVIOUS ALL MONTHS UNBILLED
+            {pendingEntries.length > 0 && (
+              <Box component="span" sx={{
+                ml: 1, px: 0.8, py: 0.2, borderRadius: '10px',
+                bgcolor: '#0284c7', color: '#fff', fontSize: '0.7rem', fontWeight: 800
+              }}>
+                {pendingEntries.length}
+              </Box>
+            )}
+          </Button>
 
           <Button size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: '1rem' }} />} onClick={handleExport}
             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' } }}>
