@@ -84,7 +84,6 @@ router.get("/", async (req, res) => {
     if (req.query.site) filter["SITE"] = req.query.site;
     if (req.query.owner) filter["OWNER NAME"] = req.query.owner;
     if (req.query.vehicle) {
-      // Create a space-agnostic regex for vehicle number to match variants like "WB 11A 1111" vs "WB11A1111"
       const stripped = req.query.vehicle.replace(/[^a-zA-Z0-9]/g, '');
       const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
       filter["VEHICLE NUMBER"] = { $regex: new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i') };
@@ -95,12 +94,31 @@ router.get("/", async (req, res) => {
       if (req.query.to) filter["LOADING DATE"]["$lte"] = new Date(req.query.to);
     }
 
-    if (req.query.month && req.query.year) {
-      filter.month = parseInt(req.query.month, 10);
-      filter.year = parseInt(req.query.year, 10);
+    let reqMonth = req.query.month ? parseInt(req.query.month, 10) : null;
+    let reqYear = req.query.year ? parseInt(req.query.year, 10) : null;
+
+    if (reqMonth && reqYear) {
+      filter.$or = [
+        { month: reqMonth, year: reqYear }
+      ];
     }
 
-    const entries = await col.find(filter).toArray();
+    let entries = await col.find(filter).toArray();
+
+    // Post-filter to guarantee strictly exact month and year match based on actual bill/record date
+    if (reqMonth && reqYear) {
+      const startDate = new Date(reqYear, reqMonth - 1, 1, 0, 0, 0, 0);
+      const endDate = new Date(reqYear, reqMonth, 0, 23, 59, 59, 999);
+
+      entries = entries.filter(entry => {
+        const rawDate = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || entry["RECEIVING DATE"] || entry["INVOICE DATE"] || entry["UNLOADING STATUS"];
+        const dObj = parseToDate(rawDate);
+        if (dObj.getTime() > 0) {
+          return dObj.getTime() >= startDate.getTime() && dObj.getTime() <= endDate.getTime();
+        }
+        return entry.month === reqMonth && entry.year === reqYear;
+      });
+    }
 
     // Sort chronologically by date
     entries.sort((a, b) => {
@@ -120,7 +138,6 @@ router.get("/", async (req, res) => {
       if (entry["LOADING DT"]) entry["LOADING DT"] = formatDateToDDMMYY(entry["LOADING DT"]);
       if (entry["LOADING DATE"]) entry["LOADING DATE"] = formatDateToDDMMYY(entry["LOADING DATE"]);
       
-      // Deductions override overlay removed - now handled directly in DB fields
       return entry;
     });
 

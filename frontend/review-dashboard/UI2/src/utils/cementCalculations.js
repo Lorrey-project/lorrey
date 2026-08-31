@@ -288,19 +288,60 @@ export function fmt2(n) { return Math.round(num(n) * 100) / 100; }
 
 export function parseToDate(dStr) {
   if (!dStr) return new Date(0);
+  if (dStr instanceof Date) return isNaN(dStr.getTime()) ? new Date(0) : dStr;
+
   const clean = String(dStr).trim();
-  const parts = clean.split(/[-/.]/);
-  if (parts.length === 3) {
-    const day = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    let year = parseInt(parts[2], 10);
-    if (parts[2].length === 2) {
-      year += (year >= 70 ? 1900 : 2000);
+  if (!clean) return new Date(0);
+
+  // Excel Serial Date number (e.g. 46250)
+  if (/^\d{5}(\.\d+)?$/.test(clean)) {
+    const excelDays = parseFloat(clean);
+    const date = new Date(Math.round((excelDays - 25569) * 86400 * 1000));
+    if (!isNaN(date.getTime())) return date;
+  }
+
+  // YYYY-MM-DD or YYYY/MM/DD
+  const isoMatch = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) return date;
+  }
+
+  // DD-Mon-YYYY (e.g. 16-Aug-2026 or 16-Aug-26)
+  const monMatch = clean.match(/^(\d{1,2})[-/.]([a-zA-Z]{3,})[-/.](\d{2,4})/);
+  if (monMatch) {
+    const day = parseInt(monMatch[1], 10);
+    const monthIdx = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(monMatch[2].toLowerCase().slice(0, 3));
+    let year = parseInt(monMatch[3], 10);
+    if (year < 100) year += 2000;
+    if (monthIdx >= 0) {
+      const date = new Date(year, monthIdx, day);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+
+  // DD.MM.YYYY or DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
+  if (dmyMatch) {
+    const p1 = parseInt(dmyMatch[1], 10);
+    const p2 = parseInt(dmyMatch[2], 10);
+    let year = parseInt(dmyMatch[3], 10);
+    if (year < 100) year += 2000;
+
+    let day = p1;
+    let month = p2 - 1;
+    if (p2 > 12 && p1 <= 12) {
+      day = p2;
+      month = p1 - 1;
     }
     const date = new Date(year, month, day);
     if (!isNaN(date.getTime())) return date;
   }
-  let d = new Date(dStr);
+
+  let d = new Date(clean);
   if (!isNaN(d.getTime())) return d;
   return new Date(0);
 }

@@ -504,18 +504,32 @@ export default function CementRegister({ onBack }) {
 
   // ── Merged rows with calcs ─────────────────────────────────────────────────
   const computedRows = useMemo(() => {
-    let dbRows = entries.map(row => {
+    const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
+    const monthStartDate = new Date(calendarYear, selectedMonth - 1, 1, 0, 0, 0, 0);
+    const monthEndDate = new Date(calendarYear, selectedMonth, 0, 23, 59, 59, 999);
+
+    const isRecordInSelectedPeriod = (row) => {
+      const merged = { ...row, ...(localData[row._id] || {}) };
+      const rawDate = merged['LOADING DT'] || merged['LOADING DATE'] || merged['BILL DATE'] || merged['RECEIVING DATE'] || merged['INVOICE DATE'] || merged['UNLOADING STATUS'] || merged.date;
+      const rDate = parseToDate(rawDate);
+
+      if (rDate.getTime() > 0) {
+        return rDate.getTime() >= monthStartDate.getTime() && rDate.getTime() <= monthEndDate.getTime();
+      }
+      return merged.month === selectedMonth && merged.year === calendarYear;
+    };
+
+    let dbRows = entries.filter(isRecordInSelectedPeriod).map(row => {
       const merged = { ...row, ...(localData[row._id] || {}) };
       return applyCalcs(merged);
     });
 
-    let previewRows = unsavedImportRows.map(row => {
+    let previewRows = unsavedImportRows.filter(isRecordInSelectedPeriod).map(row => {
       const merged = { ...row, ...(localData[row._id] || {}) };
       return applyCalcs(merged);
     });
 
     let rows = [...dbRows, ...previewRows];
-
 
     // Sort chronologically by date
     rows.sort((a, b) => {
@@ -535,31 +549,12 @@ export default function CementRegister({ onBack }) {
       'SL NO': String(index + 1),
       'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
     }));
-  }, [entries, unsavedImportRows, localData]);
+  }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear]);
 
   // ── Pending merged rows with calcs ─────────────────────────────────────────
   const pendingComputedRows = useMemo(() => {
-    let rows = pendingEntries.map(row => {
-      const merged = { ...row, ...(localData[row._id] || {}) };
-      return applyCalcs(merged);
-    });
-
-    // Sort chronologically by date
-    rows.sort((a, b) => {
-      const dateA = parseToDate(a['LOADING DT'] || a['LOADING DATE']);
-      const dateB = parseToDate(b['LOADING DT'] || b['LOADING DATE']);
-      if (dateA.getTime() !== dateB.getTime()) {
-        return dateA.getTime() - dateB.getTime();
-      }
-      return 0; // Maintain existing order if dates match
-    });
-
-    return rows.map((r, index) => ({
-      ...r,
-      'isPending': true,
-      'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
-    }));
-  }, [pendingEntries, localData]);
+    return [];
+  }, []);
 
   const filteredRows = useMemo(() => {
     const applyFilters = (rowsArray) => {
@@ -581,15 +576,12 @@ export default function CementRegister({ onBack }) {
 
     return {
       normal: applyFilters(computedRows),
-      pending: applyFilters(pendingComputedRows)
+      pending: []
     };
-  }, [computedRows, pendingComputedRows, searchQuery, filterBillingStatus, filterChallanStatus]);
+  }, [computedRows, searchQuery, filterBillingStatus, filterChallanStatus]);
 
   const allRecords = useMemo(() => {
-    return [
-      ...filteredRows.pending.map(r => ({ ...r, _isPending: true })),
-      ...filteredRows.normal.map(r => ({ ...r, _isPending: false }))
-    ];
+    return filteredRows.normal.map(r => ({ ...r, _isPending: false }));
   }, [filteredRows]);
 
   const paginatedRecords = useMemo(() => {
@@ -1584,12 +1576,12 @@ export default function CementRegister({ onBack }) {
           </thead>
 
           <tbody>
-            {filteredRows.normal.length === 0 && filteredRows.pending.length === 0 && (
+            {filteredRows.normal.length === 0 && (
               <tr>
                 <td colSpan={VISIBLE_COLS.length + 1} style={{
-                  textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px'
+                  textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '14px', fontWeight: 600
                 }}>
-                  No entries found. Upload and approve an invoice slip — data will auto-populate here.
+                  No bills found for {MONTHS[selectedMonth - 1]} {selectedMonth <= 3 ? selectedYear + 1 : selectedYear}.
                 </td>
               </tr>
             )}
