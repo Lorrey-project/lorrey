@@ -157,9 +157,9 @@ router.get("/pending-bills", async (req, res) => {
     const m = parseInt(month, 10);
     const y = parseInt(year, 10);
     
-    // Calculate previous 4 months
+    // Calculate target month + previous 4 months (i = 0 to 4)
     const prevMonths = [];
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 0; i <= 4; i++) {
       let prevM = m - i;
       let prevY = y;
       if (prevM <= 0) {

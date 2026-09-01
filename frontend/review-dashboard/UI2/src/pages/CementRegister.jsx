@@ -1210,20 +1210,97 @@ export default function CementRegister({ onBack }) {
       totalUnbilledRowsCount += g.rows.length;
     });
 
-    const allUnbilledIds = [];
-    unbilledByMonth.forEach(g => {
-      g.rows.forEach(r => allUnbilledIds.push(r._id));
+    const isRecordUnbilledCheck = (comp) => {
+      if (comp['Billing Completed'] === 'Yes' || comp.billingCompleted === true) {
+        return false;
+      }
+      const freightBillNo = String(comp['BILL NO'] || comp['BILL NUMBER'] || comp['FREIGHT BILL NO'] || comp.freightBillNo || '').trim();
+      const fGen = comp['Freight Generated'] === 'Yes' || freightBillNo !== '';
+
+      const unloadingBillNo = String(comp['UNLOADING BILL NO'] || comp['UNLOADING BILL NUMBER'] || comp.unloadingBillNo || '').trim();
+      const uGen = comp['Unloading Generated'] === 'Yes' || unloadingBillNo !== '';
+
+      const challanBilled = String(comp['CHALLAN STATUS'] || '').toUpperCase().trim() === 'BILLED';
+
+      if ((fGen && uGen) || (fGen && challanBilled) || (fGen && !uGen && !comp['EXTRA UNLOADING'])) {
+        return false;
+      }
+
+      return true;
+    };
+
+    // Gather all unbilled current month entries from both pendingEntries & computedRows
+    const currentMonthUnbilledList = [];
+    const seenIds = new Set();
+
+    [...pendingEntries, ...computedRows].forEach(row => {
+      if (!row || !row._id || seenIds.has(row._id)) return;
+
+      const merged = { ...row, ...(localData[row._id] || {}) };
+      const comp = applyCalcs(merged);
+
+      const rawDate = comp['LOADING DT'] || comp['LOADING DATE'] || comp['BILL DATE'] || comp['RECEIVING DATE'] || comp['INVOICE DATE'] || comp['UNLOADING STATUS'] || comp.date;
+      const rDate = parseToDate(rawDate);
+      let rMonth = comp.month;
+      let rYear = comp.year;
+      if (rDate.getTime() > 0) {
+        rMonth = rDate.getMonth() + 1;
+        rYear = rDate.getFullYear();
+      }
+
+      if (rMonth === selectedMonth && rYear === calendarYear) {
+        if (isRecordUnbilledCheck(comp)) {
+          seenIds.add(row._id);
+          const rawSlNo = row['SL NO'] || row['SL. NO.'] || row.slNo || row.sl_no || comp['SL NO'] || '';
+          if (rawSlNo) comp['SL NO'] = String(rawSlNo);
+          currentMonthUnbilledList.push(comp);
+        }
+      }
     });
-    const allUnbilledSelected = allUnbilledIds.length > 0 && allUnbilledIds.every(id => selectedIds.has(id));
-    const someUnbilledSelected = allUnbilledIds.some(id => selectedIds.has(id)) && !allUnbilledSelected;
+
+    currentMonthUnbilledList.sort((a, b) => {
+      const dA = parseToDate(a['LOADING DT'] || a['LOADING DATE']);
+      const dB = parseToDate(b['LOADING DT'] || b['LOADING DATE']);
+      if (dA.getTime() !== dB.getTime()) return dA.getTime() - dB.getTime();
+      const slA = parseInt(String(a['SL NO'] || '').replace(/\D/g, ''), 10) || 0;
+      const slB = parseInt(String(b['SL NO'] || '').replace(/\D/g, ''), 10) || 0;
+      return slA - slB;
+    });
+
+    const currentMonthMax10Rows = currentMonthUnbilledList.slice(0, 10);
+
+    const allSelectableIds = [];
+    unbilledByMonth.forEach(g => {
+      g.rows.forEach(r => allSelectableIds.push(r._id));
+    });
+    currentMonthMax10Rows.forEach(r => allSelectableIds.push(r._id));
+
+    const allUnbilledSelected = allSelectableIds.length > 0 && allSelectableIds.every(id => selectedIds.has(id));
+    const someUnbilledSelected = allSelectableIds.some(id => selectedIds.has(id)) && !allUnbilledSelected;
 
     const toggleAllUnbilled = () => {
       setSelectedIds(prev => {
         const s = new Set(prev);
         if (allUnbilledSelected) {
-          allUnbilledIds.forEach(id => s.delete(id));
+          allSelectableIds.forEach(id => s.delete(id));
         } else {
-          allUnbilledIds.forEach(id => s.add(id));
+          allSelectableIds.forEach(id => s.add(id));
+        }
+        return s;
+      });
+    };
+
+    const currentMonthGroupIds = currentMonthMax10Rows.map(r => r._id);
+    const allCurrentSelected = currentMonthGroupIds.length > 0 && currentMonthGroupIds.every(id => selectedIds.has(id));
+    const someCurrentSelected = currentMonthGroupIds.some(id => selectedIds.has(id)) && !allCurrentSelected;
+
+    const toggleCurrentMonthGroupSelect = () => {
+      setSelectedIds(prev => {
+        const s = new Set(prev);
+        if (allCurrentSelected) {
+          currentMonthGroupIds.forEach(id => s.delete(id));
+        } else {
+          currentMonthGroupIds.forEach(id => s.add(id));
         }
         return s;
       });
