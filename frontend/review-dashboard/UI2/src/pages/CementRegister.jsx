@@ -1442,7 +1442,7 @@ export default function CementRegister({ onBack }) {
                           {VISIBLE_COLS.map((col) => (
                             <td key={col.key} style={{
                               padding: '4px 6px',
-                              textAlign: col.type === 'calc' || NUMERIC_KEYS.includes(col.key) ? 'right' : 'left',
+                              textAlign: col.type === 'calc' || (NUMERIC_KEYS.has ? NUMERIC_KEYS.has(col.key) : NUMERIC_KEYS.includes(col.key)) ? 'right' : 'left',
                               borderRight: '1px solid #f1f5f9',
                               whiteSpace: 'nowrap',
                               fontSize: '11px'
