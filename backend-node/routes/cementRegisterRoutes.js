@@ -196,7 +196,7 @@ router.get("/pending-bills", async (req, res) => {
         return mVal === pm.month && yVal === pm.year;
       });
 
-      // Sort ALL entries of this month chronologically by date and existing SL NO
+      // Sort ALL entries of this month chronologically by date
       monthEntries.sort((a, b) => {
         const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"]);
         const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"]);
@@ -208,12 +208,9 @@ router.get("/pending-bills", async (req, res) => {
         return slA - slB;
       });
 
-      // Assign exact month-wise Cement Register SL NO to every entry in this month
+      // Assign exact month-wise Cement Register SL NO (1 to N) to every entry in this month
       monthEntries.forEach((entry, idx) => {
-        const rawSl = entry["SL NO"] ?? entry["SL. NO."] ?? entry.slNo ?? entry.sl_no ?? entry["S.NO"] ?? entry.sno ?? entry.sl ?? entry["SL"];
-        entry["SL NO"] = (rawSl !== undefined && rawSl !== null && String(rawSl).trim() !== '') 
-          ? String(rawSl) 
-          : String(idx + 1);
+        entry["SL NO"] = String(idx + 1);
       });
 
       // Filter for unbilled records in this month

@@ -630,10 +630,10 @@ export default function CementRegister({ onBack }) {
       return slA - slB;
     });
 
-    // Format dates to DD.MM.YY and preserve original SL NO (fallback to index+1)
+    // Format dates to DD.MM.YY and set month-wise row order as SL NO (1 to N)
     return rows.map((r, index) => ({
       ...r,
-      'SL NO': String(r['SL NO'] ?? r['SL. NO.'] ?? r.slNo ?? r.sl_no ?? r['S.NO'] ?? r.sno ?? r.sl ?? r['SL'] ?? (index + 1)),
+      'SL NO': String(index + 1),
       'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
     }));
   }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear]);
