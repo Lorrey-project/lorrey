@@ -169,42 +169,34 @@ router.get("/pending-bills", async (req, res) => {
       prevMonths.push({ month: prevM, year: prevY });
     }
     
-    const filter = {
-      $or: prevMonths.map(pm => ({ month: pm.month, year: pm.year }))
-    };
-    
     const col = getCollection();
-    const entries = await col.find(filter).toArray();
+    const entries = await col.find({}).toArray();
     
     const pendingEntries = [];
 
     // Process month-by-month so each month's rows carry their exact Cement Register month-wise SL NO
     for (const pm of prevMonths) {
-      // Fetch all non-blank entries for this specific month
-      const monthEntries = entries.filter(r => {
-        const rawDate = r['LOADING DT'] || r['LOADING DATE'] || r['BILL DATE'] || r['RECEIVING DATE'] || r['INVOICE DATE'] || r.date;
-        const invNo = r['INVOICE NO'] || r['Invoice No'] || r['SHIPMENT NO'];
-        if (!rawDate && !invNo) return false;
+      const startDate = new Date(pm.year, pm.month - 1, 1, 0, 0, 0, 0);
+      const endDate = new Date(pm.year, pm.month, 0, 23, 59, 59, 999);
 
-        const d = parseToDate(rawDate);
-        let mVal = r.month;
-        let yVal = r.year;
-        if (d.getTime() > 0) {
-          mVal = d.getMonth() + 1;
-          yVal = d.getFullYear();
+      let monthEntries = entries.filter(entry => {
+        const rawDate = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || entry["RECEIVING DATE"] || entry["INVOICE DATE"] || entry["UNLOADING STATUS"];
+        const dObj = parseToDate(rawDate);
+        if (dObj.getTime() > 0) {
+          return dObj.getTime() >= startDate.getTime() && dObj.getTime() <= endDate.getTime();
         }
-        return mVal === pm.month && yVal === pm.year;
+        return entry.month === pm.month && entry.year === pm.year;
       });
 
-      // Sort ALL entries of this month chronologically by date
+      // Sort ALL entries of this month chronologically by date exactly as GET /cement-register
       monthEntries.sort((a, b) => {
-        const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"]);
-        const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"]);
+        const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"] || a["UNLOADING STATUS"]);
+        const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"] || b["UNLOADING STATUS"]);
         if (dateA.getTime() !== dateB.getTime()) {
           return dateA.getTime() - dateB.getTime();
         }
-        const slA = parseInt(String(a["SL NO"] || a["SL. NO."] || a.slNo || '').replace(/\D/g, ''), 10) || 0;
-        const slB = parseInt(String(b["SL NO"] || b["SL. NO."] || b.slNo || '').replace(/\D/g, ''), 10) || 0;
+        const slA = parseInt(String(a["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
+        const slB = parseInt(String(b["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
         return slA - slB;
       });
 
@@ -215,6 +207,10 @@ router.get("/pending-bills", async (req, res) => {
 
       // Filter for unbilled records in this month
       const unbilledInMonth = monthEntries.filter(r => {
+        const rawDate = r['LOADING DT'] || r['LOADING DATE'] || r['BILL DATE'] || r['RECEIVING DATE'] || r['INVOICE DATE'];
+        const invNo = r['INVOICE NO'] || r['Invoice No'] || r['SHIPMENT NO'];
+        if (!rawDate && !invNo) return false;
+
         if (r['Billing Completed'] === 'Yes' || r.billingCompleted === true) {
           return false;
         }
