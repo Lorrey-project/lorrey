@@ -510,17 +510,17 @@ export default function CementRegister({ onBack }) {
   const fetchData = useCallback(async (silent = false) => {
     setErrorMsg('');
     console.log('fetchData called', { silent, selectedMonth, selectedYear });
-    
+
     // STEP 1: Render Current Data Immediately
     try {
       if (!silent) setLoading(true);
       const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
-      
+
       // Fetch normal data first!
       const res = await axios.get(`${API_URL}/cement-register`, {
         params: { month: selectedMonth, year: calendarYear, _t: Date.now() }
       });
-      
+
       if (res.data && res.data.success) {
         setEntries(res.data.entries || []);
         setLocalData({});
@@ -529,7 +529,7 @@ export default function CementRegister({ onBack }) {
         const preview = typeof res.data === 'string' ? res.data.substring(0, 50) : JSON.stringify(res.data || 'undefined');
         setErrorMsg(`API Response Success is falsy. Data: ${preview}`);
       }
-      
+
       // We have normal data, stop main loading spinner
       setLoading(false);
 
@@ -538,7 +538,7 @@ export default function CementRegister({ onBack }) {
         params: { month: selectedMonth, year: calendarYear, _t: Date.now() }
       }).then(pendingRes => {
         if (pendingRes.data && pendingRes.data.success) {
-           setPendingEntries(pendingRes.data.entries || []);
+          setPendingEntries(pendingRes.data.entries || []);
         }
       }).catch(err => {
         console.error('Failed to fetch pending bills:', err);
@@ -649,7 +649,7 @@ export default function CementRegister({ onBack }) {
         if (filterChallanStatus === 'Non-Stamped') result = result.filter(r => String(r['CHALLAN STATUS']).toUpperCase() === 'NON STAMP');
         if (filterChallanStatus === 'Empty') result = result.filter(r => !r['CHALLAN STATUS']);
       }
-  
+
       if (!searchQuery) return result;
       const q = searchQuery.toLowerCase();
       return result.filter(row => Object.values(row).some(val => String(val || '').toLowerCase().includes(q)));
@@ -1164,9 +1164,9 @@ export default function CementRegister({ onBack }) {
 
     return allAvailable.filter(r => selectedIds.has(r._id)).map(r => {
       const amt = parseFloat(String(r['BILLING AMOUNT'] || '').replace(/,/g, '')) ||
-            parseFloat(String(r['Billing Amount'] || '').replace(/,/g, '')) ||
-            parseFloat(String(r['BILLING ER 95%'] || '').replace(/,/g, '')) ||
-            parseFloat(String(r['AMOUNT'] || '').replace(/,/g, '')) || 0;
+        parseFloat(String(r['Billing Amount'] || '').replace(/,/g, '')) ||
+        parseFloat(String(r['BILLING ER 95%'] || '').replace(/,/g, '')) ||
+        parseFloat(String(r['AMOUNT'] || '').replace(/,/g, '')) || 0;
       return { ...r, _previewAmt: amt };
     });
   }, [showPreviousScreen, selectedIds, computedRows, pendingEntries, localData, bulkBillInput.billType]);
@@ -1210,40 +1210,20 @@ export default function CementRegister({ onBack }) {
       totalUnbilledRowsCount += g.rows.length;
     });
 
-    const currentMonthMax10Rows = computedRows.slice(0, 10);
-
-    const allSelectableIds = [];
+    const allUnbilledIds = [];
     unbilledByMonth.forEach(g => {
-      g.rows.forEach(r => allSelectableIds.push(r._id));
+      g.rows.forEach(r => allUnbilledIds.push(r._id));
     });
-    currentMonthMax10Rows.forEach(r => allSelectableIds.push(r._id));
-
-    const allUnbilledSelected = allSelectableIds.length > 0 && allSelectableIds.every(id => selectedIds.has(id));
-    const someUnbilledSelected = allSelectableIds.some(id => selectedIds.has(id)) && !allUnbilledSelected;
+    const allUnbilledSelected = allUnbilledIds.length > 0 && allUnbilledIds.every(id => selectedIds.has(id));
+    const someUnbilledSelected = allUnbilledIds.some(id => selectedIds.has(id)) && !allUnbilledSelected;
 
     const toggleAllUnbilled = () => {
       setSelectedIds(prev => {
         const s = new Set(prev);
         if (allUnbilledSelected) {
-          allSelectableIds.forEach(id => s.delete(id));
+          allUnbilledIds.forEach(id => s.delete(id));
         } else {
-          allSelectableIds.forEach(id => s.add(id));
-        }
-        return s;
-      });
-    };
-
-    const currentMonthGroupIds = currentMonthMax10Rows.map(r => r._id);
-    const allCurrentSelected = currentMonthGroupIds.length > 0 && currentMonthGroupIds.every(id => selectedIds.has(id));
-    const someCurrentSelected = currentMonthGroupIds.some(id => selectedIds.has(id)) && !allCurrentSelected;
-
-    const toggleCurrentMonthGroupSelect = () => {
-      setSelectedIds(prev => {
-        const s = new Set(prev);
-        if (allCurrentSelected) {
-          currentMonthGroupIds.forEach(id => s.delete(id));
-        } else {
-          currentMonthGroupIds.forEach(id => s.add(id));
+          allUnbilledIds.forEach(id => s.add(id));
         }
         return s;
       });
@@ -1276,9 +1256,9 @@ export default function CementRegister({ onBack }) {
                 PREVIOUS ALL MONTHS UNBILLED
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ color: '#94a3b8' }}>
-                Previous 4 Months Unbilled + Current Month (<span style={{ fontWeight: 700, color: '#e2e8f0' }}>{MONTHS[selectedMonth - 1]} {calendarYear}</span>)
+                Showing unbilled records for previous 4 months relative to <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{MONTHS[selectedMonth - 1]} {calendarYear}</span>
                 <span style={{ margin: '0 8px', color: '#64748b' }}>•</span>
-                Unbilled Count: <span style={{ fontWeight: 800, color: '#38bdf8' }}>{totalUnbilledRowsCount}</span>
+                Total Unbilled: <span style={{ fontWeight: 800, color: '#38bdf8' }}>{totalUnbilledRowsCount}</span>
               </Typography>
             </Box>
           </Box>
@@ -1312,23 +1292,23 @@ export default function CementRegister({ onBack }) {
         </Box>
 
         {/* Table Container (EXACT CEMENT REGISTER PATTERN) */}
-        <Box ref={tableContainerRef} sx={{ 
-          overflow: 'auto', 
-          flex: 1, 
+        <Box ref={tableContainerRef} sx={{
+          overflow: 'auto',
+          flex: 1,
           minHeight: 0,
           minWidth: 0,
-          m: { xs: 1, md: 2 }, 
-          borderRadius: '12px', 
-          border: '1px solid #e2e8f0', 
-          boxShadow: '0 4px 15px rgba(0,0,0,0.03)', 
-          bgcolor: 'background.paper' 
+          m: { xs: 1, md: 2 },
+          borderRadius: '12px',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
+          bgcolor: 'background.paper'
         }}>
           <table style={{
-            borderCollapse: 'separate', 
+            borderCollapse: 'separate',
             borderSpacing: 0,
             minWidth: '100%',
-            tableLayout: 'auto', 
-            fontFamily: 'Inter, system-ui, sans-serif', 
+            tableLayout: 'auto',
+            fontFamily: 'Inter, system-ui, sans-serif',
             fontSize: '11px'
           }}>
             {/* Col widths */}
@@ -1389,11 +1369,10 @@ export default function CementRegister({ onBack }) {
             </thead>
 
             <tbody>
-              {/* SECTION A: PREVIOUS 4 MONTHS UNBILLED */}
               {totalUnbilledRowsCount === 0 && (
                 <tr>
                   <td colSpan={VISIBLE_COLS.length + 1} style={{
-                    textAlign: 'center', padding: '30px', color: '#64748b', fontSize: '13px', fontWeight: 600
+                    textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '14px', fontWeight: 600
                   }}>
                     🎉 No unbilled bills found across previous 4 months ({previousFourMonths.map(p => p.label).join(', ')}). All shipments are fully billed.
                   </td>
@@ -1480,7 +1459,7 @@ export default function CementRegister({ onBack }) {
                                 rowIndex={index}
                                 row={row}
                                 onChange={(val) => handleCellEdit(row._id, col.key, val)}
-                                onAttachSaved={() => {}}
+                                onAttachSaved={() => { }}
                               />
                             );
                           })}
@@ -1490,77 +1469,6 @@ export default function CementRegister({ onBack }) {
                   </React.Fragment>
                 );
               })}
-
-              {/* SECTION B: CURRENT / PRESENT MONTH (MAX 10 RECORDS) */}
-              {currentMonthMax10Rows.length > 0 && (
-                <React.Fragment>
-                  <tr style={{ background: '#ecfdf5', borderTop: '3px double #059669', borderBottom: '2px solid #059669' }}>
-                    <td style={{ textAlign: 'center', padding: '8px 4px', background: '#d1fae5' }}>
-                      <input
-                        type="checkbox"
-                        checked={allCurrentSelected}
-                        ref={el => { if (el) el.indeterminate = someCurrentSelected; }}
-                        onChange={toggleCurrentMonthGroupSelect}
-                        style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#059669' }}
-                      />
-                    </td>
-                    <td colSpan={VISIBLE_COLS.length} style={{ padding: '10px 16px', fontWeight: 900, fontSize: '13px', color: '#065f46', letterSpacing: '0.4px' }}>
-                      ⚡ CURRENT MONTH — {MONTHS[selectedMonth - 1]?.toUpperCase()} {calendarYear} <span style={{ fontSize: '11px', color: '#047857', fontWeight: 700 }}>(MAXIMUM 10 ELIGIBLE SHIPMENTS)</span>
-                    </td>
-                  </tr>
-
-                  {/* Current Month Rows */}
-                  {currentMonthMax10Rows.map((row, index) => {
-                    const isRowSelected = selectedIds.has(row._id);
-                    const background = isRowSelected ? '#f5f3ff' : (index % 2 === 0 ? '#ffffff' : '#f0fdf4');
-
-                    return (
-                      <tr
-                        key={row._id}
-                        style={{
-                          background,
-                          borderBottom: '1px solid #e2e8f0',
-                          outline: isRowSelected ? '2px solid rgba(124,58,237,0.4)' : 'none',
-                        }}
-                      >
-                        <td style={{
-                          position: 'sticky', left: 0, zIndex: 5,
-                          background,
-                          textAlign: 'center', padding: '4px',
-                          borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0'
-                        }}>
-                          <input
-                            type="checkbox"
-                            checked={isRowSelected}
-                            onChange={() => toggleSelect(row._id)}
-                            style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#7c3aed' }}
-                          />
-                        </td>
-
-                        {VISIBLE_COLS.map((col) => {
-                          const rawVal = row[col.key];
-                          const localVal = localData[row._id]?.[col.key];
-                          const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
-                          const isDirty = localVal !== undefined;
-
-                          return (
-                            <CellRenderer
-                              key={col.key}
-                              col={col}
-                              value={displayVal}
-                              isDirty={isDirty}
-                              rowIndex={index}
-                              row={row}
-                              onChange={(val) => handleCellEdit(row._id, col.key, val)}
-                              onAttachSaved={() => {}}
-                            />
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </React.Fragment>
-              )}
             </tbody>
           </table>
         </Box>
@@ -1595,13 +1503,13 @@ export default function CementRegister({ onBack }) {
                 {generatedBillsPreview ? '✅ Bill Generated Successfully' : 'Preview Selected Shipments'}
               </Typography>
               <Typography variant="body2" color="#64748b" fontWeight={500}>
-                {generatedBillsPreview 
+                {generatedBillsPreview
                   ? `Generated Bill(s): ${generatedBillsPreview.join(', ')}`
                   : 'Final verification before bill generation'}
               </Typography>
             </Box>
           </Box>
-          
+
           <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mb: 0.5, letterSpacing: '0.5px' }}>BILL TYPE</Typography>
@@ -1701,11 +1609,11 @@ export default function CementRegister({ onBack }) {
               </tbody>
             </table>
           </Box>
-          
+
           {/* Summary Area */}
-          <Box sx={{ 
-            p: 3, 
-            borderTop: '1px solid #e2e8f0', 
+          <Box sx={{
+            p: 3,
+            borderTop: '1px solid #e2e8f0',
             bgcolor: 'background.default',
             display: 'flex',
             alignItems: 'center',
@@ -1974,23 +1882,23 @@ export default function CementRegister({ onBack }) {
       </Box>
 
       {/* ── Group header row ─────────────────────────────────────────────── */}
-      <Box ref={tableContainerRef} sx={{ 
-        overflow: 'auto', 
-        flex: 1, 
+      <Box ref={tableContainerRef} sx={{
+        overflow: 'auto',
+        flex: 1,
         minHeight: 0, // Fix vertical flex overflow
         minWidth: 0,  // Fix horizontal flex overflow
-        m: { xs: 1, md: 2 }, 
-        borderRadius: '12px', 
-        border: '1px solid #e2e8f0', 
-        boxShadow: '0 4px 15px rgba(0,0,0,0.03)', 
-        bgcolor: 'background.paper' 
+        m: { xs: 1, md: 2 },
+        borderRadius: '12px',
+        border: '1px solid #e2e8f0',
+        boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
+        bgcolor: 'background.paper'
       }}>
         <table style={{
-          borderCollapse: 'separate', 
+          borderCollapse: 'separate',
           borderSpacing: 0,
           minWidth: '100%',
-          tableLayout: 'auto', 
-          fontFamily: 'Inter, system-ui, sans-serif', 
+          tableLayout: 'auto',
+          fontFamily: 'Inter, system-ui, sans-serif',
           fontSize: '11px'
         }}>
           {/* Col widths */}
@@ -2061,7 +1969,7 @@ export default function CementRegister({ onBack }) {
                 </td>
               </tr>
             )}
-            
+
             {paginatedRecords.map((row, index) => {
               const prevRow = page * rowsPerPage + index > 0 ? allRecords[page * rowsPerPage + index - 1] : null;
               const showPendingDivider = row._isPending && (!prevRow || !prevRow._isPending);
@@ -2074,10 +1982,10 @@ export default function CementRegister({ onBack }) {
               const isLocked = row['Billing Completed'] === 'Yes';
 
               // Styles
-              const background = row._isPending 
-                 ? (isRowSelected ? '#e0f2fe' : hasDraft ? '#fef3c7' : '#fafafa')
-                 : (isLocked ? '#f8fafc' : isMatch ? '#f1f5f9' : isRowSelected ? '#f5f3ff' : row.isUnsavedImport ? '#fdf4ff' : hasDraft ? '#fffbeb' : ((page * rowsPerPage + index) % 2 === 0 ? '#ffffff' : '#fafafa'));
-              
+              const background = row._isPending
+                ? (isRowSelected ? '#e0f2fe' : hasDraft ? '#fef3c7' : '#fafafa')
+                : (isLocked ? '#f8fafc' : isMatch ? '#f1f5f9' : isRowSelected ? '#f5f3ff' : row.isUnsavedImport ? '#fdf4ff' : hasDraft ? '#fffbeb' : ((page * rowsPerPage + index) % 2 === 0 ? '#ffffff' : '#fafafa'));
+
               const outline = row._isPending ? 'none' : (isMatch ? '2px solid #cbd5e1' : (isRowSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'));
               const opacity = row._isPending ? 1 : (isLocked ? 0.85 : 1);
               const boxShadow = row._isPending ? 'none' : (isLocked ? 'inset 0 0 0 9999px rgba(226,232,240,0.3)' : 'none');
@@ -2128,9 +2036,9 @@ export default function CementRegister({ onBack }) {
                           if (row._isPending) e.stopPropagation();
                           toggleSelect(row._id);
                         }}
-                        style={{ 
-                          cursor: (row._isPending ? isRowUnbilled : !isLocked) ? 'pointer' : (row._isPending ? 'default' : 'not-allowed'), 
-                          width: row._isPending ? 14 : 13, height: row._isPending ? 14 : 13, accentColor: row._isPending ? '#3b82f6' : '#7c3aed' 
+                        style={{
+                          cursor: (row._isPending ? isRowUnbilled : !isLocked) ? 'pointer' : (row._isPending ? 'default' : 'not-allowed'),
+                          width: row._isPending ? 14 : 13, height: row._isPending ? 14 : 13, accentColor: row._isPending ? '#3b82f6' : '#7c3aed'
                         }}
                       />
                     </td>
@@ -2148,8 +2056,8 @@ export default function CementRegister({ onBack }) {
                           isDirty={isDirty}
                           rowIndex={row._isPending ? index : (page * rowsPerPage + index)}
                           row={row}
-                          onChange={row._isPending ? () => {} : ((val) => handleCellEdit(row._id, col.key, val))} 
-                          onAttachSaved={row._isPending ? () => {} : ((field, url) => {
+                          onChange={row._isPending ? () => { } : ((val) => handleCellEdit(row._id, col.key, val))}
+                          onAttachSaved={row._isPending ? () => { } : ((field, url) => {
                             const billNo = row['BILL NO'];
                             setEntries(prev => prev.map(r => {
                               if (field === 'BILL_PDF_URL' && billNo && r['BILL NO'] === billNo) {
@@ -2717,9 +2625,9 @@ export default function CementRegister({ onBack }) {
               <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', mb: 0.5, display: 'block' }}>BILL TYPE</Typography>
               {(() => {
                 const selectedRowsArray = [...selectedIds].map(id => {
-                   let r = computedRows.find(row => row._id === id);
-                   if (!r) r = pendingComputedRows.find(row => row._id === id);
-                   return r;
+                  let r = computedRows.find(row => row._id === id);
+                  if (!r) r = pendingComputedRows.find(row => row._id === id);
+                  return r;
                 }).filter(Boolean);
                 const totalSelected = selectedRowsArray.length;
 
