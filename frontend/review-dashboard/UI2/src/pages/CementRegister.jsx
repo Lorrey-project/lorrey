@@ -1534,7 +1534,10 @@ export default function CementRegister({ onBack }) {
                           </td>
 
                           {VISIBLE_COLS.map((col) => {
-                            const rawVal = row[col.key];
+                            let rawVal = row[col.key];
+                            if (col.key === 'SL NO' && (rawVal === undefined || rawVal === null || String(rawVal).trim() === '')) {
+                              rawVal = row['SL. NO.'] ?? row.slNo ?? row.sl_no ?? row['S.NO'] ?? row.sno ?? row.sl ?? row['SL'] ?? '';
+                            }
                             const localVal = localData[row._id]?.[col.key];
                             const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
                             const isDirty = localVal !== undefined;
@@ -1607,7 +1610,10 @@ export default function CementRegister({ onBack }) {
                         </td>
 
                         {VISIBLE_COLS.map((col) => {
-                          const rawVal = row[col.key];
+                          let rawVal = row[col.key];
+                          if (col.key === 'SL NO' && (rawVal === undefined || rawVal === null || String(rawVal).trim() === '')) {
+                            rawVal = row['SL. NO.'] ?? row.slNo ?? row.sl_no ?? row['S.NO'] ?? row.sno ?? row.sl ?? row['SL'] ?? '';
+                          }
                           const localVal = localData[row._id]?.[col.key];
                           const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
                           const isDirty = localVal !== undefined;
