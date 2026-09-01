@@ -1521,7 +1521,7 @@ export default function FinancialYearDetails({ onBack }) {
           <Button size="small" variant="outlined" startIcon={<TableChartIcon sx={{ fontSize: '1rem', color: '#10b981' }} />}
             onClick={() => setExcelModalOpen(true)}
             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#059669', borderColor: '#a7f3d0', bgcolor: '#ecfdf5', textTransform: 'none', '&:hover': { bgcolor: '#d1fae5', borderColor: '#34d399' } }}>
-            📊 Excel Upload
+            Upload Bill Register
           </Button>
 
           <Button size="small" variant="outlined" startIcon={<AddIcon sx={{ fontSize: '1rem' }} />} onClick={handleAddRow}
@@ -2325,7 +2325,7 @@ export default function FinancialYearDetails({ onBack }) {
       <Dialog open={excelModalOpen} onClose={() => { if (!uploadingExcel) setExcelModalOpen(false); }} maxWidth="md" fullWidth>
         <DialogTitle sx={{ fontWeight: 800, fontSize: '1.2rem', color: '#0f172a', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 1 }}>
           <TableChartIcon sx={{ color: '#10b981' }} />
-          Bill Register Excel Upload — 100% Accurate Data Import
+          Upload Bill Register
         </DialogTitle>
         <DialogContent sx={{ py: 3 }}>
           <Box display="flex" flexDirection="column" gap={2.5}>
