@@ -482,6 +482,11 @@ export default function CementRegister({ onBack }) {
         rYear = rDate.getFullYear();
       }
 
+      const rawSlNo = row['SL NO'] || row['SL. NO.'] || row.slNo || row.sl_no || comp['SL NO'] || '';
+      if (rawSlNo) {
+        comp['SL NO'] = String(rawSlNo);
+      }
+
       const matchPm = previousFourMonths.find(pm => pm.month === rMonth && pm.year === rYear);
       if (matchPm) {
         if (!map[matchPm.label]) map[matchPm.label] = [];
@@ -619,10 +624,10 @@ export default function CementRegister({ onBack }) {
       return slA - slB;
     });
 
-    // Format dates to DD.MM.YY and assign sequential SL NO
+    // Format dates to DD.MM.YY and preserve original SL NO (fallback to index+1)
     return rows.map((r, index) => ({
       ...r,
-      'SL NO': String(index + 1),
+      'SL NO': r['SL NO'] || r['SL. NO.'] || r.slNo || String(index + 1),
       'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
     }));
   }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear]);
