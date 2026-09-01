@@ -627,7 +627,7 @@ export default function CementRegister({ onBack }) {
     // Format dates to DD.MM.YY and preserve original SL NO (fallback to index+1)
     return rows.map((r, index) => ({
       ...r,
-      'SL NO': r['SL NO'] || r['SL. NO.'] || r.slNo || String(index + 1),
+      'SL NO': String(r['SL NO'] ?? r['SL. NO.'] ?? r.slNo ?? r.sl_no ?? r['S.NO'] ?? r.sno ?? r.sl ?? r['SL'] ?? (index + 1)),
       'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
     }));
   }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear]);
@@ -1738,7 +1738,7 @@ export default function CementRegister({ onBack }) {
                         transition: 'background 0.15s',
                       }}
                     >
-                      <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{r['SHIPMENT NO'] || r['SL NO'] || '—'}</td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{r['SL NO'] || r['SL. NO.'] || r.slNo || r.sl_no || r['SHIPMENT NO'] || '—'}</td>
                       <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontFamily: 'monospace' }}>{r['VEHICLE NUMBER'] || r['VEHICLE'] || '—'}</td>
                       <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155' }}>{r['INVOICE NO'] || r['Invoice No'] || '—'}</td>
                       <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
@@ -2743,7 +2743,7 @@ export default function CementRegister({ onBack }) {
                   const amt = row._previewAmt || 0;
                   return (
                     <tr key={row._id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SHIPMENT NO'] || row['SL NO'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SL NO'] || row['SL. NO.'] || row.slNo || row.sl_no || row['SHIPMENT NO'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['VEHICLE NUMBER'] || row['VEHICLE'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['INVOICE NO'] || row['Invoice No'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['LOADING DT'] || row['LOADING DATE'] || row['INVOICE DATE'] || ''}</td>
