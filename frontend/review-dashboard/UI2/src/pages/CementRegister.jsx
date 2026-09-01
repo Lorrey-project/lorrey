@@ -630,12 +630,16 @@ export default function CementRegister({ onBack }) {
       return slA - slB;
     });
 
-    // Format dates to DD.MM.YY and set month-wise row order as SL NO (1 to N)
-    return rows.map((r, index) => ({
-      ...r,
-      'SL NO': String(index + 1),
-      'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
-    }));
+    // Format dates to DD.MM.YY and preserve original Cement Register SL NO
+    return rows.map((r, index) => {
+      const origSl = r['SL NO'] ?? r['SL. NO.'] ?? r.slNo ?? r.sl_no ?? r['S.NO'] ?? r.sno ?? r.sl ?? r['SL'];
+      const slVal = (origSl !== undefined && origSl !== null && String(origSl).trim() !== '') ? String(origSl) : String(index + 1);
+      return {
+        ...r,
+        'SL NO': slVal,
+        'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
+      };
+    });
   }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear]);
 
   // ── Pending merged rows with calcs ─────────────────────────────────────────
