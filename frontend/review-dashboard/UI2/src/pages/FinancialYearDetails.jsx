@@ -17,6 +17,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
+import TableChartIcon from '@mui/icons-material/TableChart';
+import * as XLSX from 'xlsx';
 
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -170,6 +172,188 @@ export default function FinancialYearDetails({ onBack }) {
   // Payment Status Dashboard States
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [dashboardM, setDashboardM] = useState(new Date().getMonth() + 1); // Defaults to current calendar month
+
+  // Excel Upload States
+  const [excelModalOpen, setExcelModalOpen] = useState(false);
+  const [excelFile, setExcelFile] = useState(null);
+  const [excelParsedRows, setExcelParsedRows] = useState([]);
+  const [excelHeaders, setExcelHeaders] = useState([]);
+  const [excelHeaderMap, setExcelHeaderMap] = useState({});
+  const [excelSummary, setExcelSummary] = useState(null);
+  const [uploadingExcel, setUploadingExcel] = useState(false);
+
+  const parseExcelString = (val) => {
+    if (val === null || val === undefined) return '';
+    return String(val).trim();
+  };
+
+  const parseExcelNumber = (val) => {
+    if (val === null || val === undefined || val === '') return 0;
+    const cleaned = String(val).replace(/,/g, '').trim();
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  const parseExcelDate = (val) => {
+    if (val === null || val === undefined || val === '') return '';
+    if (typeof val === 'number') {
+      try {
+        const jsDate = XLSX.SSF.parse_date_code(val);
+        if (jsDate) {
+          const y = jsDate.y;
+          const m = String(jsDate.m).padStart(2, '0');
+          const d = String(jsDate.d).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        }
+      } catch (_) {}
+    }
+    const str = String(val).trim();
+    const ddmmyyyy = str.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
+    if (ddmmyyyy) {
+      let day = ddmmyyyy[1].padStart(2, '0');
+      let month = ddmmyyyy[2].padStart(2, '0');
+      let year = ddmmyyyy[3];
+      if (year.length === 2) year = '20' + year;
+      return `${year}-${month}-${day}`;
+    }
+    const yyyymmdd = str.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
+    if (yyyymmdd) {
+      let year = yyyymmdd[1];
+      let month = yyyymmdd[2].padStart(2, '0');
+      let day = yyyymmdd[3].padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    return str;
+  };
+
+  const handleExcelFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setExcelFile(file);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true, cellText: false });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        const rawMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (rawMatrix.length === 0) {
+          setSnack({ severity: 'error', msg: 'Excel sheet is empty.' });
+          return;
+        }
+
+        let headerRowIdx = 0;
+        for (let i = 0; i < Math.min(10, rawMatrix.length); i++) {
+          if (rawMatrix[i].some(cell => String(cell).trim() !== '')) {
+            headerRowIdx = i;
+            break;
+          }
+        }
+
+        const headers = rawMatrix[headerRowIdx].map(h => String(h).trim());
+        setExcelHeaders(headers);
+
+        const map = {};
+        headers.forEach((h, colIdx) => {
+          const cleanH = String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (['slno', 'sno', 'sl', 'srno'].includes(cleanH)) map.slNo = colIdx;
+          else if (['invoicedate', 'invdate', 'date', 'billdate'].includes(cleanH)) map.invoiceDate = colIdx;
+          else if (['invoicenumber', 'invoiceno', 'invoicen', 'billnumber', 'billno', 'billn', 'invno'].includes(cleanH)) map.invoiceNumber = colIdx;
+          else if (['month'].includes(cleanH)) map.month = colIdx;
+          else if (['site', 'plant'].includes(cleanH)) map.site = colIdx;
+          else if (['billsubmissionthrough', 'submissionthrough', 'submittedthrough', 'byportal', 'portal'].includes(cleanH)) map.submissionThrough = colIdx;
+          else if (['billtype', 'type', 'bill'].includes(cleanH)) map.billType = colIdx;
+          else if (['amount', 'taxableamount', 'taxablevalue', 'taxableval', 'billingamount', 'netamount'].includes(cleanH)) map.amount = colIdx;
+          else if (['cgst', 'cgstamount'].includes(cleanH)) map.cgst = colIdx;
+          else if (['sgst', 'sgstamount'].includes(cleanH)) map.sgst = colIdx;
+          else if (['igst', 'igstamount'].includes(cleanH)) map.igst = colIdx;
+          else if (['totalamount', 'total', 'grossamount', 'grandtotal'].includes(cleanH)) map.totalAmount = colIdx;
+        });
+        setExcelHeaderMap(map);
+
+        const parsed = [];
+        let validCount = 0;
+        let existingCount = 0;
+
+        const existingKeys = new Set(rows.map(r => String(r.invoiceNumber || r.billNo || '').trim().toUpperCase()));
+
+        for (let rIdx = headerRowIdx + 1; rIdx < rawMatrix.length; rIdx++) {
+          const rowArr = rawMatrix[rIdx];
+          if (!rowArr || rowArr.every(cell => String(cell).trim() === '')) continue;
+
+          const getVal = (colIdx) => (colIdx !== undefined && colIdx < rowArr.length) ? rowArr[colIdx] : '';
+
+          let invNo = parseExcelString(getVal(map.invoiceNumber));
+          let invDate = parseExcelDate(getVal(map.invoiceDate));
+          let monthStr = parseExcelString(getVal(map.month));
+          let siteStr = parseExcelString(getVal(map.site)) || 'NVCL';
+          let bType = parseExcelString(getVal(map.billType)) || 'FREIGHT';
+          let amt = parseExcelNumber(getVal(map.amount));
+          let sl = parseExcelNumber(getVal(map.slNo));
+
+          if (!invNo) continue;
+
+          const isExisting = existingKeys.has(invNo.toUpperCase());
+          if (isExisting) existingCount++;
+          else validCount++;
+
+          parsed.push({
+            invoiceNumber: invNo,
+            displayInvoiceNumber: invNo,
+            invoiceDate: invDate,
+            month: monthStr,
+            site: siteStr,
+            billType: bType,
+            amount: amt,
+            slNo: sl || (parsed.length + 1),
+            isExisting
+          });
+        }
+
+        setExcelParsedRows(parsed);
+        setExcelSummary({
+          total: parsed.length,
+          valid: validCount,
+          existing: existingCount,
+          failed: 0
+        });
+      } catch (err) {
+        console.error('Excel parse error:', err);
+        setSnack({ severity: 'error', msg: 'Failed to read Excel file: ' + err.message });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleConfirmExcelImport = async () => {
+    if (excelParsedRows.length === 0) return;
+    setUploadingExcel(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.post(`${API_URL}/fy-details/import-excel`, { rows: excelParsedRows }, { headers });
+
+      if (res.data.success) {
+        setSnack({
+          severity: 'success',
+          msg: `Excel Upload Successful! Imported ${res.data.importedCount} new rows (${res.data.existingCount} already existed).`
+        });
+        setExcelModalOpen(false);
+        setExcelFile(null);
+        setExcelParsedRows([]);
+        setExcelSummary(null);
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Excel import failed:', err);
+      setSnack({ severity: 'error', msg: 'Import failed: ' + (err.response?.data?.error || err.message) });
+    } finally {
+      setUploadingExcel(false);
+    }
+  };
 
   const handleAddRow = () => {
     if (selectedIds.length > 1) {
@@ -1334,6 +1518,12 @@ export default function FinancialYearDetails({ onBack }) {
             </Button>
           )}
 
+          <Button size="small" variant="outlined" startIcon={<TableChartIcon sx={{ fontSize: '1rem', color: '#10b981' }} />}
+            onClick={() => setExcelModalOpen(true)}
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#059669', borderColor: '#a7f3d0', bgcolor: '#ecfdf5', textTransform: 'none', '&:hover': { bgcolor: '#d1fae5', borderColor: '#34d399' } }}>
+            📊 Excel Upload
+          </Button>
+
           <Button size="small" variant="outlined" startIcon={<AddIcon sx={{ fontSize: '1rem' }} />} onClick={handleAddRow}
             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#475569', borderColor: '#e2e8f0', textTransform: 'none', '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' } }}>
             Add Row
@@ -2127,6 +2317,113 @@ export default function FinancialYearDetails({ onBack }) {
         <DialogActions sx={{ px: 4, py: 2.5, borderTop: '1px solid #f1f5f9', bgcolor: '#fafafa' }}>
           <Button onClick={() => setDashboardOpen(false)} variant="contained" sx={{ bgcolor: '#0f172a', '&:hover': { bgcolor: '#1e293b' }, fontWeight: 700, px: 3, borderRadius: 2 }}>
             Close Dashboard
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Bill Register Excel Upload Modal ────────────────────────────────────── */}
+      <Dialog open={excelModalOpen} onClose={() => { if (!uploadingExcel) setExcelModalOpen(false); }} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, fontSize: '1.2rem', color: '#0f172a', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TableChartIcon sx={{ color: '#10b981' }} />
+          Bill Register Excel Upload — 100% Accurate Data Import
+        </DialogTitle>
+        <DialogContent sx={{ py: 3 }}>
+          <Box display="flex" flexDirection="column" gap={2.5}>
+            <Typography variant="body2" sx={{ color: '#475569', fontWeight: 500 }}>
+              Select an Excel file (.xlsx / .xls / .csv) containing Bill Register records. Headers will be matched automatically regardless of column order.
+            </Typography>
+
+            <Button
+              variant="outlined"
+              component="label"
+              startIcon={<UploadIcon />}
+              sx={{
+                py: 2,
+                borderStyle: 'dashed',
+                borderWidth: '2px',
+                borderColor: '#10b981',
+                bgcolor: '#f0fdf4',
+                color: '#047857',
+                fontWeight: 700,
+                textTransform: 'none',
+                '&:hover': { bgcolor: '#dcfce7', borderColor: '#059669' }
+              }}
+            >
+              {excelFile ? `File Selected: ${excelFile.name}` : 'Click to Browse / Select Excel File'}
+              <input type="file" accept=".xlsx, .xls, .csv" hidden onChange={handleExcelFileChange} />
+            </Button>
+
+            {excelSummary && (
+              <Box sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1, color: '#1e293b' }}>
+                  📊 Import Validation & Summary
+                </Typography>
+                <Box display="flex" gap={2} flexWrap="wrap">
+                  <Chip label={`Total Rows: ${excelSummary.total}`} sx={{ fontWeight: 700, bgcolor: '#e2e8f0', color: '#334155' }} />
+                  <Chip label={`Ready to Import: ${excelSummary.valid}`} color="success" sx={{ fontWeight: 700 }} />
+                  <Chip label={`Already Existing: ${excelSummary.existing}`} color="warning" sx={{ fontWeight: 700 }} />
+                  <Chip label={`Failed: ${excelSummary.failed}`} color="error" sx={{ fontWeight: 700 }} />
+                </Box>
+              </Box>
+            )}
+
+            {excelParsedRows.length > 0 && (
+              <Box>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mb: 1, display: 'block' }}>
+                  PREVIEW OF MAPPED RECORDS (Showing first {Math.min(5, excelParsedRows.length)} of {excelParsedRows.length}):
+                </Typography>
+                <Box sx={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                  <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                        <th style={{ padding: '6px' }}>SL NO</th>
+                        <th style={{ padding: '6px' }}>Bill / Invoice No</th>
+                        <th style={{ padding: '6px' }}>Invoice Date</th>
+                        <th style={{ padding: '6px' }}>Site</th>
+                        <th style={{ padding: '6px' }}>Bill Type</th>
+                        <th style={{ padding: '6px' }}>Amount (₹)</th>
+                        <th style={{ padding: '6px' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {excelParsedRows.slice(0, 10).map((r, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #f1f5f9', background: r.isExisting ? '#fffbeb' : '#fff' }}>
+                          <td style={{ padding: '6px' }}>{r.slNo}</td>
+                          <td style={{ padding: '6px', fontWeight: 700 }}>{r.invoiceNumber}</td>
+                          <td style={{ padding: '6px' }}>{r.invoiceDate}</td>
+                          <td style={{ padding: '6px' }}>{r.site}</td>
+                          <td style={{ padding: '6px' }}>{r.billType}</td>
+                          <td style={{ padding: '6px', fontWeight: 700 }}>₹{r.amount?.toLocaleString('en-IN')}</td>
+                          <td style={{ padding: '6px' }}>
+                            <Chip size="small" label={r.isExisting ? 'Exists' : 'New'} color={r.isExisting ? 'warning' : 'success'} sx={{ height: 18, fontSize: '9px', fontWeight: 800 }} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Box>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid #f1f5f9' }}>
+          <Button onClick={() => setExcelModalOpen(false)} disabled={uploadingExcel} sx={{ textTransform: 'none', color: '#64748b', fontWeight: 700 }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleConfirmExcelImport}
+            disabled={!excelParsedRows.length || uploadingExcel}
+            startIcon={uploadingExcel ? <CircularProgress size={16} color="inherit" /> : <TableChartIcon />}
+            sx={{
+              bgcolor: '#10b981',
+              '&:hover': { bgcolor: '#059669' },
+              fontWeight: 700,
+              textTransform: 'none',
+              borderRadius: '8px'
+            }}
+          >
+            {uploadingExcel ? 'Importing...' : `Import ${excelParsedRows.length} Rows into Bill Register`}
           </Button>
         </DialogActions>
       </Dialog>

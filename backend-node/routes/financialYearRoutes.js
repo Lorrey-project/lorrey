@@ -838,6 +838,91 @@ router.post('/upload-proof', paymentProofUpload.single('proof'), async (req, res
   }
 });
 
+router.post('/import-excel', async (req, res) => {
+  try {
+    const { rows } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid rows provided for import.' });
+    }
+
+    const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
+    const bulkOps = [];
+    let importedCount = 0;
+    let existingCount = 0;
+    const errors = [];
+
+    // Fetch existing bill numbers from FinancialYearRow & cement entries
+    const existingFyRows = await FinancialYearRow.find({}).lean();
+    const existingBillNos = new Set(existingFyRows.map(r => String(r.billNo).trim().toUpperCase()));
+
+    const allCementBills = await cementCol.find({}, { projection: { "BILL NO": 1, "UNLOADING BILL NO": 1, "INVOICE NO": 1 } }).toArray();
+    allCementBills.forEach(c => {
+      if (c["BILL NO"]) existingBillNos.add(String(c["BILL NO"]).trim().toUpperCase());
+      if (c["UNLOADING BILL NO"]) existingBillNos.add(String(c["UNLOADING BILL NO"]).trim().toUpperCase());
+      if (c["INVOICE NO"]) existingBillNos.add(String(c["INVOICE NO"]).trim().toUpperCase());
+    });
+
+    for (let idx = 0; idx < rows.length; idx++) {
+      const r = rows[idx];
+      const invNo = String(r.invoiceNumber || r.billNo || r.displayInvoiceNumber || '').trim();
+
+      if (!invNo) {
+        errors.push({ row: idx + 1, error: 'Missing Invoice / Bill Number' });
+        continue;
+      }
+
+      const upperKey = invNo.toUpperCase();
+
+      const updateDoc = {
+        billNo: invNo,
+        billType: (r.billType || 'FREIGHT').toUpperCase(),
+        editedInvoiceDate: r.invoiceDate || '',
+        editedInvoiceNumber: r.displayInvoiceNumber || invNo,
+        editedMonth: r.month || '',
+        editedSite: r.site || 'NVCL',
+        editedAmount: typeof r.amount === 'number' ? r.amount : (parseFloat(r.amount) || 0),
+        slNo: typeof r.slNo === 'number' ? r.slNo : (parseFloat(r.slNo) || (idx + 1))
+      };
+
+      if (existingBillNos.has(upperKey)) {
+        existingCount++;
+      } else {
+        importedCount++;
+        existingBillNos.add(upperKey);
+      }
+
+      bulkOps.push({
+        updateOne: {
+          filter: { billNo: invNo },
+          update: { $set: updateDoc },
+          upsert: true
+        }
+      });
+    }
+
+    if (bulkOps.length > 0) {
+      await FinancialYearRow.bulkWrite(bulkOps);
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('cementUpdates', { action: 'billRegisterExcelImport', count: bulkOps.length });
+    }
+
+    res.json({
+      success: true,
+      totalRows: rows.length,
+      importedCount,
+      existingCount,
+      errorCount: errors.length,
+      errors
+    });
+  } catch (err) {
+    console.error('Failed to import Bill Register Excel:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.post('/save-row', async (req, res) => {
   try {
     const {
