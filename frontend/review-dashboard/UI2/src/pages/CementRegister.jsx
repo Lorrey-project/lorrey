@@ -1546,6 +1546,78 @@ export default function CementRegister({ onBack }) {
                   </React.Fragment>
                 );
               })}
+
+              {/* CURRENT / RECENT MONTH SECTION (MAX 10 UNBILLED RECORDS) */}
+              {currentMonthMax10Rows.length > 0 && (
+                <React.Fragment key="current-month-section">
+                  {/* Current / Recent Month Header Row */}
+                  <tr style={{ background: '#f0fdf4', borderTop: '2px solid #86efac', borderBottom: '2px solid #86efac' }}>
+                    <td style={{ textAlign: 'center', padding: '8px 4px', background: '#dcfce7' }}>
+                      <input
+                        type="checkbox"
+                        checked={allCurrentSelected}
+                        ref={el => { if (el) el.indeterminate = someCurrentSelected; }}
+                        onChange={toggleCurrentMonthGroupSelect}
+                        style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#16a34a' }}
+                      />
+                    </td>
+                    <td colSpan={VISIBLE_COLS.length} style={{ padding: '8px 16px', fontWeight: 800, fontSize: '12px', color: '#14532d', letterSpacing: '0.3px' }}>
+                      ⚡ CURRENT / RECENT MONTH — {MONTHS[selectedMonth - 1]?.toUpperCase()} {calendarYear} — <span style={{ color: '#16a34a' }}>({currentMonthMax10Rows.length} UNBILLED SHIPMENT(S) — MAXIMUM 10)</span>
+                    </td>
+                  </tr>
+
+                  {/* Current Month Rows */}
+                  {currentMonthMax10Rows.map((row, index) => {
+                    const isRowSelected = selectedIds.has(row._id);
+                    const background = isRowSelected ? '#f5f3ff' : (index % 2 === 0 ? '#ffffff' : '#fafafa');
+
+                    return (
+                      <tr
+                        key={row._id}
+                        style={{
+                          background,
+                          borderBottom: '1px solid #f1f5f9',
+                          outline: isRowSelected ? '2px solid rgba(124,58,237,0.4)' : 'none',
+                        }}
+                      >
+                        <td style={{
+                          position: 'sticky', left: 0, zIndex: 5,
+                          background,
+                          textAlign: 'center', padding: '4px',
+                          borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #f1f5f9'
+                        }}>
+                          <input
+                            type="checkbox"
+                            checked={isRowSelected}
+                            onChange={() => toggleSelect(row._id)}
+                            style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#7c3aed' }}
+                          />
+                        </td>
+
+                        {VISIBLE_COLS.map((col) => {
+                          const rawVal = row[col.key];
+                          const localVal = localData[row._id]?.[col.key];
+                          const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
+                          const isDirty = localVal !== undefined;
+
+                          return (
+                            <CellRenderer
+                              key={col.key}
+                              col={col}
+                              value={displayVal}
+                              isDirty={isDirty}
+                              rowIndex={index}
+                              row={row}
+                              onChange={(val) => handleCellEdit(row._id, col.key, val)}
+                              onAttachSaved={() => { }}
+                            />
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </React.Fragment>
+              )}
             </tbody>
           </table>
         </Box>
