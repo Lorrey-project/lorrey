@@ -208,12 +208,9 @@ router.get("/pending-bills", async (req, res) => {
         return slA - slB;
       });
 
-      // Preserve exact original Cement Register SL NO for every entry in this month
+      // Assign exact Cement Register month-wise SL NO (1 to N) to every entry in this month
       monthEntries.forEach((entry, idx) => {
-        const origSl = entry["SL NO"] ?? entry["SL. NO."] ?? entry.slNo ?? entry.sl_no ?? entry["S.NO"] ?? entry.sno ?? entry.sl ?? entry["SL"];
-        entry["SL NO"] = (origSl !== undefined && origSl !== null && String(origSl).trim() !== '') 
-          ? String(origSl) 
-          : String(idx + 1);
+        entry["SL NO"] = String(idx + 1);
       });
 
       // Filter for unbilled records in this month
