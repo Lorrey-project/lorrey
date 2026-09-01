@@ -304,6 +304,7 @@ const VehicleDetailsModal = ({ open, vehicle: v, onClose, selectedMonth, current
 const AiExtraExpense = ({ onBack }) => {
   const [loading, setLoading] = useState(true);
   const [trips, setTrips] = useState([]);
+  const [extraCashExpenseAmount, setExtraCashExpenseAmount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   
   const initialSelection = useMemo(() => getCurrentFYAndMonth(), []);
@@ -319,12 +320,23 @@ const AiExtraExpense = ({ onBack }) => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${API_URL}/cement-register`);
-      if (res.data.success) {
-        setTrips(res.data.entries || []);
+      const token = localStorage.getItem('token');
+      const [tripsRes, settingsRes] = await Promise.allSettled([
+        axios.get(`${API_URL}/cement-register`),
+        axios.get(`${API_URL}/settings/oil-allowances`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        })
+      ]);
+
+      if (tripsRes.status === 'fulfilled' && tripsRes.value.data?.success) {
+        setTrips(tripsRes.value.data.entries || []);
+      }
+      if (settingsRes.status === 'fulfilled' && settingsRes.value.data?.success && settingsRes.value.data?.data) {
+        const amt = parseFloat(settingsRes.value.data.data.extraCashExpenseAmount || 0);
+        setExtraCashExpenseAmount(isNaN(amt) ? 0 : amt);
       }
     } catch (e) {
-      console.error("Failed to fetch historical trips", e);
+      console.error("Failed to fetch historical trips or settings", e);
     } finally {
       setLoading(false);
     }
@@ -387,8 +399,7 @@ const AiExtraExpense = ({ onBack }) => {
       const actualAdv = parseNum(trip["ADVANCE"] || trip["LOADING ADVANCE"]);
       
       if (actualFuel === 0 && actualAdv === 0) return;
-      const base = baselines[site];
-      if (!base) return;
+      const base = baselines[site] || { avgFuel: 0, avgAdv: 0 };
 
       if (!vehicleMap[vehicle]) {
         vehicleMap[vehicle] = { 
@@ -409,9 +420,11 @@ const AiExtraExpense = ({ onBack }) => {
       
       let excessFuelForTrip = 0;
       let excessAdvForTrip = 0;
-      const expectedAdvForTrip = base.avgAdv > 0 ? base.avgAdv : actualAdv;
+
+      // Expense Stats - prioritize configured Extra Cash Expense threshold, fallback to baseline
+      const allowedAdvLimit = extraCashExpenseAmount > 0 ? extraCashExpenseAmount : (base.avgAdv > 0 ? base.avgAdv : actualAdv);
+      const expectedAdvForTrip = allowedAdvLimit;
       
-      // Expense Stats
       if (actualAdv > 0) {
         totalExpense += actualAdv;
         expectedExpenseTotal += expectedAdvForTrip;
@@ -419,20 +432,23 @@ const AiExtraExpense = ({ onBack }) => {
         v.actualAdvSum += actualAdv;
         v.expectedAdvSum += expectedAdvForTrip;
 
-        if (base.avgAdv > 0 && actualAdv > base.avgAdv) {
-          excessAdvForTrip = actualAdv - base.avgAdv;
+        if (expectedAdvForTrip > 0 && actualAdv > expectedAdvForTrip) {
+          excessAdvForTrip = actualAdv - expectedAdvForTrip;
           extraExpenseTotal += excessAdvForTrip;
           v.excessAdvSum += excessAdvForTrip;
         }
       }
 
-      // Fuel Stats
+      // Fuel Stats - prioritize FUEL REQUIRED, fallback to destination baseline
+      const fuelRequired = parseNum(trip["FUEL REQUIRED"]);
+      const expectedFuelForTrip = fuelRequired > 0 ? fuelRequired : (base.avgFuel > 0 ? base.avgFuel : actualFuel);
+
       if (actualFuel > 0) {
         v.actualFuelSum += actualFuel;
-        v.expectedFuelSum += base.avgFuel > 0 ? base.avgFuel : actualFuel;
+        v.expectedFuelSum += expectedFuelForTrip;
 
-        if (base.avgFuel > 0 && actualFuel > base.avgFuel) {
-          excessFuelForTrip = actualFuel - base.avgFuel;
+        if (expectedFuelForTrip > 0 && actualFuel > expectedFuelForTrip) {
+          excessFuelForTrip = actualFuel - expectedFuelForTrip;
           v.excessFuelSum += excessFuelForTrip;
         }
       }
@@ -441,7 +457,7 @@ const AiExtraExpense = ({ onBack }) => {
         date: trip["LOADING DT"] || trip["LOADING DATE"],
         invoice: trip["BILL NO"] || "—",
         destination: site,
-        expectedFuel: base.avgFuel,
+        expectedFuel: expectedFuelForTrip,
         actualFuel,
         excessFuel: excessFuelForTrip,
         expectedAdv: expectedAdvForTrip,
@@ -456,13 +472,21 @@ const AiExtraExpense = ({ onBack }) => {
     const norm = [];
 
     Object.values(vehicleMap).forEach(v => {
+      v.excessFuelSum = Math.round((v.excessFuelSum || 0) * 100) / 100;
+      v.excessAdvSum = Math.round((v.excessAdvSum || 0) * 100) / 100;
+
       const hasFuel = v.excessFuelSum > 0;
       const hasAdv = v.excessAdvSum > 0;
 
-      if (hasFuel && hasAdv) both.push(v);
-      else if (hasFuel) exFuel.push(v);
-      else if (hasAdv) exAdv.push(v);
-      else norm.push(v);
+      if (hasFuel && hasAdv) {
+        both.push(v);
+      } else if (hasFuel) {
+        exFuel.push(v);
+      } else if (hasAdv) {
+        exAdv.push(v);
+      } else {
+        norm.push(v);
+      }
     });
 
     exFuel.sort((a, b) => b.excessFuelSum - a.excessFuelSum);
@@ -519,8 +543,15 @@ const AiExtraExpense = ({ onBack }) => {
               <Typography variant="h5" fontWeight={900} sx={{ color: '#0f172a', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: 1.5 }}>
                 THE AI with EXTRA EXPENSE
               </Typography>
-              <Typography variant="body2" fontWeight={500} sx={{ color: '#64748b', mt: 0.5 }}>
+              <Typography variant="body2" fontWeight={500} sx={{ color: '#64748b', mt: 0.5, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
                 AI-Powered Extra Expense & Fuel Management
+                {extraCashExpenseAmount > 0 && (
+                  <Chip 
+                    label={`Allowed Expense Limit: ₹${extraCashExpenseAmount.toLocaleString('en-IN')}`} 
+                    size="small" 
+                    sx={{ fontWeight: 700, bgcolor: '#eff6ff', color: '#1e3a8a', border: '1px solid #bfdbfe' }} 
+                  />
+                )}
               </Typography>
             </Box>
           </Box>
@@ -597,11 +628,11 @@ const AiExtraExpense = ({ onBack }) => {
         <Grid container spacing={3} sx={{ mb: 4 }}>
           {[
             { 
-              tabIndex: 0, title: 'EXTRA FUEL', subtitle: 'Vehicles exceeding fuel limits', count: excessFuelOnly.length,
+              tabIndex: 0, title: 'EXTRA FUEL', subtitle: 'Vehicles with extra fuel only', count: excessFuelOnly.length,
               icon: <LocalGasStationIcon sx={{ fontSize: 20 }} />, color: '#0284c7', activeBg: '#f0f9ff'
             },
             { 
-              tabIndex: 1, title: 'EXTRA EXPENSE', subtitle: 'Vehicles with excess expense', count: excessExpenseOnly.length,
+              tabIndex: 1, title: 'EXTRA EXPENSE', subtitle: 'Vehicles with extra expense only', count: excessExpenseOnly.length,
               icon: <AccountBalanceWalletIcon sx={{ fontSize: 20 }} />, color: '#1e3a8a', activeBg: '#eff6ff'
             },
             { 

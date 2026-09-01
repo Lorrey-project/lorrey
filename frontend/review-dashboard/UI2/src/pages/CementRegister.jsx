@@ -2978,6 +2978,10 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
               : value === 'Partial' ? '⚡ Partial'
                 : value}
           </span>
+        ) : col.key === 'ACTUAL EXTRA' && value && parseFloat(value) > 0 ? (
+          <span style={{ color: '#dc2626', fontWeight: 800 }}>
+            +{value} L
+          </span>
         ) : col.key === 'DIFFERENCE' && value ? (
           <span style={{
             color: parseFloat(value) > 0 ? '#15803d' : parseFloat(value) < 0 ? '#dc2626' : '#64748b',

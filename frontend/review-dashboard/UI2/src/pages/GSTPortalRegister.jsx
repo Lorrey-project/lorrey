@@ -3,7 +3,8 @@ import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Select, MenuItem,
-  Tabs, Tab
+  Tabs, Tab, Dialog, DialogTitle, DialogContent, DialogActions,
+  Radio, RadioGroup, FormControlLabel, FormControl, FormLabel
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -101,6 +102,16 @@ export default function GSTPortalRegister({ onBack }) {
 
   const fileInputRef = useRef(null);
   const [targetRowIdForUpload, setTargetRowIdForUpload] = useState(null);
+
+  const excelInputRef = useRef(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFileName, setImportFileName] = useState('');
+  const [importSheetName, setImportSheetName] = useState('');
+  const [importColCount, setImportColCount] = useState(0);
+  const [parsedRows, setParsedRows] = useState([]);
+  const [duplicateHandlingMode, setDuplicateHandlingMode] = useState('skip');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null); // { imported: 0, skipped: 0, failed: 0 }
 
   const toggleSelect = (id) => setSelectedIds(prev => {
     const s = new Set(prev);
@@ -313,6 +324,511 @@ export default function GSTPortalRegister({ onBack }) {
     }
   };
 
+  const getColumnKeysAndLabels = () => {
+    const map = {};
+    COLUMNS.forEach(col => {
+      if (col.key === 'SL NO' || col.key === 'GST_FILE_URL') return;
+      
+      const possibleMatches = new Set([
+        normalizeHeader(col.key),
+        normalizeHeader(col.label)
+      ]);
+      
+      // Also add explicit clean variants for standard B2B columns
+      if (col.key === 'GSTIN of Supplier') {
+        possibleMatches.add('gstin');
+        possibleMatches.add('supplier gstin');
+      }
+      if (col.key === 'Trade / Legal Name') {
+        possibleMatches.add('trade name');
+        possibleMatches.add('legal name');
+        possibleMatches.add('trade / legal name');
+        possibleMatches.add('trade/legal name');
+      }
+      if (col.key === 'Invoice Number') {
+        possibleMatches.add('invoice no');
+        possibleMatches.add('invoice no.');
+        possibleMatches.add('inv no');
+        possibleMatches.add('inv no.');
+      }
+      if (col.key === 'Invoice Date') {
+        possibleMatches.add('inv date');
+      }
+      if (col.key === 'Invoice Value') {
+        possibleMatches.add('inv value');
+        possibleMatches.add('invoice value (rs)');
+        possibleMatches.add('invoice value (inr)');
+        possibleMatches.add('invoice value (₹)');
+      }
+      if (col.key === 'Supply attract reverse charge') {
+        possibleMatches.add('reverse charge');
+        possibleMatches.add('rev charge');
+      }
+      if (col.key === 'Taxable Value') {
+        possibleMatches.add('taxable value (rs)');
+        possibleMatches.add('taxable value (inr)');
+        possibleMatches.add('taxable value (₹)');
+      }
+      if (col.key === 'Integrated Tax') {
+        possibleMatches.add('igst');
+        possibleMatches.add('integrated tax (rs)');
+        possibleMatches.add('integrated tax (inr)');
+        possibleMatches.add('integrated tax (₹)');
+      }
+      if (col.key === 'CGST') {
+        possibleMatches.add('cgst (rs)');
+        possibleMatches.add('cgst (inr)');
+        possibleMatches.add('cgst (₹)');
+      }
+      if (col.key === 'SGST') {
+        possibleMatches.add('sgst (rs)');
+        possibleMatches.add('sgst (inr)');
+        possibleMatches.add('sgst (₹)');
+      }
+      if (col.key === 'Cess') {
+        possibleMatches.add('cess (rs)');
+        possibleMatches.add('cess (inr)');
+        possibleMatches.add('cess (₹)');
+      }
+      
+      map[col.key] = Array.from(possibleMatches);
+    });
+    return map;
+  };
+
+  const normalizeHeader = (h) => {
+    return String(h || '')
+      .replace(/\r?\n|\r/g, ' ') // Replace line breaks with space
+      .replace(/\s+/g, ' ')      // Normalize repeated spaces to a single space
+      .trim()
+      .toLowerCase();
+  };
+
+  const parseExcelDate = (val) => {
+    if (!val) return { isValid: false, reason: 'Empty date' };
+    
+    if (val instanceof Date) {
+      if (isNaN(val.getTime())) {
+        return { isValid: false, reason: 'Invalid Date Object' };
+      }
+      return { isValid: true, date: val };
+    }
+    
+    if (typeof val === 'number') {
+      const date = new Date((val - 25569) * 86400 * 1000);
+      if (isNaN(date.getTime())) {
+        return { isValid: false, reason: 'Invalid Excel Serial Date' };
+      }
+      return { isValid: true, date };
+    }
+    
+    const str = String(val).trim();
+    
+    // Pattern 1: DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+    const ddmmyyyy = str.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})$/);
+    if (ddmmyyyy) {
+      const d = parseInt(ddmmyyyy[1], 10);
+      const m = parseInt(ddmmyyyy[2], 10);
+      const y = parseInt(ddmmyyyy[3], 10);
+      
+      if (m < 1 || m > 12) {
+        return { isValid: false, reason: 'Month must be between 1 and 12' };
+      }
+      const daysInMonth = new Date(y, m, 0).getDate();
+      if (d < 1 || d > daysInMonth) {
+        return { isValid: false, reason: `Day must be between 1 and ${daysInMonth} for month ${m}` };
+      }
+      
+      return { isValid: true, date: new Date(y, m - 1, d) };
+    }
+    
+    // Pattern 2: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+    const yyyymmdd = str.match(/^(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})$/);
+    if (yyyymmdd) {
+      const y = parseInt(yyyymmdd[1], 10);
+      const m = parseInt(yyyymmdd[2], 10);
+      const d = parseInt(yyyymmdd[3], 10);
+      
+      if (m < 1 || m > 12) {
+        return { isValid: false, reason: 'Month must be between 1 and 12' };
+      }
+      const daysInMonth = new Date(y, m, 0).getDate();
+      if (d < 1 || d > daysInMonth) {
+        return { isValid: false, reason: `Day must be between 1 and ${daysInMonth} for month ${m}` };
+      }
+      
+      return { isValid: true, date: new Date(y, m - 1, d) };
+    }
+    
+    return { isValid: false, reason: 'Ambiguous format (use DD/MM/YYYY or YYYY-MM-DD)' };
+  };
+
+  const formatDateToString = (date) => {
+    if (!date) return '';
+    const d = date.getDate().toString().padStart(2, '0');
+    const m = (date.getMonth() + 1).toString().padStart(2, '0');
+    const y = date.getFullYear();
+    return `${d}/${m}/${y}`;
+  };
+
+  const handleTriggerExcelUpload = () => {
+    if (excelInputRef.current) {
+      excelInputRef.current.click();
+    }
+  };
+
+  const handleExcelFileSelected = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportFileName(file.name);
+    setImportResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const dataStr = evt.target.result;
+        const workbook = XLSX.read(dataStr, { type: 'binary', cellDates: true, cellNF: true, cellText: true });
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) {
+          setSnack({ severity: 'error', msg: 'The Excel file contains no worksheets.' });
+          return;
+        }
+
+        setImportSheetName(firstSheetName);
+
+        const worksheet = workbook.Sheets[firstSheetName];
+        if (!worksheet['!ref']) {
+          setSnack({ severity: 'error', msg: 'The Excel worksheet is empty.' });
+          return;
+        }
+
+        const range = XLSX.utils.decode_range(worksheet['!ref']);
+        const excelRows = [];
+        const rawHeaders = [];
+
+        // 1. Extract raw headers from the first row
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cell_ref = XLSX.utils.encode_cell({ c: C, r: range.s.r });
+          const cell = worksheet[cell_ref];
+          let headerVal = '';
+          if (cell) {
+            headerVal = String(cell.v !== undefined && cell.v !== null ? cell.v : '').trim();
+          }
+          rawHeaders.push(headerVal);
+        }
+
+        setImportColCount(rawHeaders.filter(Boolean).length);
+
+        // 2. Build column mapping dictionary
+        const B2B_COLUMN_MATCHES = getColumnKeysAndLabels();
+        const headerMapping = {}; // excelHeaderIndex -> B2B_Column_Key
+
+        rawHeaders.forEach((rawHeader, index) => {
+          if (!rawHeader) return;
+          const normalized = normalizeHeader(rawHeader);
+          
+          let matchedKey = null;
+          for (const key of Object.keys(B2B_COLUMN_MATCHES)) {
+            const matches = B2B_COLUMN_MATCHES[key];
+            if (matches.includes(normalized)) {
+              matchedKey = key;
+              break;
+            }
+          }
+          if (matchedKey) {
+            headerMapping[index] = matchedKey;
+          }
+        });
+
+        // 3. Verify required headers are present
+        const mappedB2BKeys = Object.values(headerMapping);
+        if (!mappedB2BKeys.includes('GSTIN of Supplier')) {
+          setSnack({ severity: 'error', msg: 'Required column not found: GSTIN OF SUPPLIER' });
+          return;
+        }
+        if (!mappedB2BKeys.includes('Invoice Number')) {
+          setSnack({ severity: 'error', msg: 'Required column not found: INVOICE NUMBER' });
+          return;
+        }
+        if (!mappedB2BKeys.includes('Invoice Date')) {
+          setSnack({ severity: 'error', msg: 'Required column not found: INVOICE DATE' });
+          return;
+        }
+
+        // 4. Extract data rows preserving raw values exactly
+        for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+          const rowData = {};
+          let rowHasData = false;
+          
+          for (let C = range.s.c; C <= range.e.c; ++C) {
+            const b2bKey = headerMapping[C];
+            if (!b2bKey) continue;
+            
+            const cell_ref = XLSX.utils.encode_cell({ c: C, r: R });
+            const cell = worksheet[cell_ref];
+            
+            let val = '';
+            if (cell) {
+              rowHasData = true;
+              
+              if (cell.t === 'd' || (cell.v instanceof Date)) {
+                val = cell.v;
+              } else if (cell.t === 'n') {
+                val = cell.v; // Exact numeric value
+              } else {
+                if (typeof cell.v === 'number' && cell.w) {
+                  val = cell.w; // leading zeros preserved
+                } else {
+                  val = cell.v !== undefined && cell.v !== null ? cell.v : '';
+                }
+              }
+            }
+            rowData[b2bKey] = val;
+          }
+          
+          if (rowHasData) {
+            excelRows.push(rowData);
+          }
+        }
+
+        if (excelRows.length === 0) {
+          setSnack({ severity: 'error', msg: 'No data rows found in worksheet.' });
+          return;
+        }
+
+        // 5. Perform validation and duplicate check
+        const validated = excelRows.map((mappedRow, index) => {
+          const errors = [];
+          
+          let gstin = '';
+          if (mappedRow['GSTIN of Supplier'] !== undefined && mappedRow['GSTIN of Supplier'] !== null) {
+            gstin = String(mappedRow['GSTIN of Supplier']).trim();
+          }
+          if (!gstin) {
+            errors.push({ column: 'GSTIN OF SUPPLIER', problem: 'Missing GSTIN' });
+          } else if (!/^[A-Za-z0-9]{15}$/.test(gstin)) {
+            errors.push({ column: 'GSTIN OF SUPPLIER', problem: 'Invalid GSTIN format (must be 15 alphanumeric characters)' });
+          }
+
+          let invNo = '';
+          if (mappedRow['Invoice Number'] !== undefined && mappedRow['Invoice Number'] !== null) {
+            invNo = String(mappedRow['Invoice Number']).trim();
+          }
+          if (!invNo) {
+            errors.push({ column: 'INVOICE NUMBER', problem: 'Missing Invoice Number' });
+          }
+
+          const invDateVal = mappedRow['Invoice Date'];
+          let formattedInvoiceDate = '';
+          if (invDateVal === undefined || invDateVal === null || invDateVal === '') {
+            errors.push({ column: 'INVOICE DATE', problem: 'Missing Invoice Date' });
+          } else {
+            const dateParseResult = parseExcelDate(invDateVal);
+            if (!dateParseResult.isValid) {
+              errors.push({ column: 'INVOICE DATE', problem: `Invalid date: ${dateParseResult.reason}` });
+            } else {
+              formattedInvoiceDate = formatDateToString(dateParseResult.date);
+            }
+          }
+
+          const numericFields = ['Invoice Value', 'Taxable Value', 'Integrated Tax', 'CGST', 'SGST', 'Cess', 'Applicable % Tax Rate'];
+          const convertedNumerics = {};
+          numericFields.forEach(field => {
+            const val = mappedRow[field];
+            if (val === undefined || val === null || val === '') {
+              convertedNumerics[field] = '';
+            } else {
+              const cleanStr = String(val).replace(/,/g, '');
+              const num = parseFloat(cleanStr);
+              if (isNaN(num)) {
+                errors.push({ column: field.toUpperCase(), problem: `${field} must be a valid numeric value` });
+              } else {
+                convertedNumerics[field] = num; // Lossless precision
+              }
+            }
+          });
+
+          let revCharge = '';
+          if (mappedRow['Supply attract reverse charge'] !== undefined && mappedRow['Supply attract reverse charge'] !== null) {
+            const rawRev = String(mappedRow['Supply attract reverse charge']).trim().toLowerCase();
+            if (rawRev === 'yes' || rawRev === 'y' || rawRev === 'true') {
+              revCharge = 'Yes';
+            } else if (rawRev === 'no' || rawRev === 'n' || rawRev === 'false') {
+              revCharge = 'No';
+            } else if (rawRev === '') {
+              revCharge = '';
+            } else {
+              errors.push({ column: 'REVERSE CHARGE', problem: "Reverse Charge value must be 'Yes', 'No', or empty" });
+            }
+          }
+
+          let formattedFilingDate = '';
+          if (mappedRow['GSTR-1/1A/IFF/GSTR-5 Filing Date']) {
+            const dateParse = parseExcelDate(mappedRow['GSTR-1/1A/IFF/GSTR-5 Filing Date']);
+            if (dateParse.isValid) {
+              formattedFilingDate = formatDateToString(dateParse.date);
+            }
+          }
+          let formattedIrnDate = '';
+          if (mappedRow['IRN Date']) {
+            const dateParse = parseExcelDate(mappedRow['IRN Date']);
+            if (dateParse.isValid) {
+              formattedIrnDate = formatDateToString(dateParse.date);
+            }
+          }
+
+          const b2bEntries = entries.filter(e => !e.type || e.type === 'b2b');
+          const existingMatch = b2bEntries.find(e =>
+            String(e['GSTIN of Supplier'] || '').trim().toLowerCase() === gstin.toLowerCase() &&
+            String(e['Invoice Number'] || '').trim().toLowerCase() === invNo.toLowerCase()
+          );
+
+          const finalMappedRow = {
+            'GSTIN of Supplier': gstin,
+            'Trade / Legal Name': mappedRow['Trade / Legal Name'] !== undefined && mappedRow['Trade / Legal Name'] !== null ? String(mappedRow['Trade / Legal Name']).trim() : '',
+            'Invoice Number': invNo,
+            'Invoice Type': mappedRow['Invoice Type'] !== undefined && mappedRow['Invoice Type'] !== null ? String(mappedRow['Invoice Type']).trim() : '',
+            'Invoice Date': formattedInvoiceDate || String(invDateVal || ''),
+            'Invoice Value': convertedNumerics['Invoice Value'],
+            'Place of Supply': mappedRow['Place of Supply'] !== undefined && mappedRow['Place of Supply'] !== null ? String(mappedRow['Place of Supply']).trim() : '',
+            'Supply attract reverse charge': revCharge,
+            'Taxable Value': convertedNumerics['Taxable Value'],
+            'Integrated Tax': convertedNumerics['Integrated Tax'],
+            'CGST': convertedNumerics['CGST'],
+            'SGST': convertedNumerics['SGST'],
+            'Cess': convertedNumerics['Cess'],
+            'GSTR-1/1A/IFF/GSTR-5 Period': mappedRow['GSTR-1/1A/IFF/GSTR-5 Period'] !== undefined && mappedRow['GSTR-1/1A/IFF/GSTR-5 Period'] !== null ? String(mappedRow['GSTR-1/1A/IFF/GSTR-5 Period']).trim() : '',
+            'GSTR-1/1A/IFF/GSTR-5 Filing Date': formattedFilingDate || String(mappedRow['GSTR-1/1A/IFF/GSTR-5 Filing Date'] || ''),
+            'ITC Availability': mappedRow['ITC Availability'] !== undefined && mappedRow['ITC Availability'] !== null ? String(mappedRow['ITC Availability']).trim() : '',
+            'Reason': mappedRow['Reason'] !== undefined && mappedRow['Reason'] !== null ? String(mappedRow['Reason']).trim() : '',
+            'Applicable % Tax Rate': convertedNumerics['Applicable % Tax Rate'],
+            'Source': mappedRow['Source'] !== undefined && mappedRow['Source'] !== null ? String(mappedRow['Source']).trim() : '',
+            'IRN': mappedRow['IRN'] !== undefined && mappedRow['IRN'] !== null ? String(mappedRow['IRN']).trim() : '',
+            'IRN Date': formattedIrnDate || String(mappedRow['IRN Date'] || ''),
+            type: 'b2b'
+          };
+
+          return {
+            rowNum: index + 2,
+            mapped: finalMappedRow,
+            errors,
+            isValid: errors.length === 0,
+            isDuplicate: errors.length === 0 && !!existingMatch,
+            duplicateRecord: existingMatch
+          };
+        });
+
+        setParsedRows(validated);
+        setDuplicateHandlingMode('skip');
+        setImportDialogOpen(true);
+      } catch (err) {
+        setSnack({ severity: 'error', msg: 'Failed to parse Excel file: ' + err.message });
+      } finally {
+        if (excelInputRef.current) excelInputRef.current.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleExecuteImport = async () => {
+    setImporting(true);
+    try {
+      const validRows = parsedRows.filter(r => r.isValid);
+      const toInsertRows = [];
+      const toUpdateRows = [];
+      const invalidCount = parsedRows.length - validRows.length;
+      let skippedCount = 0;
+
+      const token = localStorage.getItem('token');
+      const b2bEntries = entries.filter(e => !e.type || e.type === 'b2b');
+      const nextSlNo = b2bEntries.length > 0 ? Math.max(...b2bEntries.map(e => e['SL NO'] || 0)) + 1 : 1;
+      let currentNextSl = nextSlNo;
+
+      validRows.forEach(row => {
+        if (row.isDuplicate) {
+          if (duplicateHandlingMode === 'skip') {
+            skippedCount++;
+          } else {
+            toUpdateRows.push({
+              id: row.duplicateRecord._id,
+              changes: {
+                'GSTIN of Supplier': row.mapped['GSTIN of Supplier'],
+                'Trade / Legal Name': row.mapped['Trade / Legal Name'],
+                'Invoice Number': row.mapped['Invoice Number'],
+                'Invoice Type': row.mapped['Invoice Type'],
+                'Invoice Date': row.mapped['Invoice Date'],
+                'Invoice Value': row.mapped['Invoice Value'],
+                'Place of Supply': row.mapped['Place of Supply'],
+                'Supply attract reverse charge': row.mapped['Supply attract reverse charge'],
+                'Taxable Value': row.mapped['Taxable Value'],
+                'Integrated Tax': row.mapped['Integrated Tax'],
+                'CGST': row.mapped['CGST'],
+                'SGST': row.mapped['SGST'],
+                'Cess': row.mapped['Cess'],
+                'GSTR-1/1A/IFF/GSTR-5 Period': row.mapped['GSTR-1/1A/IFF/GSTR-5 Period'],
+                'GSTR-1/1A/IFF/GSTR-5 Filing Date': row.mapped['GSTR-1/1A/IFF/GSTR-5 Filing Date'],
+                'ITC Availability': row.mapped['ITC Availability'],
+                'Reason': row.mapped['Reason'],
+                'Applicable % Tax Rate': row.mapped['Applicable % Tax Rate'],
+                'Source': row.mapped['Source'],
+                'IRN': row.mapped['IRN'],
+                'IRN Date': row.mapped['IRN Date']
+              }
+            });
+          }
+        } else {
+          toInsertRows.push({
+            ...row.mapped,
+            'SL NO': currentNextSl
+          });
+          currentNextSl++;
+        }
+      });
+
+      let insertedCount = 0;
+      let updatedCount = 0;
+
+      // 1. Execute Updates
+      if (toUpdateRows.length > 0) {
+        const updateRes = await axios.put(`${API_URL}/gst-portal/bulk-update`, {
+          updates: toUpdateRows
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (updateRes.data.success) {
+          updatedCount = updateRes.data.updatedCount || toUpdateRows.length;
+        }
+      }
+
+      // 2. Execute Inserts
+      if (toInsertRows.length > 0) {
+        const insertRes = await axios.post(`${API_URL}/gst-portal/bulk`, {
+          entries: toInsertRows
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (insertRes.data.success) {
+          insertedCount = insertRes.data.insertedCount || toInsertRows.length;
+        }
+      }
+
+      // Show final results
+      setImportResult({
+        imported: insertedCount + updatedCount,
+        skipped: skippedCount,
+        failed: invalidCount
+      });
+
+      // Reload B2B table data
+      fetchData();
+    } catch (err) {
+      setSnack({ severity: 'error', msg: 'Import failed: ' + (err.response?.data?.error || err.message) });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // ── Export ──────────────────────────────────────────────────────────────
   const handleExport = () => {
     if (activeTab === 0) {
@@ -380,11 +896,16 @@ export default function GSTPortalRegister({ onBack }) {
     }
   });
 
+  const typedInputVal = parseFloat(tempInputReceived);
+  const safeInputReceived = (isNaN(typedInputVal) || typedInputVal < 0) ? 0 : typedInputVal;
+  const gstLiabilitiesPayable = Math.max(0, (totals['GST(18%)'] || 0) - safeInputReceived);
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
 
       {/* Hidden file input */}
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,application/pdf" onChange={onFileSelected} />
+      <input type="file" ref={excelInputRef} style={{ display: 'none' }} accept=".xls,.xlsx" onChange={handleExcelFileSelected} />
 
       {/* ── Top Bar ─────────────────────────────────────────────────────────── */}
       <Box sx={{
@@ -476,6 +997,11 @@ export default function GSTPortalRegister({ onBack }) {
 
           <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={handleAddNewRow}
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>New Row</Button>
+
+          {activeTab === 1 && (
+            <Button size="small" variant="outlined" startIcon={<FileUploadIcon />} onClick={handleTriggerExcelUpload}
+              sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>Upload XLS</Button>
+          )}
 
           <Tooltip title="Reload">
             <IconButton size="small" onClick={fetchData} sx={{ bgcolor: 'background.default' }}>
@@ -736,7 +1262,20 @@ export default function GSTPortalRegister({ onBack }) {
                   <input
                     type="number"
                     value={tempInputReceived}
-                    onChange={e => setTempInputReceived(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setTempInputReceived('');
+                        return;
+                      }
+                      const parsed = parseFloat(val);
+                      if (isNaN(parsed)) return;
+                      if (parsed < 0) {
+                        setTempInputReceived('0');
+                        return;
+                      }
+                      setTempInputReceived(val);
+                    }}
                     placeholder="Enter value"
                     style={{
                       width: '100%', border: '1px solid #cbd5e1', padding: '6px 10px',
@@ -765,7 +1304,7 @@ export default function GSTPortalRegister({ onBack }) {
                   borderRight: '1px solid #e2e8f0', fontSize: '15px',
                   fontWeight: 900, textShadow: '0 1px 2px rgba(0,0,0,0.05)'
                 }}>
-                  ₹ {(totals['GST(18%)'] - inputReceived).toLocaleString('en-IN')}
+                  ₹ {gstLiabilitiesPayable.toLocaleString('en-IN')}
                 </td>
                 <td style={{ borderTop: '1px solid #bae6fd' }}></td>
               </tr>
@@ -802,6 +1341,207 @@ export default function GSTPortalRegister({ onBack }) {
           </Box>
         </Box>
       )}
+
+      {/* ── Excel Import Dialog ────────────────────────────────────────────── */}
+      <Dialog
+        open={importDialogOpen}
+        onClose={importing ? undefined : () => setImportDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: 3, p: 1 }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 800, fontSize: '18px', borderBottom: '1px solid #e2e8f0', pb: 1.5 }}>
+          📥 Import B2B Excel
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          {importResult ? (
+            <Box sx={{ py: 2, textAlign: 'center' }}>
+              <Typography variant="h6" fontWeight={800} color="success.main" mb={2}>
+                🎉 Import Completed
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 3, alignItems: 'center', bgcolor: '#f0fdf4', p: 2, borderRadius: 2, border: '1px solid #bbf7d0' }}>
+                <Typography fontSize="14px" fontWeight={600} color="green"><strong>Imported/Updated:</strong> {importResult.imported} rows</Typography>
+                <Typography fontSize="14px" fontWeight={600} color="text.secondary"><strong>Skipped (Duplicates):</strong> {importResult.skipped} rows</Typography>
+                <Typography fontSize="14px" fontWeight={600} color="error"><strong>Failed (Invalid):</strong> {importResult.failed} rows</Typography>
+              </Box>
+              <Button variant="contained" onClick={() => { setImportDialogOpen(false); setImportResult(null); }} sx={{ fontWeight: 700, borderRadius: 2, px: 4 }}>
+                Close
+              </Button>
+            </Box>
+          ) : (() => {
+            const totalParsed = parsedRows.length;
+            const invalidRows = parsedRows.filter(r => !r.isValid);
+            const invalidCount = invalidRows.length;
+            const duplicateRows = parsedRows.filter(r => r.isValid && r.isDuplicate);
+            const duplicateCount = duplicateRows.length;
+            const validCount = parsedRows.filter(r => r.isValid).length;
+
+            const previewCols = [
+              { key: 'GSTIN of Supplier', label: 'GSTIN OF SUPPLIER' },
+              { key: 'Trade / Legal Name', label: 'TRADE / LEGAL NAME' },
+              { key: 'Invoice Number', label: 'INVOICE NUMBER' },
+              { key: 'Invoice Type', label: 'INVOICE TYPE' },
+              { key: 'Invoice Date', label: 'INVOICE DATE' },
+              { key: 'Invoice Value', label: 'INVOICE VALUE' },
+              { key: 'Place of Supply', label: 'PLACE OF SUPPLY' },
+              { key: 'Supply attract reverse charge', label: 'REVERSE CHARGE' },
+              { key: 'Taxable Value', label: 'TAXABLE VALUE' },
+              { key: 'Integrated Tax', label: 'INTEGRATED TAX' },
+              { key: 'CGST', label: 'CGST' },
+              { key: 'SGST', label: 'SGST' },
+              { key: 'Cess', label: 'CESS' }
+            ];
+
+            return (
+              <>
+                <Box display="flex" flexDirection="column" gap={0.5} mb={2}>
+                  <Typography fontSize="13px"><strong>File Name:</strong> {importFileName}</Typography>
+                  <Typography fontSize="13px"><strong>Worksheet Name:</strong> {importSheetName}</Typography>
+                  <Typography fontSize="13px"><strong>Total Rows:</strong> {totalParsed}</Typography>
+                  <Typography fontSize="13px"><strong>Total Columns Match:</strong> {importColCount}</Typography>
+                </Box>
+                
+                <Box display="flex" gap={1.5} mb={2.5} flexWrap="wrap">
+                  <Chip label={`${totalParsed} Rows Detected`} variant="outlined" sx={{ fontWeight: 700 }} />
+                  <Chip label={`${validCount} Valid`} color="success" variant="outlined" sx={{ fontWeight: 700 }} />
+                  {invalidCount > 0 && (
+                    <Chip label={`${invalidCount} Invalid`} color="error" variant="outlined" sx={{ fontWeight: 700 }} />
+                  )}
+                  {duplicateCount > 0 && (
+                    <Chip label={`${duplicateCount} Duplicates`} color="warning" variant="outlined" sx={{ fontWeight: 700 }} />
+                  )}
+                </Box>
+
+                {/* VISUAL TABLE PREVIEW */}
+                {validCount > 0 && (
+                  <>
+                    <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1}>
+                      📊 Visual Column Mapping Preview (First 5 Rows):
+                    </Typography>
+                    <Box sx={{ mb: 2, overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 2, maxHeight: 220 }}>
+                      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '11px', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: '#f1f5f9' }}>
+                            {previewCols.map(c => (
+                              <th key={c.key} style={{ padding: '8px', borderBottom: '1px solid #cbd5e1', whiteSpace: 'nowrap', fontWeight: 800, color: '#334155' }}>
+                                {c.label}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {parsedRows.filter(r => r.isValid).slice(0, 5).map((row, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                              {previewCols.map(c => {
+                                const val = row.mapped[c.key];
+                                return (
+                                  <td key={c.key} style={{ padding: '8px', whiteSpace: 'nowrap', color: '#475569' }}>
+                                    {val !== undefined && val !== null ? String(val) : ''}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </Box>
+                    {validCount > 5 && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2, fontStyle: 'italic' }}>
+                        Showing first 5 rows of {validCount} valid rows...
+                      </Typography>
+                    )}
+                  </>
+                )}
+
+                {invalidCount > 0 && (
+                  <Box sx={{ mb: 2.5, p: 2, bgcolor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: 2, maxHeight: 150, overflowY: 'auto' }}>
+                    <Typography variant="subtitle2" fontWeight={800} color="error.main" mb={1}>
+                      ⚠️ Invalid Rows (Will be skipped):
+                    </Typography>
+                    {invalidRows.map(r => (
+                      <Box key={r.rowNum} sx={{ mb: 1 }}>
+                        <Typography fontSize="12px" fontWeight={700} color="error.dark">
+                          Row {r.rowNum}:
+                        </Typography>
+                        {r.errors.map((e, ei) => (
+                          <Typography key={ei} fontSize="11px" color="error.main" sx={{ pl: 2 }}>
+                            {e.column} → {e.problem}
+                          </Typography>
+                        ))}
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+
+                {duplicateCount > 0 && (
+                  <Box sx={{ mb: 2.5, p: 2, bgcolor: '#fffbeb', border: '1px solid #fef3c7', borderRadius: 2 }}>
+                    <Typography variant="subtitle2" fontWeight={800} color="warning.dark" mb={1}>
+                      🔁 Duplicate Invoices Detected ({duplicateCount} rows):
+                    </Typography>
+                    <Typography fontSize="12px" color="text.secondary" mb={1.5}>
+                      These invoice numbers already exist in the database for the given GSTINs. Choose option:
+                    </Typography>
+
+                    <FormControl component="fieldset">
+                      <RadioGroup
+                        value={duplicateHandlingMode}
+                        onChange={(e) => setDuplicateHandlingMode(e.target.value)}
+                      >
+                        <FormControlLabel value="skip" control={<Radio size="small" />} label={<Typography fontSize="13px" fontWeight={600}>Skip duplicates (Import only new rows)</Typography>} />
+                        <FormControlLabel value="update" control={<Radio size="small" />} label={<Typography fontSize="13px" fontWeight={600}>Update existing (Overwrite database with Excel values)</Typography>} />
+                      </RadioGroup>
+                    </FormControl>
+                  </Box>
+                )}
+
+                {invalidCount === totalParsed ? (
+                  <Alert severity="error" sx={{ fontWeight: 700 }}>
+                    All rows in this Excel sheet are invalid. Please fix the validation errors and try again.
+                  </Alert>
+                ) : null}
+              </>
+            );
+          })()}
+        </DialogContent>
+        {!importResult && (
+          (() => {
+            const totalParsed = parsedRows.length;
+            const invalidCount = parsedRows.filter(r => !r.isValid).length;
+            const duplicateCount = parsedRows.filter(r => r.isValid && r.isDuplicate).length;
+            const validCount = parsedRows.filter(r => r.isValid).length;
+            const importCount = duplicateHandlingMode === 'skip' ? validCount - duplicateCount : validCount;
+
+            return (
+              <DialogActions sx={{ borderTop: '1px solid #e2e8f0', pt: 1.5, px: 3, pb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box>
+                  {invalidCount !== totalParsed && (
+                    <Typography fontSize="13px" fontWeight={700} color="text.primary">
+                      Import {importCount} valid B2B records?
+                    </Typography>
+                  )}
+                </Box>
+                <Box display="flex" gap={1.5}>
+                  <Button variant="outlined" size="small" onClick={() => setImportDialogOpen(false)} disabled={importing} sx={{ fontWeight: 700, borderRadius: 2 }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={handleExecuteImport}
+                    disabled={importing || invalidCount === totalParsed}
+                    startIcon={importing ? <CircularProgress size={13} color="inherit" /> : null}
+                    sx={{ fontWeight: 800, borderRadius: 2, px: 3, bgcolor: '#0ea5e9', '&:hover': { bgcolor: '#0284c7' } }}
+                  >
+                    {importing ? 'Importing…' : 'Import'}
+                  </Button>
+                </Box>
+              </DialogActions>
+            );
+          })()
+        )}
+      </Dialog>
 
       {/* ── Snackbar ────────────────────────────────────────────────────────── */}
       <Snackbar open={!!snack} autoHideDuration={4500} onClose={() => setSnack(null)}

@@ -207,7 +207,7 @@ router.post("/", auth, async (req, res) => {
 });
 
 // ── POST /gst-portal/bulk ───────────────────────────────────────────────────
-router.post("/bulk", auth, adminOnly, async (req, res) => {
+router.post("/bulk", auth, async (req, res) => {
   try {
     const col = getCollection();
     const docs = req.body.entries || req.body;

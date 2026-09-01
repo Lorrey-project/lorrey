@@ -128,9 +128,19 @@ export const COLUMNS = [
     formula: r => {
       const hsd = num(r['HSD (LTR)']);
       const fuel = num(r['FUEL REQUIRED']);
-      const extra = num(r['EXTRA ALLOWED']);
-      const val = hsd - fuel - extra;
-      const rounded = Math.round(val * 100) / 100;
+      const extraAllowed = num(r['EXTRA ALLOWED']);
+      const rawFuelReq = r['FUEL REQUIRED'];
+
+      if (rawFuelReq === undefined || rawFuelReq === null || rawFuelReq === '' || fuel <= 0) {
+        return '0';
+      }
+
+      const netExtra = hsd - fuel - extraAllowed;
+      if (netExtra <= 0) {
+        return '0';
+      }
+
+      const rounded = Math.round(netExtra * 100) / 100;
       if (rounded % 1 === 0) {
         return rounded.toFixed(2);
       }
@@ -404,4 +414,22 @@ export function formatTotalValue(key, value) {
   }
   return value.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 }
+
+// Calculate excess fuel taken beyond required fuel for a given row
+export function calculateExtraFuel(row) {
+  if (!row) return 0;
+  const hsd = num(row['HSD (LTR)']);
+  const fuelReq = num(row['FUEL REQUIRED']);
+  const rawFuelReq = row['FUEL REQUIRED'];
+
+  if (rawFuelReq === undefined || rawFuelReq === null || rawFuelReq === '') {
+    return 0;
+  }
+
+  if (hsd > fuelReq && fuelReq > 0) {
+    return Math.round((hsd - fuelReq) * 100) / 100;
+  }
+  return 0;
+}
+
 

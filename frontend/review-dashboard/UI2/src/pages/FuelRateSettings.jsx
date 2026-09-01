@@ -626,6 +626,121 @@ function ProjectedDeductionTab({ snackHandler }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// EXTRA CASH EXPENSE TAB
+// ─────────────────────────────────────────────────────────────────────────────
+function ExtraCashExpenseTab({ snackHandler }) {
+    const [amountInput, setAmountInput] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        fetchExpenseAmount();
+    }, []);
+
+    const fetchExpenseAmount = async () => {
+        setLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`${API_URL}/settings/oil-allowances`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.success && res.data.data) {
+                setAmountInput(String(res.data.data.extraCashExpenseAmount || 0));
+            }
+        } catch (e) {
+            snackHandler({ msg: 'Failed to load extra cash expense', sev: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        const amt = parseFloat(amountInput);
+        if (amountInput === '' || isNaN(amt) || amt < 0) {
+            snackHandler({ msg: 'Please enter a valid extra cash expense amount.', sev: 'error' });
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.put(`${API_URL}/settings/oil-allowances`, {
+                extraCashExpenseAmount: amt
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (res.data.success) {
+                snackHandler({ msg: 'Extra cash expense saved successfully.', sev: 'success' });
+                if (res.data.data) {
+                    setAmountInput(String(res.data.data.extraCashExpenseAmount || 0));
+                }
+            }
+        } catch (err) {
+            snackHandler({ msg: err.response?.data?.error || 'Failed to save settings', sev: 'error' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <Grid container spacing={4}>
+                <Grid item xs={12} md={6} lg={4}>
+                    <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
+                        <Box sx={{ p: 3, borderBottom: '1px solid rgba(255,255,255,0.05)', bgcolor: 'rgba(255,255,255,0.02)' }}>
+                            <Typography variant="h6" fontWeight={600}>Extra Cash Expense</Typography>
+                            <Typography variant="body2" color="text.secondary">Enter the extra cash expense amount.</Typography>
+                        </Box>
+                        <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            {loading ? (
+                                <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+                                    <CircularProgress size={24} />
+                                </Box>
+                            ) : (
+                                <>
+                                    <TextField
+                                        label="Extra Cash Expense Amount"
+                                        type="text"
+                                        value={amountInput}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (val === '') {
+                                                setAmountInput('');
+                                                return;
+                                            }
+                                            if (/^\d*\.?\d*$/.test(val)) {
+                                                setAmountInput(val);
+                                            }
+                                        }}
+                                        InputProps={{
+                                            startAdornment: <Typography sx={{ mr: 1, color: 'text.secondary' }}>₹</Typography>,
+                                        }}
+                                        fullWidth
+                                    />
+                                    <Box sx={{ display: 'flex', gap: 2 }}>
+                                        <Button 
+                                            variant="contained" 
+                                            color="info" 
+                                            startIcon={<SaveIcon />} 
+                                            onClick={handleSave} 
+                                            disabled={saving} 
+                                            sx={{ flex: 1, borderRadius: 2 }}
+                                        >
+                                            {saving ? 'Saving...' : 'Save'}
+                                        </Button>
+                                    </Box>
+                                </>
+                            )}
+                        </CardContent>
+                    </Card>
+                </Grid>
+            </Grid>
+        </Box>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function FuelRateSettings({ onBack }) {
@@ -688,7 +803,7 @@ export default function FuelRateSettings({ onBack }) {
                                 transition: 'all 0.3s ease'
                             },
                             '& .Mui-selected': {
-                                bgcolor: tabIndex === 0 ? 'primary.main' : 'success.main',
+                                bgcolor: tabIndex === 0 ? 'primary.main' : tabIndex === 1 ? 'success.main' : tabIndex === 2 ? 'warning.main' : 'info.main',
                                 color: '#fff !important',
                                 boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
                             }
@@ -697,6 +812,7 @@ export default function FuelRateSettings({ onBack }) {
                         <Tab label="Fuel Rate Settings" />
                         <Tab label="Pump Cash Discount" />
                         <Tab label="Projected Deduction Settings" />
+                        <Tab label="Extra Cash Expense" />
                     </Tabs>
                 </Paper>
             </Box>
@@ -710,6 +826,9 @@ export default function FuelRateSettings({ onBack }) {
             </TabPanel>
             <TabPanel value={tabIndex} index={2}>
                 <ProjectedDeductionTab snackHandler={snackHandler} />
+            </TabPanel>
+            <TabPanel value={tabIndex} index={3}>
+                <ExtraCashExpenseTab snackHandler={snackHandler} />
             </TabPanel>
 
             <Snackbar 
