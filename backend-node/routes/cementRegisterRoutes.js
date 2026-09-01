@@ -176,14 +176,25 @@ router.get("/pending-bills", async (req, res) => {
     const col = getCollection();
     const entries = await col.find(filter).toArray();
     
-    // Filter in JS: We only want pending records:
-    // Either Freight is pending (no BILL NO and Freight Generated != 'Yes')
-    // OR Unloading is pending (no UNLOADING BILL NO and Unloading Generated != 'Yes')
+    // Filter strictly for UNBILLED records:
+    // A record is UNBILLED if Freight Bill No is missing OR Unloading Bill No is missing.
+    // If BOTH exist (or Billing Completed == 'Yes'), it is FULLY BILLED -> EXCLUDE.
     const pendingEntries = entries.filter(r => {
-       const fGen = r['Freight Generated'] === 'Yes' || !!(r['BILL NO'] && String(r['BILL NO']).trim() !== '');
-       const uGen = r['Unloading Generated'] === 'Yes' || !!(r['UNLOADING BILL NO'] && String(r['UNLOADING BILL NO']).trim() !== '');
-       
-       return !fGen || !uGen; // at least one is pending
+      if (r['Billing Completed'] === 'Yes' || r.billingCompleted === true) {
+        return false; // Fully Billed -> EXCLUDE
+      }
+
+      const freightBillNo = String(r['BILL NO'] || r['BILL NUMBER'] || r['Freight Bill No'] || '').trim();
+      const fGen = r['Freight Generated'] === 'Yes' || freightBillNo !== '';
+
+      const unloadingBillNo = String(r['UNLOADING BILL NO'] || r['Unloading Bill No'] || '').trim();
+      const uGen = r['Unloading Generated'] === 'Yes' || unloadingBillNo !== '';
+
+      if (fGen && uGen) {
+        return false; // Fully Billed -> EXCLUDE
+      }
+
+      return true; // Unbilled -> INCLUDE
     });
     
     // Sort chronologically by date

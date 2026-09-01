@@ -457,6 +457,20 @@ export default function CementRegister({ onBack }) {
       const merged = { ...row, ...(localData[row._id] || {}) };
       const comp = applyCalcs(merged);
 
+      // Check if fully billed
+      if (comp['Billing Completed'] === 'Yes' || comp.billingCompleted === true) {
+        return; // Fully Billed -> EXCLUDE
+      }
+      const freightBillNo = String(comp['BILL NO'] || comp['BILL NUMBER'] || comp['Freight Bill No'] || '').trim();
+      const fGen = comp['Freight Generated'] === 'Yes' || freightBillNo !== '';
+
+      const unloadingBillNo = String(comp['UNLOADING BILL NO'] || comp['Unloading Bill No'] || '').trim();
+      const uGen = comp['Unloading Generated'] === 'Yes' || unloadingBillNo !== '';
+
+      if (fGen && uGen) {
+        return; // Fully Billed -> EXCLUDE
+      }
+
       const rawDate = comp['LOADING DT'] || comp['LOADING DATE'] || comp['BILL DATE'] || comp['RECEIVING DATE'] || comp['INVOICE DATE'] || comp['UNLOADING STATUS'] || comp.date;
       const rDate = parseToDate(rawDate);
       let rMonth = comp.month;
