@@ -176,44 +176,69 @@ router.get("/pending-bills", async (req, res) => {
     const col = getCollection();
     const entries = await col.find(filter).toArray();
     
-    const pendingEntries = entries.filter(r => {
-      // Exclude blank/empty draft entries
-      const rawDate = r['LOADING DT'] || r['LOADING DATE'] || r['BILL DATE'] || r['RECEIVING DATE'] || r['INVOICE DATE'];
-      const invNo = r['INVOICE NO'] || r['Invoice No'] || r['SHIPMENT NO'];
-      if (!rawDate && !invNo) {
-        return false;
-      }
+    const pendingEntries = [];
 
-      if (r['Billing Completed'] === 'Yes' || r.billingCompleted === true) {
-        return false; // Fully Billed -> EXCLUDE
-      }
+    // Process month-by-month so each month's rows carry their exact Cement Register month-wise SL NO
+    for (const pm of prevMonths) {
+      // Fetch all non-blank entries for this specific month
+      const monthEntries = entries.filter(r => {
+        const rawDate = r['LOADING DT'] || r['LOADING DATE'] || r['BILL DATE'] || r['RECEIVING DATE'] || r['INVOICE DATE'] || r.date;
+        const invNo = r['INVOICE NO'] || r['Invoice No'] || r['SHIPMENT NO'];
+        if (!rawDate && !invNo) return false;
 
-      const freightBillNo = String(r['BILL NO'] || r['BILL NUMBER'] || r['FREIGHT BILL NO'] || r.freightBillNo || '').trim();
-      const fGen = r['Freight Generated'] === 'Yes' || freightBillNo !== '';
+        const d = parseToDate(rawDate);
+        let mVal = r.month;
+        let yVal = r.year;
+        if (d.getTime() > 0) {
+          mVal = d.getMonth() + 1;
+          yVal = d.getFullYear();
+        }
+        return mVal === pm.month && yVal === pm.year;
+      });
 
-      const unloadingBillNo = String(r['UNLOADING BILL NO'] || r['UNLOADING BILL NUMBER'] || r.unloadingBillNo || '').trim();
-      const uGen = r['Unloading Generated'] === 'Yes' || unloadingBillNo !== '';
+      // Sort ALL entries of this month chronologically by date and existing SL NO
+      monthEntries.sort((a, b) => {
+        const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"]);
+        const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"]);
+        if (dateA.getTime() !== dateB.getTime()) {
+          return dateA.getTime() - dateB.getTime();
+        }
+        const slA = parseInt(String(a["SL NO"] || a["SL. NO."] || a.slNo || '').replace(/\D/g, ''), 10) || 0;
+        const slB = parseInt(String(b["SL NO"] || b["SL. NO."] || b.slNo || '').replace(/\D/g, ''), 10) || 0;
+        return slA - slB;
+      });
 
-      const challanBilled = String(r['CHALLAN STATUS'] || '').toUpperCase().trim() === 'BILLED';
+      // Assign exact month-wise Cement Register SL NO to every entry in this month
+      monthEntries.forEach((entry, idx) => {
+        const rawSl = entry["SL NO"] ?? entry["SL. NO."] ?? entry.slNo ?? entry.sl_no ?? entry["S.NO"] ?? entry.sno ?? entry.sl ?? entry["SL"];
+        entry["SL NO"] = (rawSl !== undefined && rawSl !== null && String(rawSl).trim() !== '') 
+          ? String(rawSl) 
+          : String(idx + 1);
+      });
 
-      if ((fGen && uGen) || (fGen && challanBilled) || (fGen && !uGen && !r['EXTRA UNLOADING'])) {
-        return false; // Fully Billed -> EXCLUDE
-      }
+      // Filter for unbilled records in this month
+      const unbilledInMonth = monthEntries.filter(r => {
+        if (r['Billing Completed'] === 'Yes' || r.billingCompleted === true) {
+          return false;
+        }
 
-      return true; // Unbilled -> INCLUDE
-    });
-    
-    // Sort chronologically by date
-    pendingEntries.sort((a, b) => {
-      const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"] || a["UNLOADING STATUS"]);
-      const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"] || b["UNLOADING STATUS"]);
-      if (dateA.getTime() !== dateB.getTime()) {
-        return dateA.getTime() - dateB.getTime();
-      }
-      const slA = parseInt(String(a["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
-      const slB = parseInt(String(b["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
-      return slA - slB;
-    });
+        const freightBillNo = String(r['BILL NO'] || r['BILL NUMBER'] || r['FREIGHT BILL NO'] || r.freightBillNo || '').trim();
+        const fGen = r['Freight Generated'] === 'Yes' || freightBillNo !== '';
+
+        const unloadingBillNo = String(r['UNLOADING BILL NO'] || r['UNLOADING BILL NUMBER'] || r.unloadingBillNo || '').trim();
+        const uGen = r['Unloading Generated'] === 'Yes' || unloadingBillNo !== '';
+
+        const challanBilled = String(r['CHALLAN STATUS'] || '').toUpperCase().trim() === 'BILLED';
+
+        if ((fGen && uGen) || (fGen && challanBilled) || (fGen && !uGen && !r['EXTRA UNLOADING'])) {
+          return false;
+        }
+
+        return true; // Unbilled -> KEEP WITH ORIGINAL MONTH-WISE SL NO PRESERVED
+      });
+
+      pendingEntries.push(...unbilledInMonth);
+    }
 
     const formattedEntries = pendingEntries.map((entry) => {
       if (entry["LOADING DT"]) entry["LOADING DT"] = formatDateToDDMMYY(entry["LOADING DT"]);
