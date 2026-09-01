@@ -1439,17 +1439,25 @@ export default function CementRegister({ onBack }) {
                             />
                           </td>
 
-                          {VISIBLE_COLS.map((col) => (
-                            <td key={col.key} style={{
-                              padding: '4px 6px',
-                              textAlign: col.type === 'calc' || (NUMERIC_KEYS.has ? NUMERIC_KEYS.has(col.key) : NUMERIC_KEYS.includes(col.key)) ? 'right' : 'left',
-                              borderRight: '1px solid #f1f5f9',
-                              whiteSpace: 'nowrap',
-                              fontSize: '11px'
-                            }}>
-                              {renderCell(col, row, index)}
-                            </td>
-                          ))}
+                          {VISIBLE_COLS.map((col) => {
+                            const rawVal = row[col.key];
+                            const localVal = localData[row._id]?.[col.key];
+                            const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
+                            const isDirty = localVal !== undefined;
+
+                            return (
+                              <CellRenderer
+                                key={col.key}
+                                col={col}
+                                value={displayVal}
+                                isDirty={isDirty}
+                                rowIndex={index}
+                                row={row}
+                                onChange={(val) => handleCellEdit(row._id, col.key, val)}
+                                onAttachSaved={() => {}}
+                              />
+                            );
+                          })}
                         </tr>
                       );
                     })}
