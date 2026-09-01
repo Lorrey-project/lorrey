@@ -177,20 +177,22 @@ router.get("/pending-bills", async (req, res) => {
     const entries = await col.find(filter).toArray();
     
     // Filter strictly for UNBILLED records:
-    // A record is UNBILLED if Freight Bill No is missing OR Unloading Bill No is missing.
-    // If BOTH exist (or Billing Completed == 'Yes'), it is FULLY BILLED -> EXCLUDE.
+    // A record is UNBILLED if Freight Bill No is missing OR required Unloading Bill No is missing.
+    // If Freight Bill No exists AND (Unloading Bill exists OR Challan Status is BILLED OR no Extra Unloading requested), it is FULLY BILLED -> EXCLUDE.
     const pendingEntries = entries.filter(r => {
       if (r['Billing Completed'] === 'Yes' || r.billingCompleted === true) {
         return false; // Fully Billed -> EXCLUDE
       }
 
-      const freightBillNo = String(r['BILL NO'] || r['BILL NUMBER'] || r['Freight Bill No'] || '').trim();
+      const freightBillNo = String(r['BILL NO'] || r['BILL NUMBER'] || r['FREIGHT BILL NO'] || r.freightBillNo || '').trim();
       const fGen = r['Freight Generated'] === 'Yes' || freightBillNo !== '';
 
-      const unloadingBillNo = String(r['UNLOADING BILL NO'] || r['Unloading Bill No'] || '').trim();
+      const unloadingBillNo = String(r['UNLOADING BILL NO'] || r['UNLOADING BILL NUMBER'] || r.unloadingBillNo || '').trim();
       const uGen = r['Unloading Generated'] === 'Yes' || unloadingBillNo !== '';
 
-      if (fGen && uGen) {
+      const challanBilled = String(r['CHALLAN STATUS'] || '').toUpperCase().trim() === 'BILLED';
+
+      if ((fGen && uGen) || (fGen && challanBilled) || (fGen && !uGen && !r['EXTRA UNLOADING'])) {
         return false; // Fully Billed -> EXCLUDE
       }
 

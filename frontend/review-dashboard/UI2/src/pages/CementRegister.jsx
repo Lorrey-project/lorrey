@@ -461,13 +461,15 @@ export default function CementRegister({ onBack }) {
       if (comp['Billing Completed'] === 'Yes' || comp.billingCompleted === true) {
         return; // Fully Billed -> EXCLUDE
       }
-      const freightBillNo = String(comp['BILL NO'] || comp['BILL NUMBER'] || comp['Freight Bill No'] || '').trim();
+      const freightBillNo = String(comp['BILL NO'] || comp['BILL NUMBER'] || comp['FREIGHT BILL NO'] || comp.freightBillNo || '').trim();
       const fGen = comp['Freight Generated'] === 'Yes' || freightBillNo !== '';
 
-      const unloadingBillNo = String(comp['UNLOADING BILL NO'] || comp['Unloading Bill No'] || '').trim();
+      const unloadingBillNo = String(comp['UNLOADING BILL NO'] || comp['UNLOADING BILL NUMBER'] || comp.unloadingBillNo || '').trim();
       const uGen = comp['Unloading Generated'] === 'Yes' || unloadingBillNo !== '';
 
-      if (fGen && uGen) {
+      const challanBilled = String(comp['CHALLAN STATUS'] || '').toUpperCase().trim() === 'BILLED';
+
+      if ((fGen && uGen) || (fGen && challanBilled) || (fGen && !uGen && !comp['EXTRA UNLOADING'])) {
         return; // Fully Billed -> EXCLUDE
       }
 
