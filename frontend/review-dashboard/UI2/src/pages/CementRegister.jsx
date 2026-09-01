@@ -1199,48 +1199,61 @@ export default function CementRegister({ onBack }) {
 
   if (showUnbilledView) {
     const calendarYear = selectedMonth <= 3 ? selectedYear + 1 : selectedYear;
-    const totalUnbilledCount = pendingEntries.length;
+
+    let totalUnbilledRowsCount = 0;
+    unbilledByMonth.forEach(g => {
+      totalUnbilledRowsCount += g.rows.length;
+    });
+
+    const allUnbilledIds = [];
+    unbilledByMonth.forEach(g => {
+      g.rows.forEach(r => allUnbilledIds.push(r._id));
+    });
+    const allUnbilledSelected = allUnbilledIds.length > 0 && allUnbilledIds.every(id => selectedIds.has(id));
+    const someUnbilledSelected = allUnbilledIds.some(id => selectedIds.has(id)) && !allUnbilledSelected;
+
+    const toggleAllUnbilled = () => {
+      setSelectedIds(prev => {
+        const s = new Set(prev);
+        if (allUnbilledSelected) {
+          allUnbilledIds.forEach(id => s.delete(id));
+        } else {
+          allUnbilledIds.forEach(id => s.add(id));
+        }
+        return s;
+      });
+    };
 
     return (
-      <Box sx={{
-        minHeight: '100vh',
-        bgcolor: 'background.default',
-        color: 'text.primary',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
+      <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
         {/* Top Header */}
         <Box sx={{
-          px: { xs: 2, md: 4 },
-          py: 2,
-          bgcolor: 'background.paper',
-          borderBottom: '1px solid #e2e8f0',
-          display: 'flex',
-          alignItems: 'center',
-          justify: 'space-between',
-          position: 'sticky',
-          top: 0,
-          zIndex: 100
+          px: { xs: 2, md: 4 }, py: 2,
+          background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexWrap: 'wrap', gap: 2, borderBottom: '1px solid rgba(255,255,255,0.1)',
         }}>
           <Box display="flex" alignItems="center" gap={2}>
             <Button
               variant="outlined"
               onClick={() => setShowUnbilledView(false)}
-              startIcon={<ArrowBackIcon />}
+              startIcon={<ArrowBackIcon fontSize="small" sx={{ color: '#f8fafc' }} />}
               sx={{
                 fontWeight: 700, borderRadius: '10px', fontSize: '0.85rem',
-                color: '#334155', borderColor: '#cbd5e1', textTransform: 'none',
-                '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
+                color: '#fff', borderColor: 'rgba(255,255,255,0.2)', bgcolor: 'rgba(255,255,255,0.05)', textTransform: 'none',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.1)', borderColor: 'rgba(255,255,255,0.3)' }
               }}
             >
               ← BACK TO CEMENT REGISTER
             </Button>
             <Box>
-              <Typography variant="h5" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
+              <Typography variant="h5" fontWeight={800} sx={{ color: '#fff', letterSpacing: '-0.5px' }}>
                 PREVIOUS ALL MONTHS UNBILLED
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Showing unbilled records for previous 4 months relative to <span style={{ fontWeight: 700, color: '#0f172a' }}>{MONTHS[selectedMonth - 1]} {calendarYear}</span>
+              <Typography variant="body2" color="text.secondary" sx={{ color: '#94a3b8' }}>
+                Showing unbilled records for previous 4 months relative to <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{MONTHS[selectedMonth - 1]} {calendarYear}</span>
+                <span style={{ margin: '0 8px', color: '#64748b' }}>•</span>
+                Total Unbilled: <span style={{ fontWeight: 800, color: '#38bdf8' }}>{totalUnbilledRowsCount}</span>
               </Typography>
             </Box>
           </Box>
@@ -1256,6 +1269,7 @@ export default function CementRegister({ onBack }) {
               disabled={selectedIds.size === 0}
               onClick={() => {
                 setShowUnbilledView(false);
+                setBulkBillInput({ billDate: '', billType: '' });
                 setIsBillingModalOpen(true);
               }}
               sx={{
@@ -1272,163 +1286,178 @@ export default function CementRegister({ onBack }) {
           </Box>
         </Box>
 
-        {/* Content Area */}
-        <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, overflowY: 'auto' }}>
-          {totalUnbilledCount === 0 ? (
-            <Paper sx={{ p: 8, textAlign: 'center', borderRadius: '16px', border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
-              <Typography variant="h6" fontWeight={700} color="#64748b" mb={1}>
-                🎉 No Unbilled Shipments Found
-              </Typography>
-              <Typography variant="body2" color="#94a3b8">
-                All shipments from the previous 4 months ({previousFourMonths.map(p => p.label).join(', ')}) have been fully billed.
-              </Typography>
-            </Paper>
-          ) : (
-            unbilledByMonth.map((group) => {
-              const groupIds = group.rows.map(r => r._id);
-              const allGroupSelected = groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
-              const someGroupSelected = groupIds.some(id => selectedIds.has(id)) && !allGroupSelected;
+        {/* Table Container (EXACT CEMENT REGISTER PATTERN) */}
+        <Box ref={tableContainerRef} sx={{ 
+          overflow: 'auto', 
+          flex: 1, 
+          minHeight: 0,
+          minWidth: 0,
+          m: { xs: 1, md: 2 }, 
+          borderRadius: '12px', 
+          border: '1px solid #e2e8f0', 
+          boxShadow: '0 4px 15px rgba(0,0,0,0.03)', 
+          bgcolor: 'background.paper' 
+        }}>
+          <table style={{
+            borderCollapse: 'separate', 
+            borderSpacing: 0,
+            minWidth: '100%',
+            tableLayout: 'auto', 
+            fontFamily: 'Inter, system-ui, sans-serif', 
+            fontSize: '11px'
+          }}>
+            {/* Col widths */}
+            <colgroup>
+              <col style={{ width: 40, minWidth: 40 }} />{/* checkbox */}
+              {VISIBLE_COLS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
+            </colgroup>
 
-              const toggleGroupSelect = () => {
-                setSelectedIds(prev => {
-                  const s = new Set(prev);
-                  if (allGroupSelected) {
-                    groupIds.forEach(id => s.delete(id));
-                  } else {
-                    groupIds.forEach(id => s.add(id));
-                  }
-                  return s;
-                });
-              };
+            <thead>
+              {/* Column headers */}
+              <tr>
+                {/* Select-all checkbox */}
+                <th style={{
+                  position: 'sticky', top: 0, left: 0, zIndex: 20, width: 40, minWidth: 40,
+                  background: '#0f172a',
+                  textAlign: 'center', padding: '10px 4px',
+                  borderRight: '1px solid rgba(255,255,255,0.1)',
+                  borderBottom: '1px solid rgba(255,255,255,0.2)',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={allUnbilledSelected}
+                    ref={el => { if (el) el.indeterminate = someUnbilledSelected; }}
+                    onChange={toggleAllUnbilled}
+                    style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#7c3aed' }}
+                  />
+                </th>
+                {VISIBLE_COLS.map((col) => {
+                  const typeStyle = col.type === 'auto'
+                    ? { background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', color: '#e2e8f0' }
+                    : col.type === 'calc'
+                      ? { background: 'linear-gradient(180deg, #064e3b 0%, #022c22 100%)', color: '#a7f3d0' }
+                      : col.type === 'dropdown'
+                        ? { background: 'linear-gradient(180deg, #7c2d12 0%, #431407 100%)', color: '#fed7aa' }
+                        : { background: 'linear-gradient(180deg, #1e3a8a 0%, #172554 100%)', color: '#bfdbfe' };
+                  return (
+                    <th key={col.key}
+                      title={col.hint || col.label}
+                      style={{
+                        position: 'sticky', top: 0, zIndex: 10,
+                        ...typeStyle,
+                        padding: '10px 6px',
+                        textAlign: 'center',
+                        fontSize: '10px', fontWeight: 700,
+                        letterSpacing: '0.5px',
+                        whiteSpace: 'pre-line', lineHeight: 1.2,
+                        borderRight: '1px solid rgba(255,255,255,0.05)',
+                        borderBottom: '1px solid rgba(255,255,255,0.1)',
+                      }}>
+                      {col.label}
+                      {col.type === 'auto' && <div style={{ fontSize: '7px', opacity: 0.6, marginTop: 4, letterSpacing: '1px' }}>AUTO</div>}
+                      {col.type === 'calc' && <div style={{ fontSize: '7px', opacity: 0.7, marginTop: 4, letterSpacing: '1px' }}>CALC</div>}
+                    </th>
+                  );
+                })}
+              </tr>
+              <div style={{ height: 2, background: 'linear-gradient(90deg, #0284c7 0%, #059669 100%)' }} />
+            </thead>
 
-              return (
-                <Paper key={group.label} sx={{ mb: 4, borderRadius: '16px', overflow: 'hidden', border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
-                  {/* Month Header */}
-                  <Box sx={{
-                    px: 3, py: 2, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0',
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+            <tbody>
+              {totalUnbilledRowsCount === 0 && (
+                <tr>
+                  <td colSpan={VISIBLE_COLS.length + 1} style={{
+                    textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '14px', fontWeight: 600
                   }}>
-                    <Box display="flex" alignItems="center" gap={1.5}>
-                      <input
-                        type="checkbox"
-                        checked={allGroupSelected}
-                        ref={el => { if (el) el.indeterminate = someGroupSelected; }}
-                        onChange={toggleGroupSelect}
-                        disabled={group.rows.length === 0}
-                        style={{ width: 18, height: 18, cursor: group.rows.length > 0 ? 'pointer' : 'default' }}
-                      />
-                      <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.3px' }}>
-                        {group.label}
-                      </Typography>
-                      <Chip
-                        label={`${group.rows.length} Unbilled`}
-                        size="small"
-                        sx={{ fontWeight: 800, fontSize: '0.75rem', bgcolor: group.rows.length > 0 ? '#fef3c7' : '#f1f5f9', color: group.rows.length > 0 ? '#b45309' : '#64748b' }}
-                      />
-                    </Box>
-                  </Box>
+                    🎉 No unbilled bills found across previous 4 months ({previousFourMonths.map(p => p.label).join(', ')}). All shipments are fully billed.
+                  </td>
+                </tr>
+              )}
 
-                  {/* Table */}
-                  {group.rows.length === 0 ? (
-                    <Box sx={{ p: 4, textAlign: 'center', color: '#94a3b8', fontSize: '13px', fontWeight: 600 }}>
-                      No unbilled records for {group.label}.
-                    </Box>
-                  ) : (
-                    <Box sx={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                        <thead>
-                          <tr style={{ background: '#f1f5f9', color: '#475569', textAlign: 'left', fontWeight: 700 }}>
-                            <th style={{ padding: '10px 14px', width: 45, textAlign: 'center' }}>Select</th>
-                            <th style={{ padding: '10px 14px' }}>SL NO</th>
-                            <th style={{ padding: '10px 14px' }}>LOADING DT</th>
-                            <th style={{ padding: '10px 14px' }}>SITE</th>
-                            <th style={{ padding: '10px 14px' }}>VEHICLE NUMBER</th>
-                            <th style={{ padding: '10px 14px' }}>PARTY NAME</th>
-                            <th style={{ padding: '10px 14px' }}>DESTINATION</th>
-                            <th style={{ padding: '10px 14px', textAlign: 'right' }}>BILLING</th>
-                            <th style={{ padding: '10px 14px', textAlign: 'right' }}>MT</th>
-                            <th style={{ padding: '10px 14px', textAlign: 'right' }}>GROSS AMOUNT</th>
-                            <th style={{ padding: '10px 14px' }}>FREIGHT BILL</th>
-                            <th style={{ padding: '10px 14px' }}>UNLOADING BILL</th>
-                            <th style={{ padding: '10px 14px' }}>CHALLAN STATUS</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {group.rows.map((row, idx) => {
-                            const isSelected = selectedIds.has(row._id);
-                            const loadDt = formatDateToDDMMYY(row['LOADING DT'] || row['LOADING DATE'] || '');
-                            const freightGen = row['Freight Generated'] === 'Yes' || !!(row['BILL NO'] && String(row['BILL NO']).trim() !== '');
-                            const unloadingGen = row['Unloading Generated'] === 'Yes' || !!(row['UNLOADING BILL NO'] && String(row['UNLOADING BILL NO']).trim() !== '');
+              {unbilledByMonth.map((group) => {
+                if (group.rows.length === 0) return null;
 
-                            return (
-                              <tr
-                                key={row._id}
-                                onClick={() => toggleSelect(row._id)}
-                                style={{
-                                  background: isSelected ? '#f5f3ff' : (idx % 2 === 0 ? '#ffffff' : '#fafafa'),
-                                  borderBottom: '1px solid #f1f5f9',
-                                  cursor: 'pointer',
-                                  transition: 'background 0.15s'
-                                }}
-                              >
-                                <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      toggleSelect(row._id);
-                                    }}
-                                    style={{ width: 16, height: 16, cursor: 'pointer' }}
-                                  />
-                                </td>
-                                <td style={{ padding: '10px 14px', fontWeight: 600, color: '#64748b' }}>{idx + 1}</td>
-                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a' }}>{loadDt}</td>
-                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#2563eb' }}>{row.SITE || '-'}</td>
-                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a' }}>{row['VEHICLE NUMBER'] || '-'}</td>
-                                <td style={{ padding: '10px 14px', color: '#334155' }}>{row['PARTY NAME'] || '-'}</td>
-                                <td style={{ padding: '10px 14px', color: '#334155' }}>{row['DESTINATION'] || '-'}</td>
-                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>{row.BILLING || '-'}</td>
-                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>{row.MT || '-'}</td>
-                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#059669' }}>
-                                  ₹{num(row['GROSS AMOUNT'] || row['NET AMOUNT']).toLocaleString()}
-                                </td>
-                                <td style={{ padding: '10px 14px' }}>
-                                  <Chip
-                                    label={freightGen ? `Bill #${row['BILL NO'] || 'Done'}` : 'Pending'}
-                                    size="small"
-                                    sx={{
-                                      fontSize: '11px', fontWeight: 700,
-                                      bgcolor: freightGen ? '#dcfce7' : '#fee2e2',
-                                      color: freightGen ? '#15803d' : '#b91c1c'
-                                    }}
-                                  />
-                                </td>
-                                <td style={{ padding: '10px 14px' }}>
-                                  <Chip
-                                    label={unloadingGen ? `Bill #${row['UNLOADING BILL NO'] || 'Done'}` : 'Pending'}
-                                    size="small"
-                                    sx={{
-                                      fontSize: '11px', fontWeight: 700,
-                                      bgcolor: unloadingGen ? '#dcfce7' : '#fef3c7',
-                                      color: unloadingGen ? '#15803d' : '#b45309'
-                                    }}
-                                  />
-                                </td>
-                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>
-                                  {row['CHALLAN STATUS'] || 'NON STAMP'}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </Box>
-                  )}
-                </Paper>
-              );
-            })
-          )}
+                const groupIds = group.rows.map(r => r._id);
+                const allGroupSelected = groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
+                const someGroupSelected = groupIds.some(id => selectedIds.has(id)) && !allGroupSelected;
+
+                const toggleGroupSelect = () => {
+                  setSelectedIds(prev => {
+                    const s = new Set(prev);
+                    if (allGroupSelected) {
+                      groupIds.forEach(id => s.delete(id));
+                    } else {
+                      groupIds.forEach(id => s.add(id));
+                    }
+                    return s;
+                  });
+                };
+
+                return (
+                  <React.Fragment key={group.label}>
+                    {/* Month Section Header Row */}
+                    <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', borderBottom: '2px solid #cbd5e1' }}>
+                      <td style={{ textAlign: 'center', padding: '8px 4px', background: '#f1f5f9' }}>
+                        <input
+                          type="checkbox"
+                          checked={allGroupSelected}
+                          ref={el => { if (el) el.indeterminate = someGroupSelected; }}
+                          onChange={toggleGroupSelect}
+                          style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#0284c7' }}
+                        />
+                      </td>
+                      <td colSpan={VISIBLE_COLS.length} style={{ padding: '8px 16px', fontWeight: 800, fontSize: '12px', color: '#0f172a', letterSpacing: '0.3px' }}>
+                        📅 {group.label} — <span style={{ color: '#0284c7' }}>{group.rows.length} UNBILLED SHIPMENT(S)</span>
+                      </td>
+                    </tr>
+
+                    {/* Month Rows */}
+                    {group.rows.map((row, index) => {
+                      const isRowSelected = selectedIds.has(row._id);
+                      const background = isRowSelected ? '#f5f3ff' : (index % 2 === 0 ? '#ffffff' : '#fafafa');
+
+                      return (
+                        <tr
+                          key={row._id}
+                          style={{
+                            background,
+                            borderBottom: '1px solid #f1f5f9',
+                            outline: isRowSelected ? '2px solid rgba(124,58,237,0.4)' : 'none',
+                          }}
+                        >
+                          <td style={{
+                            position: 'sticky', left: 0, zIndex: 5,
+                            background,
+                            textAlign: 'center', padding: '4px',
+                            borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #f1f5f9'
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={isRowSelected}
+                              onChange={() => toggleSelect(row._id)}
+                              style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#7c3aed' }}
+                            />
+                          </td>
+
+                          {VISIBLE_COLS.map((col) => (
+                            <td key={col.key} style={{
+                              padding: '4px 6px',
+                              textAlign: col.type === 'calc' || NUMERIC_KEYS.includes(col.key) ? 'right' : 'left',
+                              borderRight: '1px solid #f1f5f9',
+                              whiteSpace: 'nowrap',
+                              fontSize: '11px'
+                            }}>
+                              {renderCell(col, row, index)}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </Box>
       </Box>
     );
