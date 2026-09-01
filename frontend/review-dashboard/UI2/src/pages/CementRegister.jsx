@@ -457,6 +457,12 @@ export default function CementRegister({ onBack }) {
       const merged = { ...row, ...(localData[row._id] || {}) };
       const comp = applyCalcs(merged);
 
+      const rawDateStr = comp['LOADING DT'] || comp['LOADING DATE'] || comp['BILL DATE'] || comp['RECEIVING DATE'] || comp['INVOICE DATE'] || comp.date;
+      const invNoStr = comp['INVOICE NO'] || comp['Invoice No'] || comp['SHIPMENT NO'] || '';
+      if (!rawDateStr && !invNoStr) {
+        return; // Blank/empty entry -> EXCLUDE
+      }
+
       // Check if fully billed
       if (comp['Billing Completed'] === 'Yes' || comp.billingCompleted === true) {
         return; // Fully Billed -> EXCLUDE
@@ -1211,6 +1217,12 @@ export default function CementRegister({ onBack }) {
     });
 
     const isRecordUnbilledCheck = (comp) => {
+      const rawDateStr = comp['LOADING DT'] || comp['LOADING DATE'] || comp['BILL DATE'] || comp['RECEIVING DATE'] || comp['INVOICE DATE'] || comp.date;
+      const invNoStr = comp['INVOICE NO'] || comp['Invoice No'] || comp['SHIPMENT NO'] || '';
+      if (!rawDateStr && !invNoStr) {
+        return false; // Blank/empty entry -> EXCLUDE
+      }
+
       if (comp['Billing Completed'] === 'Yes' || comp.billingCompleted === true) {
         return false;
       }

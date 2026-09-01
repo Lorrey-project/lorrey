@@ -179,7 +179,13 @@ router.get("/pending-bills", async (req, res) => {
     // Filter strictly for UNBILLED records:
     // A record is UNBILLED if Freight Bill No is missing OR required Unloading Bill No is missing.
     // If Freight Bill No exists AND (Unloading Bill exists OR Challan Status is BILLED OR no Extra Unloading requested), it is FULLY BILLED -> EXCLUDE.
-    const pendingEntries = entries.filter(r => {
+      // Exclude blank/empty draft entries
+      const rawDate = r['LOADING DT'] || r['LOADING DATE'] || r['BILL DATE'] || r['RECEIVING DATE'] || r['INVOICE DATE'];
+      const invNo = r['INVOICE NO'] || r['Invoice No'] || r['SHIPMENT NO'];
+      if (!rawDate && !invNo) {
+        return false;
+      }
+
       if (r['Billing Completed'] === 'Yes' || r.billingCompleted === true) {
         return false; // Fully Billed -> EXCLUDE
       }
