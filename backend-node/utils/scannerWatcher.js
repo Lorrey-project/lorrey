@@ -3,9 +3,6 @@ const path = require('path');
 const chokidar = require('chokidar');
 const fs = require('fs');
 const axios = require('axios');
-const s3 = require('../config/s3');
-const { PutObjectCommand } = require('@aws-sdk/client-s3');
-const Invoice = require('../models/Invoice');
 const { pushToRegister } = require('./syncManager');
 
 const WATCH_DIR = path.join(__dirname, '../../Lorrey_Scans');
@@ -44,6 +41,10 @@ function startWatcher() {
         
         try {
             if (io) io.emit('scanner_status', { message: 'Physical scan detected! Processing AI...' });
+
+            const s3 = require('../config/s3');
+            const { PutObjectCommand } = require('@aws-sdk/client-s3');
+            const Invoice = require('../models/Invoice');
 
             const fileBuffer = fs.readFileSync(filePath);
             const fileName = path.basename(filePath);

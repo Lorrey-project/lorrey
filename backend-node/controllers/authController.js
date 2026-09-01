@@ -1,11 +1,5 @@
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
-const {
-    generateRegistrationOptions,
-    verifyRegistrationResponse,
-    generateAuthenticationOptions,
-    verifyAuthenticationResponse,
-} = require('@simplewebauthn/server');
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
 
@@ -128,6 +122,7 @@ exports.generateRegOptions = async (req, res) => {
             return acc;
         }, []);
 
+        const { generateRegistrationOptions } = require('@simplewebauthn/server');
         const options = await generateRegistrationOptions({
             rpName,
             rpID: getRPID(req),
@@ -162,6 +157,7 @@ exports.verifyRegResponse = async (req, res) => {
             ? [actualOrigin, actualOrigin.replace(/\/\/[^:]+/, '//localhost')]
             : ['https://localhost:5173', 'http://localhost:5173'];
 
+        const { verifyRegistrationResponse } = require('@simplewebauthn/server');
         let verification;
         try {
             verification = await verifyRegistrationResponse({
@@ -210,6 +206,7 @@ exports.generateAuthOptions = async (req, res) => {
 
         const validPasskeys = user.passkeys.filter(k => k.credentialID);
 
+        const { generateAuthenticationOptions } = require('@simplewebauthn/server');
         const options = await generateAuthenticationOptions({
             rpID: getRPID(req),
             allowCredentials: validPasskeys.map(key => ({
@@ -261,6 +258,7 @@ exports.verifyAuthResponse = async (req, res) => {
         const passkey = user.passkeys.find(k => k.credentialID === body.id);
         if (!passkey) return res.status(400).json({ error: "Unregistered credential" });
 
+        const { verifyAuthenticationResponse } = require('@simplewebauthn/server');
         let verification;
         try {
             verification = await verifyAuthenticationResponse({

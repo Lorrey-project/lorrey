@@ -174,11 +174,14 @@ async function calculateCheckOutStatus(checkOutTime, dateStr) {
 
 
 
-// Trigger seeding immediately on route load if not in test environment
+const mongoose = require("mongoose");
+// Trigger seeding after Mongoose database connection is established
 if (process.env.NODE_ENV !== "test") {
-    seedDefaultSites();
-    seedDefaultSettings();
-    seedDefaultHolidays();
+    mongoose.connection.once("open", () => {
+        seedDefaultSites();
+        seedDefaultSettings();
+        seedDefaultHolidays();
+    });
 }
 
 // Distance calculation: Haversine formula

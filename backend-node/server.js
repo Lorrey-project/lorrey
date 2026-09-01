@@ -1,3 +1,4 @@
+process.env.AWS_EC2_METADATA_DISABLED = "true";
 require("dotenv").config();
 
 const validateEnv = require("./utils/envValidator");
@@ -186,6 +187,25 @@ app.post("/invoice/gcn-softcopy", auth, gcnUpload.single("softcopy"), async (req
   res.json({ message: "GCN softcopy saved successfully", url: req.file.location });
 });
 
+app.use("/invoice", auth, invoiceRoutes);
+
+// Catch-all 404 logger
+app.use((req, res, next) => {
+  console.log(`🚨 [404 NOT FOUND] No route matched for ${req.method} ${req.url}`);
+  res.status(404).json({ error: `Route not found: ${req.method} ${req.url}` });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error(`🚨 [500 INTERNAL ERROR] on ${req.method} ${req.url}`, err);
+  res.status(500).json({ error: err.message || "Internal Server Error" });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
@@ -209,22 +229,3 @@ const connectDB = async () => {
   }
 };
 connectDB();
-
-app.use("/invoice", auth, invoiceRoutes);
-
-// Catch-all 404 logger
-app.use((req, res, next) => {
-  console.log(`🚨 [404 NOT FOUND] No route matched for ${req.method} ${req.url}`);
-  res.status(404).json({ error: `Route not found: ${req.method} ${req.url}` });
-});
-
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error(`🚨 [500 INTERNAL ERROR] on ${req.method} ${req.url}`, err);
-  res.status(500).json({ error: err.message || "Internal Server Error" });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-});
