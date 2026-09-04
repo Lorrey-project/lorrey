@@ -311,11 +311,19 @@ router.post("/extend-eway-validity", auth, async (req, res) => {
       } else if (id && typeof id === 'string' && id.length > 5 && !id.includes('_')) {
         filter = { _id: id };
       } else {
-        const conds = {};
-        if (invoiceNo) conds["$or"] = [{ "INVOICE NO": invoiceNo }, { "INVOICE NO.": invoiceNo }];
-        if (ewayBillNo) conds["E-WAY BILL NO"] = ewayBillNo;
-        if (vehicleNo) conds["$or"] = [{ "VEHICLE NUMBER": vehicleNo }, { "VEHICLE NO": vehicleNo }, { "VEHICLE NO.": vehicleNo }];
-        filter = conds;
+        const andArray = [];
+        if (invoiceNo) {
+          andArray.push({ $or: [{ "INVOICE NO": invoiceNo }, { "INVOICE NO.": invoiceNo }] });
+        }
+        if (ewayBillNo) {
+          andArray.push({ $or: [{ "E-WAY BILL NO": ewayBillNo }, { "E-WAY BILL NUMBER": ewayBillNo }] });
+        }
+        if (vehicleNo) {
+          andArray.push({ $or: [{ "VEHICLE NUMBER": vehicleNo }, { "VEHICLE NO": vehicleNo }, { "VEHICLE NO.": vehicleNo }] });
+        }
+        if (andArray.length > 0) {
+          filter = { $and: andArray };
+        }
       }
 
       if (!filter || Object.keys(filter).length === 0) continue;

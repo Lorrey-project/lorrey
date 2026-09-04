@@ -98,6 +98,44 @@ const getEWayBillStatus = (row) => {
   const effectiveValidityRaw = (extendedValidityRaw && extendedValidityRaw !== "-") ? extendedValidityRaw : originalValidityRaw;
   const isExtended = Boolean(extendedValidityRaw && extendedValidityRaw !== "-" && extendedValidityRaw !== originalValidityRaw);
 
+  const unloadingRaw = String(
+    row["RECEIVING DATE"] ||
+    row["UNLOADING DATE"] ||
+    row["RECEIVING DT"] ||
+    row["UNLOADING DT"] ||
+    row["receivingDate"] ||
+    row["unloadingDate"] ||
+    row["RECEIVING_DATE"] ||
+    row["UNLOADING_DATE"] ||
+    ""
+  ).trim();
+
+  const hasUnloadingDate = Boolean(
+    unloadingRaw &&
+    unloadingRaw !== "-" &&
+    unloadingRaw.toLowerCase() !== "null" &&
+    unloadingRaw.toLowerCase() !== "undefined"
+  );
+
+  // E-WAY BILL COMPLETED = Unloading Date exists in Cement Register.
+  // Immediately consider vehicle as COMPLETED (DONE) and remove from E-Way Bill extension pending list.
+  if (hasUnloadingDate) {
+    return {
+      status: "DONE",
+      label: isExtended ? "✓ DONE (EXTENDED)" : "✓ DONE",
+      code: "DONE",
+      subtitle: `Unloaded (${unloadingRaw})`,
+      color: "#047857",
+      bgColor: "#ecfdf5",
+      borderColor: "#6ee7b7",
+      isUrgent: false,
+      isBlinking: false,
+      isExtended,
+      effectiveValidity: effectiveValidityRaw || "-",
+      originalValidity: originalValidityRaw || "-"
+    };
+  }
+
   if (!ewayNo || ewayNo === "-" || !effectiveValidityRaw || effectiveValidityRaw === "-") {
     return {
       status: "DATA NOT AVAILABLE",
@@ -131,30 +169,10 @@ const getEWayBillStatus = (row) => {
     };
   }
 
-  const unloadingRaw = String(row["RECEIVING DATE"] || row["UNLOADING DATE"] || row["RECEIVING DT"] || "").trim();
-  const unloadingMs = parseDateToStartOfDay(unloadingRaw);
   const now = new Date();
   const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
-  // Case 1 & Case 5: Unloading completed on or before validity date
-  if (unloadingMs && unloadingMs <= validityMs) {
-    return {
-      status: "DONE",
-      label: isExtended ? "✓ DONE (EXTENDED)" : "✓ DONE",
-      code: "DONE",
-      subtitle: "Unloaded before E-Way Bill expiry",
-      color: "#047857",
-      bgColor: "#ecfdf5",
-      borderColor: "#6ee7b7",
-      isUrgent: false,
-      isBlinking: false,
-      isExtended,
-      effectiveValidity: effectiveValidityRaw,
-      originalValidity: originalValidityRaw
-    };
-  }
-
-  // Case 2: Expiring Today
+  // Case 2: Expiring Today (Unloading Date is EMPTY)
   if (todayMs === validityMs) {
     return {
       status: "EXPIRING TODAY",
@@ -172,7 +190,7 @@ const getEWayBillStatus = (row) => {
     };
   }
 
-  // Case 3: Already Expired
+  // Case 3: Already Expired (Unloading Date is EMPTY)
   if (todayMs > validityMs) {
     return {
       status: "EXPIRED",
@@ -190,7 +208,7 @@ const getEWayBillStatus = (row) => {
     };
   }
 
-  // Case 4: Active
+  // Case 4: Active (Unloading Date is EMPTY, Validity is in future)
   return {
     status: "ACTIVE",
     label: isExtended ? "● ACTIVE (EXTENDED)" : "● ACTIVE",
