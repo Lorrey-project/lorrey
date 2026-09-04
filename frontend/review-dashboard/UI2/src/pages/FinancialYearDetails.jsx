@@ -197,34 +197,44 @@ export default function FinancialYearDetails({ onBack }) {
 
   const parseExcelDate = (val) => {
     if (val === null || val === undefined || val === '') return '';
-    if (typeof val === 'number') {
+
+    let dateObj = null;
+    if (val instanceof Date) {
+      dateObj = val;
+    } else if (typeof val === 'number') {
       try {
         const jsDate = XLSX.SSF.parse_date_code(val);
-        if (jsDate) {
-          const y = jsDate.y;
-          const m = String(jsDate.m).padStart(2, '0');
-          const d = String(jsDate.d).padStart(2, '0');
-          return `${y}-${m}-${d}`;
-        }
+        if (jsDate) dateObj = new Date(jsDate.y, jsDate.m - 1, jsDate.d);
       } catch (_) {}
+    } else {
+      const str = String(val).trim();
+      const ddmmyyyy = str.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
+      if (ddmmyyyy) {
+        let day = ddmmyyyy[1].padStart(2, '0');
+        let month = ddmmyyyy[2].padStart(2, '0');
+        let year = ddmmyyyy[3];
+        if (year.length === 2) year = '20' + year;
+        return `${day}/${month}/${year}`;
+      }
+      const yyyymmdd = str.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
+      if (yyyymmdd) {
+        let year = yyyymmdd[1];
+        let month = yyyymmdd[2].padStart(2, '0');
+        let day = yyyymmdd[3].padStart(2, '0');
+        return `${day}/${month}/${year}`;
+      }
+      const parsed = new Date(str);
+      if (!isNaN(parsed.getTime())) dateObj = parsed;
+      else return str;
     }
-    const str = String(val).trim();
-    const ddmmyyyy = str.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
-    if (ddmmyyyy) {
-      let day = ddmmyyyy[1].padStart(2, '0');
-      let month = ddmmyyyy[2].padStart(2, '0');
-      let year = ddmmyyyy[3];
-      if (year.length === 2) year = '20' + year;
-      return `${year}-${month}-${day}`;
+
+    if (dateObj && !isNaN(dateObj.getTime())) {
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const year = dateObj.getFullYear();
+      return `${day}/${month}/${year}`;
     }
-    const yyyymmdd = str.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
-    if (yyyymmdd) {
-      let year = yyyymmdd[1];
-      let month = yyyymmdd[2].padStart(2, '0');
-      let day = yyyymmdd[3].padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    }
-    return str;
+    return String(val).trim();
   };
 
   const handleClearBillRegister = async () => {
@@ -295,20 +305,20 @@ export default function FinancialYearDetails({ onBack }) {
           else if (['igst', 'igstamount'].includes(cleanH)) map.igst = colIdx;
           else if (['totalamount', 'total', 'grossamount', 'grandtotal'].includes(cleanH)) map.totalAmount = colIdx;
           else if (['tds2', 'tds', 'tdsamount', 'tds2percent'].includes(cleanH)) map.tds = colIdx;
-          else if (['receivable', 'receivableamount'].includes(cleanH)) map.receivable = colIdx;
+          else if (['receivable', 'receivableamount', 'receivableamountfromnuvoco'].includes(cleanH)) map.receivable = colIdx;
           else if (['paymentamountpaid', 'paymentamount', 'paidamount', 'amountpaid'].includes(cleanH)) map.paymentAmount = colIdx;
           else if (['tdsprovision'].includes(cleanH)) map.tdsProvision = colIdx;
           else if (['difference'].includes(cleanH)) map.difference = colIdx;
           else if (['paymentdate'].includes(cleanH)) map.paymentDate = colIdx;
-          else if (['referenceno', 'refno', 'reference'].includes(cleanH)) map.referenceNo = colIdx;
+          else if (['referenceno', 'refno', 'reference', 'referenceno.'].includes(cleanH)) map.referenceNo = colIdx;
           else if (['debitamount'].includes(cleanH)) map.debitAmount = colIdx;
           else if (['debitreasonsdeduction', 'debitreasons', 'debitreason', 'deductionreasons'].includes(cleanH)) map.debitReasons = colIdx;
           else if (['remarks', 'remark'].includes(cleanH)) map.remarks = colIdx;
         });
 
         // Positional fallback mapping if header mapping missed key fields
-        if (map.invoiceNumber === undefined) map.invoiceNumber = headers.findIndex((_, idx) => idx === 1 || idx === 2);
-        if (map.invoiceDate === undefined) map.invoiceDate = headers.findIndex((_, idx) => idx === 2 || idx === 3);
+        if (map.invoiceNumber === undefined) map.invoiceNumber = 2;
+        if (map.invoiceDate === undefined) map.invoiceDate = 1;
 
         setExcelHeaderMap(map);
 
@@ -316,6 +326,7 @@ export default function FinancialYearDetails({ onBack }) {
         let validCount = 0;
         let existingCount = 0;
         let failedCount = 0;
+        let summaryRowCount = 0;
         const failedErrors = [];
 
         const existingKeys = new Set(rows.map(r => String(r.invoiceNumber || r.billNo || '').trim().toUpperCase()));
@@ -333,6 +344,18 @@ export default function FinancialYearDetails({ onBack }) {
 
           let excelSite = parseExcelString(getVal(map.site)).toUpperCase();
           let siteStr = (excelSite === 'NVL' || excelSite === 'NVCL') ? excelSite : targetSite;
+
+          // Detect Excel bottom formula/summary/total rows (no invoice number AND no date AND no month AND no site)
+          if (!invNo && !invDate && !monthStr && !excelSite) {
+            summaryRowCount++;
+            continue;
+          }
+
+          if (!invNo) {
+            failedCount++;
+            failedErrors.push({ row: rIdx + 1, error: 'Missing Invoice / Bill Number' });
+            continue;
+          }
 
           let bType = parseExcelString(getVal(map.billType)).toUpperCase() || 'FREIGHT';
           let amt = parseExcelNumber(getVal(map.amount));
