@@ -835,6 +835,28 @@ router.post('/upload-proof', paymentProofUpload.single('proof'), async (req, res
   }
 });
 
+router.post('/clear-bill-register', async (req, res) => {
+  try {
+    const rRes = await FinancialYearRow.deleteMany({});
+    const pRes = await FinancialYearPayment.deleteMany({});
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('cementUpdates', { action: 'billRegisterCleared' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Bill Register data cleared successfully.',
+      rowsDeleted: rRes.deletedCount,
+      paymentsDeleted: pRes.deletedCount
+    });
+  } catch (err) {
+    console.error('Failed to clear Bill Register data:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.post('/import-excel', async (req, res) => {
   try {
     const { rows } = req.body;
@@ -878,7 +900,21 @@ router.post('/import-excel', async (req, res) => {
         editedMonth: r.month || '',
         editedSite: r.site || 'NVCL',
         editedAmount: typeof r.amount === 'number' ? r.amount : (parseFloat(r.amount) || 0),
-        slNo: typeof r.slNo === 'number' ? r.slNo : (parseFloat(r.slNo) || (idx + 1))
+        shipmentNo: r.shipmentNo || r.shipmentNumber || '',
+        cgst: typeof r.cgst === 'number' ? r.cgst : (parseFloat(r.cgst) || 0),
+        sgst: typeof r.sgst === 'number' ? r.sgst : (parseFloat(r.sgst) || 0),
+        totalAmount: typeof r.totalAmount === 'number' ? r.totalAmount : (parseFloat(r.totalAmount) || 0),
+        tds: typeof r.tds === 'number' ? r.tds : (parseFloat(r.tds) || 0),
+        receivable: typeof r.receivable === 'number' ? r.receivable : (parseFloat(r.receivable) || 0),
+        paymentAmount: typeof r.paymentAmount === 'number' ? r.paymentAmount : (parseFloat(r.paymentAmount) || 0),
+        tdsProvision: typeof r.tdsProvision === 'number' ? r.tdsProvision : (parseFloat(r.tdsProvision) || 0),
+        paymentDate: r.paymentDate || '',
+        referenceNo: r.referenceNo || '',
+        debitAmount: typeof r.debitAmount === 'number' ? r.debitAmount : (parseFloat(r.debitAmount) || 0),
+        debitReasons: Array.isArray(r.debitReasons) ? r.debitReasons : (r.debitReasons ? [r.debitReasons] : []),
+        remarks: r.remarks || '',
+        slNo: typeof r.slNo === 'number' ? r.slNo : (parseFloat(r.slNo) || (idx + 1)),
+        hidden: false
       };
 
       if (existingBillNos.has(upperKey)) {

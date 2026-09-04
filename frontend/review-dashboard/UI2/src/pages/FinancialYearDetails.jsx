@@ -227,6 +227,27 @@ export default function FinancialYearDetails({ onBack }) {
     return str;
   };
 
+  const handleClearBillRegister = async () => {
+    if (!window.confirm('Are you sure you want to clear all uploaded Bill Register data? This will remove transaction rows to prepare for a fresh Excel upload.')) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.post(`${API_URL}/fy-details/clear-bill-register`, {}, { headers });
+      if (res.data.success) {
+        setSnack({ severity: 'success', msg: 'Bill Register data cleared successfully! Ready for fresh upload.' });
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to clear Bill Register data:', err);
+      setSnack({ severity: 'error', msg: 'Failed to clear data: ' + (err.response?.data?.error || err.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleExcelFileChange = (e, targetSiteOverride = null, existingFile = null) => {
     const file = e?.target?.files?.[0] || existingFile || excelFile;
     const targetSite = (targetSiteOverride || uploadSiteTarget || 'NVL').toUpperCase();
@@ -262,18 +283,33 @@ export default function FinancialYearDetails({ onBack }) {
         headers.forEach((h, colIdx) => {
           const cleanH = String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
           if (['slno', 'sno', 'sl', 'srno'].includes(cleanH)) map.slNo = colIdx;
-          else if (['invoicedate', 'invdate', 'date', 'billdate'].includes(cleanH)) map.invoiceDate = colIdx;
           else if (['invoicenumber', 'invoiceno', 'invoicen', 'billnumber', 'billno', 'billn', 'invno'].includes(cleanH)) map.invoiceNumber = colIdx;
+          else if (['invoicedate', 'invdate', 'date', 'billdate'].includes(cleanH)) map.invoiceDate = colIdx;
+          else if (['shipmentnumber', 'shipmentno', 'shipment', 'shipmentn'].includes(cleanH)) map.shipmentNumber = colIdx;
           else if (['month'].includes(cleanH)) map.month = colIdx;
           else if (['site', 'plant'].includes(cleanH)) map.site = colIdx;
-          else if (['billsubmissionthrough', 'submissionthrough', 'submittedthrough', 'byportal', 'portal'].includes(cleanH)) map.submissionThrough = colIdx;
-          else if (['billtype', 'type', 'bill'].includes(cleanH)) map.billType = colIdx;
+          else if (['billtype', 'type', 'bill', 'billname'].includes(cleanH)) map.billType = colIdx;
           else if (['amount', 'taxableamount', 'taxablevalue', 'taxableval', 'billingamount', 'netamount'].includes(cleanH)) map.amount = colIdx;
           else if (['cgst', 'cgstamount'].includes(cleanH)) map.cgst = colIdx;
           else if (['sgst', 'sgstamount'].includes(cleanH)) map.sgst = colIdx;
           else if (['igst', 'igstamount'].includes(cleanH)) map.igst = colIdx;
           else if (['totalamount', 'total', 'grossamount', 'grandtotal'].includes(cleanH)) map.totalAmount = colIdx;
+          else if (['tds2', 'tds', 'tdsamount', 'tds2percent'].includes(cleanH)) map.tds = colIdx;
+          else if (['receivable', 'receivableamount'].includes(cleanH)) map.receivable = colIdx;
+          else if (['paymentamountpaid', 'paymentamount', 'paidamount', 'amountpaid'].includes(cleanH)) map.paymentAmount = colIdx;
+          else if (['tdsprovision'].includes(cleanH)) map.tdsProvision = colIdx;
+          else if (['difference'].includes(cleanH)) map.difference = colIdx;
+          else if (['paymentdate'].includes(cleanH)) map.paymentDate = colIdx;
+          else if (['referenceno', 'refno', 'reference'].includes(cleanH)) map.referenceNo = colIdx;
+          else if (['debitamount'].includes(cleanH)) map.debitAmount = colIdx;
+          else if (['debitreasonsdeduction', 'debitreasons', 'debitreason', 'deductionreasons'].includes(cleanH)) map.debitReasons = colIdx;
+          else if (['remarks', 'remark'].includes(cleanH)) map.remarks = colIdx;
         });
+
+        // Positional fallback mapping if header mapping missed key fields
+        if (map.invoiceNumber === undefined) map.invoiceNumber = headers.findIndex((_, idx) => idx === 1 || idx === 2);
+        if (map.invoiceDate === undefined) map.invoiceDate = headers.findIndex((_, idx) => idx === 2 || idx === 3);
+
         setExcelHeaderMap(map);
 
         const parsed = [];
@@ -292,9 +328,26 @@ export default function FinancialYearDetails({ onBack }) {
 
           let invNo = parseExcelString(getVal(map.invoiceNumber));
           let invDate = parseExcelDate(getVal(map.invoiceDate));
+          let shipNo = parseExcelString(getVal(map.shipmentNumber));
           let monthStr = parseExcelString(getVal(map.month));
-          let bType = parseExcelString(getVal(map.billType)) || 'FREIGHT';
+
+          let excelSite = parseExcelString(getVal(map.site)).toUpperCase();
+          let siteStr = (excelSite === 'NVL' || excelSite === 'NVCL') ? excelSite : targetSite;
+
+          let bType = parseExcelString(getVal(map.billType)).toUpperCase() || 'FREIGHT';
           let amt = parseExcelNumber(getVal(map.amount));
+          let cgstVal = parseExcelNumber(getVal(map.cgst));
+          let sgstVal = parseExcelNumber(getVal(map.sgst));
+          let totalAmtVal = parseExcelNumber(getVal(map.totalAmount)) || (amt + cgstVal + sgstVal);
+          let tdsVal = parseExcelNumber(getVal(map.tds));
+          let recVal = parseExcelNumber(getVal(map.receivable)) || (totalAmtVal - tdsVal);
+          let payAmtVal = parseExcelNumber(getVal(map.paymentAmount));
+          let tdsProvVal = parseExcelNumber(getVal(map.tdsProvision));
+          let payDateVal = parseExcelDate(getVal(map.paymentDate));
+          let refNoVal = parseExcelString(getVal(map.referenceNo));
+          let debitAmtVal = parseExcelNumber(getVal(map.debitAmount)) || parseExcelNumber(getVal(map.difference));
+          let debitReasonsVal = parseExcelString(getVal(map.debitReasons));
+          let remarksVal = parseExcelString(getVal(map.remarks));
           let sl = parseExcelNumber(getVal(map.slNo));
 
           if (!invNo) {
@@ -308,14 +361,27 @@ export default function FinancialYearDetails({ onBack }) {
           else validCount++;
 
           parsed.push({
+            slNo: sl || (parsed.length + 1),
             invoiceNumber: invNo,
             displayInvoiceNumber: invNo,
             invoiceDate: invDate,
+            shipmentNo: shipNo,
             month: monthStr,
-            site: targetSite, // Unconditionally assign selected Site (NVL or NVCL)
+            site: siteStr,
             billType: bType,
             amount: amt,
-            slNo: sl || (parsed.length + 1),
+            cgst: cgstVal,
+            sgst: sgstVal,
+            totalAmount: totalAmtVal,
+            tds: tdsVal,
+            receivable: recVal,
+            paymentAmount: payAmtVal,
+            tdsProvision: tdsProvVal,
+            paymentDate: payDateVal,
+            referenceNo: refNoVal,
+            debitAmount: debitAmtVal,
+            debitReasons: debitReasonsVal ? [debitReasonsVal] : [],
+            remarks: remarksVal,
             isExisting
           });
         }
@@ -2532,25 +2598,37 @@ export default function FinancialYearDetails({ onBack }) {
             )}
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid #f1f5f9' }}>
-          <Button onClick={() => setExcelModalOpen(false)} disabled={uploadingExcel} sx={{ textTransform: 'none', color: '#64748b', fontWeight: 700 }}>
-            Cancel
-          </Button>
+        <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between' }}>
           <Button
-            variant="contained"
-            onClick={handleConfirmExcelImport}
-            disabled={!excelParsedRows.length || uploadingExcel}
-            startIcon={uploadingExcel ? <CircularProgress size={16} color="inherit" /> : <TableChartIcon />}
-            sx={{
-              bgcolor: uploadSiteTarget === 'NVL' ? '#10b981' : '#0284c7',
-              '&:hover': { bgcolor: uploadSiteTarget === 'NVL' ? '#059669' : '#0369a1' },
-              fontWeight: 700,
-              textTransform: 'none',
-              borderRadius: '8px'
-            }}
+            variant="outlined"
+            color="error"
+            onClick={handleClearBillRegister}
+            disabled={uploadingExcel}
+            sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
           >
-            {uploadingExcel ? 'Importing...' : `Import ${excelParsedRows.length} Rows into Bill Register (${uploadSiteTarget})`}
+            Clear Current Data
           </Button>
+
+          <Box display="flex" gap={1}>
+            <Button onClick={() => setExcelModalOpen(false)} disabled={uploadingExcel} sx={{ textTransform: 'none', color: '#64748b', fontWeight: 700 }}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleConfirmExcelImport}
+              disabled={!excelParsedRows.length || uploadingExcel}
+              startIcon={uploadingExcel ? <CircularProgress size={16} color="inherit" /> : <TableChartIcon />}
+              sx={{
+                bgcolor: uploadSiteTarget === 'NVL' ? '#10b981' : '#0284c7',
+                '&:hover': { bgcolor: uploadSiteTarget === 'NVL' ? '#059669' : '#0369a1' },
+                fontWeight: 700,
+                textTransform: 'none',
+                borderRadius: '8px'
+              }}
+            >
+              {uploadingExcel ? 'Importing...' : `Import ${excelParsedRows.length} Rows into Bill Register (${uploadSiteTarget})`}
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
 

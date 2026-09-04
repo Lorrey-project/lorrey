@@ -8,8 +8,20 @@ const fyRowSchema = new mongoose.Schema({
   editedMonth: { type: String },
   editedSite: { type: String },
   editedAmount: { type: Number },
+  shipmentNo: { type: String },
+  cgst: { type: Number },
+  sgst: { type: Number },
+  totalAmount: { type: Number },
+  tds: { type: Number },
+  receivable: { type: Number },
+  paymentAmount: { type: Number },
+  tdsProvision: { type: Number },
+  paymentDate: { type: String },
+  referenceNo: { type: String },
+  debitAmount: { type: Number },
   debitReason: { type: String, default: 'None' },
   debitReasons: { type: [String], default: [] },
+  remarks: { type: String },
   // Legacy singular fields (kept for backward compat)
   damageVehicle: { type: String },
   damageTrip: { type: Object },
@@ -21,6 +33,6 @@ const fyRowSchema = new mongoose.Schema({
   damageVehicleAmounts: { type: mongoose.Schema.Types.Mixed, default: {} },
   slNo: { type: Number },
   hidden: { type: Boolean, default: false }
-}, { timestamps: true });
+}, { timestamps: true, strict: false });
 
 module.exports = mongoose.model('FinancialYearRow', fyRowSchema);
