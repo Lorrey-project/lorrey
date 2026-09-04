@@ -45,7 +45,7 @@ const parseNum = (v) => {
 const parseDateToMs = (dStr) => {
   if (!dStr) return 0;
   const s = String(dStr).trim();
-  
+
   // YYYY-MM-DD format
   if (/^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}$/.test(s)) {
     const parts = s.split(/[\/\-\.]/);
@@ -78,7 +78,7 @@ router.get("/data", auth, async (req, res) => {
     // Helper to calculate year and month index from 'fy' and 'month' query parameters
     let monthInt = null;
     let yearInt = null;
-    
+
     if (fy && month) {
       const monthNamesArray = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
       const mIdx = monthNamesArray.indexOf(month);
@@ -101,10 +101,10 @@ router.get("/data", auth, async (req, res) => {
       if (!monthInt || !yearInt) {
         return res.status(400).json({ success: false, error: "Missing valid fy and month for ALL dates" });
       }
-      
+
       cementFilter = { month: monthInt, year: yearInt };
       cashbookFilter = { month: monthInt, year: yearInt };
-      
+
       // Generate all valid YYYY-MM-DD for the selected month to query daily_advances
       const daysInMonth = new Date(yearInt, monthInt, 0).getDate();
       for (let i = 1; i <= daysInMonth; i++) {
@@ -115,7 +115,7 @@ router.get("/data", auth, async (req, res) => {
     } else {
       // Date is specific (YYYY-MM-DD)
       const patterns = getDatePatterns(date);
-      
+
       cementFilter = {
         $or: [
           { "LOADING DT": { $in: patterns } },
@@ -127,13 +127,13 @@ router.get("/data", auth, async (req, res) => {
         cementFilter.month = monthInt;
         cementFilter.year = yearInt;
       }
-      
+
       cashbookFilter = { DATE: { $in: patterns } };
       if (monthInt && yearInt) {
         cashbookFilter.month = monthInt;
         cashbookFilter.year = yearInt;
       }
-      
+
       isoDateStrings = [date];
     }
 
@@ -164,18 +164,18 @@ router.get("/data", auth, async (req, res) => {
       const oOpen = (e.O_OPENING !== undefined && e.O_OPENING !== '') ? parseNum(e.O_OPENING) : prevOClosing;
 
       const pWith = parseNum(e.P_WITHDRAW);
-      const pDac  = parseNum(e.P_GIVEN_DAC);
-      const pOff  = parseNum(e.P_GIVEN_OFFICE);
-      const pOth  = parseNum(e.P_OTHERS);
+      const pDac = parseNum(e.P_GIVEN_DAC);
+      const pOff = parseNum(e.P_GIVEN_OFFICE);
+      const pOth = parseNum(e.P_OTHERS);
       const pClose = (pOpen + pWith) - pDac - pOff - pOth;
 
       const sTransOff = parseNum(e.S_TRANS_OFFICE);
-      const sExp      = parseNum(e.S_EXPENSE);
-      const sClose    = (sOpen + pDac + sTransOff) - sExp;
+      const sExp = parseNum(e.S_EXPENSE);
+      const sClose = (sOpen + pDac + sTransOff) - sExp;
 
       const sTransToOff = parseNum(e.S_TRANS_TO_OFFICE);
-      const oExp        = parseNum(e.O_EXPENSE);
-      const oClose      = (oOpen + pOff + sTransToOff) - oExp;
+      const oExp = parseNum(e.O_EXPENSE);
+      const oClose = (oOpen + pOff + sTransToOff) - oExp;
 
       computedCashbookRows.push({
         DATE: e.DATE,
@@ -207,8 +207,8 @@ router.get("/data", auth, async (req, res) => {
       const monthRows = computedCashbookRows.filter(r => r.month === monthInt && r.year === yearInt);
       if (monthRows.length > 0) {
         cashReceivedDAC = monthRows.reduce((s, r) => s + r.pDac, 0);
-        miscExpenses    = monthRows.reduce((s, r) => s + r.miscExp, 0);
-        openingBalance  = monthRows[0].sOpen;
+        miscExpenses = monthRows.reduce((s, r) => s + r.miscExp, 0);
+        openingBalance = monthRows[0].sOpen;
       }
     } else {
       const targetMs = parseDateToMs(date);
@@ -216,8 +216,8 @@ router.get("/data", auth, async (req, res) => {
 
       if (todayRows.length > 0) {
         cashReceivedDAC = todayRows.reduce((s, r) => s + r.pDac, 0);
-        miscExpenses    = todayRows.reduce((s, r) => s + r.miscExp, 0);
-        openingBalance  = todayRows[0].sOpen;
+        miscExpenses = todayRows.reduce((s, r) => s + r.miscExp, 0);
+        openingBalance = todayRows[0].sOpen;
       } else {
         const priorRows = computedCashbookRows.filter(r => r.dateMs < targetMs);
         if (priorRows.length > 0) {
@@ -311,19 +311,11 @@ router.post("/extend-eway-validity", auth, async (req, res) => {
       } else if (id && typeof id === 'string' && id.length > 5 && !id.includes('_')) {
         filter = { _id: id };
       } else {
-        const andArray = [];
-        if (invoiceNo) {
-          andArray.push({ $or: [{ "INVOICE NO": invoiceNo }, { "INVOICE NO.": invoiceNo }] });
-        }
-        if (ewayBillNo) {
-          andArray.push({ $or: [{ "E-WAY BILL NO": ewayBillNo }, { "E-WAY BILL NUMBER": ewayBillNo }] });
-        }
-        if (vehicleNo) {
-          andArray.push({ $or: [{ "VEHICLE NUMBER": vehicleNo }, { "VEHICLE NO": vehicleNo }, { "VEHICLE NO.": vehicleNo }] });
-        }
-        if (andArray.length > 0) {
-          filter = { $and: andArray };
-        }
+        const conds = {};
+        if (invoiceNo) conds["$or"] = [{ "INVOICE NO": invoiceNo }, { "INVOICE NO.": invoiceNo }];
+        if (ewayBillNo) conds["E-WAY BILL NO"] = ewayBillNo;
+        if (vehicleNo) conds["$or"] = [{ "VEHICLE NUMBER": vehicleNo }, { "VEHICLE NO": vehicleNo }, { "VEHICLE NO.": vehicleNo }];
+        filter = conds;
       }
 
       if (!filter || Object.keys(filter).length === 0) continue;
