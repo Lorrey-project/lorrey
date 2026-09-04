@@ -274,6 +274,45 @@ router.delete("/bulk-delete", auth, async (req, res) => {
   }
 });
 
+// ── POST /gst-portal/gstr1/delete-rows ──────────────────────────────────────
+router.post("/gstr1/delete-rows", auth, async (req, res) => {
+  try {
+    const col = getCollection();
+    const { invoiceNumbers } = req.body;
+    if (!Array.isArray(invoiceNumbers) || invoiceNumbers.length === 0) {
+      return res.status(400).json({ success: false, error: "No invoice numbers provided." });
+    }
+
+    const bulkOps = invoiceNumbers.map(invNo => ({
+      updateOne: {
+        filter: { type: 'gstr1', 'Invoice Number': invNo },
+        update: {
+          $set: {
+            type: 'gstr1',
+            'Invoice Number': invNo,
+            hidden: true,
+            hiddenAt: new Date()
+          }
+        },
+        upsert: true
+      }
+    }));
+
+    if (bulkOps.length > 0) {
+      await col.bulkWrite(bulkOps);
+    }
+
+    const io = getIO();
+    io.emit("gstPortalUpdates", { action: "gstr1Delete", invoiceNumbers });
+
+    res.json({ success: true, deletedCount: invoiceNumbers.length });
+  } catch (error) {
+    console.error("[GST Portal GSTR-1 Delete] Error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
 router.put("/:id", auth, async (req, res) => {
   try {
     const col = getCollection();

@@ -1,7 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Box, Typography, Button, Snackbar, Alert, CircularProgress, Tooltip, Select, MenuItem, FormControl } from '@mui/material';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  Box, Typography, Button, Snackbar, Alert, CircularProgress,
+  Tooltip, Select, MenuItem, Checkbox, Dialog, DialogTitle,
+  DialogContent, DialogActions, Chip
+} from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import InfoIcon from '@mui/icons-material/Info';
+import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 
 const MONTH_NAMES = [
@@ -59,6 +64,9 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
   const [dateFilter, setDateFilter] = useState('ALL');
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState({ open: false, message: '', type: 'success' });
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fyYearStr = useMemo(() => {
     if (!filterYear) return '';
@@ -69,134 +77,142 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
     }
   }, [filterMonth, filterYear]);
 
-  useEffect(() => {
-    const fetchGstr1Data = async () => {
-      if (!fyYearStr) return;
-      setLoading(true);
-      try {
-        const token = localStorage.getItem('token');
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const fetchGstr1Data = useCallback(async () => {
+    if (!fyYearStr) return;
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-        const [fyRes, gstRes] = await Promise.allSettled([
-          axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr }, headers }),
-          axios.get(`${API_URL}/gst-portal`, { headers })
-        ]);
+      const [fyRes, gstRes] = await Promise.allSettled([
+        axios.get(`${API_URL}/fy-details/data`, { params: { fy: fyYearStr }, headers }),
+        axios.get(`${API_URL}/gst-portal`, { headers })
+      ]);
 
-        let allFyRows = [];
-        if (fyRes.status === 'fulfilled' && fyRes.value?.data?.rows) {
-          allFyRows = fyRes.value.data.rows;
+      let allFyRows = [];
+      if (fyRes.status === 'fulfilled' && fyRes.value?.data?.rows) {
+        allFyRows = fyRes.value.data.rows;
+      }
+
+      let gstEntries = [];
+      if (gstRes.status === 'fulfilled' && gstRes.value?.data?.entries) {
+        gstEntries = gstRes.value.data.entries.filter(e => e.type === 'gstr1');
+      } else if (Array.isArray(entries) && entries.length > 0) {
+        gstEntries = entries.filter(e => e.type === 'gstr1');
+      }
+
+      const gstMap = {};
+      const gstHiddenSet = new Set();
+      gstEntries.forEach(g => {
+        const invKey = String(g['Invoice Number'] || g.sourceBillId || '').trim();
+        if (invKey) {
+          if (g.hidden) {
+            gstHiddenSet.add(invKey);
+          } else {
+            gstMap[invKey] = g;
+          }
         }
+      });
 
-        let gstEntries = [];
-        if (gstRes.status === 'fulfilled' && gstRes.value?.data?.entries) {
-          gstEntries = gstRes.value.data.entries.filter(e => e.type === 'gstr1');
-        } else if (Array.isArray(entries) && entries.length > 0) {
-          gstEntries = entries.filter(e => e.type === 'gstr1');
-        }
+      const seenInvoices = new Set();
+      const sourceRows = [];
 
-        const gstMap = {};
-        gstEntries.forEach(g => {
-          const invKey = String(g['Invoice Number'] || g.sourceBillId || '').trim();
-          if (invKey) gstMap[invKey] = g;
+      // 1. Include ALL Bill Register bills (Primary Source of Truth)
+      for (const r of allFyRows) {
+        const invKey = String(r.displayInvoiceNumber || r.invoiceNumber || '').trim();
+        if (!invKey || gstHiddenSet.has(invKey)) continue; // Skip hidden/deleted GSTR-1 records
+        seenInvoices.add(invKey);
+
+        const matchedGst = gstMap[invKey] || {};
+        const billTypeVal = r.billType || r.bill || matchedGst['BILL'] || matchedGst.billType || 'FREIGHT';
+        const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || matchedGst['Bill Submission'] || r.billSubmissionThrough || 'PORTAL';
+
+        sourceRows.push({
+          invoiceNumber: invKey,
+          displayInvoiceNumber: invKey,
+          invoiceDate: r.invoiceDate || matchedGst['Invoice Date'] || '',
+          month: r.month || matchedGst['Month'] || '',
+          site: r.site || matchedGst['SITE'] || '',
+          billType: billTypeVal,
+          billSubmissionThrough: calculatedSubmission,
+          amount: parseAmount(r.amount !== undefined ? r.amount : matchedGst['Amount']),
+          cgst: parseAmount(r.cgst !== undefined ? r.cgst : matchedGst['CGST']),
+          sgst: parseAmount(r.sgst !== undefined ? r.sgst : matchedGst['SGST']),
+          totalAmount: parseAmount(r.totalAmount !== undefined ? r.totalAmount : matchedGst['Total Amount']),
+          sentToGST: !!(r.sentToGST || matchedGst.sourceBillId)
         });
+      }
 
-        const seenInvoices = new Set();
-        const sourceRows = [];
-
-        // 1. Include ALL Bill Register bills (Primary Source of Truth)
-        for (const r of allFyRows) {
-          const invKey = String(r.displayInvoiceNumber || r.invoiceNumber || '').trim();
-          if (invKey) seenInvoices.add(invKey);
-
-          const matchedGst = gstMap[invKey] || {};
-          const billTypeVal = r.billType || r.bill || matchedGst['BILL'] || matchedGst.billType || 'FREIGHT';
-          const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || matchedGst['Bill Submission'] || r.billSubmissionThrough || 'PORTAL';
-
+      // 2. Append any GSTR-1 portal entries not present in Bill Register
+      for (const g of gstEntries) {
+        const invKey = String(g['Invoice Number'] || g.sourceBillId || '').trim();
+        if (invKey && !seenInvoices.has(invKey) && !gstHiddenSet.has(invKey)) {
+          seenInvoices.add(invKey);
+          const billTypeVal = g['BILL'] || g.billType || 'FREIGHT';
+          const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || g['Bill Submission'] || 'PORTAL';
           sourceRows.push({
             invoiceNumber: invKey,
             displayInvoiceNumber: invKey,
-            invoiceDate: r.invoiceDate || matchedGst['Invoice Date'] || '',
-            month: r.month || matchedGst['Month'] || '',
-            site: r.site || matchedGst['SITE'] || '',
+            invoiceDate: g['Invoice Date'] || '',
+            month: g['Month'] || '',
+            site: g['SITE'] || '',
             billType: billTypeVal,
             billSubmissionThrough: calculatedSubmission,
-            amount: parseAmount(r.amount !== undefined ? r.amount : matchedGst['Amount']),
-            cgst: parseAmount(r.cgst !== undefined ? r.cgst : matchedGst['CGST']),
-            sgst: parseAmount(r.sgst !== undefined ? r.sgst : matchedGst['SGST']),
-            totalAmount: parseAmount(r.totalAmount !== undefined ? r.totalAmount : matchedGst['Total Amount']),
-            sentToGST: !!(r.sentToGST || matchedGst.sourceBillId)
+            amount: parseAmount(g['Amount']),
+            cgst: parseAmount(g['CGST']),
+            sgst: parseAmount(g['SGST']),
+            totalAmount: parseAmount(g['Total Amount']),
+            sentToGST: true
           });
         }
+      }
 
-        // 2. Append any GSTR-1 portal entries not present in Bill Register
-        for (const g of gstEntries) {
-          const invKey = String(g['Invoice Number'] || g.sourceBillId || '').trim();
-          if (invKey && !seenInvoices.has(invKey)) {
-            seenInvoices.add(invKey);
-            const billTypeVal = g['BILL'] || g.billType || 'FREIGHT';
-            const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || g['Bill Submission'] || 'PORTAL';
-            sourceRows.push({
-              invoiceNumber: invKey,
-              displayInvoiceNumber: invKey,
-              invoiceDate: g['Invoice Date'] || '',
-              month: g['Month'] || '',
-              site: g['SITE'] || '',
-              billType: billTypeVal,
-              billSubmissionThrough: calculatedSubmission,
-              amount: parseAmount(g['Amount']),
-              cgst: parseAmount(g['CGST']),
-              sgst: parseAmount(g['SGST']),
-              totalAmount: parseAmount(g['Total Amount']),
-              sentToGST: true
-            });
-          }
+      const mappedRows = sourceRows.map((r, i) => {
+        const amt = parseAmount(r.amount);
+        let c = parseAmount(r.cgst);
+        let s = parseAmount(r.sgst);
+
+        if (c === 0 && s === 0 && amt > 0) {
+          c = Math.round(amt * 0.09);
+          s = Math.round(amt * 0.09);
         }
 
-        const mappedRows = sourceRows.map((r, i) => {
-          const amt = parseAmount(r.amount);
-          let c = parseAmount(r.cgst);
-          let s = parseAmount(r.sgst);
+        const parsedDate = parseInvoiceDate(r.invoiceDate);
+        const monthYearStr = getMonthYearStr(parsedDate);
 
-          if (c === 0 && s === 0 && amt > 0) {
-            c = Math.round(amt * 0.09);
-            s = Math.round(amt * 0.09);
-          }
+        const billTypeVal = r.billType || r.bill || r['BILL'] || '';
+        const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || r.billSubmissionThrough || r['Bill Submission'] || 'PORTAL';
 
-          const parsedDate = parseInvoiceDate(r.invoiceDate);
-          const monthYearStr = getMonthYearStr(parsedDate);
+        return {
+          id: r.invoiceNumber || `temp-${i}`,
+          slNo: i + 1,
+          invoiceDate: r.invoiceDate || '',
+          invoiceDateObj: parsedDate,
+          monthYearStr: monthYearStr,
+          invoiceNumber: r.displayInvoiceNumber || r.invoiceNumber || '',
+          month: r.month || '',
+          site: r.site || '',
+          billSubmissionThrough: calculatedSubmission,
+          bill: billTypeVal,
+          billType: billTypeVal,
+          amount: amt,
+          cgst: c,
+          sgst: s,
+          totalAmount: amt + c + s
+        };
+      });
 
-          const billTypeVal = r.billType || r.bill || r['BILL'] || '';
-          const calculatedSubmission = getBillSubmissionFromType(billTypeVal) || r.billSubmissionThrough || r['Bill Submission'] || 'PORTAL';
-
-          return {
-            id: r.invoiceNumber || `temp-${i}`,
-            slNo: i + 1,
-            invoiceDate: r.invoiceDate || '',
-            invoiceDateObj: parsedDate,
-            monthYearStr: monthYearStr,
-            invoiceNumber: r.displayInvoiceNumber || r.invoiceNumber || '',
-            month: r.month || '',
-            site: r.site || '',
-            billSubmissionThrough: calculatedSubmission,
-            bill: billTypeVal,
-            billType: billTypeVal,
-            amount: amt,
-            cgst: c,
-            sgst: s,
-            totalAmount: amt + c + s
-          };
-        });
-
-        setRows(mappedRows);
-      } catch (err) {
-        console.error("Failed to fetch GSTR-1 data", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchGstr1Data();
+      setRows(mappedRows);
+    } catch (err) {
+      console.error("Failed to fetch GSTR-1 data", err);
+    } finally {
+      setLoading(false);
+    }
   }, [fyYearStr, filterMonth, entries]);
+
+  useEffect(() => {
+    fetchGstr1Data();
+  }, [fetchGstr1Data]);
 
   const availableMonths = useMemo(() => {
     const unique = new Set();
@@ -234,6 +250,89 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
     }
     return result;
   }, [rows, siteFilter, dateFilter]);
+
+  // Selection states & handlers
+  const isAllFilteredSelected = useMemo(() => {
+    if (filteredRows.length === 0) return false;
+    return filteredRows.every(r => selectedIds.has(r.id));
+  }, [filteredRows, selectedIds]);
+
+  const isSomeFilteredSelected = useMemo(() => {
+    if (filteredRows.length === 0) return false;
+    const count = filteredRows.filter(r => selectedIds.has(r.id)).length;
+    return count > 0 && count < filteredRows.length;
+  }, [filteredRows, selectedIds]);
+
+  const handleToggleRowSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (isAllFilteredSelected || isSomeFilteredSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        filteredRows.forEach(r => next.delete(r.id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        filteredRows.forEach(r => next.add(r.id));
+        return next;
+      });
+    }
+  };
+
+  // Deletion logic
+  const handleOpenDeleteDialog = () => {
+    if (selectedIds.size > 0) {
+      setDeleteDialogOpen(true);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setDeleting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const invoiceNumbersToDelete = Array.from(selectedIds);
+
+      const res = await axios.post(
+        `${API_URL}/gst-portal/gstr1/delete-rows`,
+        { invoiceNumbers: invoiceNumbersToDelete },
+        { headers }
+      );
+
+      if (res.data.success) {
+        setNotification({
+          open: true,
+          message: `Successfully deleted ${invoiceNumbersToDelete.length} GSTR-1 ${invoiceNumbersToDelete.length === 1 ? 'record' : 'records'}.`,
+          type: 'success'
+        });
+        setSelectedIds(new Set());
+        setDeleteDialogOpen(false);
+        fetchGstr1Data();
+      } else {
+        throw new Error(res.data.error || 'Delete failed');
+      }
+    } catch (err) {
+      console.error("GSTR-1 Delete error:", err);
+      setNotification({
+        open: true,
+        message: err.response?.data?.error || err.message || 'Failed to delete GSTR-1 records.',
+        type: 'error'
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   // Calculate overall totals
   const totals = useMemo(() => {
@@ -302,7 +401,34 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
             GST Return / Invoice Details (Synced with Bill Register)
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          {selectedIds.size > 0 && (
+            <Chip
+              label={`${selectedIds.size} ${selectedIds.size === 1 ? 'record' : 'records'} selected`}
+              color="primary"
+              variant="outlined"
+              sx={{ fontWeight: 700, fontSize: '13px', height: 36 }}
+            />
+          )}
+
+          <Button
+            variant="contained"
+            color="error"
+            startIcon={<DeleteIcon />}
+            disabled={selectedIds.size === 0}
+            onClick={handleOpenDeleteDialog}
+            sx={{
+              height: 36,
+              px: 2.5,
+              fontWeight: 700,
+              borderRadius: 1,
+              backgroundColor: selectedIds.size > 0 ? '#ef4444' : undefined,
+              '&:hover': { backgroundColor: '#dc2626' }
+            }}
+          >
+            DELETE SELECTED
+          </Button>
+
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="subtitle2" fontWeight="700" color="#475569">SITE:</Typography>
             <Select
@@ -358,9 +484,19 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
             <CircularProgress />
           </Box>
         )}
-        <table style={{ width: '100%', minWidth: '1350px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <table style={{ width: '100%', minWidth: '1400px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
           <thead>
             <tr>
+              <th style={{ ...thStyle, width: '45px', textAlign: 'center' }}>
+                <Checkbox
+                  size="small"
+                  checked={isAllFilteredSelected}
+                  indeterminate={isSomeFilteredSelected}
+                  onChange={handleToggleSelectAll}
+                  disabled={filteredRows.length === 0}
+                  sx={{ p: 0, color: '#64748b', '&.Mui-checked': { color: '#1976d2' } }}
+                />
+              </th>
               <th style={{ ...thStyle, width: '50px' }}>Sl No</th>
               <th style={{ ...thStyle, width: '120px' }}>Invoice Date</th>
               <th style={{ ...thStyle, width: '150px' }}>Invoice Number</th>
@@ -378,35 +514,47 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
           <tbody>
             {filteredRows.length === 0 && !loading && (
               <tr>
-                <td colSpan={12} style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                <td colSpan={13} style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
                   No bills found in the Bill Register for this month and site.
                 </td>
               </tr>
             )}
-            {filteredRows.map((row) => (
-              <tr key={row.id} style={{ transition: 'background-color 0.2s', '&:hover': { backgroundColor: '#f1f5f9' } }}>
-                <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#475569', backgroundColor: '#f8fafc' }}>
-                  {row.slNo}
-                </td>
-                <td style={tdStyle}><CellDisplay value={row.invoiceDate} align="center" /></td>
-                <td style={tdStyle}><CellDisplay value={row.invoiceNumber} /></td>
-                <td style={tdStyle}><CellDisplay value={row.month} align="center" /></td>
-                <td style={tdStyle}><CellDisplay value={row.site} /></td>
-                <td style={tdStyle}><CellDisplay value={row.billSubmissionThrough} /></td>
-                <td style={tdStyle}><CellDisplay value={row.bill} /></td>
-                <td style={tdStyle}><CellDisplay value={row.billType} /></td>
-                <td style={tdStyle}><CellDisplay value={row.amount} isNumeric align="right" /></td>
-                <td style={tdStyle}><CellDisplay value={row.cgst} isNumeric align="right" /></td>
-                <td style={tdStyle}><CellDisplay value={row.sgst} isNumeric align="right" /></td>
-                <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '12px', fontWeight: 700, color: '#0f172a' }}>
-                  ₹{formatAmount(row.totalAmount)}
-                </td>
-              </tr>
-            ))}
+            {filteredRows.map((row) => {
+              const isSelected = selectedIds.has(row.id);
+              return (
+                <tr key={row.id} style={{ transition: 'background-color 0.2s', backgroundColor: isSelected ? '#eff6ff' : '#fff', '&:hover': { backgroundColor: isSelected ? '#dbeafe' : '#f1f5f9' } }}>
+                  <td style={{ ...tdStyle, textAlign: 'center', backgroundColor: isSelected ? '#eff6ff' : '#fff' }}>
+                    <Checkbox
+                      size="small"
+                      checked={isSelected}
+                      onChange={() => handleToggleRowSelect(row.id)}
+                      sx={{ p: 0 }}
+                    />
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#475569', backgroundColor: isSelected ? '#eff6ff' : '#f8fafc' }}>
+                    {row.slNo}
+                  </td>
+                  <td style={tdStyle}><CellDisplay value={row.invoiceDate} align="center" /></td>
+                  <td style={tdStyle}><CellDisplay value={row.invoiceNumber} /></td>
+                  <td style={tdStyle}><CellDisplay value={row.month} align="center" /></td>
+                  <td style={tdStyle}><CellDisplay value={row.site} /></td>
+                  <td style={tdStyle}><CellDisplay value={row.billSubmissionThrough} /></td>
+                  <td style={tdStyle}><CellDisplay value={row.bill} /></td>
+                  <td style={tdStyle}><CellDisplay value={row.billType} /></td>
+                  <td style={tdStyle}><CellDisplay value={row.amount} isNumeric align="right" /></td>
+                  <td style={tdStyle}><CellDisplay value={row.cgst} isNumeric align="right" /></td>
+                  <td style={tdStyle}><CellDisplay value={row.sgst} isNumeric align="right" /></td>
+                  <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '12px', fontWeight: 700, color: '#0f172a' }}>
+                    ₹{formatAmount(row.totalAmount)}
+                  </td>
+                </tr>
+              );
+            })}
 
             {/* Total Row */}
             {filteredRows.length > 0 && (
               <tr style={{ backgroundColor: '#f1f5f9' }}>
+                <td style={{ ...tdStyle, backgroundColor: '#f8fafc' }}></td>
                 <td colSpan={8} style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, paddingRight: '16px', fontSize: '13px', color: '#0f172a', backgroundColor: '#f8fafc' }}>
                   TOTAL
                 </td>
@@ -428,6 +576,45 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
         </table>
       </Box>
 
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => !deleting && setDeleteDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700, color: '#0f172a', pb: 1 }}>
+          Confirm Deletion
+        </DialogTitle>
+        <DialogContent>
+          <Typography color="#334155" fontSize="14px">
+            Are you sure you want to delete the selected GSTR_1 records?
+          </Typography>
+          <Typography variant="body2" color="#dc2626" mt={1.5} fontWeight={700}>
+            {selectedIds.size} {selectedIds.size === 1 ? 'record' : 'records'} selected for deletion.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button
+            onClick={() => setDeleteDialogOpen(false)}
+            disabled={deleting}
+            sx={{ color: '#64748b', fontWeight: 600 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleConfirmDelete}
+            disabled={deleting}
+            startIcon={deleting ? <CircularProgress size={18} color="inherit" /> : <DeleteIcon />}
+            sx={{ fontWeight: 700, backgroundColor: '#ef4444', '&:hover': { backgroundColor: '#dc2626' } }}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Snackbar
         open={notification.open}
         autoHideDuration={4000}
@@ -441,5 +628,3 @@ export default function Gstr1Tab({ entries = [], filterMonth, filterYear }) {
     </Box>
   );
 }
-
-
