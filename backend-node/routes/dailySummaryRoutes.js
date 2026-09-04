@@ -288,5 +288,67 @@ router.get("/data", auth, async (req, res) => {
   }
 });
 
+router.post("/extend-eway-validity", auth, async (req, res) => {
+  try {
+    const { extensions } = req.body;
+    if (!Array.isArray(extensions) || extensions.length === 0) {
+      return res.status(400).json({ success: false, error: "No extensions provided" });
+    }
+
+    const col = getCementCol();
+    let updatedCount = 0;
+
+    for (const item of extensions) {
+      const { id, invoiceNo, ewayBillNo, vehicleNo, extendedValidityDate } = item;
+      if (!extendedValidityDate) continue;
+
+      const trimmedDate = String(extendedValidityDate).trim();
+      if (!trimmedDate) continue;
+
+      let filter = null;
+      if (id && mongoose.Types.ObjectId.isValid(id)) {
+        filter = { $or: [{ _id: id }, { _id: new mongoose.Types.ObjectId(id) }] };
+      } else if (id && typeof id === 'string' && id.length > 5 && !id.includes('_')) {
+        filter = { _id: id };
+      } else {
+        const conds = {};
+        if (invoiceNo) conds["$or"] = [{ "INVOICE NO": invoiceNo }, { "INVOICE NO.": invoiceNo }];
+        if (ewayBillNo) conds["E-WAY BILL NO"] = ewayBillNo;
+        if (vehicleNo) conds["$or"] = [{ "VEHICLE NUMBER": vehicleNo }, { "VEHICLE NO": vehicleNo }, { "VEHICLE NO.": vehicleNo }];
+        filter = conds;
+      }
+
+      if (!filter || Object.keys(filter).length === 0) continue;
+
+      const resUpdate = await col.updateOne(filter, {
+        $set: {
+          "EXTENDED E-WAY BILL VALIDITY": trimmedDate,
+          "extendedValidityDate": trimmedDate,
+          "updatedAt": new Date()
+        }
+      });
+
+      if (resUpdate.modifiedCount > 0 || resUpdate.matchedCount > 0) {
+        updatedCount++;
+      }
+    }
+
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("cementUpdates", { action: "ewayValidityExtended", count: updatedCount });
+    }
+
+    return res.json({
+      success: true,
+      message: `E-Way Bill validity extended successfully for ${updatedCount} record(s).`,
+      count: updatedCount
+    });
+  } catch (err) {
+    console.error("[DailySummary] extend-eway-validity error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to extend E-Way Bill validity" });
+  }
+});
+
 module.exports = router;
+
 

@@ -8,28 +8,53 @@ const { parseBankStatement } = require('../utils/parseBankStatement');
 const remittanceUpload = require('../middleware/remittanceUpload');
 const { allocatePaymentToBills, detectPaymentRow } = require('../utils/paymentMapper');
 
-// ── Auto-sync Bank Book Freight/Toll Payments -> Party Payment Details ──────
+// ── Auto-sync Bank Book Freight Payments -> Party Payment Details ──────
 const syncPartyPayments = async (affectedDocs) => {
   const monthNameToNumber = (name) => {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     return months.indexOf(name) + 1;
   };
 
+  const makeSpaceAgnosticRegex = (str) => {
+    if (!str) return /^$/;
+    const stripped = str.replace(/[^a-zA-Z0-9]/g, '');
+    const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
+    return new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
+  };
+
   const getCombo = (doc) => {
     const ledger = (doc.ledgerName || '').trim().toLowerCase();
-    if (ledger !== 'freight payment' && ledger !== 'toll payment') return null;
+    if (ledger !== 'freight payment') return null; // STRICT REQUIREMENT 7: ONLY Freight Payment!
     const v = (doc.vehicle || '').trim();
-    if (!v) return null;
+    const owner = (doc.names || '').trim();
+    if (!v || !owner) return null; // STRICT REQUIREMENT 2 & 3: MUST match Vehicle AND Owner Name!
 
     const docMonthStr = (doc.month || doc.selectedMonth || '').trim();
     const m = monthNameToNumber(docMonthStr);
     if (m < 1 || m > 12) return null;
 
     let fyStart = parseInt(doc.selectedYear, 10);
-    if (isNaN(fyStart)) return null;
+    if (isNaN(fyStart)) {
+      const tDate = doc.transactionDate || doc['Transaction Date'];
+      if (tDate) {
+        const parts = String(tDate).split(/[-\/\.]/);
+        if (parts.length === 3) {
+          let yr = parseInt(parts[0], 10);
+          if (isNaN(yr) || yr < 1000) yr = parseInt(parts[2], 10);
+          if (!isNaN(yr)) {
+            if (yr < 100) yr += 2000;
+            fyStart = (m >= 4) ? yr : yr - 1;
+          }
+        }
+      }
+      if (isNaN(fyStart)) {
+        const nowY = new Date().getFullYear();
+        fyStart = (m >= 4) ? nowY : nowY - 1;
+      }
+    }
 
     const y = (m >= 4) ? fyStart : fyStart + 1;
-    return { vehicleNo: v, month: m, year: y };
+    return { vehicleNo: v, ownerName: owner, month: m, year: y };
   };
 
   const combinationsToUpdate = new Set();
@@ -39,28 +64,54 @@ const syncPartyPayments = async (affectedDocs) => {
     if (combo) combinationsToUpdate.add(JSON.stringify(combo));
   });
 
+  if (combinationsToUpdate.size === 0) return;
+
   for (const comboStr of combinationsToUpdate) {
     const combo = JSON.parse(comboStr);
 
+    // Find all 'freight payment' documents for this EXACT vehicle & name in Bank Book
     const relatedDocs = await AccountDetail.find({
-      vehicle: combo.vehicleNo,
-      ledgerName: { $regex: /^(freight payment|toll payment)$/i }
+      vehicle: { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) },
+      names: { $regex: new RegExp(`^\\s*${combo.ownerName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\s*$`, 'i') },
+      ledgerName: { $regex: /^freight payment$/i }
     });
 
     let totalWithdraw = 0;
     relatedDocs.forEach(d => {
       const dCombo = getCombo(d);
-      if (dCombo && dCombo.month === combo.month && dCombo.year === combo.year) {
+      if (
+        dCombo &&
+        dCombo.month === combo.month &&
+        dCombo.year === combo.year &&
+        dCombo.ownerName.toLowerCase() === combo.ownerName.toLowerCase()
+      ) {
         const amt = parseFloat(String(d.withdraw || '').replace(/,/g, ''));
         if (!isNaN(amt)) totalWithdraw += amt;
       }
     });
 
     await PartyPayment.updateOne(
-      { vehicleNo: combo.vehicleNo, month: combo.month, year: combo.year },
-      { $set: { paidToParty: totalWithdraw } },
+      {
+        vehicleNo: combo.vehicleNo.trim().toUpperCase(),
+        month: combo.month,
+        year: combo.year
+      },
+      {
+        $set: {
+          paidToParty: totalWithdraw,
+          ownerName: combo.ownerName
+        }
+      },
       { upsert: true }
     );
+  }
+
+  try {
+    const { getIO } = require('../socket');
+    const io = getIO();
+    if (io) io.emit('partyPaymentUpdate', { action: 'sync' });
+  } catch (e) {
+    console.warn('Socket emit failed:', e.message);
   }
 };
 
@@ -101,18 +152,34 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
     const ledger = (doc.ledgerName || '').trim().toLowerCase();
     if (ledger !== 'freight advance') return null;
     const v = (doc.vehicle || '').trim();
-    const owner = (doc.names || '').trim();
-    if (!v || !owner) return null;
+    if (!v) return null;
 
     const docMonthStr = (doc.month || doc.selectedMonth || '').trim();
     const m = monthNameToNumber(docMonthStr);
     if (m < 1 || m > 12) return null;
 
     let fyStart = parseInt(doc.selectedYear, 10);
-    if (isNaN(fyStart)) return null;
+    if (isNaN(fyStart)) {
+      const tDate = doc.transactionDate || doc['Transaction Date'];
+      if (tDate) {
+        const parts = String(tDate).split(/[-\/\.]/);
+        if (parts.length === 3) {
+          let yr = parseInt(parts[0], 10);
+          if (isNaN(yr) || yr < 1000) yr = parseInt(parts[2], 10);
+          if (!isNaN(yr)) {
+            if (yr < 100) yr += 2000;
+            fyStart = (m >= 4) ? yr : yr - 1;
+          }
+        }
+      }
+      if (isNaN(fyStart)) {
+        const nowY = new Date().getFullYear();
+        fyStart = (m >= 4) ? nowY : nowY - 1;
+      }
+    }
 
     const y = (m >= 4) ? fyStart : fyStart + 1;
-    return { vehicleNo: v, month: m, year: y, ownerName: owner };
+    return { vehicleNo: v, month: m, year: y };
   };
 
   const combinationsToUpdate = new Set();
@@ -131,26 +198,24 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
   for (const comboStr of combinationsToUpdate) {
     const combo = JSON.parse(comboStr);
 
-    // Find all 'freight advance' documents for this vehicle/owner in the Bank Book
+    // Find all 'freight advance' documents for this vehicle in the Bank Book
     const relatedDocs = await AccountDetail.find({
-      vehicle: combo.vehicleNo,
-      names: combo.ownerName,
+      vehicle: { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) },
       ledgerName: { $regex: /^freight advance$/i }
     });
 
     let totalWithdraw = 0;
     relatedDocs.forEach(d => {
       const dCombo = getCombo(d);
-      if (dCombo && dCombo.month === combo.month && dCombo.year === combo.year && dCombo.ownerName === combo.ownerName) {
+      if (dCombo && dCombo.month === combo.month && dCombo.year === combo.year) {
         const amt = parseFloat(String(d.withdraw || '').replace(/,/g, ''));
         if (!isNaN(amt)) totalWithdraw += amt;
       }
     });
 
-    // Find all matching Cement Register rows for this Vehicle and Owner
+    // Find all matching Cement Register rows for this Vehicle
     const cementRows = await col.find({
-      "VEHICLE NUMBER": { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) },
-      "OWNER NAME": { $regex: new RegExp(`^\\s*${combo.ownerName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\s*$`, "i") }
+      "VEHICLE NUMBER": { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) }
     }).toArray();
 
     const idsToUpdate = [];
@@ -804,3 +869,6 @@ router.post('/sync-main-cash', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.syncPartyPayments = syncPartyPayments;
+module.exports.syncFreightAdvanceToCementRegister = syncFreightAdvanceToCementRegister;
+

@@ -1762,7 +1762,9 @@ export default function CementRegister({ onBack }) {
                       <td style={{ padding: '14px 16px', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
                         {r['LOADING DT'] || r['LOADING DATE'] || r['INVOICE DATE'] || '—'}
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155' }}>{r['SITE'] || r['PARTY NAME'] || '—'}</td>
+                      <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155' }}>
+                        {r['PARTY NAME'] !== undefined && r['PARTY NAME'] !== null ? String(r['PARTY NAME']) : (r['Party Name'] !== undefined && r['Party Name'] !== null ? String(r['Party Name']) : (r.partyName || ''))}
+                      </td>
                       <td style={{ padding: '14px 16px', fontSize: '12px', color: '#334155' }}>{r['DESTINATION'] || '—'}</td>
                       <td style={{ padding: '14px 16px', fontSize: '12px', fontWeight: 600, color: '#0f172a', textAlign: 'right' }}>
                         {mt}
@@ -2765,7 +2767,9 @@ export default function CementRegister({ onBack }) {
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['VEHICLE NUMBER'] || row['VEHICLE'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['INVOICE NO'] || row['Invoice No'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['LOADING DT'] || row['LOADING DATE'] || row['INVOICE DATE'] || ''}</td>
-                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['SITE'] || row['PARTY NAME'] || ''}</td>
+                      <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>
+                        {row['PARTY NAME'] !== undefined && row['PARTY NAME'] !== null ? String(row['PARTY NAME']) : (row['Party Name'] !== undefined && row['Party Name'] !== null ? String(row['Party Name']) : (row.partyName || ''))}
+                      </td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['DESTINATION'] || ''}</td>
                       <td style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>{row['MT'] || ''}</td>
                       <td style={{ padding: '8px' }}>

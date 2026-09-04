@@ -105,6 +105,9 @@ router.get('/debug-cement', async (req, res) => {
   }
 });
 
+const AccountDetail = require('../models/AccountDetail');
+const { syncPartyPayments } = require('./accountDetailRoutes');
+
 // GET all manual entries for a specific month and year
 router.get('/', async (req, res) => {
   try {
@@ -113,9 +116,24 @@ router.get('/', async (req, res) => {
       return res.status(400).json({ error: 'Month and year are required' });
     }
 
+    const m = parseInt(month, 10);
+    const y = parseInt(year, 10);
+
+    // Auto-sync existing Freight Payment entries from Bank Book
+    try {
+      const freightDocs = await AccountDetail.find({
+        ledgerName: { $regex: /^freight payment$/i }
+      });
+      if (freightDocs.length > 0) {
+        await syncPartyPayments(freightDocs);
+      }
+    } catch (syncErr) {
+      console.warn('[PartyPaymentRoute] Auto-sync on fetch failed:', syncErr.message);
+    }
+
     const records = await PartyPayment.find({
-      month: parseInt(month, 10),
-      year: parseInt(year, 10)
+      month: m,
+      year: y
     });
 
     return res.json(records);

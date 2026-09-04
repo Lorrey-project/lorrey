@@ -56,7 +56,7 @@ app.use((req, res, next) => {
   // Hook into response finish to trigger recalculation if data was modified
   res.on('finish', () => {
     if (['POST', 'PUT', 'DELETE'].includes(req.method) && res.statusCode >= 200 && res.statusCode < 300) {
-      if (req.url.includes('/cement-register') || req.url.includes('/main-cashbook')) {
+      if (req.url.includes('/cement-register') || req.url.includes('/main-cashbook') || req.url.includes('/daily-summary')) {
         triggerRecalculateAdvances();
       }
     }

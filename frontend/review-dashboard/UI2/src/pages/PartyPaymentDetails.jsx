@@ -15,11 +15,13 @@ import PendingActionsIcon from '@mui/icons-material/PendingActions';
 import TodayIcon from '@mui/icons-material/Today';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 import { useShortcut } from '../context/ShortcutContext';
 import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -290,7 +292,18 @@ export default function PartyPaymentDetails({ onBack }) {
     }
   };
 
-  useEffect(() => { fetchData(); }, [selMonth, selYear]); // eslint-disable-line
+  useEffect(() => {
+    fetchData();
+
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+    socket.on('partyPaymentUpdate', () => {
+      fetchData();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [selMonth, selYear]);
 
   // ── Computed rows (formulas) ──────────────────────────────────────────────────
   const computedRows = useMemo(() => {

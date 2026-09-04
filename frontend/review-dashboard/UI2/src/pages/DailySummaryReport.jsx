@@ -41,6 +41,173 @@ const socket = io(SOCKET_URL, { autoConnect: true, transports: ["websocket", "po
 
 const parseNum = (val) => parseFloat(String(val || 0).replace(/,/g, '')) || 0;
 
+const parseDateToStartOfDay = (dStr) => {
+  if (!dStr) return null;
+  const s = String(dStr).trim();
+  if (!s || s === '-' || s === 'undefined' || s === 'null') return null;
+
+  // YYYY-MM-DD format
+  if (/^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}$/.test(s)) {
+    const parts = s.split(/[\/\-\.]/);
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    return new Date(year, month, day).getTime();
+  }
+
+  // DD-MM-YYYY or D-M-YYYY or DD/MM/YYYY
+  const parts = s.split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    let day = parseInt(parts[0], 10);
+    let month = parseInt(parts[1], 10) - 1;
+    let year = parseInt(parts[2], 10);
+    if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+    if (year < 100) year += 2000;
+    return new Date(year, month, day).getTime();
+  }
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+};
+
+const formatDateToDDMMYYYY = (isoDateStr) => {
+  if (!isoDateStr) return '';
+  const s = String(isoDateStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-');
+    return `${d}-${m}-${y}`;
+  }
+  return s;
+};
+
+const formatDateToYYYYMMDD = (dStr) => {
+  if (!dStr) return '';
+  const ms = parseDateToStartOfDay(dStr);
+  if (!ms) return '';
+  const dObj = new Date(ms);
+  const y = dObj.getFullYear();
+  const m = String(dObj.getMonth() + 1).padStart(2, '0');
+  const d = String(dObj.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const getEWayBillStatus = (row) => {
+  const ewayNo = String(row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || row["E-WAY BILL"] || "").trim();
+  const originalValidityRaw = String(row["E-WAY BILL VALIDITY"] || row["E-WAY BILL VALIDITY DATE"] || "").trim();
+  const extendedValidityRaw = String(row["EXTENDED E-WAY BILL VALIDITY"] || row["extendedValidityDate"] || "").trim();
+  const effectiveValidityRaw = (extendedValidityRaw && extendedValidityRaw !== "-") ? extendedValidityRaw : originalValidityRaw;
+  const isExtended = Boolean(extendedValidityRaw && extendedValidityRaw !== "-" && extendedValidityRaw !== originalValidityRaw);
+
+  if (!ewayNo || ewayNo === "-" || !effectiveValidityRaw || effectiveValidityRaw === "-") {
+    return {
+      status: "DATA NOT AVAILABLE",
+      label: "DATA NOT AVAILABLE",
+      code: "NO_DATA",
+      color: "#64748b",
+      bgColor: "#f1f5f9",
+      borderColor: "#cbd5e1",
+      isUrgent: false,
+      isBlinking: false,
+      isExtended: false,
+      effectiveValidity: effectiveValidityRaw || "-",
+      originalValidity: originalValidityRaw || "-"
+    };
+  }
+
+  const validityMs = parseDateToStartOfDay(effectiveValidityRaw);
+  if (!validityMs) {
+    return {
+      status: "DATA NOT AVAILABLE",
+      label: "DATA NOT AVAILABLE",
+      code: "NO_DATA",
+      color: "#64748b",
+      bgColor: "#f1f5f9",
+      borderColor: "#cbd5e1",
+      isUrgent: false,
+      isBlinking: false,
+      isExtended: false,
+      effectiveValidity: effectiveValidityRaw || "-",
+      originalValidity: originalValidityRaw || "-"
+    };
+  }
+
+  const unloadingRaw = String(row["RECEIVING DATE"] || row["UNLOADING DATE"] || row["RECEIVING DT"] || "").trim();
+  const unloadingMs = parseDateToStartOfDay(unloadingRaw);
+  const now = new Date();
+  const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  // Case 1 & Case 5: Unloading completed on or before validity date
+  if (unloadingMs && unloadingMs <= validityMs) {
+    return {
+      status: "DONE",
+      label: isExtended ? "✓ DONE (EXTENDED)" : "✓ DONE",
+      code: "DONE",
+      subtitle: "Unloaded before E-Way Bill expiry",
+      color: "#047857",
+      bgColor: "#ecfdf5",
+      borderColor: "#6ee7b7",
+      isUrgent: false,
+      isBlinking: false,
+      isExtended,
+      effectiveValidity: effectiveValidityRaw,
+      originalValidity: originalValidityRaw
+    };
+  }
+
+  // Case 2: Expiring Today
+  if (todayMs === validityMs) {
+    return {
+      status: "EXPIRING TODAY",
+      label: isExtended ? "⚠ EXPIRING TODAY (EXTENDED)" : "⚠ EXPIRING TODAY",
+      code: "EXPIRING_TODAY",
+      action: "Extend E-Way Bill Validity",
+      color: "#b91c1c",
+      bgColor: "#fef2f2",
+      borderColor: "#fca5a5",
+      isUrgent: true,
+      isBlinking: true,
+      isExtended,
+      effectiveValidity: effectiveValidityRaw,
+      originalValidity: originalValidityRaw
+    };
+  }
+
+  // Case 3: Already Expired
+  if (todayMs > validityMs) {
+    return {
+      status: "EXPIRED",
+      label: isExtended ? "🔴 EXPIRED (EXTENDED)" : "🔴 EXPIRED",
+      code: "EXPIRED",
+      action: "E-Way Bill validity expired - Extension required",
+      color: "#b91c1c",
+      bgColor: "#fff1f2",
+      borderColor: "#fda4af",
+      isUrgent: true,
+      isBlinking: false,
+      isExtended,
+      effectiveValidity: effectiveValidityRaw,
+      originalValidity: originalValidityRaw
+    };
+  }
+
+  // Case 4: Active
+  return {
+    status: "ACTIVE",
+    label: isExtended ? "● ACTIVE (EXTENDED)" : "● ACTIVE",
+    code: "ACTIVE",
+    subtitle: `Valid until ${effectiveValidityRaw}`,
+    color: isExtended ? "#4338ca" : "#0369a1",
+    bgColor: isExtended ? "#e0e7ff" : "#f0f9ff",
+    borderColor: isExtended ? "#a5b4fc" : "#7dd3fc",
+    isUrgent: false,
+    isBlinking: false,
+    isExtended,
+    effectiveValidity: effectiveValidityRaw,
+    originalValidity: originalValidityRaw
+  };
+};
+
+
 const getCurrentFYAndMonth = () => {
   const currentDate = new Date();
   const currentMonthIndex = currentDate.getMonth();
@@ -120,6 +287,112 @@ function DailySummaryTab({
   const [alertModalTitle, setAlertModalTitle] = useState('');
   const [alertModalData, setAlertModalData] = useState([]);
 
+  const [extensionDialogOpen, setExtensionDialogOpen] = useState(false);
+  const [extensionRecords, setExtensionRecords] = useState([]);
+  const [extensionDraft, setExtensionDraft] = useState({});
+  const [extensionErrors, setExtensionErrors] = useState({});
+  const [savingExtensions, setSavingExtensions] = useState(false);
+
+  const getRowUniqueKey = (row, idx) => {
+    if (row._id) return String(row._id);
+    if (row.id) return String(row.id);
+    const invoiceNo = String(row["INVOICE NO"] || row["INVOICE NO."] || "").trim();
+    const ewayNo = String(row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "").trim();
+    const vehNo = String(row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "").trim();
+    return `${invoiceNo}_${ewayNo}_${vehNo}_${idx}`;
+  };
+
+  const handleOpenExtensionDialog = () => {
+    const recordsToExtend = alertModalData.length > 0 ? alertModalData : (eWayAlerts.urgentRecords.length > 0 ? eWayAlerts.urgentRecords : (data?.cement || []));
+    setExtensionRecords(recordsToExtend);
+
+    const initialDraft = {};
+    recordsToExtend.forEach((row, idx) => {
+      const rowId = getRowUniqueKey(row, idx);
+      const extVal = row["EXTENDED E-WAY BILL VALIDITY"] || row["extendedValidityDate"];
+      if (extVal) {
+        initialDraft[rowId] = formatDateToYYYYMMDD(extVal);
+      } else {
+        initialDraft[rowId] = '';
+      }
+    });
+    setExtensionDraft(initialDraft);
+    setExtensionErrors({});
+    setExtensionDialogOpen(true);
+  };
+
+  const handleSaveExtensions = async () => {
+    const payload = [];
+    const errors = {};
+    let hasErrors = false;
+
+    extensionRecords.forEach((row, idx) => {
+      const rowId = getRowUniqueKey(row, idx);
+      const enteredVal = (extensionDraft[rowId] || '').trim();
+      if (!enteredVal) return;
+
+      const info = getEWayBillStatus(row);
+      const currentMs = parseDateToStartOfDay(info.effectiveValidity);
+      const newMs = parseDateToStartOfDay(enteredVal);
+
+      if (!newMs) {
+        errors[rowId] = "Invalid date format.";
+        hasErrors = true;
+        return;
+      }
+
+      if (currentMs && newMs < currentMs) {
+        errors[rowId] = `Date cannot be earlier than ${info.effectiveValidity}`;
+        hasErrors = true;
+        return;
+      }
+
+      const formattedVal = formatDateToDDMMYYYY(enteredVal);
+      payload.push({
+        id: row._id || row.id || null,
+        invoiceNo: row["INVOICE NO"] || row["INVOICE NO."],
+        ewayBillNo: row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"],
+        vehicleNo: row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."],
+        extendedValidityDate: formattedVal
+      });
+    });
+
+    setExtensionErrors(errors);
+
+    if (hasErrors) {
+      setSnack({ severity: 'error', msg: 'Please fix the validation errors highlighted in red.' });
+      return;
+    }
+
+    if (payload.length === 0) {
+      setSnack({ severity: 'warning', msg: 'No new validity dates were selected.' });
+      return;
+    }
+
+    setSavingExtensions(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/daily-summary/extend-eway-validity`, { extensions: payload }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data.success) {
+        setSnack({ severity: 'success', msg: res.data.message || 'E-Way Bill validity extended successfully.' });
+        setExtensionDialogOpen(false);
+        await fetchData(date);
+      } else {
+        setSnack({ severity: 'error', msg: res.data.error || 'Failed to save extension dates.' });
+      }
+    } catch (err) {
+      console.error(err);
+      setSnack({ severity: 'error', msg: err.response?.data?.error || 'Error saving E-Way Bill extensions.' });
+    } finally {
+      setSavingExtensions(false);
+    }
+  };
+
+
+
   const fetchData = useCallback(async (targetDate) => {
     setLoading(true);
     try {
@@ -179,30 +452,30 @@ function DailySummaryTab({
       XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
 
       // 2. Cement Register
-      const cementRows = (data.cement || []).map(e => ({
-        "GCN NO": e["GCN NO"] || "",
-        "BILL NO": e["BILL NO"] || "",
-        "INVOICE NO": e["INVOICE NO"] || e["INVOICE NO."] || "",
-        "SITE": e["SITE"] || "",
-        "BILLING RATE": parseNum(e["BILLING"]),
-        "QTY (MT)": parseNum(e["MT"]),
-        "AMOUNT": parseNum(e["Billing Amount"]) || parseNum(e["AMOUNT"]),
-        "LOADING ADVANCE": parseNum(e["ADVANCE"] || e["LOADING ADVANCE"])
-      }));
+      const cementRows = (data.cement || []).map(e => {
+        const info = getEWayBillStatus(e);
+        return {
+          "GCN NO": e["GCN NO"] || "",
+          "BILL NO": e["BILL NO"] || "",
+          "INVOICE NO": e["INVOICE NO"] || e["INVOICE NO."] || "",
+          "SITE": e["SITE"] || "",
+          "BILLING RATE": parseNum(e["BILLING"]),
+          "QTY (MT)": parseNum(e["MT"]),
+          "AMOUNT": parseNum(e["AMOUNT"]),
+          "LOADING ADVANCE": parseNum(e["ADVANCE"] || e["LOADING ADVANCE"]),
+          "VEHICLE NO": e["VEHICLE NUMBER"] || e["VEHICLE NO"] || e["VEHICLE NO."] || "",
+          "HSD SLIP NUMBER": e["HSD SLIP NO"] || e["HSD SLIP NUMBER"] || "",
+          "QTY (LTR)": parseNum(e["HSD (LTR)"] || e["QTY (LTR)"]),
+          "DESTINATION": e["DESTINATION"] || "",
+          "PARTY NAME": e["PARTY NAME"] || "",
+          "BILLING AMOUNT": parseNum(e["Billing Amount"] || e["BILLING AMOUNT"]),
+          "E-WAY BILL NO": e["E-WAY BILL NO"] || e["E-WAY BILL NUMBER"] || "",
+          "E-WAY BILL VALIDITY": e["E-WAY BILL VALIDITY"] || e["E-WAY BILL VALIDITY DATE"] || "",
+          "E-WAY BILL STATUS": info.status
+        };
+      });
       const wsCement = XLSX.utils.json_to_sheet(cementRows);
       XLSX.utils.book_append_sheet(wb, wsCement, "Cement Register");
-
-      // 3. Diesel slips
-      const fuelRows = (data.pumpSlips || []).map((e, idx) => ({
-        "SL NO": idx + 1,
-        "PUMP NAME": e["PUMP NAME"] || "",
-        "VEHICLE NO": e["VEHICLE NUMBER"] || e["VEHICLE NO"] || "",
-        "HSD SLIP NO": e["HSD SLIP NO"] || "",
-        "HSD (LTR)": parseNum(e["HSD (LTR)"]),
-        "HSD AMOUNT": parseNum(e["HSD AMOUNT"])
-      }));
-      const wsFuel = XLSX.utils.json_to_sheet(fuelRows);
-      XLSX.utils.book_append_sheet(wb, wsFuel, "Diesel Slips");
 
       XLSX.writeFile(wb, `Daily_Operations_Report_${date}.xlsx`);
       setSnack({ severity: 'success', msg: 'Daily Excel operations report downloaded successfully.' });
@@ -322,6 +595,36 @@ function DailySummaryTab({
     return { pending, nonStamp, stamp };
   }, [data]);
 
+  const eWayAlerts = useMemo(() => {
+    const expiringToday = [];
+    const expired = [];
+    const active = [];
+    const done = [];
+    const noData = [];
+
+    (data?.cement || []).forEach(e => {
+      const info = getEWayBillStatus(e);
+      if (info.code === "EXPIRING_TODAY") expiringToday.push({ ...e, ewayInfo: info });
+      else if (info.code === "EXPIRED") expired.push({ ...e, ewayInfo: info });
+      else if (info.code === "ACTIVE") active.push({ ...e, ewayInfo: info });
+      else if (info.code === "DONE") done.push({ ...e, ewayInfo: info });
+      else noData.push({ ...e, ewayInfo: info });
+    });
+
+    const urgentRecords = [...expiringToday, ...expired];
+
+    return {
+      expiringToday,
+      expired,
+      active,
+      done,
+      noData,
+      urgentRecords,
+      urgentCount: urgentRecords.length,
+      hasBlinking: expiringToday.length > 0
+    };
+  }, [data]);
+
   const performanceAnalytics = useMemo(() => {
     if (!data?.cement) return { chartData: [] };
 
@@ -391,10 +694,18 @@ function DailySummaryTab({
     if (type === 'Pending') setAlertModalTitle('PENDING CHALLAN DETAILS');
     else if (type === 'STAMP') setAlertModalTitle('STAMP BILL DETAILS');
     else if (type === 'NON-STAMP') setAlertModalTitle('NON-STAMP BILL DETAILS');
+    else if (type === 'E-WAY-BILL') setAlertModalTitle('E-WAY BILL VALIDITY ALERTS');
 
     setAlertModalData(records);
     setAlertModalOpen(true);
   };
+
+  useEffect(() => {
+    if (alertModalOpen && alertModalTitle === 'E-WAY BILL VALIDITY ALERTS') {
+      setAlertModalData(eWayAlerts.urgentRecords);
+    }
+  }, [data, alertModalOpen, alertModalTitle, eWayAlerts.urgentRecords]);
+
 
   return (
     <Box sx={{ bgcolor: '#f4f7fa', minHeight: '100vh', pb: 6 }}>
@@ -729,7 +1040,7 @@ function DailySummaryTab({
 
                   <Box
                     onClick={() => handleAlertClick('NON-STAMP', challanAlerts.nonStamp)}
-                    display="flex" alignItems="center" gap={2} p={2} borderRadius="12px"
+                    display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px"
                     sx={{ cursor: 'pointer', bgcolor: challanAlerts.nonStamp.length > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${challanAlerts.nonStamp.length > 0 ? '#fecdd3' : '#e2e8f0'}`, transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' } }}
                   >
                     <ErrorOutlineIcon sx={{ color: challanAlerts.nonStamp.length > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
@@ -738,6 +1049,30 @@ function DailySummaryTab({
                       <Typography variant="caption" fontWeight={600} color={challanAlerts.nonStamp.length > 0 ? '#e11d48' : '#94a3b8'}>Click to view NON-STAMP records</Typography>
                     </Box>
                     <Typography variant="h5" fontWeight={900} color={challanAlerts.nonStamp.length > 0 ? '#881337' : '#64748b'}>{challanAlerts.nonStamp.length}</Typography>
+                  </Box>
+
+                  <Box
+                    onClick={() => handleAlertClick('E-WAY-BILL', eWayAlerts.urgentRecords)}
+                    display="flex" alignItems="center" gap={2} p={2} borderRadius="12px"
+                    sx={{
+                      cursor: 'pointer',
+                      bgcolor: eWayAlerts.urgentCount > 0 ? '#fff1f2' : '#f8fafc',
+                      border: `1px solid ${eWayAlerts.urgentCount > 0 ? '#fecdd3' : '#e2e8f0'}`,
+                      transition: 'all 0.2s',
+                      '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
+                      animation: eWayAlerts.hasBlinking ? 'pulseEWayCardRed 1.5s infinite ease-in-out' : 'none',
+                      '@keyframes pulseEWayCardRed': {
+                        '0%, 100%': { boxShadow: '0 0 0 0 rgba(225, 29, 72, 0.4)' },
+                        '50%': { boxShadow: '0 0 0 8px rgba(225, 29, 72, 0)' }
+                      }
+                    }}
+                  >
+                    <WarningAmberIcon sx={{ color: eWayAlerts.urgentCount > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight={800} color={eWayAlerts.urgentCount > 0 ? '#be123c' : '#64748b'}>E-Way Bill Validity Alert</Typography>
+                      <Typography variant="caption" fontWeight={600} color={eWayAlerts.urgentCount > 0 ? '#e11d48' : '#94a3b8'}>Click to view E-Way Bills requiring attention</Typography>
+                    </Box>
+                    <Typography variant="h5" fontWeight={900} color={eWayAlerts.urgentCount > 0 ? '#881337' : '#64748b'}>{eWayAlerts.urgentCount}</Typography>
                   </Box>
 
                 </CardContent>
@@ -938,97 +1273,94 @@ function DailySummaryTab({
 
           {/* --- Detail Sections (Registers) --- */}
           <Paper sx={{ borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-              <Tabs
-                value={tabValue}
-                onChange={(e, v) => setTabValue(v)}
-                textColor="primary"
-                indicatorColor="primary"
-                variant="scrollable"
-                scrollButtons="auto"
-                sx={{
-                  px: 2, py: 0.5,
-                  '& .MuiTab-root': { fontWeight: 800, fontSize: 14, textTransform: 'none' }
-                }}
-              >
-                <Tab label="Cement Loading (DB)" />
-                <Tab label="Diesel Slips (DB)" />
-              </Tabs>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, py: 2 }}>
+              <Typography variant="h6" fontWeight={850} color="#0f172a">
+                Cement Loading (DB)
+              </Typography>
             </Box>
 
-            {/* Tab Panel 0: Cement Loading */}
-            {tabValue === 0 && (
-              <Box p={3} bgcolor="#fff">
-                <Typography variant="h6" fontWeight={850} mb={2}>Cement Loading Register</Typography>
-                {!data?.cement?.length ? (
-                  <Typography color="text.secondary">No cement entries loaded on this date.</Typography>
-                ) : (
-                  <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-                    <Table size="small">
-                      <TableHead sx={{ bgcolor: 'background.default' }}>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>GCN NO</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>BILL NO</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>INVOICE NO</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>SITE</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>BILLING RATE</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>QTY (MT)</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>AMOUNT</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {data.cement.map((e, idx) => (
+            <Box p={3} bgcolor="#fff">
+              <Typography variant="subtitle1" fontWeight={800} color="#475569" mb={2}>Cement Loading Register</Typography>
+              {!data?.cement?.length ? (
+                <Typography color="text.secondary">No cement entries loaded on this date.</Typography>
+              ) : (
+                <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', overflowX: 'auto' }}>
+                  <Table size="small" sx={{ minWidth: 1600 }}>
+                    <TableHead sx={{ bgcolor: 'background.default' }}>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>GCN NO</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>BILL NO</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>SITE</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>BILLING RATE</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>QTY (MT)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>AMOUNT</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>LOADING ADVANCE</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>HSD SLIP NUMBER</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>QTY (LTR)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>BILLING AMOUNT</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL VALIDITY</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL STATUS</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {data.cement.map((e, idx) => {
+                        const ewayInfo = getEWayBillStatus(e);
+                        return (
                           <TableRow key={idx} hover>
-                            <TableCell>{e["GCN NO"] || "-"}</TableCell>
-                            <TableCell>{e["BILL NO"] || "-"}</TableCell>
-                            <TableCell>{e["INVOICE NO"] || e["INVOICE NO."] || "-"}</TableCell>
-                            <TableCell>{e["SITE"] || "-"}</TableCell>
-                            <TableCell>₹{parseNum(e["BILLING"])?.toLocaleString() || "-"}</TableCell>
-                            <TableCell>{e["MT"] || "-"}</TableCell>
-                            <TableCell>₹{(parseNum(e["Billing Amount"]) || parseNum(e["AMOUNT"]))?.toLocaleString() || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["GCN NO"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["BILL NO"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["INVOICE NO"] || e["INVOICE NO."] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["SITE"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{parseNum(e["BILLING"]) ? `₹${parseNum(e["BILLING"]).toLocaleString()}` : "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["MT"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              {e["AMOUNT"] !== undefined && e["AMOUNT"] !== null && e["AMOUNT"] !== ""
+                                ? (typeof e["AMOUNT"] === "number" ? `₹${e["AMOUNT"].toLocaleString()}` : (String(e["AMOUNT"]).startsWith("₹") ? e["AMOUNT"] : `₹${parseNum(e["AMOUNT"]).toLocaleString()}`))
+                                : "-"}
+                            </TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              {(e["ADVANCE"] || e["LOADING ADVANCE"]) ? `₹${parseNum(e["ADVANCE"] || e["LOADING ADVANCE"]).toLocaleString()}` : "-"}
+                            </TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["VEHICLE NUMBER"] || e["VEHICLE NO"] || e["VEHICLE NO."] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["HSD SLIP NO"] || e["HSD SLIP NUMBER"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              {(e["HSD (LTR)"] || e["QTY (LTR)"]) ? parseNum(e["HSD (LTR)"] || e["QTY (LTR)"]).toLocaleString() : "-"}
+                            </TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["DESTINATION"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["PARTY NAME"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              {(e["Billing Amount"] || e["BILLING AMOUNT"]) ? `₹${parseNum(e["Billing Amount"] || e["BILLING AMOUNT"]).toLocaleString()}` : "-"}
+                            </TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["E-WAY BILL NO"] || e["E-WAY BILL NUMBER"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{e["E-WAY BILL VALIDITY"] || e["E-WAY BILL VALIDITY DATE"] || "-"}</TableCell>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              <Box
+                                sx={{
+                                  px: 1.5, py: 0.5, borderRadius: '20px', display: 'inline-block', fontSize: '0.75rem', fontWeight: 800,
+                                  bgcolor: ewayInfo.bgColor, color: ewayInfo.color, border: `1px solid ${ewayInfo.borderColor}`,
+                                  animation: ewayInfo.isBlinking ? 'pulseChipRed 1.5s infinite ease-in-out' : 'none',
+                                  '@keyframes pulseChipRed': {
+                                    '0%, 100%': { opacity: 1, transform: 'scale(1)' },
+                                    '50%': { opacity: 0.7, transform: 'scale(1.03)' }
+                                  }
+                                }}
+                              >
+                                {ewayInfo.label}
+                              </Box>
+                            </TableCell>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </Box>
-            )}
-
-            {/* Tab Panel 1: Diesel slips */}
-            {tabValue === 1 && (
-              <Box p={3} bgcolor="#fff">
-                <Typography variant="h6" fontWeight={850} mb={2}>Diesel Issuance Registry</Typography>
-                {!data?.pumpSlips?.length ? (
-                  <Typography color="text.secondary">No diesel slips issued on this date.</Typography>
-                ) : (
-                  <TableContainer component={Paper} sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-                    <Table size="small">
-                      <TableHead sx={{ bgcolor: 'background.default' }}>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>PUMP NAME</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>VEHICLE NUMBER</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>SLIP NO</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>QTY (LTR)</TableCell>
-                          <TableCell sx={{ fontWeight: 800, color: '#475569' }}>AMOUNT</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {data.pumpSlips.map((e, idx) => (
-                          <TableRow key={idx} hover>
-                            <TableCell>{e["PUMP NAME"] || "-"}</TableCell>
-                            <TableCell>{e["VEHICLE NUMBER"] || e["VEHICLE NO"] || "-"}</TableCell>
-                            <TableCell>{e["HSD SLIP NO"] || "-"}</TableCell>
-                            <TableCell>{e["HSD (LTR)"] || "-"}</TableCell>
-                            <TableCell>₹{parseNum(e["HSD AMOUNT"])?.toLocaleString() || "-"}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </Box>
-            )}
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Box>
           </Paper>
         </Box>
       )}
@@ -1143,35 +1475,133 @@ function DailySummaryTab({
       </Dialog>
 
       {/* --- Dynamic Alert Detail Dialog --- */}
-      <Dialog open={alertModalOpen} onClose={() => setAlertModalOpen(false)} maxWidth="lg" fullWidth PaperProps={{ sx: { borderRadius: '16px', bgcolor: 'background.default' } }}>
+      <Dialog open={alertModalOpen} onClose={() => setAlertModalOpen(false)} maxWidth="xl" fullWidth PaperProps={{ sx: { borderRadius: '16px', bgcolor: 'background.default' } }}>
         <DialogTitle sx={{ bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', px: 3, py: 2.5 }}>
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Typography variant="h6" fontWeight={800} color="#0f172a">
               {alertModalTitle}
             </Typography>
-            <Chip label={`${alertModalData.length} Records`} sx={{ bgcolor: '#e0e7ff', color: '#4338ca', fontWeight: 800, borderRadius: '8px' }} />
+            <Box display="flex" alignItems="center" gap={1.5}>
+              {alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' && (
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<AccessTimeIcon />}
+                  onClick={handleOpenExtensionDialog}
+                  sx={{
+                    bgcolor: '#2563eb',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    px: 2,
+                    py: 0.75,
+                    textTransform: 'none',
+                    boxShadow: '0 2px 4px rgba(37, 99, 235, 0.25)',
+                    '&:hover': { bgcolor: '#1d4ed8' }
+                  }}
+                >
+                  EXTEND E-WAY BILL VALIDITY
+                </Button>
+              )}
+              <Chip label={`${alertModalData.length} Records`} sx={{ bgcolor: '#e0e7ff', color: '#4338ca', fontWeight: 800, borderRadius: '8px' }} />
+            </Box>
           </Box>
         </DialogTitle>
         <DialogContent sx={{ p: 3 }}>
-          <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)', border: '1px solid #e2e8f0' }}>
+          <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
             <Table size="small">
               <TableHead>
-                <TableRow sx={{ bgcolor: 'background.default' }}>
-                  <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2 }}>SL</TableCell>
-                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>VEHICLE</TableCell>
-                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>DATE</TableCell>
-                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>PARTY</TableCell>
-                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>DESTINATION</TableCell>
-                  <TableCell sx={{ fontWeight: 800, color: '#475569' }}>CHALLAN STATUS</TableCell>
-                </TableRow>
+                {alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? (
+                  <TableRow sx={{ bgcolor: 'background.default' }}>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2, whiteSpace: 'nowrap' }}>SL</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>INVOICE DATE</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL VALIDITY</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>UNLOADING DATE</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>SITE</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>STATUS</TableCell>
+                  </TableRow>
+                ) : (
+                  <TableRow sx={{ bgcolor: 'background.default' }}>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2 }}>SL</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569' }}>VEHICLE</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569' }}>DATE</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569' }}>PARTY</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569' }}>DESTINATION</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569' }}>CHALLAN STATUS</TableCell>
+                  </TableRow>
+                )}
               </TableHead>
               <TableBody>
                 {alertModalData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
+                    <TableCell colSpan={alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? 11 : 6} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
                       No records found.
                     </TableCell>
                   </TableRow>
+                ) : alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? (
+                  alertModalData.map((row, idx) => {
+                    const info = getEWayBillStatus(row);
+                    return (
+                      <TableRow key={idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{idx + 1}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["INVOICE NO"] || row["INVOICE NO."] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Box display="flex" flexDirection="column" gap={0.5}>
+                            <Box display="flex" alignItems="center" gap={1}>
+                              <Typography variant="body2" fontWeight={800} color={info.isExtended ? '#2563eb' : '#dc2626'}>
+                                {info.effectiveValidity}
+                              </Typography>
+                              {info.isExtended && (
+                                <Chip
+                                  size="small"
+                                  label="EXTENDED"
+                                  sx={{
+                                    bgcolor: '#e0e7ff',
+                                    color: '#4338ca',
+                                    fontWeight: 800,
+                                    fontSize: '0.65rem',
+                                    height: '20px'
+                                  }}
+                                />
+                              )}
+                            </Box>
+                            {info.isExtended && (
+                              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.68rem' }}>
+                                Original: {info.originalValidity}
+                              </Typography>
+                            )}
+                          </Box>
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["RECEIVING DATE"] || row["UNLOADING DATE"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#0f172a' }}>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["SITE"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["DESTINATION"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["PARTY NAME"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Box
+                            sx={{
+                              px: 1.5, py: 0.5, borderRadius: '20px', display: 'inline-block', fontSize: '0.75rem', fontWeight: 800,
+                              bgcolor: info.bgColor, color: info.color, border: `1px solid ${info.borderColor}`,
+                              animation: info.isBlinking ? 'pulseModalChipRed 1.5s infinite ease-in-out' : 'none',
+                              '@keyframes pulseModalChipRed': {
+                                '0%, 100%': { opacity: 1, transform: 'scale(1)' },
+                                '50%': { opacity: 0.7, transform: 'scale(1.03)' }
+                              }
+                            }}
+                          >
+                            {info.label}
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 ) : (
                   alertModalData.map((row, idx) => (
                     <TableRow key={idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
@@ -1196,6 +1626,205 @@ function DailySummaryTab({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* --- Dedicated Extension Mode / Modal --- */}
+      <Dialog
+        open={extensionDialogOpen}
+        onClose={() => !savingExtensions && setExtensionDialogOpen(false)}
+        maxWidth="xl"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: '16px', bgcolor: 'background.default' } }}
+      >
+        <DialogTitle sx={{ bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', px: 3, py: 2.5 }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Box display="flex" alignItems="center" gap={1.5}>
+              <AccessTimeIcon sx={{ color: '#2563eb', fontSize: 28 }} />
+              <Box>
+                <Typography variant="h6" fontWeight={800} color="#0f172a">
+                  EXTEND E-WAY BILL VALIDITY
+                </Typography>
+                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                  Enter new validity dates individually per vehicle / E-Way Bill record
+                </Typography>
+              </Box>
+            </Box>
+            <Chip label={`${extensionRecords.length} Records`} sx={{ bgcolor: '#e0e7ff', color: '#4338ca', fontWeight: 800, borderRadius: '8px' }} />
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <Box sx={{ mb: 2.5, p: 2, bgcolor: '#eff6ff', borderRadius: '10px', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <CalendarTodayIcon sx={{ color: '#2563eb' }} />
+            <Typography variant="body2" color="#1e40af" fontWeight={600}>
+              Enter or select a new date in the <strong>NEW EXTENDED VALIDITY DATE</strong> column for each individual vehicle/record you want to extend. Unchanged fields remain untouched.
+            </Typography>
+          </Box>
+          <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: 'background.default' }}>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2, whiteSpace: 'nowrap' }}>SL NO</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>INVOICE DATE</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>CURRENT E-WAY BILL VALIDITY</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>UNLOADING DATE</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>SITE</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
+                  <TableCell sx={{ fontWeight: 900, color: '#1e40af', bgcolor: '#dbeafe', whiteSpace: 'nowrap', minWidth: 230, borderBottom: '2px solid #2563eb' }}>
+                    NEW EXTENDED VALIDITY DATE 📅
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>ACTION / STATUS</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {extensionRecords.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={12} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
+                      No records available to extend.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  extensionRecords.map((row, idx) => {
+                    const rowId = getRowUniqueKey(row, idx);
+                    const info = getEWayBillStatus(row);
+                    const err = extensionErrors[rowId];
+                    const enteredVal = extensionDraft[rowId] || '';
+
+                    return (
+                      <TableRow key={rowId} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{idx + 1}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["INVOICE NO"] || row["INVOICE NO."] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Box display="flex" flexDirection="column" gap={0.5}>
+                            <Typography variant="body2" fontWeight={700} color={info.isExtended ? '#2563eb' : '#dc2626'}>
+                              {info.effectiveValidity}
+                            </Typography>
+                            {info.isExtended && (
+                              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.68rem' }}>
+                                Original: {info.originalValidity}
+                              </Typography>
+                            )}
+                          </Box>
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["RECEIVING DATE"] || row["UNLOADING DATE"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#0f172a' }}>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["SITE"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["DESTINATION"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["PARTY NAME"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', py: 1.5, minWidth: 230, bgcolor: '#f8fafc' }}>
+                          <TextField
+                            type="date"
+                            size="small"
+                            value={enteredVal}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setExtensionDraft(prev => ({ ...prev, [rowId]: val }));
+                              
+                              const currentMs = parseDateToStartOfDay(info.effectiveValidity);
+                              const newMs = parseDateToStartOfDay(val);
+                              if (val && currentMs && newMs < currentMs) {
+                                setExtensionErrors(prev => ({ ...prev, [rowId]: `Must be on or after ${info.effectiveValidity}` }));
+                              } else {
+                                setExtensionErrors(prev => ({ ...prev, [rowId]: null }));
+                              }
+                            }}
+                            error={Boolean(err)}
+                            helperText={err || (info.isExtended ? `Active: ${info.effectiveValidity}` : '')}
+                            inputProps={{
+                              min: formatDateToYYYYMMDD(info.effectiveValidity) || undefined
+                            }}
+                            InputProps={{
+                              startAdornment: (
+                                <InputAdornment position="start">
+                                  <CalendarTodayIcon sx={{ color: err ? '#ef4444' : (enteredVal ? '#2563eb' : '#64748b'), fontSize: 18 }} />
+                                </InputAdornment>
+                              ),
+                            }}
+                            sx={{
+                              width: '210px',
+                              '& .MuiOutlinedInput-root': {
+                                borderRadius: '8px',
+                                bgcolor: enteredVal ? '#f0f9ff' : '#ffffff',
+                                fontWeight: 700,
+                                fontSize: '0.85rem',
+                                '& fieldset': {
+                                  borderWidth: '2px',
+                                  borderColor: err ? '#ef4444' : (enteredVal ? '#2563eb' : '#cbd5e1')
+                                },
+                                '&:hover fieldset': {
+                                  borderColor: err ? '#ef4444' : '#1d4ed8'
+                                }
+                              },
+                              '& .MuiFormHelperText-root': {
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                mt: 0.5,
+                                mx: 0,
+                                color: err ? '#dc2626' : '#64748b'
+                              }
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Box display="flex" flexDirection="column" gap={0.5}>
+                            <Box
+                              sx={{
+                                px: 1.5, py: 0.5, borderRadius: '20px', display: 'inline-block', fontSize: '0.75rem', fontWeight: 800,
+                                bgcolor: info.bgColor, color: info.color, border: `1px solid ${info.borderColor}`,
+                                animation: info.isBlinking ? 'pulseModalChipRed 1.5s infinite ease-in-out' : 'none'
+                              }}
+                            >
+                              {info.label}
+                            </Box>
+                            {info.isExtended && (
+                              <Chip
+                                size="small"
+                                label="EXTENDED"
+                                sx={{
+                                  bgcolor: '#e0e7ff',
+                                  color: '#4338ca',
+                                  fontWeight: 800,
+                                  fontSize: '0.65rem',
+                                  height: '20px',
+                                  width: 'fit-content'
+                                }}
+                              />
+                            )}
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions sx={{ p: 3, pt: 0, justifyContent: 'space-between' }}>
+          <Button
+            onClick={() => setExtensionDialogOpen(false)}
+            variant="outlined"
+            disabled={savingExtensions}
+            sx={{ borderRadius: '8px', px: 3, fontWeight: 700, borderColor: '#cbd5e1', color: '#475569' }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveExtensions}
+            variant="contained"
+            disabled={savingExtensions}
+            startIcon={savingExtensions ? <CircularProgress size={18} color="inherit" /> : <CheckCircleOutlineIcon />}
+            sx={{ bgcolor: '#047857', color: '#fff', borderRadius: '8px', px: 4, fontWeight: 700, '&:hover': { bgcolor: '#065f46' } }}
+          >
+            {savingExtensions ? 'Saving...' : 'SAVE EXTENDED VALIDITY'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
 
       {/* --- Snackbar alerts --- */}
       <Snackbar

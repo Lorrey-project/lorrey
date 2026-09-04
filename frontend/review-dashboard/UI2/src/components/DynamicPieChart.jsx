@@ -60,13 +60,16 @@ const CustomTooltip = ({ active, payload, ledgerName }) => {
             <Typography sx={{ color: '#F5F7FA', fontWeight: 700 }}>{data.percentage}%</Typography>
           </Box>
         )}
+        <Typography sx={{ color: '#60a5fa', fontSize: '0.7rem', mt: 1, fontWeight: 700 }}>
+          💡 Click to view detailed records
+        </Typography>
       </Box>
     );
   }
   return null;
 };
 
-const DynamicPieChart = ({ data, ledgerName, palette, totalAmount }) => {
+const DynamicPieChart = ({ data, ledgerName, palette, totalAmount, onSliceClick }) => {
   const activeColors = palette === 'cool' ? COOL_COLORS : palette === 'warm' ? WARM_COLORS : DEFAULT_COLORS;
 
   if (!data || data.length === 0) {
@@ -89,7 +92,16 @@ const DynamicPieChart = ({ data, ledgerName, palette, totalAmount }) => {
       <Box sx={{ height: '100%', overflowY: 'auto', pr: 1, '&::-webkit-scrollbar': { width: '4px' }, '&::-webkit-scrollbar-thumb': { bgcolor: 'rgba(255,255,255,0.2)', borderRadius: '4px' } }}>
         <Grid container spacing={1}>
           {dataWithPercentages.map((entry, index) => (
-            <Grid item xs={12} sm={6} key={`legend-${index}`} sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+            <Grid
+              item xs={12} sm={6}
+              key={`legend-${index}`}
+              onClick={() => onSliceClick && onSliceClick(entry)}
+              sx={{
+                display: 'flex', alignItems: 'center', mb: 0.5, cursor: onSliceClick ? 'pointer' : 'default',
+                borderRadius: '6px', p: '4px 6px',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
+              }}
+            >
               <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: activeColors[index % activeColors.length], mr: 1, flexShrink: 0 }} />
               <Typography sx={{ color: '#AAB4C0', fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '90px' }}>
                 {entry.name}
@@ -126,7 +138,8 @@ const DynamicPieChart = ({ data, ledgerName, palette, totalAmount }) => {
                 <Cell 
                   key={`cell-${index}`} 
                   fill={activeColors[index % activeColors.length]} 
-                  style={{ transition: 'all 0.3s ease' }}
+                  style={{ transition: 'all 0.3s ease', cursor: onSliceClick ? 'pointer' : 'default' }}
+                  onClick={() => onSliceClick && onSliceClick(entry)}
                 />
               ))}
             </Pie>

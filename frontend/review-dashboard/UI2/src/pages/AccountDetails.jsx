@@ -53,7 +53,7 @@ const COLUMNS = [
 ];
 
 const LEDGER_OPTIONS = [
-  "CA charges", "Capital investment", "Capital investment refund", "Challan Sign",
+  "Bill & Unbilled", "CA charges", "Capital investment", "Capital investment refund", "Challan Sign",
   "Employee P Tax", "Endhan Cash Back", "Fasttag payment", "Freight Advance",
   "Freight payment", "Freight Payment Refund", "GST Paid", "interest Paid",
   "ITR return", "Main cash", "Office Exp", "Partner Interest", "Partner Salary",
@@ -557,7 +557,9 @@ export default function AccountDetails({ onBack }) {
       const token = localStorage.getItem('token');
       const updates = [];
 
-      // Validation: Ensure all modified rows have a Transaction Date
+      // Validation: Ensure all modified rows have a Transaction Date & Validate Freight Advance rules
+      const currentMonthName = MONTHS[new Date().getMonth()];
+
       for (const row of unsavedImportRows) {
         const rowEdits = localData[row._id] || {};
         const mergedRow = { ...row, ...rowEdits };
@@ -566,6 +568,26 @@ export default function AccountDetails({ onBack }) {
           setSnack({ severity: 'error', msg: 'Error: Transaction Date is required for all imported rows.' });
           setSaving(false);
           return;
+        }
+
+        const ledger = String(mergedRow['Ledger Name'] || '').trim().toLowerCase();
+        if (ledger === 'freight advance') {
+          const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
+          const name = String(mergedRow['Names'] || '').trim();
+          const veh = String(mergedRow['Vehicle'] || '').trim();
+          const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
+
+          if (!m || !name || !veh || isNaN(w) || w <= 0) {
+            setSnack({ severity: 'error', msg: 'Freight Advance requires Month, Name, Vehicle Number, and Withdraw Amount > 0.' });
+            setSaving(false);
+            return;
+          }
+
+          if (m.toLowerCase() !== currentMonthName.toLowerCase()) {
+            setSnack({ severity: 'error', msg: `Freight Advance is allowed ONLY for the current month (${currentMonthName}).` });
+            setSaving(false);
+            return;
+          }
         }
 
         updates.push({
@@ -581,12 +603,33 @@ export default function AccountDetails({ onBack }) {
 
       for (const [id, changes] of Object.entries(localData)) {
         const originalEntry = entries.find(e => e._id === id);
+        const mergedRow = { ...originalEntry, ...changes };
         const transactionDate = changes['Transaction Date'] ?? originalEntry?.['Transaction Date'] ?? originalEntry?.transactionDate ?? '';
 
         if (!transactionDate) {
           setSnack({ severity: 'error', msg: 'Error: Transaction Date is required for all rows.' });
           setSaving(false);
           return;
+        }
+
+        const ledger = String(mergedRow['Ledger Name'] || '').trim().toLowerCase();
+        if (ledger === 'freight advance') {
+          const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
+          const name = String(mergedRow['Names'] || '').trim();
+          const veh = String(mergedRow['Vehicle'] || '').trim();
+          const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
+
+          if (!m || !name || !veh || isNaN(w) || w <= 0) {
+            setSnack({ severity: 'error', msg: 'Freight Advance requires Month, Name, Vehicle Number, and Withdraw Amount > 0.' });
+            setSaving(false);
+            return;
+          }
+
+          if (m.toLowerCase() !== currentMonthName.toLowerCase()) {
+            setSnack({ severity: 'error', msg: `Freight Advance is allowed ONLY for the current month (${currentMonthName}).` });
+            setSaving(false);
+            return;
+          }
         }
 
         updates.push({
@@ -1109,7 +1152,14 @@ export default function AccountDetails({ onBack }) {
                           disabled={col.key === 'Vehicle' && !(localData[row._id]?.['Names'] || row['Names'])}
                           options={
                             col.key === 'Month'
-                              ? MONTHS
+                              ? (() => {
+                                  const ledgerLower = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toLowerCase();
+                                  if (ledgerLower === 'freight advance') {
+                                    const curMonthName = MONTHS[new Date().getMonth()];
+                                    return [curMonthName];
+                                  }
+                                  return MONTHS;
+                                })()
                               : col.key === 'Vehicle'
                                 ? (() => {
                                   const typed = String(localData[row._id]?.['Names'] || row['Names'] || '').trim();
@@ -1164,6 +1214,22 @@ export default function AccountDetails({ onBack }) {
                               const currentLedger = (col.key === 'Ledger Name' ? newValue : (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || ''));
                               const currentMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
                               const currentLedgerLower = String(currentLedger).toLowerCase();
+
+                              if (currentLedgerLower === 'freight advance') {
+                                const curMonthName = MONTHS[new Date().getMonth()];
+                                const curYearStr = String(new Date().getFullYear());
+                                handleCellEdit(row._id, 'Month', curMonthName);
+                                setLocalData(prev => ({
+                                  ...prev,
+                                  [row._id]: {
+                                    ...prev[row._id],
+                                    'Ledger Name': currentLedger,
+                                    'Month': curMonthName,
+                                    selectedMonth: curMonthName,
+                                    selectedYear: curYearStr
+                                  }
+                                }));
+                              }
 
                               if (currentLedgerLower === 'pump payment' && currentMonth) {
                                 openPumpPaymentModal(row._id, currentMonth);
