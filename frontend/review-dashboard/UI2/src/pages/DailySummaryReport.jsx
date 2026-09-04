@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Box, Typography, Button, IconButton, Grid, Card, CardContent, CircularProgress, 
-  Tabs, Tab, Select, MenuItem, FormControl, TableContainer, Table, TableHead, 
+  Box, Typography, Button, IconButton, Grid, Card, CardContent, CircularProgress,
+  Tabs, Tab, Select, MenuItem, FormControl, TableContainer, Table, TableHead,
   TableRow, TableCell, TableBody, Paper, Collapse,
   Snackbar, Alert, TextField, Tooltip, Popover, Chip, Divider,
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -70,6 +70,55 @@ const parseDateToStartOfDay = (dStr) => {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 };
 
+const parseDateTimeToMs = (dStr, defaultToEndOfDay = false) => {
+  if (!dStr) return null;
+  const s = String(dStr).trim();
+  if (!s || s === '-' || s === 'undefined' || s === 'null') return null;
+
+  const timeMatch = s.match(/(?:,\s*|\s+)(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM|am|pm)?/);
+  let hours = 0;
+  let minutes = 0;
+  let seconds = 0;
+
+  if (timeMatch) {
+    hours = parseInt(timeMatch[1], 10);
+    minutes = parseInt(timeMatch[2], 10);
+    if (timeMatch[3]) seconds = parseInt(timeMatch[3], 10);
+    const ampm = timeMatch[4] ? timeMatch[4].toUpperCase() : null;
+
+    if (ampm === 'PM' && hours < 12) hours += 12;
+    if (ampm === 'AM' && hours === 12) hours = 0;
+  } else if (defaultToEndOfDay) {
+    hours = 23;
+    minutes = 59;
+    seconds = 59;
+  }
+
+  const dateOnlyStr = s.replace(/(?:,\s*|\s+)\d{1,2}:\d{2}.*$/, '').trim();
+
+  if (/^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}$/.test(dateOnlyStr)) {
+    const parts = dateOnlyStr.split(/[\/\-\.]/);
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    return new Date(year, month, day, hours, minutes, seconds).getTime();
+  }
+
+  const parts = dateOnlyStr.split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    let day = parseInt(parts[0], 10);
+    let month = parseInt(parts[1], 10) - 1;
+    let year = parseInt(parts[2], 10);
+    if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+    if (year < 100) year += 2000;
+    return new Date(year, month, day, hours, minutes, seconds).getTime();
+  }
+
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  return d.getTime();
+};
+
 const formatDateToDDMMYYYY = (isoDateStr) => {
   if (!isoDateStr) return '';
   const s = String(isoDateStr).trim();
@@ -92,19 +141,22 @@ const formatDateToYYYYMMDD = (dStr) => {
 };
 
 const getEWayBillStatus = (row) => {
-  const ewayNo = String(row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || row["E-WAY BILL"] || "").trim();
+  const ewayNo = String(row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || row["E-WAY BILL NO."] || row["E-WAY BILL"] || "").trim();
   const originalValidityRaw = String(row["E-WAY BILL VALIDITY"] || row["E-WAY BILL VALIDITY DATE"] || "").trim();
   const extendedValidityRaw = String(row["EXTENDED E-WAY BILL VALIDITY"] || row["extendedValidityDate"] || "").trim();
   const effectiveValidityRaw = (extendedValidityRaw && extendedValidityRaw !== "-") ? extendedValidityRaw : originalValidityRaw;
   const isExtended = Boolean(extendedValidityRaw && extendedValidityRaw !== "-" && extendedValidityRaw !== originalValidityRaw);
 
   const unloadingRaw = String(
+    row["UNLOADING STATUS"] ||
     row["RECEIVING DATE"] ||
     row["UNLOADING DATE"] ||
     row["RECEIVING DT"] ||
     row["UNLOADING DT"] ||
+    row["unloadingStatus"] ||
     row["receivingDate"] ||
     row["unloadingDate"] ||
+    row["UNLOADING_STATUS"] ||
     row["RECEIVING_DATE"] ||
     row["UNLOADING_DATE"] ||
     ""
@@ -117,7 +169,7 @@ const getEWayBillStatus = (row) => {
     unloadingRaw.toLowerCase() !== "undefined"
   );
 
-  // E-WAY BILL COMPLETED = Unloading Date exists in Cement Register.
+  // E-WAY BILL COMPLETED = Unloading Status / Unloading Date exists in Cement Register.
   // Immediately consider vehicle as COMPLETED (DONE) and remove from E-Way Bill extension pending list.
   if (hasUnloadingDate) {
     return {
@@ -152,8 +204,9 @@ const getEWayBillStatus = (row) => {
     };
   }
 
-  const validityMs = parseDateToStartOfDay(effectiveValidityRaw);
-  if (!validityMs) {
+  const validityMs = parseDateTimeToMs(effectiveValidityRaw, true);
+  const validityStartMs = parseDateToStartOfDay(effectiveValidityRaw);
+  if (!validityMs || !validityStartMs) {
     return {
       status: "DATA NOT AVAILABLE",
       label: "DATA NOT AVAILABLE",
@@ -170,28 +223,11 @@ const getEWayBillStatus = (row) => {
   }
 
   const now = new Date();
-  const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const nowMs = now.getTime();
+  const todayStartMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
-  // Case 2: Expiring Today (Unloading Date is EMPTY)
-  if (todayMs === validityMs) {
-    return {
-      status: "EXPIRING TODAY",
-      label: isExtended ? "⚠ EXPIRING TODAY (EXTENDED)" : "⚠ EXPIRING TODAY",
-      code: "EXPIRING_TODAY",
-      action: "Extend E-Way Bill Validity",
-      color: "#b91c1c",
-      bgColor: "#fef2f2",
-      borderColor: "#fca5a5",
-      isUrgent: true,
-      isBlinking: true,
-      isExtended,
-      effectiveValidity: effectiveValidityRaw,
-      originalValidity: originalValidityRaw
-    };
-  }
-
-  // Case 3: Already Expired (Unloading Date is EMPTY)
-  if (todayMs > validityMs) {
+  // Case: Current timestamp has passed the validity timestamp -> EXPIRED
+  if (nowMs > validityMs) {
     return {
       status: "EXPIRED",
       label: isExtended ? "🔴 EXPIRED (EXTENDED)" : "🔴 EXPIRED",
@@ -208,7 +244,43 @@ const getEWayBillStatus = (row) => {
     };
   }
 
-  // Case 4: Active (Unloading Date is EMPTY, Validity is in future)
+  // Case: Validity date is today (and current time <= validity time) -> EXPIRING TODAY
+  if (validityStartMs === todayStartMs) {
+    return {
+      status: "EXPIRING TODAY",
+      label: isExtended ? "⚠ EXPIRING TODAY (EXTENDED)" : "⚠ EXPIRING TODAY",
+      code: "EXPIRING_TODAY",
+      action: "Extend E-Way Bill Validity",
+      color: "#b91c1c",
+      bgColor: "#fef2f2",
+      borderColor: "#fca5a5",
+      isUrgent: true,
+      isBlinking: true,
+      isExtended,
+      effectiveValidity: effectiveValidityRaw,
+      originalValidity: originalValidityRaw
+    };
+  }
+
+  // Case: Validity date is in the past -> EXPIRED
+  if (validityStartMs < todayStartMs) {
+    return {
+      status: "EXPIRED",
+      label: isExtended ? "🔴 EXPIRED (EXTENDED)" : "🔴 EXPIRED",
+      code: "EXPIRED",
+      action: "E-Way Bill validity expired - Extension required",
+      color: "#b91c1c",
+      bgColor: "#fff1f2",
+      borderColor: "#fda4af",
+      isUrgent: true,
+      isBlinking: false,
+      isExtended,
+      effectiveValidity: effectiveValidityRaw,
+      originalValidity: originalValidityRaw
+    };
+  }
+
+  // Case: Active (Validity date in future, Unloading Status/Date is EMPTY)
   return {
     status: "ACTIVE",
     label: isExtended ? "● ACTIVE (EXTENDED)" : "● ACTIVE",
@@ -224,7 +296,6 @@ const getEWayBillStatus = (row) => {
     originalValidity: originalValidityRaw
   };
 };
-
 
 const getCurrentFYAndMonth = () => {
   const currentDate = new Date();
@@ -290,7 +361,7 @@ function DailySummaryTab({
   useEffect(() => {
     setDate('ALL');
   }, [financialYear, month]);
-  
+
   const [calendarAnchorEl, setCalendarAnchorEl] = useState(null);
   const handleOpenCalendar = (event) => setCalendarAnchorEl(event.currentTarget);
   const handleCloseCalendar = () => setCalendarAnchorEl(null);
@@ -415,7 +486,7 @@ function DailySummaryTab({
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      
+
       const res = await axios.get(`${API_URL}/daily-summary/data`, {
         params: { date: targetDate, fy: financialYear, month: month },
         headers: { Authorization: `Bearer ${token}` }
@@ -667,30 +738,30 @@ function DailySummaryTab({
     data.cement.forEach(e => {
       const amt = parseNum(e["Billing Amount"] || e["AMOUNT"] || 0);
       const mt = parseNum(e["MT"] || 0);
-      
+
       const d = String(e["LOADING DT"] || e["LOADING DATE"] || e["BILL DATE"] || "Unknown").trim();
       let key = d;
-      
+
       if (d !== "Unknown" && groupByMonth) {
         const parts = d.split('-');
         if (parts.length === 3) {
-           key = parts[1]; // e.g. 'Jun'
+          key = parts[1]; // e.g. 'Jun'
         }
       }
-      
+
       if (amt > 0) mapRev[key] = (mapRev[key] || 0) + amt;
       if (mt > 0) mapMT[key] = (mapMT[key] || 0) + mt;
     });
 
     const allKeys = Array.from(new Set([...Object.keys(mapRev), ...Object.keys(mapMT)]));
-    
+
     // Sort logic
     if (!groupByMonth) {
       allKeys.sort((a, b) => {
         const da = a.split(/[-/]/);
         const db = b.split(/[-/]/);
-        if(da.length === 3 && db.length === 3) {
-           return Number(da[0]) - Number(db[0]); 
+        if (da.length === 3 && db.length === 3) {
+          return Number(da[0]) - Number(db[0]);
         }
         return a.localeCompare(b);
       });
@@ -801,18 +872,18 @@ function DailySummaryTab({
             variant="outlined"
             endIcon={<CalendarTodayIcon />}
             sx={{
-              bgcolor: 'background.default', 
-              borderRadius: '8px', 
-              borderColor: '#e2e8f0', 
+              bgcolor: 'background.default',
+              borderRadius: '8px',
+              borderColor: '#e2e8f0',
               color: '#0f172a',
-              fontWeight: 800, 
+              fontWeight: 800,
               minWidth: 130,
               textTransform: 'none',
               px: 2,
               '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' }
             }}
           >
-            {date === 'ALL' ? 'ALL' : (dateOptions.find(d => d.value === date)?.display?.split('-')[0] + ' ' + month.substring(0,3))}
+            {date === 'ALL' ? 'ALL' : (dateOptions.find(d => d.value === date)?.display?.split('-')[0] + ' ' + month.substring(0, 3))}
           </Button>
 
           <Popover
@@ -833,7 +904,7 @@ function DailySummaryTab({
                 {month} {financialYear.substring(3, 7)}
               </Typography>
             </Box>
-            
+
             <Button
               fullWidth
               variant={date === 'ALL' ? 'contained' : 'outlined'}
@@ -858,7 +929,7 @@ function DailySummaryTab({
                 const isSelected = date === d.value;
                 const isToday = new Date().toISOString().split('T')[0] === d.value;
                 return (
-                  <Grid item xs={12/7} key={d.value}>
+                  <Grid item xs={12 / 7} key={d.value}>
                     <Box
                       onClick={() => { setDate(d.value); handleCloseCalendar(); }}
                       sx={{
@@ -1168,10 +1239,10 @@ function DailySummaryTab({
                 6. Live Trends / Analytics
               </Typography>
             </Box>
-            
+
             <CardContent sx={{ p: { xs: 2, md: 4 } }}>
               <Grid container spacing={4}>
-                
+
                 {/* DAILY / OPERATIONAL TRENDS */}
                 <Grid item xs={12}>
                   <Typography variant="subtitle1" fontWeight={800} color="#0f172a" mb={2}>
@@ -1226,7 +1297,7 @@ function DailySummaryTab({
                     <Typography variant="subtitle2" fontWeight={700} color="text.secondary" mb={4} align="center">
                       Revenue & Tonnage Trends
                     </Typography>
-                    
+
                     {performanceAnalytics.chartData.length === 0 ? (
                       <Box display="flex" flex={1} alignItems="center" justifyContent="center" minHeight={450}>
                         <Typography variant="body1" color="text.secondary" fontWeight={600}>No data for selected period</Typography>
@@ -1236,34 +1307,34 @@ function DailySummaryTab({
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart data={performanceAnalytics.chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                            <XAxis 
-                              dataKey="name" 
-                              axisLine={false} 
-                              tickLine={false} 
-                              tick={{ fill: '#64748b', fontSize: 13, fontWeight: 700 }} 
-                              dy={10} 
+                            <XAxis
+                              dataKey="name"
+                              axisLine={false}
+                              tickLine={false}
+                              tick={{ fill: '#64748b', fontSize: 13, fontWeight: 700 }}
+                              dy={10}
                             />
                             {/* Primary Y-Axis for REVENUE */}
-                            <YAxis 
+                            <YAxis
                               yAxisId="left"
                               orientation="left"
-                              axisLine={false} 
-                              tickLine={false} 
-                              tick={{ fill: '#4f46e5', fontSize: 13, fontWeight: 700 }} 
-                              tickFormatter={(value) => `₹${value >= 1000 ? (value/1000).toFixed(0) + 'k' : value}`} 
+                              axisLine={false}
+                              tickLine={false}
+                              tick={{ fill: '#4f46e5', fontSize: 13, fontWeight: 700 }}
+                              tickFormatter={(value) => `₹${value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
                             />
                             {/* Secondary Y-Axis for TONNAGE */}
-                            <YAxis 
+                            <YAxis
                               yAxisId="right"
                               orientation="right"
-                              axisLine={false} 
-                              tickLine={false} 
-                              tick={{ fill: '#10b981', fontSize: 13, fontWeight: 700 }} 
-                              tickFormatter={(value) => `${value} MT`} 
+                              axisLine={false}
+                              tickLine={false}
+                              tick={{ fill: '#10b981', fontSize: 13, fontWeight: 700 }}
+                              tickFormatter={(value) => `${value} MT`}
                             />
-                            <RechartsTooltip 
-                              cursor={{ fill: '#f8fafc' }} 
-                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', fontWeight: 700, padding: '12px 16px' }} 
+                            <RechartsTooltip
+                              cursor={{ fill: '#f8fafc' }}
+                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', fontWeight: 700, padding: '12px 16px' }}
                               formatter={(value, name) => {
                                 if (name === 'Revenue') return [`₹${value.toLocaleString()}`, 'Revenue'];
                                 if (name === 'Tonnage') return [`${value} MT`, 'Tonnage'];
@@ -1272,10 +1343,10 @@ function DailySummaryTab({
                               labelStyle={{ color: '#0f172a', fontWeight: 800, marginBottom: '8px' }}
                             />
                             <Legend verticalAlign="bottom" height={40} iconType="circle" wrapperStyle={{ fontSize: '14px', fontWeight: 700, color: '#1e293b' }} />
-                            
+
                             {/* Revenue as the primary visual (Bars) */}
                             <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill="#4f46e5" radius={[6, 6, 0, 0]} maxBarSize={60} />
-                            
+
                             {/* Tonnage as the secondary visual (Line) */}
                             <Line yAxisId="right" type="monotone" dataKey="tonnage" name="Tonnage" stroke="#10b981" strokeWidth={4} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
                           </ComposedChart>
@@ -1536,7 +1607,7 @@ function DailySummaryTab({
                     <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
                     <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
                     <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL VALIDITY</TableCell>
-                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>UNLOADING DATE</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>UNLOADING DATE / STATUS</TableCell>
                     <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
                     <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>SITE</TableCell>
                     <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
@@ -1597,7 +1668,7 @@ function DailySummaryTab({
                             )}
                           </Box>
                         </TableCell>
-                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["RECEIVING DATE"] || row["UNLOADING DATE"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["UNLOADING STATUS"] || row["RECEIVING DATE"] || row["UNLOADING DATE"] || "-"}</TableCell>
                         <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#0f172a' }}>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "-"}</TableCell>
                         <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["SITE"] || "-"}</TableCell>
                         <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["DESTINATION"] || "-"}</TableCell>
@@ -1685,7 +1756,7 @@ function DailySummaryTab({
                   <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>CURRENT E-WAY BILL VALIDITY</TableCell>
-                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>UNLOADING DATE</TableCell>
+                  <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>UNLOADING DATE / STATUS</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>SITE</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
@@ -1728,7 +1799,7 @@ function DailySummaryTab({
                             )}
                           </Box>
                         </TableCell>
-                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["RECEIVING DATE"] || row["UNLOADING DATE"] || "-"}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["UNLOADING STATUS"] || row["RECEIVING DATE"] || row["UNLOADING DATE"] || "-"}</TableCell>
                         <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#0f172a' }}>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "-"}</TableCell>
                         <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["SITE"] || "-"}</TableCell>
                         <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["DESTINATION"] || "-"}</TableCell>
@@ -1741,7 +1812,7 @@ function DailySummaryTab({
                             onChange={(e) => {
                               const val = e.target.value;
                               setExtensionDraft(prev => ({ ...prev, [rowId]: val }));
-                              
+
                               const currentMs = parseDateToStartOfDay(info.effectiveValidity);
                               const newMs = parseDateToStartOfDay(val);
                               if (val && currentMs && newMs < currentMs) {
