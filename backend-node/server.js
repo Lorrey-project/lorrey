@@ -89,6 +89,9 @@ app.use("/pump-payment-register", require("./routes/pumpPaymentRegisterRoutes"))
 app.use("/attendance", require("./routes/attendanceRoutes"));
 app.use("/settings", require("./routes/settingsRoutes"));
 app.use("/pie-chart", require("./routes/pieChartRoutes"));
+app.use("/others-creditors", require("./routes/othersCreditorRoutes"));
+app.use("/tds-reports", require("./routes/tdsReportRoutes"));
+
 
 const activePortals = {
   office: 0,

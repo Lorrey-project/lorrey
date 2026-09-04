@@ -406,23 +406,20 @@ router.get('/data', async (req, res) => {
       });
     }
 
-    // 3. Sort finalRows by default order first (month name, then date)
+    // 3. Sort finalRows by actual invoice date timestamp (chronologically ascending)
     finalRows.sort((a, b) => {
-      const mA = getMonthIndexFromDate(a.invoiceDate);
-      const mB = getMonthIndexFromDate(b.invoiceDate);
-      if (mA !== mB) return mA - mB;
-      return (a.invoiceDate || '').localeCompare(b.invoiceDate || '') || (a.invoiceNumber || '').localeCompare(b.invoiceNumber || '');
+      const dA = parseDate(a.invoiceDate);
+      const dB = parseDate(b.invoiceDate);
+      const tA = dA ? dA.getTime() : 0;
+      const tB = dB ? dB.getTime() : 0;
+      if (tA !== tB) return tA - tB;
+      return (a.invoiceNumber || '').localeCompare(b.invoiceNumber || '');
     });
 
-    // 4. Assign default slNo to rows without one, and respect stored slNo
+    // 4. Assign slNo sequentially based on date order
     for (let i = 0; i < finalRows.length; i++) {
-      if (finalRows[i].slNo === undefined || finalRows[i].slNo === null) {
-        finalRows[i].slNo = i + 1;
-      }
+      finalRows[i].slNo = i + 1;
     }
-
-    // 5. Final sort by slNo
-    finalRows.sort((a, b) => a.slNo - b.slNo);
 
     // 6. Filter payments based on whether they belong to the rows generated for this FY
     const finalInvNos = new Set(finalRows.map(r => String(r.invoiceNumber)));

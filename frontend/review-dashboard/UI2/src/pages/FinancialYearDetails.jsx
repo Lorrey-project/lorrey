@@ -175,6 +175,7 @@ export default function FinancialYearDetails({ onBack }) {
 
   // Excel Upload States
   const [excelModalOpen, setExcelModalOpen] = useState(false);
+  const [uploadSiteTarget, setUploadSiteTarget] = useState('NVL'); // 'NVL' | 'NVCL'
   const [excelFile, setExcelFile] = useState(null);
   const [excelParsedRows, setExcelParsedRows] = useState([]);
   const [excelHeaders, setExcelHeaders] = useState([]);
@@ -226,8 +227,9 @@ export default function FinancialYearDetails({ onBack }) {
     return str;
   };
 
-  const handleExcelFileChange = (e) => {
-    const file = e.target.files?.[0];
+  const handleExcelFileChange = (e, targetSiteOverride = null, existingFile = null) => {
+    const file = e?.target?.files?.[0] || existingFile || excelFile;
+    const targetSite = (targetSiteOverride || uploadSiteTarget || 'NVL').toUpperCase();
     if (!file) return;
     setExcelFile(file);
 
@@ -277,6 +279,8 @@ export default function FinancialYearDetails({ onBack }) {
         const parsed = [];
         let validCount = 0;
         let existingCount = 0;
+        let failedCount = 0;
+        const failedErrors = [];
 
         const existingKeys = new Set(rows.map(r => String(r.invoiceNumber || r.billNo || '').trim().toUpperCase()));
 
@@ -289,12 +293,15 @@ export default function FinancialYearDetails({ onBack }) {
           let invNo = parseExcelString(getVal(map.invoiceNumber));
           let invDate = parseExcelDate(getVal(map.invoiceDate));
           let monthStr = parseExcelString(getVal(map.month));
-          let siteStr = parseExcelString(getVal(map.site)) || 'NVCL';
           let bType = parseExcelString(getVal(map.billType)) || 'FREIGHT';
           let amt = parseExcelNumber(getVal(map.amount));
           let sl = parseExcelNumber(getVal(map.slNo));
 
-          if (!invNo) continue;
+          if (!invNo) {
+            failedCount++;
+            failedErrors.push({ row: rIdx + 1, error: 'Missing Invoice / Bill Number' });
+            continue;
+          }
 
           const isExisting = existingKeys.has(invNo.toUpperCase());
           if (isExisting) existingCount++;
@@ -305,7 +312,7 @@ export default function FinancialYearDetails({ onBack }) {
             displayInvoiceNumber: invNo,
             invoiceDate: invDate,
             month: monthStr,
-            site: siteStr,
+            site: targetSite, // Unconditionally assign selected Site (NVL or NVCL)
             billType: bType,
             amount: amt,
             slNo: sl || (parsed.length + 1),
@@ -315,10 +322,12 @@ export default function FinancialYearDetails({ onBack }) {
 
         setExcelParsedRows(parsed);
         setExcelSummary({
-          total: parsed.length,
+          total: parsed.length + failedCount,
           valid: validCount,
           existing: existingCount,
-          failed: 0
+          failed: failedCount,
+          errors: failedErrors,
+          targetSite
         });
       } catch (err) {
         console.error('Excel parse error:', err);
@@ -337,9 +346,10 @@ export default function FinancialYearDetails({ onBack }) {
       const res = await axios.post(`${API_URL}/fy-details/import-excel`, { rows: excelParsedRows }, { headers });
 
       if (res.data.success) {
+        const siteLabel = (excelSummary?.targetSite || uploadSiteTarget).toUpperCase();
         setSnack({
           severity: 'success',
-          msg: `Excel Upload Successful! Imported ${res.data.importedCount} new rows (${res.data.existingCount} already existed).`
+          msg: `${siteLabel} Excel uploaded successfully. ${res.data.importedCount} records imported (${res.data.existingCount} already existed).`
         });
         setExcelModalOpen(false);
         setExcelFile(null);
@@ -680,6 +690,40 @@ export default function FinancialYearDetails({ onBack }) {
     }
   };
 
+  // Parse date string/object to timestamp for sorting
+  const parseDateToTime = useCallback((val) => {
+    if (!val) return 0;
+    if (val instanceof Date) return isNaN(val.getTime()) ? 0 : val.getTime();
+
+    const str = String(val).trim();
+
+    // Indian format: DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY
+    const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if (ddmmyyyy) {
+      let d = parseInt(ddmmyyyy[1], 10);
+      let m = parseInt(ddmmyyyy[2], 10);
+      let y = parseInt(ddmmyyyy[3], 10);
+      if (y < 100) y += 2000;
+      if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+        return new Date(y, m - 1, d).getTime();
+      }
+    }
+
+    // ISO format: YYYY-MM-DD
+    const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+    if (yyyymmdd) {
+      let y = parseInt(yyyymmdd[1], 10);
+      let m = parseInt(yyyymmdd[2], 10);
+      let d = parseInt(yyyymmdd[3], 10);
+      if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+        return new Date(y, m - 1, d).getTime();
+      }
+    }
+
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  }, []);
+
   // Compute calculated fields
   const computedRows = useMemo(() => {
     return rows.filter(r => {
@@ -716,11 +760,13 @@ export default function FinancialYearDetails({ onBack }) {
         groupData: paymentObj || { id: `AUTO-${r.invoiceNumber}`, billNos: [r.invoiceNumber], paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: '', paymentProofUrl: '' }
       };
     }).sort((a, b) => {
-      // Backend already assigns slNo chronologically across the entire financial year based on accurate date parsing.
-      // We rely on slNo to maintain the true sequence of bills.
+      // Sort combined NVL + NVCL rows strictly by actual Invoice Date timestamp
+      const timeA = parseDateToTime(a.invoiceDate);
+      const timeB = parseDateToTime(b.invoiceDate);
+      if (timeA !== timeB) return timeA - timeB;
       return (a.slNo || 0) - (b.slNo || 0);
     });
-  }, [rows, payments]);
+  }, [rows, payments, parseDateToTime]);
 
   // Site filter helpers
   const isNVL = useCallback((site) => /^NVL$/i.test((site || '').trim()), []);
@@ -2323,14 +2369,72 @@ export default function FinancialYearDetails({ onBack }) {
 
       {/* ── Bill Register Excel Upload Modal ────────────────────────────────────── */}
       <Dialog open={excelModalOpen} onClose={() => { if (!uploadingExcel) setExcelModalOpen(false); }} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800, fontSize: '1.2rem', color: '#0f172a', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 1 }}>
-          <TableChartIcon sx={{ color: '#10b981' }} />
-          Upload Bill Register
+        <DialogTitle sx={{ fontWeight: 800, fontSize: '1.2rem', color: '#0f172a', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box display="flex" alignItems="center" gap={1}>
+            <TableChartIcon sx={{ color: uploadSiteTarget === 'NVL' ? '#10b981' : '#0284c7' }} />
+            Upload Bill Register Excel
+          </Box>
+          <Chip
+            label={`TARGET SITE: ${uploadSiteTarget}`}
+            sx={{
+              fontWeight: 800,
+              fontSize: '11px',
+              bgcolor: uploadSiteTarget === 'NVL' ? '#dcfce7' : '#e0f2fe',
+              color: uploadSiteTarget === 'NVL' ? '#15803d' : '#0369a1',
+              border: `1px solid ${uploadSiteTarget === 'NVL' ? '#86efac' : '#7dd3fc'}`
+            }}
+          />
         </DialogTitle>
         <DialogContent sx={{ py: 3 }}>
           <Box display="flex" flexDirection="column" gap={2.5}>
-            <Typography variant="body2" sx={{ color: '#475569', fontWeight: 500 }}>
-              Select an Excel file (.xlsx / .xls / .csv) containing Bill Register records. Headers will be matched automatically regardless of column order.
+            {/* ── Separate NVL & NVCL Upload Options ──────────────── */}
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#1e293b' }}>
+              SELECT SITE UPLOAD TYPE:
+            </Typography>
+            <Box display="flex" gap={2}>
+              <Button
+                variant={uploadSiteTarget === 'NVL' ? 'contained' : 'outlined'}
+                onClick={() => {
+                  setUploadSiteTarget('NVL');
+                  if (excelFile) handleExcelFileChange(null, 'NVL', excelFile);
+                }}
+                startIcon={<Chip label="NVL" size="small" sx={{ bgcolor: uploadSiteTarget === 'NVL' ? '#fff' : '#10b981', color: uploadSiteTarget === 'NVL' ? '#047857' : '#fff', fontWeight: 800, height: 20 }} />}
+                sx={{
+                  flex: 1, py: 1.5, fontWeight: 800, fontSize: '0.95rem', borderRadius: '10px',
+                  bgcolor: uploadSiteTarget === 'NVL' ? '#10b981' : '#f0fdf4',
+                  color: uploadSiteTarget === 'NVL' ? '#fff' : '#047857',
+                  borderColor: '#10b981',
+                  boxShadow: uploadSiteTarget === 'NVL' ? '0 4px 12px rgba(16, 185, 129, 0.3)' : 'none',
+                  '&:hover': { bgcolor: uploadSiteTarget === 'NVL' ? '#059669' : '#dcfce7', borderColor: '#059669' }
+                }}
+              >
+                NVL EXCEL UPLOAD
+              </Button>
+
+              <Button
+                variant={uploadSiteTarget === 'NVCL' ? 'contained' : 'outlined'}
+                onClick={() => {
+                  setUploadSiteTarget('NVCL');
+                  if (excelFile) handleExcelFileChange(null, 'NVCL', excelFile);
+                }}
+                startIcon={<Chip label="NVCL" size="small" sx={{ bgcolor: uploadSiteTarget === 'NVCL' ? '#fff' : '#0284c7', color: uploadSiteTarget === 'NVCL' ? '#0369a1' : '#fff', fontWeight: 800, height: 20 }} />}
+                sx={{
+                  flex: 1, py: 1.5, fontWeight: 800, fontSize: '0.95rem', borderRadius: '10px',
+                  bgcolor: uploadSiteTarget === 'NVCL' ? '#0284c7' : '#f0f9ff',
+                  color: uploadSiteTarget === 'NVCL' ? '#fff' : '#0369a1',
+                  borderColor: '#0284c7',
+                  boxShadow: uploadSiteTarget === 'NVCL' ? '0 4px 12px rgba(2, 132, 199, 0.3)' : 'none',
+                  '&:hover': { bgcolor: uploadSiteTarget === 'NVCL' ? '#0369a1' : '#e0f2fe', borderColor: '#0369a1' }
+                }}
+              >
+                NVCL EXCEL UPLOAD
+              </Button>
+            </Box>
+
+            <Typography variant="body2" sx={{ color: '#475569', fontWeight: 500, fontStyle: 'italic' }}>
+              {uploadSiteTarget === 'NVL'
+                ? 'Uploading Excel for site NVL. All imported rows will be assigned Site = NVL automatically.'
+                : 'Uploading Excel for site NVCL. All imported rows will be assigned Site = NVCL automatically.'}
             </Typography>
 
             <Button
@@ -2338,39 +2442,61 @@ export default function FinancialYearDetails({ onBack }) {
               component="label"
               startIcon={<UploadIcon />}
               sx={{
-                py: 2,
+                py: 2.5,
                 borderStyle: 'dashed',
                 borderWidth: '2px',
-                borderColor: '#10b981',
-                bgcolor: '#f0fdf4',
-                color: '#047857',
+                borderColor: uploadSiteTarget === 'NVL' ? '#10b981' : '#0284c7',
+                bgcolor: uploadSiteTarget === 'NVL' ? '#f0fdf4' : '#f0f9ff',
+                color: uploadSiteTarget === 'NVL' ? '#047857' : '#0369a1',
                 fontWeight: 700,
+                fontSize: '0.95rem',
                 textTransform: 'none',
-                '&:hover': { bgcolor: '#dcfce7', borderColor: '#059669' }
+                borderRadius: '12px',
+                '&:hover': {
+                  bgcolor: uploadSiteTarget === 'NVL' ? '#dcfce7' : '#e0f2fe',
+                  borderColor: uploadSiteTarget === 'NVL' ? '#059669' : '#0369a1'
+                }
               }}
             >
-              {excelFile ? `File Selected: ${excelFile.name}` : 'Click to Browse / Select Excel File'}
-              <input type="file" accept=".xlsx, .xls, .csv" hidden onChange={handleExcelFileChange} />
+              {excelFile ? `File Selected: ${excelFile.name} (${uploadSiteTarget})` : `Click to Select Excel File for ${uploadSiteTarget}`}
+              <input
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                hidden
+                onChange={(e) => handleExcelFileChange(e, uploadSiteTarget)}
+              />
             </Button>
 
             {excelSummary && (
               <Box sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1, color: '#1e293b' }}>
-                  📊 Import Validation & Summary
+                  📊 Import Validation &amp; Summary ({excelSummary.targetSite})
                 </Typography>
-                <Box display="flex" gap={2} flexWrap="wrap">
+                <Box display="flex" gap={1.5} flexWrap="wrap" mb={excelSummary.failed > 0 ? 1.5 : 0}>
                   <Chip label={`Total Rows: ${excelSummary.total}`} sx={{ fontWeight: 700, bgcolor: '#e2e8f0', color: '#334155' }} />
                   <Chip label={`Ready to Import: ${excelSummary.valid}`} color="success" sx={{ fontWeight: 700 }} />
                   <Chip label={`Already Existing: ${excelSummary.existing}`} color="warning" sx={{ fontWeight: 700 }} />
                   <Chip label={`Failed: ${excelSummary.failed}`} color="error" sx={{ fontWeight: 700 }} />
                 </Box>
+
+                {excelSummary.failed > 0 && excelSummary.errors && (
+                  <Alert severity="error" sx={{ mt: 1, fontSize: '12px', fontWeight: 600 }}>
+                    <strong>Validation Errors ({excelSummary.failed} rows skipped):</strong>
+                    <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                      {excelSummary.errors.slice(0, 5).map((err, idx) => (
+                        <li key={idx}>Row {err.row}: {err.error}</li>
+                      ))}
+                      {excelSummary.errors.length > 5 && <li>...and {excelSummary.errors.length - 5} more</li>}
+                    </ul>
+                  </Alert>
+                )}
               </Box>
             )}
 
             {excelParsedRows.length > 0 && (
               <Box>
                 <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mb: 1, display: 'block' }}>
-                  PREVIEW OF MAPPED RECORDS (Showing first {Math.min(5, excelParsedRows.length)} of {excelParsedRows.length}):
+                  PREVIEW OF MAPPED RECORDS (Assigned Site: <strong>{uploadSiteTarget}</strong>):
                 </Typography>
                 <Box sx={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
                   <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
@@ -2391,7 +2517,7 @@ export default function FinancialYearDetails({ onBack }) {
                           <td style={{ padding: '6px' }}>{r.slNo}</td>
                           <td style={{ padding: '6px', fontWeight: 700 }}>{r.invoiceNumber}</td>
                           <td style={{ padding: '6px' }}>{r.invoiceDate}</td>
-                          <td style={{ padding: '6px' }}>{r.site}</td>
+                          <td style={{ padding: '6px', fontWeight: 800, color: r.site === 'NVL' ? '#047857' : '#0369a1' }}>{r.site}</td>
                           <td style={{ padding: '6px' }}>{r.billType}</td>
                           <td style={{ padding: '6px', fontWeight: 700 }}>₹{r.amount?.toLocaleString('en-IN')}</td>
                           <td style={{ padding: '6px' }}>
@@ -2416,14 +2542,14 @@ export default function FinancialYearDetails({ onBack }) {
             disabled={!excelParsedRows.length || uploadingExcel}
             startIcon={uploadingExcel ? <CircularProgress size={16} color="inherit" /> : <TableChartIcon />}
             sx={{
-              bgcolor: '#10b981',
-              '&:hover': { bgcolor: '#059669' },
+              bgcolor: uploadSiteTarget === 'NVL' ? '#10b981' : '#0284c7',
+              '&:hover': { bgcolor: uploadSiteTarget === 'NVL' ? '#059669' : '#0369a1' },
               fontWeight: 700,
               textTransform: 'none',
               borderRadius: '8px'
             }}
           >
-            {uploadingExcel ? 'Importing...' : `Import ${excelParsedRows.length} Rows into Bill Register`}
+            {uploadingExcel ? 'Importing...' : `Import ${excelParsedRows.length} Rows into Bill Register (${uploadSiteTarget})`}
           </Button>
         </DialogActions>
       </Dialog>

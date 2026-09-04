@@ -33,7 +33,9 @@ import IncentiveCalculationSheet from './pages/IncentiveCalculationSheet';
 import AttendancePanel from './pages/AttendancePanel';
 import AiExtraExpense from './pages/AiExtraExpense';
 import TdsReportsPage from './pages/TdsReportsPage';
+import OthersCreditor from './pages/OthersCreditor';
 import VantaTrunkBackground from './components/VantaTrunkBackground';
+
 
 
 
@@ -293,6 +295,10 @@ function AppContent() {
     return <TdsReportsPage onBack={() => handleViewChange('dashboard')} />;
   }
 
+  if (currentView === 'othersCreditor') {
+    return <OthersCreditor onBack={() => handleViewChange('dashboard')} />;
+  }
+
   if (currentView === 'dashboard') {
     if (isMobile) {
       if (user.role === 'PETROL PUMP') {
@@ -361,9 +367,11 @@ function AppContent() {
         onOpenIncentiveSheet={() => handleViewChange('incentiveCalculationSheet')}
         onOpenAttendancePanel={() => handleViewChange('attendancePanel')}
         onOpenTdsReports={() => handleViewChange('tdsReports')}
+        onOpenOthersCreditor={() => handleViewChange('othersCreditor')}
       />
     );
   }
+
 
   return (
     <InvoiceForm onBack={() => handleViewChange('dashboard')} />

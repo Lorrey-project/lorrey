@@ -21,6 +21,8 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import PersonIcon from '@mui/icons-material/Person';
+import PeopleIcon from '@mui/icons-material/People';
+
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -50,7 +52,8 @@ const _dashSocket = io(SOCKET_URL, {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenOthersCreditor }) => {
+
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
     const [invoices, setInvoices] = useState([]);
@@ -758,8 +761,10 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <ActionCard title="CEMENT REGISTER" subtitle="Trip & Freight Logic" icon={<LocalShippingIcon />} accentColor="#3b82f6" onClick={onOpenCementRegister} />
                                     <ActionCard title="BILL REGISTER" subtitle="Pending & Cleared Bills" icon={<TableChartIcon />} accentColor="#94a3b8" onClick={onOpenFYDetails} />
                                     <ActionCard title="PARTY PAYMENT DETAILS" subtitle="Aggregated Monthly Ledger" icon={<AccountBalanceWalletIcon />} accentColor="#f43f5e" onClick={onOpenPartyPayment} />
+                                    <ActionCard title="OTHERS CREDITOR" subtitle="Vendor Ledger & Dues" icon={<PeopleIcon />} accentColor="#a855f7" onClick={onOpenOthersCreditor} />
                                 </Grid>
                             </Box>
+
 
                             {/* ── Financial Management ─────────────────────────── */}
                             <Box mb={6}>
