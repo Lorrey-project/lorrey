@@ -73,7 +73,11 @@ exports.login = async (req, res) => {
 
         // Role verification firewall
         if (role && user.role !== role) {
-            return res.status(403).json({ message: `Unauthorized access: Cannot login to ${role} workspace.` });
+            const isBrindaMatch = (role === 'BRINDA SHYAM' && ['HEAD_OFFICE', 'OFFICE', 'BRINDA SHYAM'].includes(user.role));
+            const isOfficeMatch = (role === 'OFFICE' && ['HEAD_OFFICE', 'OFFICE'].includes(user.role));
+            if (!isBrindaMatch && !isOfficeMatch) {
+                return res.status(403).json({ message: `Unauthorized access: Cannot login to ${role} workspace.` });
+            }
         }
 
         const isMatch = await user.comparePassword(password);
@@ -245,7 +249,11 @@ exports.verifyAuthResponse = async (req, res) => {
 
         // Role verification firewall (same as login)
         if (role && user.role !== role) {
-            return res.status(403).json({ error: `Unauthorized access: Cannot login to ${role} workspace.` });
+            const isBrindaMatch = (role === 'BRINDA SHYAM' && ['HEAD_OFFICE', 'OFFICE', 'BRINDA SHYAM'].includes(user.role));
+            const isOfficeMatch = (role === 'OFFICE' && ['HEAD_OFFICE', 'OFFICE'].includes(user.role));
+            if (!isBrindaMatch && !isOfficeMatch) {
+                return res.status(403).json({ error: `Unauthorized access: Cannot login to ${role} workspace.` });
+            }
         }
 
         const expectedChallenge = user.currentChallenge;

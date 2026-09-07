@@ -250,7 +250,7 @@ const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
                     Create Account
                 </Typography>
                 <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, mb: 2.5 }}>
-                    {isPump ? `${pumpName} Pump Admin Registration` : `${PORTALS.find(p => p.id === portal)?.label} Admin — New Account`}
+                    {isPump ? `${pumpName} Pump Admin Registration` : portal === 'BRINDA SHYAM' ? 'Brinda Shyam Portal — New Account' : `${PORTALS.find(p => p.id === portal)?.label || portal} Admin — New Account`}
                 </Typography>
 
                 {/* Error */}
