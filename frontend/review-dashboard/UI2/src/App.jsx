@@ -22,6 +22,7 @@ import FuelRateSettings from './pages/FuelRateSettings';
 import OfficePortal from './portals/office/OfficePortal';
 import SitePortal from './portals/site/SitePortal';
 import PumpPortal from './portals/pump/PumpPortal';
+import BrindaPortal from './portals/brinda/BrindaPortal';
 import PumpPaymentDetails from './pages/PumpPaymentDetails';
 import PartyPaymentDetails from './pages/PartyPaymentDetails';
 import FinancialYearDetails from './pages/FinancialYearDetails';
@@ -126,7 +127,16 @@ function AppContent() {
   
   const renderView = () => {
     if (!user) {
-    const portal = import.meta.env.VITE_PORTAL; // undefined | 'site' | 'sas1' | 'sas2'
+    const portal = import.meta.env.VITE_PORTAL; // undefined | 'site' | 'sas1' | 'sas2' | 'brinda'
+
+    // Port 5177 — Brinda Shyam panel only
+    if (portal === 'brinda') {
+      return showSignup ? (
+        <Signup onToggle={() => setShowSignup(false)} lockedPortal="BRINDA SHYAM" />
+      ) : (
+        <Login onToggle={() => setShowSignup(true)} lockedPortal="BRINDA SHYAM" />
+      );
+    }
 
     // Port 5175 — SAS-1 pump only
     if (portal === 'sas1') {
@@ -300,6 +310,22 @@ function AppContent() {
   }
 
   if (currentView === 'dashboard') {
+    if (import.meta.env.VITE_PORTAL === 'brinda') {
+      return (
+        <BrindaPortal
+          onLogout={() => {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.reload();
+          }}
+          onOpenCementRegister={() => handleViewChange('cementRegister')}
+          onOpenMainCashbook={() => handleViewChange('mainCashbook')}
+          onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
+          onOpenDashboard={() => handleViewChange('dashboard')}
+        />
+      );
+    }
+
     if (isMobile) {
       if (user.role === 'PETROL PUMP') {
         return (

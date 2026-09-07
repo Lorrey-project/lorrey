@@ -20,6 +20,9 @@ Then run the command for the panel you want to start:
 - Pump SAS2 Panel (Port 5176):
   npm run dev:sas2
 
+- Brinda Shyam Panel (Port 5177):
+  npm run dev:brinda
+
 =====================================================
 2. Backend Service
 Location: backend-node

@@ -680,7 +680,7 @@ function MonojBandhanSection() {
 // ─────────────────────────────────────────────────────────────────────────────
 // CREDITOR VEHICLE LEDGER SECTION (BRINDA SHYAM & JEET PANJA TABS)
 // ─────────────────────────────────────────────────────────────────────────────
-function CreditorVehicleLedgerSection({ creditorName }) {
+export function CreditorVehicleLedgerSection({ creditorName }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);

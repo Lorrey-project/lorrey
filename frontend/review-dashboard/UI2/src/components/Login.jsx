@@ -143,7 +143,7 @@ const Login = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
                     DIPALI ASSOCIATES & CO.
                 </Typography>
                 <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, mt: 0.5, letterSpacing: 1 }}>
-                    {lockedPump ? `${lockedPump} — PUMP PORTAL` : lockedPortal === 'OFFICE' ? 'SITE ADMIN PORTAL' : 'OFFICE / ADMIN PORTAL'}
+                    {lockedPump ? `${lockedPump} — PUMP PORTAL` : lockedPortal === 'BRINDA SHYAM' ? 'BRINDA SHYAM PORTAL' : lockedPortal === 'OFFICE' ? 'SITE ADMIN PORTAL' : 'OFFICE / ADMIN PORTAL'}
                 </Typography>
             </Box>
 
@@ -202,7 +202,7 @@ const Login = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
                 {lockedPortal && (
                     <Chip
                         icon={lockedPump ? <LocalGasStationIcon sx={{ fontSize: 13, color: `${BLUE} !important` }} /> : undefined}
-                        label={lockedPump ? `${lockedPump} — PUMP PORTAL` : (PORTALS.find(p => p.id === lockedPortal)?.label?.toUpperCase() + ' ADMIN')}
+                        label={lockedPump ? `${lockedPump} — PUMP PORTAL` : lockedPortal === 'BRINDA SHYAM' ? 'BRINDA SHYAM PORTAL' : ((PORTALS.find(p => p.id === lockedPortal)?.label?.toUpperCase() || lockedPortal) + ' ADMIN')}
                         size="small"
                         sx={{
                             mb: 2.5, bgcolor: 'rgba(66,133,244,0.15)', color: BLUE,

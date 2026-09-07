@@ -215,7 +215,7 @@ const Signup = ({ onToggle, lockedPortal = null, lockedPump = null }) => {
                 {/* Locked badge */}
                 {locked && (
                     <Chip
-                        label={lockedPump ? `${lockedPump} PUMP ADMIN` : (PORTALS.find(p => p.id === lockedPortal)?.label?.toUpperCase() + ' ADMIN')}
+                        label={lockedPump ? `${lockedPump} PUMP ADMIN` : lockedPortal === 'BRINDA SHYAM' ? 'BRINDA SHYAM PORTAL' : ((PORTALS.find(p => p.id === lockedPortal)?.label?.toUpperCase() || lockedPortal) + ' ADMIN')}
                         size="small"
                         sx={{
                             mb: 2.5, bgcolor: 'rgba(66,133,244,0.15)', color: BLUE,
