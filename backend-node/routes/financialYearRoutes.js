@@ -8,6 +8,9 @@ const BillRegisterDocument = require('../models/BillRegisterDocument');
 const ProjectedDeductionSetting = require('../models/ProjectedDeductionSetting');
 const paymentProofUpload = require('../middleware/paymentProofUpload');
 const billPdfUpload = require('../middleware/billPdfUpload');
+const multer = require('multer');
+const memoryPdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const { parsePdfBillRegister } = require('../utils/pdfBillRegisterParser');
 
 function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
@@ -16,19 +19,30 @@ function parseDate(val) {
   if (!val) return null;
   if (val instanceof Date) return isNaN(val) ? null : val;
 
-  const str = String(val).trim();
+  const rawStr = String(val).trim();
+  const str = rawStr.split('T')[0].split(' ')[0].trim();
 
   // ── Detect DD-MM-YYYY or DD/MM/YYYY (Indian format) — MUST check first ──
-  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
   if (ddmmyyyy) {
-    const d = parseInt(ddmmyyyy[1]), m = parseInt(ddmmyyyy[2]), y = parseInt(ddmmyyyy[3]);
+    let d = parseInt(ddmmyyyy[1], 10), m = parseInt(ddmmyyyy[2], 10), y = parseInt(ddmmyyyy[3], 10);
+    if (y < 100) y += 2000;
     if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
-      return new Date(y, m - 1, d); // local time
+      return new Date(y, m - 1, d);
+    }
+  }
+
+  // ── Detect YYYY-MM-DD or YYYY/MM/DD (ISO format) ──
+  const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  if (yyyymmdd) {
+    let y = parseInt(yyyymmdd[1], 10), m = parseInt(yyyymmdd[2], 10), d = parseInt(yyyymmdd[3], 10);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d);
     }
   }
 
   // ── Try ISO / standard JS parsing ──
-  const iso = new Date(str);
+  const iso = new Date(rawStr);
   if (!isNaN(iso.getTime())) return iso;
 
   return null;
@@ -839,6 +853,7 @@ router.post('/clear-bill-register', async (req, res) => {
   try {
     const rRes = await FinancialYearRow.deleteMany({});
     const pRes = await FinancialYearPayment.deleteMany({});
+    const dRes = await BillRegisterDocument.deleteMany({});
 
     const io = req.app.get('io');
     if (io) {
@@ -847,9 +862,10 @@ router.post('/clear-bill-register', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Bill Register data cleared successfully.',
+      message: 'All Bill Register data has been cleared successfully.',
       rowsDeleted: rRes.deletedCount,
-      paymentsDeleted: pRes.deletedCount
+      paymentsDeleted: pRes.deletedCount,
+      documentsDeleted: dRes.deletedCount
     });
   } catch (err) {
     console.error('Failed to clear Bill Register data:', err);
@@ -952,6 +968,62 @@ router.post('/import-excel', async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to import Bill Register Excel:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/parse-pdf', memoryPdfUpload.single('pdf'), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ success: false, error: 'No PDF file uploaded.' });
+    }
+
+    const targetSite = (req.body.targetSite || req.body.site || 'NVL').toUpperCase() === 'NVCL' ? 'NVCL' : 'NVL';
+    const parseResult = await parsePdfBillRegister(req.file.buffer, targetSite);
+
+    // Fetch existing bill numbers from FinancialYearRow & cement entries for duplicate detection
+    const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
+    const existingFyRows = await FinancialYearRow.find({}).lean();
+    const existingBillNos = new Set(existingFyRows.map(r => String(r.billNo).trim().toUpperCase()));
+
+    const allCementBills = await cementCol.find({}, { projection: { "BILL NO": 1, "UNLOADING BILL NO": 1, "INVOICE NO": 1 } }).toArray();
+    allCementBills.forEach(c => {
+      if (c["BILL NO"]) existingBillNos.add(String(c["BILL NO"]).trim().toUpperCase());
+      if (c["UNLOADING BILL NO"]) existingBillNos.add(String(c["UNLOADING BILL NO"]).trim().toUpperCase());
+      if (c["INVOICE NO"]) existingBillNos.add(String(c["INVOICE NO"]).trim().toUpperCase());
+    });
+
+    let validCount = 0;
+    let existingCount = 0;
+    let reviewCount = 0;
+
+    const rowsWithStatus = parseResult.rows.map(row => {
+      const isExisting = row.invoiceNumber ? existingBillNos.has(String(row.invoiceNumber).trim().toUpperCase()) : false;
+      if (isExisting) existingCount++;
+      else validCount++;
+
+      if (row.needsReview) reviewCount++;
+
+      return {
+        ...row,
+        site: targetSite,
+        isExisting
+      };
+    });
+
+    res.json({
+      success: true,
+      filename: req.file.originalname,
+      targetSite,
+      totalPages: parseResult.totalPages,
+      totalRows: parseResult.totalRows,
+      validCount,
+      existingCount,
+      reviewCount,
+      rows: rowsWithStatus
+    });
+  } catch (err) {
+    console.error('Failed to parse PDF Bill Register:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

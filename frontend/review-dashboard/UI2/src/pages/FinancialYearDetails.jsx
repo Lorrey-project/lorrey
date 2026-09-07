@@ -18,6 +18,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
 import TableChartIcon from '@mui/icons-material/TableChart';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import * as XLSX from 'xlsx';
 
 import axios from 'axios';
@@ -46,12 +49,6 @@ const startFyYear = currentMonth >= 3 ? currentYear : currentYear - 1;
 const endFyYear = startFyYear + 1;
 const FY_LABEL = `FY ${String(startFyYear).slice(-2)}-${String(endFyYear).slice(-2)}`;
 
-const YEARS = [
-  String(startFyYear - 2),
-  String(startFyYear - 1),
-  String(startFyYear),
-  String(endFyYear)
-];
 const BILL_TYPES = ['FREIGHT', 'EXTRA FREIGHT', 'TOLL', 'UNLOADING', 'CREDIT NOTE'];
 
 const MONTH_NAMES_FULL = [
@@ -158,9 +155,10 @@ export default function FinancialYearDetails({ onBack }) {
   const [dirtyRows, setDirtyRows] = useState(new Set());
   const [dirtyGroups, setDirtyGroups] = useState(new Set());
   const [page, setPage] = useState(0);
-  const [siteFilter, setSiteFilter] = useState('All'); // 'All' | 'NVCL' | 'NVL'
-
   const [searchQuery, setSearchQuery] = useState('');
+  const [siteFilter, setSiteFilter] = useState('All'); // 'All' | 'NVCL' | 'NVL'
+  const [filterMonth, setFilterMonth] = useState('All'); // 'All' | 1..12
+  const [filterYear, setFilterYear] = useState('All');   // 'All' | '2026' | '2027'
   const [filterBillType, setFilterBillType] = useState('All');
   const [filterPartyName, setFilterPartyName] = useState('All');
   const [filterPaymentStatus, setFilterPaymentStatus] = useState('All');
@@ -182,6 +180,11 @@ export default function FinancialYearDetails({ onBack }) {
   const [excelHeaderMap, setExcelHeaderMap] = useState({});
   const [excelSummary, setExcelSummary] = useState(null);
   const [uploadingExcel, setUploadingExcel] = useState(false);
+  const [uploadFileType, setUploadFileType] = useState('EXCEL');
+  const [pdfFile, setPdfFile] = useState(null);
+  const [parsingPdf, setParsingPdf] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearingData, setClearingData] = useState(false);
 
   const parseExcelString = (val) => {
     if (val === null || val === undefined) return '';
@@ -255,6 +258,79 @@ export default function FinancialYearDetails({ onBack }) {
       setSnack({ severity: 'error', msg: 'Failed to clear data: ' + (err.response?.data?.error || err.message) });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleClearAllBillRegister = async () => {
+    setClearingData(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.post(`${API_URL}/fy-details/clear-bill-register`, {}, { headers });
+      if (res.data.success) {
+        setSnack({ severity: 'success', msg: 'All Bill Register data has been cleared successfully.' });
+        setClearConfirmOpen(false);
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to clear Bill Register data:', err);
+      setSnack({ severity: 'error', msg: 'Failed to clear data: ' + (err.response?.data?.error || err.message) });
+    } finally {
+      setClearingData(false);
+    }
+  };
+
+  const handlePdfFileChange = async (e, targetSiteOverride = null) => {
+    const file = e?.target?.files?.[0];
+    const targetSite = (targetSiteOverride || uploadSiteTarget || 'NVL').toUpperCase();
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setSnack({ severity: 'error', msg: 'Please select a valid PDF file (.pdf).' });
+      return;
+    }
+
+    setUploadFileType('PDF');
+    setPdfFile(file);
+    setUploadSiteTarget(targetSite);
+    setParsingPdf(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('pdf', file);
+      formData.append('targetSite', targetSite);
+
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const res = await axios.post(`${API_URL}/fy-details/parse-pdf`, formData, {
+        headers: { ...headers, 'Content-Type': 'multipart/form-data' }
+      });
+
+      if (res.data.success) {
+        setExcelParsedRows(res.data.rows);
+        setExcelSummary({
+          total: res.data.totalRows,
+          valid: res.data.validCount,
+          existing: res.data.existingCount,
+          failed: res.data.reviewCount,
+          errors: res.data.rows.filter(r => r.needsReview).map(r => ({ row: r.slNo, error: r.reviewReason || 'Review needed' })),
+          targetSite: res.data.targetSite,
+          isPdf: true,
+          totalPages: res.data.totalPages,
+          filename: res.data.filename
+        });
+        setExcelModalOpen(true);
+        setSnack({
+          severity: 'success',
+          msg: `PDF extracted successfully! ${res.data.totalRows} rows extracted across ${res.data.totalPages} page(s).`
+        });
+      }
+    } catch (err) {
+      console.error('PDF parsing error:', err);
+      setSnack({ severity: 'error', msg: 'Failed to extract PDF: ' + (err.response?.data?.error || err.message) });
+    } finally {
+      setParsingPdf(false);
     }
   };
 
@@ -784,7 +860,8 @@ export default function FinancialYearDetails({ onBack }) {
     if (!val) return 0;
     if (val instanceof Date) return isNaN(val.getTime()) ? 0 : val.getTime();
 
-    const str = String(val).trim();
+    const rawStr = String(val).trim();
+    const str = rawStr.split('T')[0].split(' ')[0].trim();
 
     // Indian format: DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY
     const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
@@ -857,6 +934,94 @@ export default function FinancialYearDetails({ onBack }) {
     });
   }, [rows, payments, parseDateToTime]);
 
+  // Helper to extract month index (1-12) and 4-digit year string from a row
+  const getRowMonthAndYear = useCallback((r) => {
+    let dateStr = r.invoiceDate;
+    let year = null;
+    let month = null;
+
+    if (dateStr) {
+      if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
+        year = dateStr.getFullYear();
+        month = dateStr.getMonth() + 1;
+      } else {
+        const str = String(dateStr).split('T')[0].split(' ')[0].trim();
+        const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+        if (ddmmyyyy) {
+          month = parseInt(ddmmyyyy[2], 10);
+          let y = parseInt(ddmmyyyy[3], 10);
+          if (y < 100) y += 2000;
+          year = y;
+        } else {
+          const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+          if (yyyymmdd) {
+            year = parseInt(yyyymmdd[1], 10);
+            month = parseInt(yyyymmdd[2], 10);
+          } else {
+            const parsedD = new Date(str);
+            if (!isNaN(parsedD.getTime())) {
+              year = parsedD.getFullYear();
+              month = parsedD.getMonth() + 1;
+            }
+          }
+        }
+      }
+    }
+
+    if ((!year || !month) && r.month) {
+      const mStr = String(r.month).trim();
+      if (mStr.includes('-')) {
+        const parts = mStr.split('-');
+        const mName = parts[0].trim().toUpperCase();
+        const yStr = parts[1].trim();
+        if (!month) {
+          const foundM = MONTHS_LIST.find(m => m.label.toUpperCase().startsWith(mName) || mName.startsWith(m.label.toUpperCase().slice(0, 3)));
+          if (foundM) month = foundM.value;
+        }
+        if (!year) {
+          let y = parseInt(yStr, 10);
+          if (!isNaN(y)) {
+            if (y < 100) y += 2000;
+            year = y;
+          }
+        }
+      } else if (mStr.includes("'")) {
+        const parts = mStr.split("'");
+        const mName = parts[0].trim().toUpperCase();
+        const yStr = parts[1].trim();
+        if (!month) {
+          const foundM = MONTHS_LIST.find(m => m.label.toUpperCase().startsWith(mName) || mName.startsWith(m.label.toUpperCase().slice(0, 3)));
+          if (foundM) month = foundM.value;
+        }
+        if (!year) {
+          let y = parseInt(yStr, 10);
+          if (!isNaN(y)) {
+            if (y < 100) y += 2000;
+            year = y;
+          }
+        }
+      } else if (!month) {
+        const u = mStr.toUpperCase();
+        const foundM = MONTHS_LIST.find(m => m.label.toUpperCase() === u || u.startsWith(m.label.toUpperCase().slice(0, 3)));
+        if (foundM) month = foundM.value;
+      }
+    }
+
+    return { year: year ? String(year) : '', month: month || 99 };
+  }, []);
+
+  // Dynamically extract all available years strictly from existing Bill Register records
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set();
+    computedRows.forEach(r => {
+      const { year } = getRowMonthAndYear(r);
+      if (year && year !== 'NaN' && String(year).trim().length === 4) {
+        yearsSet.add(String(year).trim());
+      }
+    });
+    return Array.from(yearsSet).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+  }, [computedRows, getRowMonthAndYear]);
+
   // Site filter helpers
   const isNVL = useCallback((site) => /^NVL$/i.test((site || '').trim()), []);
   const isNVCL = useCallback((site) => /^NVCL$/i.test((site || '').trim()), []);
@@ -865,8 +1030,35 @@ export default function FinancialYearDetails({ onBack }) {
     if (siteFilter === 'NVL') result = result.filter(r => isNVL(r.site));
     if (siteFilter === 'NVCL') result = result.filter(r => isNVCL(r.site));
 
+    if (filterMonth !== 'All' && filterMonth !== '') {
+      const targetM = parseInt(filterMonth, 10);
+      result = result.filter(r => {
+        const { month } = getRowMonthAndYear(r);
+        return month === targetM;
+      });
+    }
+
+    if (filterYear !== 'All' && filterYear !== '') {
+      const targetY = String(filterYear).trim();
+      result = result.filter(r => {
+        const { year } = getRowMonthAndYear(r);
+        return year === targetY;
+      });
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter(r => {
+        const inv = (r.displayInvoiceNumber || r.invoiceNumber || '').toLowerCase();
+        const site = (r.site || '').toLowerCase();
+        const month = (r.month || '').toLowerCase();
+        const ship = (r.shipmentNos || []).join(' ').toLowerCase();
+        return inv.includes(q) || site.includes(q) || month.includes(q) || ship.includes(q);
+      });
+    }
+
     return result;
-  }, [computedRows, siteFilter, isNVL, isNVCL]);
+  }, [computedRows, siteFilter, filterMonth, filterYear, searchQuery, isNVL, isNVCL, getRowMonthAndYear]);
 
   const groupSpanMap = useMemo(() => {
     const map = {};
@@ -1278,38 +1470,47 @@ export default function FinancialYearDetails({ onBack }) {
     };
 
 
-    // Parse month/year for the monthYear column
+    // Parse month/year for the Month/Year column
+    const { year: derivedYear, month: derivedMonthIdx } = getRowMonthAndYear(r);
+    const derivedMonthName = (derivedMonthIdx >= 1 && derivedMonthIdx <= 12) ? MONTH_NAMES_FULL[derivedMonthIdx] : '';
+
     const rawMonth = String(r.month || '').trim();
     let curM = '', curY = '';
-    if (rawMonth.includes('-')) { [curM, curY] = rawMonth.split('-'); }
-    else if (rawMonth.includes(' ')) {
-      [curM, curY] = rawMonth.split(' ');
-      if (curY?.startsWith("'")) curY = '20' + curY.substring(1);
-    } else { curM = rawMonth; }
+    if (rawMonth.includes('-')) {
+      const parts = rawMonth.split('-');
+      curM = parts[0].trim();
+      curY = parts[1].trim();
+      if (curY.startsWith("'")) curY = '20' + curY.substring(1);
+    } else if (rawMonth.includes("'")) {
+      const parts = rawMonth.split("'");
+      curM = parts[0].trim();
+      curY = '20' + parts[1].trim();
+    } else if (rawMonth.includes(' ')) {
+      const parts = rawMonth.split(' ');
+      curM = parts[0].trim();
+      curY = parts[1].trim();
+      if (curY.startsWith("'")) curY = '20' + curY.substring(1);
+    } else {
+      curM = rawMonth;
+    }
 
     const matchFull = MONTH_NAMES_FULL.find(m => m && m.toUpperCase() === curM.toUpperCase());
     if (matchFull) curM = matchFull;
-    else curM = '';
+    else curM = derivedMonthName;
 
-    if (!YEARS.includes(curY)) curY = '';
+    if (!curY || isNaN(parseInt(curY, 10))) {
+      curY = derivedYear;
+    }
+
+    const rowYears = (curY && !availableYears.includes(curY))
+      ? [...availableYears, curY].sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+      : availableYears;
 
     const handleMonthYearChange = (type, val) => {
-      let newM = type === 'M' ? val : (curM || 'January');
-      let newY = type === 'Y' ? val : (curY || String(new Date().getFullYear()));
+      let newM = type === 'M' ? val : (curM || derivedMonthName || 'January');
+      let newY = type === 'Y' ? val : (curY || derivedYear || '');
 
-      const mIndex = MONTH_NAMES_FULL.indexOf(newM) - 1;
-      const now = new Date();
-      const curMonthIndex = now.getMonth();
-      const curYear = now.getFullYear();
-
-      if (parseInt(newY) > curYear) {
-        newY = String(curYear);
-      }
-      if (parseInt(newY) === curYear && mIndex > curMonthIndex) {
-        newY = String(curYear - 1);
-      }
-
-      handleRowEdit(r.invoiceNumber, 'month', `${newM.toUpperCase()}-${newY}`);
+      handleRowEdit(r.invoiceNumber, 'month', newY ? `${newM.toUpperCase()}-${newY}` : newM.toUpperCase());
     };
 
     return (
@@ -1383,7 +1584,7 @@ export default function FinancialYearDetails({ onBack }) {
               </SearchableSelect>
               <SearchableSelect variant="standard" value={curY} onChange={e => handleMonthYearChange('Y', e.target.value)} style={{ ...selStyle, color: r.isLocked ? '#0369a1' : 'inherit', minWidth: 80 }} disabled={r.isLocked}>
                 <option value="">Year</option>
-                {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                {rowYears.map(y => <option key={y} value={y}>{y}</option>)}
               </SearchableSelect>
             </div>
           </td>
@@ -1629,16 +1830,40 @@ export default function FinancialYearDetails({ onBack }) {
             )}
           </Box>
 
-          <Box display="flex" alignItems="center" gap={1}>
+          <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
             <SearchableSelect
               value={siteFilter}
               onChange={(e) => handleSiteFilter(e.target.value)}
               size="small"
-              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: 'background.default', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 140 }}
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: 'background.default', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 130 }}
             >
               <MenuItem value="All" sx={{ fontSize: '12px' }}>All Sites ({computedRows.length})</MenuItem>
               <MenuItem value="NVCL" sx={{ fontSize: '12px' }}>NVCL ({computedRows.filter(r => isNVCL(r.site)).length})</MenuItem>
               <MenuItem value="NVL" sx={{ fontSize: '12px' }}>NVL ({computedRows.filter(r => isNVL(r.site)).length})</MenuItem>
+            </SearchableSelect>
+
+            <SearchableSelect
+              value={filterMonth}
+              onChange={(e) => { setFilterMonth(e.target.value); setPage(0); }}
+              size="small"
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: 'background.default', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 130 }}
+            >
+              <MenuItem value="All" sx={{ fontSize: '12px' }}>All Months</MenuItem>
+              {MONTHS_LIST.map(m => (
+                <MenuItem key={m.value} value={m.value} sx={{ fontSize: '12px' }}>{m.label}</MenuItem>
+              ))}
+            </SearchableSelect>
+
+            <SearchableSelect
+              value={filterYear}
+              onChange={(e) => { setFilterYear(e.target.value); setPage(0); }}
+              size="small"
+              sx={{ borderRadius: '10px', fontSize: '12px', fontWeight: 600, bgcolor: 'background.default', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, minWidth: 120 }}
+            >
+              <MenuItem value="All" sx={{ fontSize: '12px' }}>All Years</MenuItem>
+              {availableYears.map(y => (
+                <MenuItem key={y} value={y} sx={{ fontSize: '12px' }}>{y}</MenuItem>
+              ))}
             </SearchableSelect>
           </Box>
         </Box>
@@ -1657,6 +1882,13 @@ export default function FinancialYearDetails({ onBack }) {
             onClick={() => setExcelModalOpen(true)}
             sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#059669', borderColor: '#a7f3d0', bgcolor: '#ecfdf5', textTransform: 'none', '&:hover': { bgcolor: '#d1fae5', borderColor: '#34d399' } }}>
             Upload Bill Register
+          </Button>
+
+          <Button size="small" variant="outlined" color="error" startIcon={<DeleteForeverIcon sx={{ fontSize: '1rem' }} />}
+            onClick={() => setClearConfirmOpen(true)}
+            disabled={loading || clearingData}
+            sx={{ fontWeight: 700, borderRadius: '10px', fontSize: '0.8rem', color: '#dc2626', borderColor: '#fca5a5', bgcolor: '#fef2f2', textTransform: 'none', '&:hover': { bgcolor: '#fee2e2', borderColor: '#f87171' } }}>
+            Clear All Data
           </Button>
 
           <Button size="small" variant="outlined" startIcon={<AddIcon sx={{ fontSize: '1rem' }} />} onClick={handleAddRow}
@@ -2456,121 +2688,150 @@ export default function FinancialYearDetails({ onBack }) {
         </DialogActions>
       </Dialog>
 
-      {/* ── Bill Register Excel Upload Modal ────────────────────────────────────── */}
-      <Dialog open={excelModalOpen} onClose={() => { if (!uploadingExcel) setExcelModalOpen(false); }} maxWidth="md" fullWidth>
+      {/* ── Bill Register Excel & PDF Upload Modal ────────────────────────────────────── */}
+      <Dialog open={excelModalOpen} onClose={() => { if (!uploadingExcel && !parsingPdf) setExcelModalOpen(false); }} maxWidth="lg" fullWidth>
         <DialogTitle sx={{ fontWeight: 800, fontSize: '1.2rem', color: '#0f172a', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box display="flex" alignItems="center" gap={1}>
             <TableChartIcon sx={{ color: uploadSiteTarget === 'NVL' ? '#10b981' : '#0284c7' }} />
-            Upload Bill Register Excel
+            Upload Bill Register (Excel / PDF)
           </Box>
-          <Chip
-            label={`TARGET SITE: ${uploadSiteTarget}`}
-            sx={{
-              fontWeight: 800,
-              fontSize: '11px',
-              bgcolor: uploadSiteTarget === 'NVL' ? '#dcfce7' : '#e0f2fe',
-              color: uploadSiteTarget === 'NVL' ? '#15803d' : '#0369a1',
-              border: `1px solid ${uploadSiteTarget === 'NVL' ? '#86efac' : '#7dd3fc'}`
-            }}
-          />
+          <Box display="flex" gap={1} alignItems="center">
+            {uploadFileType === 'PDF' && (
+              <Chip label="PDF EXTRACTION MODE" color="secondary" size="small" sx={{ fontWeight: 800, fontSize: '10px' }} />
+            )}
+            <Chip
+              label={`TARGET SITE: ${uploadSiteTarget}`}
+              sx={{
+                fontWeight: 800,
+                fontSize: '11px',
+                bgcolor: uploadSiteTarget === 'NVL' ? '#dcfce7' : '#e0f2fe',
+                color: uploadSiteTarget === 'NVL' ? '#15803d' : '#0369a1',
+                border: `1px solid ${uploadSiteTarget === 'NVL' ? '#86efac' : '#7dd3fc'}`
+              }}
+            />
+          </Box>
         </DialogTitle>
         <DialogContent sx={{ py: 3 }}>
           <Box display="flex" flexDirection="column" gap={2.5}>
             {/* ── Separate NVL & NVCL Upload Options ──────────────── */}
             <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#1e293b' }}>
-              SELECT SITE UPLOAD TYPE:
+              SELECT SITE & FILE TYPE TO UPLOAD:
             </Typography>
-            <Box display="flex" gap={2}>
-              <Button
-                variant={uploadSiteTarget === 'NVL' ? 'contained' : 'outlined'}
-                onClick={() => {
-                  setUploadSiteTarget('NVL');
-                  if (excelFile) handleExcelFileChange(null, 'NVL', excelFile);
-                }}
-                startIcon={<Chip label="NVL" size="small" sx={{ bgcolor: uploadSiteTarget === 'NVL' ? '#fff' : '#10b981', color: uploadSiteTarget === 'NVL' ? '#047857' : '#fff', fontWeight: 800, height: 20 }} />}
-                sx={{
-                  flex: 1, py: 1.5, fontWeight: 800, fontSize: '0.95rem', borderRadius: '10px',
-                  bgcolor: uploadSiteTarget === 'NVL' ? '#10b981' : '#f0fdf4',
-                  color: uploadSiteTarget === 'NVL' ? '#fff' : '#047857',
-                  borderColor: '#10b981',
-                  boxShadow: uploadSiteTarget === 'NVL' ? '0 4px 12px rgba(16, 185, 129, 0.3)' : 'none',
-                  '&:hover': { bgcolor: uploadSiteTarget === 'NVL' ? '#059669' : '#dcfce7', borderColor: '#059669' }
-                }}
-              >
-                NVL EXCEL UPLOAD
-              </Button>
 
-              <Button
-                variant={uploadSiteTarget === 'NVCL' ? 'contained' : 'outlined'}
-                onClick={() => {
-                  setUploadSiteTarget('NVCL');
-                  if (excelFile) handleExcelFileChange(null, 'NVCL', excelFile);
-                }}
-                startIcon={<Chip label="NVCL" size="small" sx={{ bgcolor: uploadSiteTarget === 'NVCL' ? '#fff' : '#0284c7', color: uploadSiteTarget === 'NVCL' ? '#0369a1' : '#fff', fontWeight: 800, height: 20 }} />}
-                sx={{
-                  flex: 1, py: 1.5, fontWeight: 800, fontSize: '0.95rem', borderRadius: '10px',
-                  bgcolor: uploadSiteTarget === 'NVCL' ? '#0284c7' : '#f0f9ff',
-                  color: uploadSiteTarget === 'NVCL' ? '#fff' : '#0369a1',
-                  borderColor: '#0284c7',
-                  boxShadow: uploadSiteTarget === 'NVCL' ? '0 4px 12px rgba(2, 132, 199, 0.3)' : 'none',
-                  '&:hover': { bgcolor: uploadSiteTarget === 'NVCL' ? '#0369a1' : '#e0f2fe', borderColor: '#0369a1' }
-                }}
-              >
-                NVCL EXCEL UPLOAD
-              </Button>
+            <Box display="flex" flexDirection="column" gap={2}>
+              {/* NVL Group */}
+              <Box p={1.5} sx={{ border: '1px solid #a7f3d0', borderRadius: '12px', bgcolor: '#f0fdf4' }}>
+                <Typography variant="caption" sx={{ fontWeight: 800, color: '#047857', display: 'block', mb: 1 }}>
+                  SITE NVL OPTIONS:
+                </Typography>
+                <Box display="flex" gap={1.5}>
+                  <Button
+                    variant={uploadSiteTarget === 'NVL' && uploadFileType === 'EXCEL' ? 'contained' : 'outlined'}
+                    component="label"
+                    startIcon={<TableChartIcon />}
+                    sx={{
+                      flex: 1, py: 1.2, fontWeight: 800, fontSize: '0.85rem', borderRadius: '8px',
+                      bgcolor: uploadSiteTarget === 'NVL' && uploadFileType === 'EXCEL' ? '#10b981' : '#fff',
+                      color: uploadSiteTarget === 'NVL' && uploadFileType === 'EXCEL' ? '#fff' : '#047857',
+                      borderColor: '#10b981',
+                      '&:hover': { bgcolor: uploadSiteTarget === 'NVL' && uploadFileType === 'EXCEL' ? '#059669' : '#dcfce7' }
+                    }}
+                  >
+                    NVL EXCEL UPLOAD
+                    <input type="file" accept=".xlsx, .xls, .csv" hidden onChange={(e) => { setUploadFileType('EXCEL'); handleExcelFileChange(e, 'NVL'); }} />
+                  </Button>
+
+                  <Button
+                    variant={uploadSiteTarget === 'NVL' && uploadFileType === 'PDF' ? 'contained' : 'outlined'}
+                    component="label"
+                    startIcon={parsingPdf && uploadSiteTarget === 'NVL' ? <CircularProgress size={16} color="inherit" /> : <PictureAsPdfIcon />}
+                    disabled={parsingPdf}
+                    sx={{
+                      flex: 1, py: 1.2, fontWeight: 800, fontSize: '0.85rem', borderRadius: '8px',
+                      bgcolor: uploadSiteTarget === 'NVL' && uploadFileType === 'PDF' ? '#059669' : '#fff',
+                      color: uploadSiteTarget === 'NVL' && uploadFileType === 'PDF' ? '#fff' : '#047857',
+                      borderColor: '#059669',
+                      '&:hover': { bgcolor: uploadSiteTarget === 'NVL' && uploadFileType === 'PDF' ? '#047857' : '#dcfce7' }
+                    }}
+                  >
+                    {parsingPdf && uploadSiteTarget === 'NVL' ? 'Extracting NVL PDF...' : 'UPLOAD NVL PDF'}
+                    <input type="file" accept=".pdf" hidden onChange={(e) => handlePdfFileChange(e, 'NVL')} />
+                  </Button>
+                </Box>
+              </Box>
+
+              {/* NVCL Group */}
+              <Box p={1.5} sx={{ border: '1px solid #7dd3fc', borderRadius: '12px', bgcolor: '#f0f9ff' }}>
+                <Typography variant="caption" sx={{ fontWeight: 800, color: '#0369a1', display: 'block', mb: 1 }}>
+                  SITE NVCL OPTIONS:
+                </Typography>
+                <Box display="flex" gap={1.5}>
+                  <Button
+                    variant={uploadSiteTarget === 'NVCL' && uploadFileType === 'EXCEL' ? 'contained' : 'outlined'}
+                    component="label"
+                    startIcon={<TableChartIcon />}
+                    sx={{
+                      flex: 1, py: 1.2, fontWeight: 800, fontSize: '0.85rem', borderRadius: '8px',
+                      bgcolor: uploadSiteTarget === 'NVCL' && uploadFileType === 'EXCEL' ? '#0284c7' : '#fff',
+                      color: uploadSiteTarget === 'NVCL' && uploadFileType === 'EXCEL' ? '#fff' : '#0369a1',
+                      borderColor: '#0284c7',
+                      '&:hover': { bgcolor: uploadSiteTarget === 'NVCL' && uploadFileType === 'EXCEL' ? '#0369a1' : '#e0f2fe' }
+                    }}
+                  >
+                    NVCL EXCEL UPLOAD
+                    <input type="file" accept=".xlsx, .xls, .csv" hidden onChange={(e) => { setUploadFileType('EXCEL'); handleExcelFileChange(e, 'NVCL'); }} />
+                  </Button>
+
+                  <Button
+                    variant={uploadSiteTarget === 'NVCL' && uploadFileType === 'PDF' ? 'contained' : 'outlined'}
+                    component="label"
+                    startIcon={parsingPdf && uploadSiteTarget === 'NVCL' ? <CircularProgress size={16} color="inherit" /> : <PictureAsPdfIcon />}
+                    disabled={parsingPdf}
+                    sx={{
+                      flex: 1, py: 1.2, fontWeight: 800, fontSize: '0.85rem', borderRadius: '8px',
+                      bgcolor: uploadSiteTarget === 'NVCL' && uploadFileType === 'PDF' ? '#0369a1' : '#fff',
+                      color: uploadSiteTarget === 'NVCL' && uploadFileType === 'PDF' ? '#fff' : '#0369a1',
+                      borderColor: '#0369a1',
+                      '&:hover': { bgcolor: uploadSiteTarget === 'NVCL' && uploadFileType === 'PDF' ? '#0284c7' : '#e0f2fe' }
+                    }}
+                  >
+                    {parsingPdf && uploadSiteTarget === 'NVCL' ? 'Extracting NVCL PDF...' : 'UPLOAD NVCL PDF'}
+                    <input type="file" accept=".pdf" hidden onChange={(e) => handlePdfFileChange(e, 'NVCL')} />
+                  </Button>
+                </Box>
+              </Box>
             </Box>
 
             <Typography variant="body2" sx={{ color: '#475569', fontWeight: 500, fontStyle: 'italic' }}>
               {uploadSiteTarget === 'NVL'
-                ? 'Uploading Excel for site NVL. All imported rows will be assigned Site = NVL automatically.'
-                : 'Uploading Excel for site NVCL. All imported rows will be assigned Site = NVCL automatically.'}
+                ? 'Uploading file for site NVL. All imported rows will be assigned Site = NVL automatically.'
+                : 'Uploading file for site NVCL. All imported rows will be assigned Site = NVCL automatically.'}
             </Typography>
 
-            <Button
-              variant="outlined"
-              component="label"
-              startIcon={<UploadIcon />}
-              sx={{
-                py: 2.5,
-                borderStyle: 'dashed',
-                borderWidth: '2px',
-                borderColor: uploadSiteTarget === 'NVL' ? '#10b981' : '#0284c7',
-                bgcolor: uploadSiteTarget === 'NVL' ? '#f0fdf4' : '#f0f9ff',
-                color: uploadSiteTarget === 'NVL' ? '#047857' : '#0369a1',
-                fontWeight: 700,
-                fontSize: '0.95rem',
-                textTransform: 'none',
-                borderRadius: '12px',
-                '&:hover': {
-                  bgcolor: uploadSiteTarget === 'NVL' ? '#dcfce7' : '#e0f2fe',
-                  borderColor: uploadSiteTarget === 'NVL' ? '#059669' : '#0369a1'
-                }
-              }}
-            >
-              {excelFile ? `File Selected: ${excelFile.name} (${uploadSiteTarget})` : `Click to Select Excel File for ${uploadSiteTarget}`}
-              <input
-                type="file"
-                accept=".xlsx, .xls, .csv"
-                hidden
-                onChange={(e) => handleExcelFileChange(e, uploadSiteTarget)}
-              />
-            </Button>
+            {parsingPdf && (
+              <Box display="flex" alignItems="center" gap={2} p={2} bgcolor="#f8fafc" borderRadius="8px" border="1px solid #e2e8f0">
+                <CircularProgress size={24} />
+                <Typography variant="body2" fontWeight={700} color="#1e293b">
+                  Extracting tabular rows from multi-page PDF... Please wait.
+                </Typography>
+              </Box>
+            )}
 
             {excelSummary && (
               <Box sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1, color: '#1e293b' }}>
-                  📊 Import Validation &amp; Summary ({excelSummary.targetSite})
+                  📊 Import Validation &amp; Summary ({excelSummary.targetSite}) {excelSummary.isPdf ? `[PDF Mode - ${excelSummary.totalPages || 1} Page(s)]` : '[Excel Mode]'}
                 </Typography>
                 <Box display="flex" gap={1.5} flexWrap="wrap" mb={excelSummary.failed > 0 ? 1.5 : 0}>
                   <Chip label={`Total Rows: ${excelSummary.total}`} sx={{ fontWeight: 700, bgcolor: '#e2e8f0', color: '#334155' }} />
                   <Chip label={`Ready to Import: ${excelSummary.valid}`} color="success" sx={{ fontWeight: 700 }} />
                   <Chip label={`Already Existing: ${excelSummary.existing}`} color="warning" sx={{ fontWeight: 700 }} />
-                  <Chip label={`Failed: ${excelSummary.failed}`} color="error" sx={{ fontWeight: 700 }} />
+                  {excelSummary.failed > 0 && <Chip label={`Review Needed: ${excelSummary.failed}`} color="error" sx={{ fontWeight: 700 }} />}
                 </Box>
 
                 {excelSummary.failed > 0 && excelSummary.errors && (
-                  <Alert severity="error" sx={{ mt: 1, fontSize: '12px', fontWeight: 600 }}>
-                    <strong>Validation Errors ({excelSummary.failed} rows skipped):</strong>
+                  <Alert severity="warning" sx={{ mt: 1, fontSize: '12px', fontWeight: 600 }}>
+                    <strong>Validation Alerts ({excelSummary.failed} rows need review):</strong>
                     <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                       {excelSummary.errors.slice(0, 5).map((err, idx) => (
                         <li key={idx}>Row {err.row}: {err.error}</li>
@@ -2585,32 +2846,50 @@ export default function FinancialYearDetails({ onBack }) {
             {excelParsedRows.length > 0 && (
               <Box>
                 <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mb: 1, display: 'block' }}>
-                  PREVIEW OF MAPPED RECORDS (Assigned Site: <strong>{uploadSiteTarget}</strong>):
+                  PREVIEW OF MAPPED RECORDS ({excelParsedRows.length} Rows - Site: <strong>{uploadSiteTarget}</strong>):
                 </Typography>
-                <Box sx={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                <Box sx={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
                   <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
                         <th style={{ padding: '6px' }}>SL NO</th>
                         <th style={{ padding: '6px' }}>Bill / Invoice No</th>
                         <th style={{ padding: '6px' }}>Invoice Date</th>
+                        <th style={{ padding: '6px' }}>Shipment No</th>
+                        <th style={{ padding: '6px' }}>Month</th>
                         <th style={{ padding: '6px' }}>Site</th>
                         <th style={{ padding: '6px' }}>Bill Type</th>
                         <th style={{ padding: '6px' }}>Amount (₹)</th>
+                        <th style={{ padding: '6px' }}>CGST</th>
+                        <th style={{ padding: '6px' }}>SGST</th>
+                        <th style={{ padding: '6px' }}>Total Amount</th>
+                        <th style={{ padding: '6px' }}>TDS</th>
                         <th style={{ padding: '6px' }}>Status</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {excelParsedRows.slice(0, 10).map((r, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid #f1f5f9', background: r.isExisting ? '#fffbeb' : '#fff' }}>
+                      {excelParsedRows.map((r, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #f1f5f9', background: r.needsReview ? '#fef2f2' : r.isExisting ? '#fffbeb' : '#fff' }}>
                           <td style={{ padding: '6px' }}>{r.slNo}</td>
-                          <td style={{ padding: '6px', fontWeight: 700 }}>{r.invoiceNumber}</td>
+                          <td style={{ padding: '6px', fontWeight: 700 }}>{r.invoiceNumber || <span style={{ color: '#ef4444' }}>[Missing]</span>}</td>
                           <td style={{ padding: '6px' }}>{r.invoiceDate}</td>
+                          <td style={{ padding: '6px' }}>{r.shipmentNo || '-'}</td>
+                          <td style={{ padding: '6px' }}>{r.month || '-'}</td>
                           <td style={{ padding: '6px', fontWeight: 800, color: r.site === 'NVL' ? '#047857' : '#0369a1' }}>{r.site}</td>
                           <td style={{ padding: '6px' }}>{r.billType}</td>
                           <td style={{ padding: '6px', fontWeight: 700 }}>₹{r.amount?.toLocaleString('en-IN')}</td>
+                          <td style={{ padding: '6px' }}>₹{r.cgst?.toLocaleString('en-IN')}</td>
+                          <td style={{ padding: '6px' }}>₹{r.sgst?.toLocaleString('en-IN')}</td>
+                          <td style={{ padding: '6px', fontWeight: 700 }}>₹{r.totalAmount?.toLocaleString('en-IN')}</td>
+                          <td style={{ padding: '6px' }}>₹{r.tds?.toLocaleString('en-IN')}</td>
                           <td style={{ padding: '6px' }}>
-                            <Chip size="small" label={r.isExisting ? 'Exists' : 'New'} color={r.isExisting ? 'warning' : 'success'} sx={{ height: 18, fontSize: '9px', fontWeight: 800 }} />
+                            {r.needsReview ? (
+                              <Chip size="small" label="Review Needed" color="error" sx={{ height: 18, fontSize: '9px', fontWeight: 800 }} />
+                            ) : r.isExisting ? (
+                              <Chip size="small" label="Exists" color="warning" sx={{ height: 18, fontSize: '9px', fontWeight: 800 }} />
+                            ) : (
+                              <Chip size="small" label="Ready" color="success" sx={{ height: 18, fontSize: '9px', fontWeight: 800 }} />
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -2626,20 +2905,20 @@ export default function FinancialYearDetails({ onBack }) {
             variant="outlined"
             color="error"
             onClick={handleClearBillRegister}
-            disabled={uploadingExcel}
+            disabled={uploadingExcel || parsingPdf}
             sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
           >
             Clear Current Data
           </Button>
 
           <Box display="flex" gap={1}>
-            <Button onClick={() => setExcelModalOpen(false)} disabled={uploadingExcel} sx={{ textTransform: 'none', color: '#64748b', fontWeight: 700 }}>
+            <Button onClick={() => setExcelModalOpen(false)} disabled={uploadingExcel || parsingPdf} sx={{ textTransform: 'none', color: '#64748b', fontWeight: 700 }}>
               Cancel
             </Button>
             <Button
               variant="contained"
               onClick={handleConfirmExcelImport}
-              disabled={!excelParsedRows.length || uploadingExcel}
+              disabled={!excelParsedRows.length || uploadingExcel || parsingPdf}
               startIcon={uploadingExcel ? <CircularProgress size={16} color="inherit" /> : <TableChartIcon />}
               sx={{
                 bgcolor: uploadSiteTarget === 'NVL' ? '#10b981' : '#0284c7',
@@ -2652,6 +2931,38 @@ export default function FinancialYearDetails({ onBack }) {
               {uploadingExcel ? 'Importing...' : `Import ${excelParsedRows.length} Rows into Bill Register (${uploadSiteTarget})`}
             </Button>
           </Box>
+        </DialogActions>
+      </Dialog>
+
+
+      {/* ── Clear All Data Confirmation Dialog ────────────────────────────── */}
+      <Dialog open={clearConfirmOpen} onClose={() => { if (!clearingData) setClearConfirmOpen(false); }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 1 }}>
+          <WarningAmberIcon color="error" />
+          Clear All Bill Register Data?
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 600, mb: 1.5 }}>
+            <strong>WARNING:</strong> This will permanently delete ALL Bill Register data currently stored in the system (Current Records: <strong>{rows.length}</strong>). This action cannot be undone. Are you sure you want to continue?
+          </Typography>
+          <Typography variant="caption" sx={{ color: '#64748b', fontStyle: 'italic', display: 'block' }}>
+            Note: Cement Register, GST Portal, Main Cashbook, and other modules will NOT be affected.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid #f1f5f9' }}>
+          <Button onClick={() => setClearConfirmOpen(false)} disabled={clearingData} sx={{ textTransform: 'none', color: '#64748b', fontWeight: 700 }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleClearAllBillRegister}
+            disabled={clearingData}
+            startIcon={clearingData ? <CircularProgress size={16} color="inherit" /> : <DeleteForeverIcon />}
+            sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px', bgcolor: '#dc2626', '&:hover': { bgcolor: '#b91c1c' } }}
+          >
+            {clearingData ? 'Clearing...' : 'Yes, Delete All Bill Register Data'}
+          </Button>
         </DialogActions>
       </Dialog>
 
