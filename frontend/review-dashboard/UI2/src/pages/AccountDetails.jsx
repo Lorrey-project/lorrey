@@ -22,6 +22,9 @@ import ListAltIcon from '@mui/icons-material/ListAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import PrintIcon from '@mui/icons-material/Print';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
@@ -34,6 +37,20 @@ const num = (val) => Number(String(val || 0).replace(/,/g, '')) || 0;
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const currentYear = new Date().getFullYear();
 const YEARS = Array.from({ length: 10 }, (_, i) => String(currentYear - 5 + i));
+
+const isPrintingAndStationary = (ledger) => {
+  if (!ledger) return false;
+  const norm = String(ledger).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return norm === 'printingstationary' || norm === 'printingandstationary';
+};
+
+const getPrintingStationaryMonths = () => {
+  const now = new Date();
+  const curIdx = now.getMonth();
+  const prevIdx = (curIdx - 1 + 12) % 12;
+  return [MONTHS[curIdx], MONTHS[prevIdx]];
+};
+
 
 // Columns configuration
 const COLUMNS = [
@@ -216,6 +233,248 @@ export default function AccountDetails({ onBack }) {
 
   const [pendingBillsModal, setPendingBillsModal] = useState({ open: false, rowId: null, party: null, bills: [], loading: false, selectedBills: [], allocations: {} });
   const [pumpPaymentModal, setPumpPaymentModal] = useState({ open: false, rowId: null, month: null, bills: [], loading: false, selectedBills: [], allocations: {} });
+
+  // ── Printing & Stationary Workflow Modals ─────────────────────────────────
+  const [billTypeModal, setBillTypeModal] = useState({
+    open: false,
+    rowId: null,
+    month: '',
+    partyName: ''
+  });
+
+  const [gstBillModal, setGstBillModal] = useState({
+    open: false,
+    rowId: null,
+    month: '',
+    partyName: '',
+    saving: false,
+    pdfFile: null,
+    existingPdfUrl: null,
+    formData: {
+      'GSTIN of Supplier': '',
+      'Trade / Legal Name': '',
+      'Invoice Number': '',
+      'Invoice Type': 'Regular',
+      'Invoice Date': new Date().toISOString().split('T')[0],
+      'Invoice Value': '',
+      'Place of Supply': '',
+      'Supply attract reverse charge': 'No',
+      'Taxable Value': '',
+      'Integrated Tax': '0',
+      'CGST': '0',
+      'SGST': '0',
+      'Cess': '0',
+      'GSTR-1/1A/IFF/GSTR-5 Period': '',
+      'GSTR-1/1A/IFF/GSTR-5 Filing Date': '',
+      'ITC Availability': 'Inputs',
+      'Reason': '',
+      'Applicable % Tax Rate': '18',
+      'Source': 'Bank Book Manual',
+      'IRN': '',
+      'IRN Date': ''
+    }
+  });
+
+  const [nonGstBillModal, setNonGstBillModal] = useState({
+    open: false,
+    rowId: null,
+    month: '',
+    partyName: '',
+    saving: false,
+    formData: {
+      'Party Name': '',
+      'Bill Number': '',
+      'Bill Date': new Date().toISOString().split('T')[0],
+      'Bill Amount': '',
+      'Tax Amount': '',
+      'Total Amount': '',
+      'Particulars': '',
+      'Remarks': ''
+    }
+  });
+
+  const openBillTypeModal = (rowId, month, partyName) => {
+    setBillTypeModal({
+      open: true,
+      rowId,
+      month: month || '',
+      partyName: partyName || ''
+    });
+  };
+
+  const handleSelectGstBill = () => {
+    const { rowId, month, partyName } = billTypeModal;
+    setBillTypeModal({ open: false, rowId: null, month: '', partyName: '' });
+    setGstBillModal({
+      open: true,
+      rowId,
+      month,
+      partyName,
+      saving: false,
+      pdfFile: null,
+      existingPdfUrl: null,
+      formData: {
+        'GSTIN of Supplier': '',
+        'Trade / Legal Name': partyName || '',
+        'Invoice Number': '',
+        'Invoice Type': 'Regular',
+        'Invoice Date': new Date().toISOString().split('T')[0],
+        'Invoice Value': '',
+        'Place of Supply': '',
+        'Supply attract reverse charge': 'No',
+        'Taxable Value': '',
+        'Integrated Tax': '0',
+        'CGST': '0',
+        'SGST': '0',
+        'Cess': '0',
+        'GSTR-1/1A/IFF/GSTR-5 Period': month || '',
+        'GSTR-1/1A/IFF/GSTR-5 Filing Date': '',
+        'ITC Availability': 'Inputs',
+        'Reason': '',
+        'Applicable % Tax Rate': '18',
+        'Source': 'Bank Book Manual',
+        'IRN': '',
+        'IRN Date': ''
+      }
+    });
+  };
+
+  const handleSelectNonGstBill = () => {
+    const { rowId, month, partyName } = billTypeModal;
+    setBillTypeModal({ open: false, rowId: null, month: '', partyName: '' });
+    setNonGstBillModal({
+      open: true,
+      rowId,
+      month,
+      partyName,
+      saving: false,
+      formData: {
+        'Party Name': partyName || '',
+        'Bill Number': '',
+        'Bill Date': new Date().toISOString().split('T')[0],
+        'Bill Amount': '',
+        'Tax Amount': '',
+        'Total Amount': '',
+        'Particulars': '',
+        'Remarks': ''
+      }
+    });
+  };
+
+  const handleSaveGstBill = async () => {
+    try {
+      setGstBillModal(prev => ({ ...prev, saving: true }));
+      const token = localStorage.getItem('token');
+
+      const getRes = await axios.get(`${API_URL}/gst-portal`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const existing = getRes.data?.entries || [];
+      const b2bEntries = existing.filter(e => !e.type || e.type === 'b2b');
+      const nextSlNo = b2bEntries.length > 0 ? Math.max(...b2bEntries.map(e => e['SL NO'] || 0)) + 1 : 1;
+
+      const fData = gstBillModal.formData;
+
+      const payload = {
+        "SL NO": nextSlNo,
+        "type": "b2b",
+        "GSTIN of Supplier": fData['GSTIN of Supplier'] || '',
+        "Trade / Legal Name": fData['Trade / Legal Name'] || gstBillModal.partyName || '',
+        "Invoice Number": fData['Invoice Number'] || '',
+        "Invoice Type": fData['Invoice Type'] || 'Regular',
+        "Invoice Date": fData['Invoice Date'] || '',
+        "Invoice Value": fData['Invoice Value'] !== undefined && fData['Invoice Value'] !== '' ? Number(fData['Invoice Value']) : '',
+        "Place of Supply": fData['Place of Supply'] || '',
+        "Supply attract reverse charge": fData['Supply attract reverse charge'] || 'No',
+        "Taxable Value": fData['Taxable Value'] !== undefined && fData['Taxable Value'] !== '' ? Number(fData['Taxable Value']) : '',
+        "Integrated Tax": fData['Integrated Tax'] !== undefined && fData['Integrated Tax'] !== '' ? Number(fData['Integrated Tax']) : 0,
+        "CGST": fData['CGST'] !== undefined && fData['CGST'] !== '' ? Number(fData['CGST']) : 0,
+        "SGST": fData['SGST'] !== undefined && fData['SGST'] !== '' ? Number(fData['SGST']) : 0,
+        "Cess": fData['Cess'] !== undefined && fData['Cess'] !== '' ? Number(fData['Cess']) : 0,
+        "GSTR-1/1A/IFF/GSTR-5 Period": fData['GSTR-1/1A/IFF/GSTR-5 Period'] || gstBillModal.month || '',
+        "GSTR-1/1A/IFF/GSTR-5 Filing Date": fData['GSTR-1/1A/IFF/GSTR-5 Filing Date'] || '',
+        "ITC Availability": fData['ITC Availability'] || 'Inputs',
+        "Reason": fData['Reason'] || '',
+        "Applicable % Tax Rate": fData['Applicable % Tax Rate'] !== undefined && fData['Applicable % Tax Rate'] !== '' ? Number(fData['Applicable % Tax Rate']) : '',
+        "Source": fData['Source'] || 'Bank Book Manual',
+        "IRN": fData['IRN'] || '',
+        "IRN Date": fData['IRN Date'] || ''
+      };
+
+      const res = await axios.post(`${API_URL}/gst-portal`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!res.data.success || !res.data.entry || !res.data.entry._id) {
+        throw new Error(res.data.error || 'Failed to save Cash B2B record.');
+      }
+
+      const createdEntryId = res.data.entry._id;
+
+      if (gstBillModal.pdfFile) {
+        try {
+          const fileFormData = new FormData();
+          fileFormData.append('file', gstBillModal.pdfFile);
+          await axios.post(`${API_URL}/gst-portal/attach/${createdEntryId}/gst_file`, fileFormData, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'multipart/form-data'
+            }
+          });
+        } catch (uploadErr) {
+          console.error('PDF Upload Error:', uploadErr);
+          setSnack({
+            severity: 'warning',
+            msg: `Record saved to Cash B2B, but Invoice Scan PDF upload failed: ${uploadErr.response?.data?.error || uploadErr.message}`
+          });
+          setGstBillModal(prev => ({ ...prev, open: false, saving: false, pdfFile: null, existingPdfUrl: null }));
+          return;
+        }
+      }
+
+      setSnack({ severity: 'success', msg: 'GST BILL (Cash B2B) record and Invoice Scan saved successfully!' });
+      setGstBillModal(prev => ({ ...prev, open: false, saving: false, pdfFile: null, existingPdfUrl: null }));
+    } catch (err) {
+      console.error('Save GST Bill error:', err);
+      setSnack({ severity: 'error', msg: 'Failed to save GST Bill: ' + (err.response?.data?.error || err.message) });
+      setGstBillModal(prev => ({ ...prev, saving: false }));
+    }
+  };
+
+  const handleSaveNonGstBill = async () => {
+    try {
+      setNonGstBillModal(prev => ({ ...prev, saving: true }));
+      const token = localStorage.getItem('token');
+
+      const fData = nonGstBillModal.formData;
+
+      const payload = {
+        "type": "non_gst",
+        "Party Name": fData['Party Name'] || nonGstBillModal.partyName || '',
+        "Bill Number": fData['Bill Number'] || '',
+        "Bill Date": fData['Bill Date'] || '',
+        "Bill Amount": fData['Bill Amount'] !== undefined && fData['Bill Amount'] !== '' ? Number(fData['Bill Amount']) : '',
+        "Tax Amount": fData['Tax Amount'] !== undefined && fData['Tax Amount'] !== '' ? Number(fData['Tax Amount']) : '',
+        "Total Amount": fData['Total Amount'] !== undefined && fData['Total Amount'] !== '' ? Number(fData['Total Amount']) : '',
+        "Particulars": fData['Particulars'] || '',
+        "Remarks": fData['Remarks'] || ''
+      };
+
+      const res = await axios.post(`${API_URL}/gst-portal`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data.success) {
+        setSnack({ severity: 'success', msg: 'Non-GST Bill saved successfully!' });
+        setNonGstBillModal(prev => ({ ...prev, open: false, saving: false }));
+      }
+    } catch (err) {
+      console.error('Save Non-GST Bill error:', err);
+      setSnack({ severity: 'error', msg: 'Failed to save Non-GST Bill: ' + (err.response?.data?.error || err.message) });
+      setNonGstBillModal(prev => ({ ...prev, saving: false }));
+    }
+  };
+
 
   const openPendingBillsModal = async (rowId, party) => {
     setPendingBillsModal({ open: true, rowId, party, bills: [], loading: true, selectedBills: [], allocations: {} });
@@ -1153,10 +1412,13 @@ export default function AccountDetails({ onBack }) {
                           options={
                             col.key === 'Month'
                               ? (() => {
-                                  const ledgerLower = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toLowerCase();
-                                  if (ledgerLower === 'freight advance') {
+                                  const ledger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim();
+                                  if (ledger.toLowerCase() === 'freight advance') {
                                     const curMonthName = MONTHS[new Date().getMonth()];
                                     return [curMonthName];
+                                  }
+                                  if (isPrintingAndStationary(ledger)) {
+                                    return getPrintingStationaryMonths();
                                   }
                                   return MONTHS;
                                 })()
@@ -1207,6 +1469,22 @@ export default function AccountDetails({ onBack }) {
                                 if (allowedVehicles.length > 0 && !allowedVehicles.includes(currentVehicle)) {
                                   handleCellEdit(row._id, 'Vehicle', '');
                                 }
+                              }
+                            }
+
+                            const curLedger = (col.key === 'Ledger Name' ? newValue : (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || ''));
+                            const curMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
+                            const curParty = (col.key === 'Names' ? newValue : (localData[row._id]?.['Names'] || row['Names'] || ''));
+
+                            if (isPrintingAndStationary(curLedger)) {
+                              const allowedMonths = getPrintingStationaryMonths();
+                              let effectiveMonth = curMonth;
+                              if (curMonth && !allowedMonths.includes(curMonth)) {
+                                effectiveMonth = allowedMonths[0];
+                                handleCellEdit(row._id, 'Month', effectiveMonth);
+                              }
+                              if (effectiveMonth && curParty) {
+                                openBillTypeModal(row._id, effectiveMonth, curParty);
                               }
                             }
 
@@ -1760,6 +2038,463 @@ export default function AccountDetails({ onBack }) {
           <Button onClick={() => setPumpPaymentModal(prev => ({ ...prev, open: false }))} color="inherit">Cancel</Button>
           <Button onClick={handlePumpPaymentApply} variant="contained" disabled={pumpPaymentModal.selectedBills.length === 0}>
             Link Selected Bill
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Printing & Stationary: Bill Type Selection Dialog ── */}
+      <Dialog open={billTypeModal.open} onClose={() => setBillTypeModal(prev => ({ ...prev, open: false }))} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, textAlign: 'center', bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0' }}>
+          Select Bill Type
+        </DialogTitle>
+        <DialogContent sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Ledger: <strong>Printing & Stationary</strong><br />
+            Month: <strong>{billTypeModal.month}</strong> | Party: <strong>{billTypeModal.partyName}</strong>
+          </Typography>
+          <Box display="flex" flexDirection="column" gap={2} mt={2}>
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<ReceiptLongIcon />}
+              onClick={handleSelectGstBill}
+              sx={{
+                py: 1.5,
+                fontSize: '15px',
+                fontWeight: 800,
+                bgcolor: '#0284c7',
+                '&:hover': { bgcolor: '#0369a1' },
+                borderRadius: 2
+              }}
+            >
+              GST BILL
+            </Button>
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<ListAltIcon />}
+              onClick={handleSelectNonGstBill}
+              sx={{
+                py: 1.5,
+                fontSize: '15px',
+                fontWeight: 800,
+                color: '#334155',
+                borderColor: '#cbd5e1',
+                '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' },
+                borderRadius: 2
+              }}
+            >
+              NON-GST BILL
+            </Button>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: 'background.default', borderTop: '1px solid #e2e8f0', justifyContent: 'center' }}>
+          <Button onClick={() => setBillTypeModal(prev => ({ ...prev, open: false }))} color="inherit">
+            Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── GST BILL (Cash B2B Format) Dialog ── */}
+      <Dialog open={gstBillModal.open} onClose={() => setGstBillModal(prev => ({ ...prev, open: false }))} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0' }}>
+          GST BILL — Existing Cash B2B Format
+        </DialogTitle>
+        <DialogContent sx={{ p: 3, bgcolor: 'background.paper' }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Party: <strong>{gstBillModal.partyName}</strong> | Month: <strong>{gstBillModal.month}</strong>
+          </Typography>
+          <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap={2}>
+            <TextField
+              label="GSTIN of Supplier"
+              size="small"
+              value={gstBillModal.formData['GSTIN of Supplier'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'GSTIN of Supplier': e.target.value } }))}
+            />
+            <TextField
+              label="Trade / Legal Name"
+              size="small"
+              value={gstBillModal.formData['Trade / Legal Name'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Trade / Legal Name': e.target.value } }))}
+            />
+            <TextField
+              label="Invoice Number"
+              size="small"
+              value={gstBillModal.formData['Invoice Number'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Invoice Number': e.target.value } }))}
+            />
+            <TextField
+              label="Invoice Type"
+              size="small"
+              value={gstBillModal.formData['Invoice Type'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Invoice Type': e.target.value } }))}
+            />
+            <TextField
+              label="Invoice Date"
+              type="date"
+              size="small"
+              InputLabelProps={{ shrink: true }}
+              value={gstBillModal.formData['Invoice Date'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Invoice Date': e.target.value } }))}
+            />
+            <TextField
+              label="Invoice Value"
+              type="number"
+              size="small"
+              value={gstBillModal.formData['Invoice Value'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Invoice Value': e.target.value } }))}
+            />
+            <TextField
+              label="Place of Supply"
+              size="small"
+              value={gstBillModal.formData['Place of Supply'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Place of Supply': e.target.value } }))}
+            />
+            <Autocomplete
+              options={['No', 'Yes']}
+              size="small"
+              value={gstBillModal.formData['Supply attract reverse charge'] || 'No'}
+              onChange={(e, val) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Supply attract reverse charge': val || 'No' } }))}
+              renderInput={(params) => <TextField {...params} label="Reverse Charge" size="small" />}
+            />
+            <TextField
+              label="Taxable Value"
+              type="number"
+              size="small"
+              value={gstBillModal.formData['Taxable Value'] || ''}
+              onChange={(e) => {
+                const taxVal = e.target.value;
+                const tvNum = parseFloat(taxVal) || 0;
+                const cgst = Math.round(tvNum * 0.09);
+                const sgst = Math.round(tvNum * 0.09);
+                const invVal = tvNum + cgst + sgst;
+                setGstBillModal(prev => ({
+                  ...prev,
+                  formData: {
+                    ...prev.formData,
+                    'Taxable Value': taxVal,
+                    'CGST': String(cgst),
+                    'SGST': String(sgst),
+                    'Invoice Value': String(invVal)
+                  }
+                }));
+              }}
+            />
+            <TextField
+              label="Integrated Tax"
+              type="number"
+              size="small"
+              value={gstBillModal.formData['Integrated Tax'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Integrated Tax': e.target.value } }))}
+            />
+            <TextField
+              label="CGST"
+              type="number"
+              size="small"
+              value={gstBillModal.formData['CGST'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'CGST': e.target.value } }))}
+            />
+            <TextField
+              label="SGST"
+              type="number"
+              size="small"
+              value={gstBillModal.formData['SGST'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'SGST': e.target.value } }))}
+            />
+            <TextField
+              label="Cess"
+              type="number"
+              size="small"
+              value={gstBillModal.formData['Cess'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Cess': e.target.value } }))}
+            />
+            <TextField
+              label="GSTR Period"
+              size="small"
+              value={gstBillModal.formData['GSTR-1/1A/IFF/GSTR-5 Period'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'GSTR-1/1A/IFF/GSTR-5 Period': e.target.value } }))}
+            />
+            <TextField
+              label="GSTR Filing Date"
+              type="date"
+              size="small"
+              InputLabelProps={{ shrink: true }}
+              value={gstBillModal.formData['GSTR-1/1A/IFF/GSTR-5 Filing Date'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'GSTR-1/1A/IFF/GSTR-5 Filing Date': e.target.value } }))}
+            />
+            <TextField
+              label="ITC Availability"
+              size="small"
+              value={gstBillModal.formData['ITC Availability'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'ITC Availability': e.target.value } }))}
+            />
+            <TextField
+              label="Reason"
+              size="small"
+              value={gstBillModal.formData['Reason'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Reason': e.target.value } }))}
+            />
+            <TextField
+              label="Applicable % Tax Rate"
+              type="number"
+              size="small"
+              value={gstBillModal.formData['Applicable % Tax Rate'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Applicable % Tax Rate': e.target.value } }))}
+            />
+            <TextField
+              label="Source"
+              size="small"
+              value={gstBillModal.formData['Source'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Source': e.target.value } }))}
+            />
+            <TextField
+              label="IRN"
+              size="small"
+              value={gstBillModal.formData['IRN'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'IRN': e.target.value } }))}
+            />
+            <TextField
+              label="IRN Date"
+              type="date"
+              size="small"
+              InputLabelProps={{ shrink: true }}
+              value={gstBillModal.formData['IRN Date'] || ''}
+              onChange={(e) => setGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'IRN Date': e.target.value } }))}
+            />
+          </Box>
+
+          {/* ── INVOICE SCAN SECTION ── */}
+          <Box
+            sx={{
+              mt: 3,
+              p: 2.5,
+              borderRadius: 2,
+              border: '1.5px dashed #0284c7',
+              bgcolor: 'rgba(2, 132, 199, 0.03)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 1.5
+            }}
+          >
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#0369a1', letterSpacing: '0.5px' }}>
+              INVOICE SCAN
+            </Typography>
+
+            {gstBillModal.pdfFile || gstBillModal.existingPdfUrl ? (
+              <Box display="flex" alignItems="center" justifyContent="space-between" p={1.5} bgcolor="#ffffff" borderRadius={1.5} border="1px solid #e2e8f0">
+                <Box display="flex" alignItems="center" gap={1.5}>
+                  <PictureAsPdfIcon sx={{ color: '#ef4444', fontSize: 28 }} />
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e293b' }}>
+                      Selected File: {gstBillModal.pdfFile ? gstBillModal.pdfFile.name : 'Attached Invoice Scan.pdf'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {gstBillModal.pdfFile ? `${(gstBillModal.pdfFile.size / (1024 * 1024)).toFixed(2)} MB • PDF Document` : 'Saved PDF Attachment'}
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box display="flex" gap={1}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<VisibilityIcon />}
+                    onClick={() => {
+                      if (gstBillModal.pdfFile) {
+                        const fileUrl = URL.createObjectURL(gstBillModal.pdfFile);
+                        window.open(fileUrl, '_blank');
+                      } else if (gstBillModal.existingPdfUrl) {
+                        window.open(gstBillModal.existingPdfUrl, '_blank');
+                      }
+                    }}
+                    sx={{ textTransform: 'none', fontWeight: 700 }}
+                  >
+                    View
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => setGstBillModal(prev => ({ ...prev, pdfFile: null, existingPdfUrl: null }))}
+                    sx={{ textTransform: 'none', fontWeight: 700 }}
+                  >
+                    Remove
+                  </Button>
+                </Box>
+              </Box>
+            ) : (
+              <Box display="flex" flexDirection="column" alignItems="center" py={2} gap={1}>
+                <Button
+                  variant="outlined"
+                  component="label"
+                  startIcon={<UploadFileIcon />}
+                  sx={{
+                    fontWeight: 700,
+                    borderColor: '#0284c7',
+                    color: '#0284c7',
+                    '&:hover': { bgcolor: '#f0f9ff', borderColor: '#0369a1' }
+                  }}
+                >
+                  Upload Invoice PDF
+                  <input
+                    type="file"
+                    hidden
+                    accept="application/pdf"
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (!file) return;
+
+                      // Validate PDF format
+                      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+                        setSnack({ severity: 'error', msg: 'Invalid file format: Only PDF files are allowed for Invoice Scan.' });
+                        e.target.value = '';
+                        return;
+                      }
+
+                      // Validate file size (20 MB limit)
+                      const MAX_SIZE = 20 * 1024 * 1024;
+                      if (file.size > MAX_SIZE) {
+                        setSnack({ severity: 'error', msg: 'File size exceeds maximum limit of 20MB.' });
+                        e.target.value = '';
+                        return;
+                      }
+
+                      setGstBillModal(prev => ({ ...prev, pdfFile: file }));
+                      e.target.value = '';
+                    }}
+                  />
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  PDF only • Max size 20 MB
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: 'background.default', borderTop: '1px solid #e2e8f0' }}>
+          <Button onClick={() => setGstBillModal(prev => ({ ...prev, open: false }))} color="inherit" disabled={gstBillModal.saving}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveGstBill}
+            variant="contained"
+            disabled={gstBillModal.saving}
+            startIcon={gstBillModal.saving ? <CircularProgress size={16} /> : <SaveIcon />}
+            sx={{ bgcolor: '#0284c7', '&:hover': { bgcolor: '#0369a1' } }}
+          >
+            {gstBillModal.saving ? 'Saving...' : 'SAVE TO CASH B2B'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── NON-GST BILL Dialog ── */}
+      <Dialog open={nonGstBillModal.open} onClose={() => setNonGstBillModal(prev => ({ ...prev, open: false }))} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0' }}>
+          NON-GST BILL ENTRY
+        </DialogTitle>
+        <DialogContent sx={{ p: 3, bgcolor: 'background.paper' }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Party: <strong>{nonGstBillModal.partyName}</strong> | Month: <strong>{nonGstBillModal.month}</strong>
+          </Typography>
+          <Box display="flex" flexDirection="column" gap={2}>
+            <TextField
+              label="Party Name"
+              size="small"
+              value={nonGstBillModal.formData['Party Name'] || ''}
+              onChange={(e) => setNonGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Party Name': e.target.value } }))}
+            />
+            <TextField
+              label="Bill Number"
+              size="small"
+              value={nonGstBillModal.formData['Bill Number'] || ''}
+              onChange={(e) => setNonGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Bill Number': e.target.value } }))}
+            />
+            <TextField
+              label="Bill Date"
+              type="date"
+              size="small"
+              InputLabelProps={{ shrink: true }}
+              value={nonGstBillModal.formData['Bill Date'] || ''}
+              onChange={(e) => setNonGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Bill Date': e.target.value } }))}
+            />
+            <TextField
+              label="Bill Amount"
+              type="number"
+              size="small"
+              value={nonGstBillModal.formData['Bill Amount'] || ''}
+              onChange={(e) => {
+                const bAmt = e.target.value;
+                const bNum = parseFloat(bAmt) || 0;
+                const tNum = parseFloat(nonGstBillModal.formData['Tax Amount'] || 0) || 0;
+                setNonGstBillModal(prev => ({
+                  ...prev,
+                  formData: {
+                    ...prev.formData,
+                    'Bill Amount': bAmt,
+                    'Total Amount': String(bNum + tNum)
+                  }
+                }));
+              }}
+            />
+            <TextField
+              label="Tax Amount (Optional)"
+              type="number"
+              size="small"
+              value={nonGstBillModal.formData['Tax Amount'] || ''}
+              onChange={(e) => {
+                const tAmt = e.target.value;
+                const bNum = parseFloat(nonGstBillModal.formData['Bill Amount'] || 0) || 0;
+                const tNum = parseFloat(tAmt) || 0;
+                setNonGstBillModal(prev => ({
+                  ...prev,
+                  formData: {
+                    ...prev.formData,
+                    'Tax Amount': tAmt,
+                    'Total Amount': String(bNum + tNum)
+                  }
+                }));
+              }}
+            />
+            <TextField
+              label="Total Amount"
+              type="number"
+              size="small"
+              value={nonGstBillModal.formData['Total Amount'] || ''}
+              onChange={(e) => setNonGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Total Amount': e.target.value } }))}
+            />
+            <TextField
+              label="Particulars"
+              size="small"
+              multiline
+              rows={2}
+              value={nonGstBillModal.formData['Particulars'] || ''}
+              onChange={(e) => setNonGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Particulars': e.target.value } }))}
+            />
+            <TextField
+              label="Remarks"
+              size="small"
+              multiline
+              rows={2}
+              value={nonGstBillModal.formData['Remarks'] || ''}
+              onChange={(e) => setNonGstBillModal(prev => ({ ...prev, formData: { ...prev.formData, 'Remarks': e.target.value } }))}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: 'background.default', borderTop: '1px solid #e2e8f0' }}>
+          <Typography variant="caption" sx={{ mr: 'auto', color: 'text.secondary' }}>
+            * NON-GST BILL data will NOT be saved to Cash B2B tab.
+          </Typography>
+          <Button onClick={() => setNonGstBillModal(prev => ({ ...prev, open: false }))} color="inherit" disabled={nonGstBillModal.saving}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveNonGstBill}
+            variant="contained"
+            disabled={nonGstBillModal.saving}
+            startIcon={nonGstBillModal.saving ? <CircularProgress size={16} /> : <SaveIcon />}
+            sx={{ bgcolor: '#475569', '&:hover': { bgcolor: '#334155' } }}
+          >
+            {nonGstBillModal.saving ? 'Saving...' : 'SAVE NON-GST BILL'}
           </Button>
         </DialogActions>
       </Dialog>
