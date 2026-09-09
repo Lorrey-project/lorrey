@@ -326,6 +326,7 @@ function AppContent() {
             onOpenMainCashbook={() => handleViewChange('mainCashbook')}
             onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
             onOpenDashboard={() => handleViewChange('dashboard')}
+            onOpenPrintingStationary={() => handleViewChange('printingStationary')}
           />
         );
       }

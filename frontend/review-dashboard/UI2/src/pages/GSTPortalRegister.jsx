@@ -85,6 +85,12 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [uploadingObj, setUploadingObj] = useState(null); // { id: rowId }
   const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    if (initialTab !== undefined) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
   const now = new Date();
   const [filterMonth, setFilterMonth] = useState(now.getMonth() + 1);
   const [filterYear, setFilterYear] = useState(now.getFullYear());
