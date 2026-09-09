@@ -110,313 +110,313 @@ function AppContent() {
   const handleViewChange = (newView) => {
     setIsTransitioning(true);
     setTimeout(() => {
-        setCurrentView(newView);
-        setIsTransitioning(false);
+      setCurrentView(newView);
+      setIsTransitioning(false);
     }, 400); // Cinematic transition duration
   };
 
 
   if (loading) {
-        return (
+    return (
       <Box display="flex" justifyContent="center" alignItems="center" height="100vh">
         <CircularProgress />
       </Box>
     );
   }
 
-  
+
   const renderView = () => {
     if (!user) {
-    const portal = import.meta.env.VITE_PORTAL; // undefined | 'site' | 'sas1' | 'sas2' | 'brinda'
+      const portal = import.meta.env.VITE_PORTAL; // undefined | 'site' | 'sas1' | 'sas2' | 'brinda'
 
-    // Port 5177 — Brinda Shyam panel only
-    if (portal === 'brinda') {
+      // Port 5177 — Brinda Shyam panel only
+      if (portal === 'brinda') {
+        return showSignup ? (
+          <Signup onToggle={() => setShowSignup(false)} lockedPortal="BRINDA SHYAM" />
+        ) : (
+          <Login onToggle={() => setShowSignup(true)} lockedPortal="BRINDA SHYAM" />
+        );
+      }
+
+      // Port 5175 — SAS-1 pump only
+      if (portal === 'sas1') {
+        return showSignup ? (
+          <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-1" />
+        ) : (
+          <Login onToggle={() => setShowSignup(true)} lockedPortal="PETROL PUMP" lockedPump="SAS-1" />
+        );
+      }
+
+      // Port 5176 — SAS-2 pump only
+      if (portal === 'sas2') {
+        return showSignup ? (
+          <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-2" />
+        ) : (
+          <Login onToggle={() => setShowSignup(true)} lockedPortal="PETROL PUMP" lockedPump="SAS-2" />
+        );
+      }
+
+      // Port 5174 — Site admin only (OFFICE role)
+      if (portal === 'site') {
+        return showSignup ? (
+          <Signup onToggle={() => setShowSignup(false)} lockedPortal="OFFICE" />
+        ) : (
+          <Login onToggle={() => setShowSignup(true)} lockedPortal="OFFICE" />
+        );
+      }
+
+      // Port 5173 — Full office portal (all roles: HEAD_OFFICE, OFFICE, PETROL PUMP)
       return showSignup ? (
-        <Signup onToggle={() => setShowSignup(false)} lockedPortal="BRINDA SHYAM" />
+        <Signup onToggle={() => setShowSignup(false)} />
       ) : (
-        <Login onToggle={() => setShowSignup(true)} lockedPortal="BRINDA SHYAM" />
+        <Login onToggle={() => setShowSignup(true)} />
       );
     }
 
-    // Port 5175 — SAS-1 pump only
-    if (portal === 'sas1') {
-      return showSignup ? (
-        <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-1" />
-      ) : (
-        <Login onToggle={() => setShowSignup(true)} lockedPortal="PETROL PUMP" lockedPump="SAS-1" />
-      );
-    }
-
-    // Port 5176 — SAS-2 pump only
-    if (portal === 'sas2') {
-      return showSignup ? (
-        <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-2" />
-      ) : (
-        <Login onToggle={() => setShowSignup(true)} lockedPortal="PETROL PUMP" lockedPump="SAS-2" />
-      );
-    }
-
-    // Port 5174 — Site admin only (OFFICE role)
-    if (portal === 'site') {
-      return showSignup ? (
-        <Signup onToggle={() => setShowSignup(false)} lockedPortal="OFFICE" />
-      ) : (
-        <Login onToggle={() => setShowSignup(true)} lockedPortal="OFFICE" />
-      );
-    }
-
-    // Port 5173 — Full office portal (all roles: HEAD_OFFICE, OFFICE, PETROL PUMP)
-    return showSignup ? (
-      <Signup onToggle={() => setShowSignup(false)} />
-    ) : (
-      <Login onToggle={() => setShowSignup(true)} />
-    );
-  }
-
-  if (currentView === 'lorryHireSlip' && lorrySlipInvoiceId) {
-    return (
-      <LorryHireSlipReview
-        invoiceId={lorrySlipInvoiceId}
-        onBack={() => { handleViewChange('dashboard'); setLorrySlipInvoiceId(null); }}
-        onOpenFuelSlip={() => {
-          setFuelSlipInvoiceId(lorrySlipInvoiceId);
-          setLorrySlipInvoiceId(null);
-          handleViewChange('fuelSlip');
-        }}
-      />
-    );
-  }
-
-  if (currentView === 'fuelSlip' && fuelSlipInvoiceId) {
-    return (
-      <FuelSlipReview
-        invoiceId={fuelSlipInvoiceId}
-        onBack={() => { handleViewChange('dashboard'); setFuelSlipInvoiceId(null); }}
-        onOpenVoucher={(id) => {
-          setVoucherInvoiceId(id);
-          setFuelSlipInvoiceId(null);
-          handleViewChange('voucher');
-        }}
-      />
-    );
-  }
-
-  if (currentView === 'voucher') {
-    return (
-      <VoucherEntry
-        invoiceId={voucherInvoiceId}
-        invoiceData={voucherInvoiceData}
-        onBack={() => {
-          if (voucherInvoiceId) {
-            setFuelSlipInvoiceId(voucherInvoiceId);
-            handleViewChange('fuelSlip');
-          } else {
-            handleViewChange('dashboard');
-          }
-          setVoucherInvoiceId(null);
-          setVoucherInvoiceData(null);
-        }}
-        onDashboard={() => {
-          handleViewChange('dashboard');
-          setVoucherInvoiceId(null);
-          setVoucherInvoiceData(null);
-        }}
-      />
-    );
-  }
-
-  if (currentView === 'cementRegister') {
-    return <CementRegister onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'voucherRegister') {
-    return <VoucherRegister onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'gstPortalRegister') {
-    return <GSTPortalRegister onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'mainCashbook') {
-    return <MainCashbook onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'pumpPayment') {
-    return <PumpPaymentDetails onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'pumpPaymentRegister') {
-    return <PumpPaymentRegister onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'partyPayment') {
-    return <PartyPaymentDetails onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'fyDetails') {
-    return <FinancialYearDetails onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'totalPaymentReports') {
-    return <TotalPaymentReports onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'pieChart') {
-    return <PieChartDashboard onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'accountDetails') {
-    return <AccountDetails onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'printingStationary') {
-    return <AccountDetails initialLedgerFilter="Printing & Stationary" onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'accountApprovals') {
-    return <AccountApprovalsPage onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'fuelRateSettings') {
-    return <FuelRateSettings onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'dailySummary') {
-    return (
-      <DailySummaryReport
-        onBack={() => handleViewChange('dashboard')}
-        onUploadNew={() => handleViewChange('dashboard')} // Will trigger upload via dashboard or we can just go dashboard
-        onOpenCementRegister={() => handleViewChange('cementRegister')}
-        onOpenPartyPayment={() => handleViewChange('partyPayment')}
-        onOpenPumpPaymentRegister={() => handleViewChange('pumpPaymentRegister')}
-      />
-    );
-  }
-
-  if (currentView === 'aiExtraExpense') {
-    return <AiExtraExpense onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'incentiveCalculationSheet') {
-    return <IncentiveCalculationSheet onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'attendancePanel') {
-    return <AttendancePanel onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'tdsReports') {
-    return <TdsReportsPage onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'othersCreditor') {
-    return <OthersCreditor onBack={() => handleViewChange('dashboard')} />;
-  }
-
-  if (currentView === 'dashboard') {
-    if (import.meta.env.VITE_PORTAL === 'brinda') {
+    if (currentView === 'lorryHireSlip' && lorrySlipInvoiceId) {
       return (
-        <BrindaPortal
-          onLogout={() => {
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            window.location.reload();
+        <LorryHireSlipReview
+          invoiceId={lorrySlipInvoiceId}
+          onBack={() => { handleViewChange('dashboard'); setLorrySlipInvoiceId(null); }}
+          onOpenFuelSlip={() => {
+            setFuelSlipInvoiceId(lorrySlipInvoiceId);
+            setLorrySlipInvoiceId(null);
+            handleViewChange('fuelSlip');
           }}
-          onOpenCementRegister={() => handleViewChange('cementRegister')}
-          onOpenMainCashbook={() => handleViewChange('mainCashbook')}
-          onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
-          onOpenDashboard={() => handleViewChange('dashboard')}
         />
       );
     }
 
-    if (isMobile) {
-      if (user.role === 'PETROL PUMP') {
+    if (currentView === 'fuelSlip' && fuelSlipInvoiceId) {
+      return (
+        <FuelSlipReview
+          invoiceId={fuelSlipInvoiceId}
+          onBack={() => { handleViewChange('dashboard'); setFuelSlipInvoiceId(null); }}
+          onOpenVoucher={(id) => {
+            setVoucherInvoiceId(id);
+            setFuelSlipInvoiceId(null);
+            handleViewChange('voucher');
+          }}
+        />
+      );
+    }
+
+    if (currentView === 'voucher') {
+      return (
+        <VoucherEntry
+          invoiceId={voucherInvoiceId}
+          invoiceData={voucherInvoiceData}
+          onBack={() => {
+            if (voucherInvoiceId) {
+              setFuelSlipInvoiceId(voucherInvoiceId);
+              handleViewChange('fuelSlip');
+            } else {
+              handleViewChange('dashboard');
+            }
+            setVoucherInvoiceId(null);
+            setVoucherInvoiceData(null);
+          }}
+          onDashboard={() => {
+            handleViewChange('dashboard');
+            setVoucherInvoiceId(null);
+            setVoucherInvoiceData(null);
+          }}
+        />
+      );
+    }
+
+    if (currentView === 'cementRegister') {
+      return <CementRegister onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'voucherRegister') {
+      return <VoucherRegister onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'gstPortalRegister') {
+      return <GSTPortalRegister onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'printingStationary') {
+      return <GSTPortalRegister onBack={() => handleViewChange('dashboard')} initialTab={3} />;
+    }
+
+    if (currentView === 'mainCashbook') {
+      return <MainCashbook onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'pumpPayment') {
+      return <PumpPaymentDetails onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'pumpPaymentRegister') {
+      return <PumpPaymentRegister onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'partyPayment') {
+      return <PartyPaymentDetails onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'fyDetails') {
+      return <FinancialYearDetails onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'totalPaymentReports') {
+      return <TotalPaymentReports onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'pieChart') {
+      return <PieChartDashboard onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'accountDetails') {
+      return <AccountDetails onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'accountApprovals') {
+      return <AccountApprovalsPage onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'fuelRateSettings') {
+      return <FuelRateSettings onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'dailySummary') {
+      return (
+        <DailySummaryReport
+          onBack={() => handleViewChange('dashboard')}
+          onUploadNew={() => handleViewChange('dashboard')} // Will trigger upload via dashboard or we can just go dashboard
+          onOpenCementRegister={() => handleViewChange('cementRegister')}
+          onOpenPartyPayment={() => handleViewChange('partyPayment')}
+          onOpenPumpPaymentRegister={() => handleViewChange('pumpPaymentRegister')}
+        />
+      );
+    }
+
+    if (currentView === 'aiExtraExpense') {
+      return <AiExtraExpense onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'incentiveCalculationSheet') {
+      return <IncentiveCalculationSheet onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'attendancePanel') {
+      return <AttendancePanel onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'tdsReports') {
+      return <TdsReportsPage onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'othersCreditor') {
+      return <OthersCreditor onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'dashboard') {
+      if (import.meta.env.VITE_PORTAL === 'brinda') {
         return (
-          <PumpPortal
-            onOpenBillingSheet={() => handleViewChange('pumpPayment')}
-            onRegisterBiometrics={() => {
-              alert("Biometric registration is initiated. Please follow the system prompt.");
+          <BrindaPortal
+            onLogout={() => {
+              localStorage.removeItem('token');
+              localStorage.removeItem('user');
+              window.location.reload();
             }}
+            onOpenCementRegister={() => handleViewChange('cementRegister')}
+            onOpenMainCashbook={() => handleViewChange('mainCashbook')}
+            onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
+            onOpenDashboard={() => handleViewChange('dashboard')}
           />
         );
       }
-      if (import.meta.env.VITE_PORTAL === 'site' || user.role === 'OFFICE') {
+
+      if (isMobile) {
+        if (user.role === 'PETROL PUMP') {
+          return (
+            <PumpPortal
+              onOpenBillingSheet={() => handleViewChange('pumpPayment')}
+              onRegisterBiometrics={() => {
+                alert("Biometric registration is initiated. Please follow the system prompt.");
+              }}
+            />
+          );
+        }
+        if (import.meta.env.VITE_PORTAL === 'site' || user.role === 'OFFICE') {
+          return (
+            <SitePortal
+              onUploadNew={() => handleViewChange('upload')}
+              onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); handleViewChange('lorryHireSlip'); }}
+              onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); handleViewChange('fuelSlip'); }}
+              onOpenRegisters={() => handleViewChange('cementRegister')}
+              onOpenVouchers={() => handleViewChange('voucherRegister')}
+            />
+          );
+        }
         return (
-          <SitePortal
+          <OfficePortal
             onUploadNew={() => handleViewChange('upload')}
             onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); handleViewChange('lorryHireSlip'); }}
             onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); handleViewChange('fuelSlip'); }}
-            onOpenRegisters={() => handleViewChange('cementRegister')}
+            onOpenFuelRateSettings={() => handleViewChange('fuelRateSettings')}
             onOpenVouchers={() => handleViewChange('voucherRegister')}
+            onOpenContacts="truckManager"
+            onOpenAccountApprovals={() => handleViewChange('accountApprovals')}
           />
         );
       }
+
+      // Desktop Routing
+      if (user.role === 'PETROL PUMP') {
+        return (
+          <PumpDashboard
+            onOpenPumpPayment={() => handleViewChange('pumpPayment')}
+          />
+        );
+      }
+
       return (
-        <OfficePortal
+        <Dashboard
           onUploadNew={() => handleViewChange('upload')}
           onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); handleViewChange('lorryHireSlip'); }}
           onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); handleViewChange('fuelSlip'); }}
+          onOpenCementRegister={() => handleViewChange('cementRegister')}
+          onOpenVoucherRegister={() => handleViewChange('voucherRegister')}
+          onOpenGSTPortalRegister={() => handleViewChange('gstPortalRegister')}
+          onOpenMainCashbook={() => handleViewChange('mainCashbook')}
+          onOpenPumpPayment={() => handleViewChange('pumpPayment')}
+          onOpenPumpPaymentRegister={() => handleViewChange('pumpPaymentRegister')}
+          onOpenPartyPayment={() => handleViewChange('partyPayment')}
+          onOpenFYDetails={() => handleViewChange('fyDetails')}
+          onOpenTotalPaymentReports={() => handleViewChange('totalPaymentReports')}
+          onOpenPieChart={() => handleViewChange('pieChart')}
           onOpenFuelRateSettings={() => handleViewChange('fuelRateSettings')}
-          onOpenVouchers={() => handleViewChange('voucherRegister')}
-          onOpenContacts="truckManager"
+          onOpenAccountDetails={() => handleViewChange('accountDetails')}
           onOpenAccountApprovals={() => handleViewChange('accountApprovals')}
+          onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
+          onOpenAiExtraExpense={() => handleViewChange('aiExtraExpense')}
+          onOpenIncentiveSheet={() => handleViewChange('incentiveCalculationSheet')}
+          onOpenAttendancePanel={() => handleViewChange('attendancePanel')}
+          onOpenTdsReports={() => handleViewChange('tdsReports')}
+          onOpenOthersCreditor={() => handleViewChange('othersCreditor')}
+          onOpenPrintingStationary={() => handleViewChange('printingStationary')}
         />
       );
     }
 
-    // Desktop Routing
-    if (user.role === 'PETROL PUMP') {
-      return (
-        <PumpDashboard
-          onOpenPumpPayment={() => handleViewChange('pumpPayment')}
-        />
-      );
-    }
 
     return (
-      <Dashboard
-        onUploadNew={() => handleViewChange('upload')}
-        onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); handleViewChange('lorryHireSlip'); }}
-        onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); handleViewChange('fuelSlip'); }}
-        onOpenCementRegister={() => handleViewChange('cementRegister')}
-        onOpenVoucherRegister={() => handleViewChange('voucherRegister')}
-        onOpenGSTPortalRegister={() => handleViewChange('gstPortalRegister')}
-        onOpenMainCashbook={() => handleViewChange('mainCashbook')}
-        onOpenPumpPayment={() => handleViewChange('pumpPayment')}
-        onOpenPumpPaymentRegister={() => handleViewChange('pumpPaymentRegister')}
-        onOpenPartyPayment={() => handleViewChange('partyPayment')}
-        onOpenFYDetails={() => handleViewChange('fyDetails')}
-        onOpenTotalPaymentReports={() => handleViewChange('totalPaymentReports')}
-        onOpenPieChart={() => handleViewChange('pieChart')}
-        onOpenFuelRateSettings={() => handleViewChange('fuelRateSettings')}
-        onOpenAccountDetails={() => handleViewChange('accountDetails')}
-        onOpenPrintingStationary={() => handleViewChange('printingStationary')}
-        onOpenAccountApprovals={() => handleViewChange('accountApprovals')}
-        onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
-        onOpenAiExtraExpense={() => handleViewChange('aiExtraExpense')}
-        onOpenIncentiveSheet={() => handleViewChange('incentiveCalculationSheet')}
-        onOpenAttendancePanel={() => handleViewChange('attendancePanel')}
-        onOpenTdsReports={() => handleViewChange('tdsReports')}
-        onOpenOthersCreditor={() => handleViewChange('othersCreditor')}
-      />
+      <InvoiceForm onBack={() => handleViewChange('dashboard')} />
     );
-  }
-
-
-  return (
-    <InvoiceForm onBack={() => handleViewChange('dashboard')} />
-  );
   };
 
   return (
     <>
       <VantaTrunkBackground />
       <Box sx={{
-          minHeight: '100vh',
-          bgcolor: 'rgba(15, 20, 25, 0.2)', // Subtle dark overlay for Vanta
-          transition: 'opacity 0.3s ease',
-          opacity: isTransitioning ? 0 : 1
+        minHeight: '100vh',
+        bgcolor: 'rgba(15, 20, 25, 0.2)', // Subtle dark overlay for Vanta
+        transition: 'opacity 0.3s ease',
+        opacity: isTransitioning ? 0 : 1
       }}>
         {renderView()}
       </Box>

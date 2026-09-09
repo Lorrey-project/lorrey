@@ -76,7 +76,7 @@ const socket = io(SOCKET_URL, {
 });
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-export default function GSTPortalRegister({ onBack }) {
+export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [snack, setSnack] = useState(null);
@@ -84,7 +84,7 @@ export default function GSTPortalRegister({ onBack }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [uploadingObj, setUploadingObj] = useState(null); // { id: rowId }
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(initialTab);
   const now = new Date();
   const [filterMonth, setFilterMonth] = useState(now.getMonth() + 1);
   const [filterYear, setFilterYear] = useState(now.getFullYear());
@@ -97,8 +97,25 @@ export default function GSTPortalRegister({ onBack }) {
   const tableContainerRef = useRef(null);
   useTableNavigation(tableContainerRef);
 
-  const allSelected = entries.length > 0 && selectedIds.size === entries.length;
+  const currentEntries = useMemo(() => {
+    if (activeTab === 1) return entries.filter(e => !e.type || e.type === 'b2b');
+    if (activeTab === 3) return entries.filter(e => e.type === 'printing_stationary');
+    if (activeTab === 2) return entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear));
+    return [];
+  }, [entries, activeTab, filterMonth, filterYear]);
+
+  const allSelected = currentEntries.length > 0 && selectedIds.size === currentEntries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
+
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const s = new Set(prev);
+    s.has(id) ? s.delete(id) : s.add(id);
+    return s;
+  });
+  const toggleSelectAll = () => {
+    if (allSelected || someSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(currentEntries.map(v => v._id)));
+  };
 
   const fileInputRef = useRef(null);
   const [targetRowIdForUpload, setTargetRowIdForUpload] = useState(null);
@@ -112,16 +129,6 @@ export default function GSTPortalRegister({ onBack }) {
   const [duplicateHandlingMode, setDuplicateHandlingMode] = useState('skip');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null); // { imported: 0, skipped: 0, failed: 0 }
-
-  const toggleSelect = (id) => setSelectedIds(prev => {
-    const s = new Set(prev);
-    s.has(id) ? s.delete(id) : s.add(id);
-    return s;
-  });
-  const toggleSelectAll = () => {
-    if (allSelected || someSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(entries.map(v => v._id)));
-  };
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -231,7 +238,7 @@ export default function GSTPortalRegister({ onBack }) {
 
       const nextSlNo = currentEntries.length > 0 ? Math.max(...currentEntries.map(e => e['SL NO'] || 0)) + 1 : 1;
 
-      const payload = { "SL NO": nextSlNo, type: activeTab === 1 ? 'b2b' : 'liability' };
+      const payload = { "SL NO": nextSlNo, type: activeTab === 3 ? 'printing_stationary' : (activeTab === 1 ? 'b2b' : 'liability') };
       if (activeTab === 2) {
         payload.filterMonth = filterMonth;
         payload.filterYear = filterYear;
@@ -740,8 +747,7 @@ export default function GSTPortalRegister({ onBack }) {
       const invalidCount = parsedRows.length - validRows.length;
       let skippedCount = 0;
 
-      const token = localStorage.getItem('token');
-      const b2bEntries = entries.filter(e => !e.type || e.type === 'b2b');
+      const b2bEntries = activeTab === 3 ? entries.filter(e => e.type === 'printing_stationary') : entries.filter(e => !e.type || e.type === 'b2b');
       const nextSlNo = b2bEntries.length > 0 ? Math.max(...b2bEntries.map(e => e['SL NO'] || 0)) + 1 : 1;
       let currentNextSl = nextSlNo;
 
@@ -780,7 +786,8 @@ export default function GSTPortalRegister({ onBack }) {
         } else {
           toInsertRows.push({
             ...row.mapped,
-            'SL NO': currentNextSl
+            'SL NO': currentNextSl,
+            type: activeTab === 3 ? 'printing_stationary' : 'b2b'
           });
           currentNextSl++;
         }
@@ -835,8 +842,9 @@ export default function GSTPortalRegister({ onBack }) {
       setSnack({ severity: 'info', msg: 'Export for GSTR_1 is not yet available.' });
       return;
     }
-    const exportCols = activeTab === 1 ? COLUMNS.filter(c => c.type !== 'upload') : LIABILITY_COLUMNS;
-    const rows = (activeTab === 1 ? entries.filter(e => !e.type || e.type === 'b2b') : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))).map(v => {
+    const isB2bLikeTab = (activeTab === 1 || activeTab === 3);
+    const exportCols = isB2bLikeTab ? COLUMNS.filter(c => c.type !== 'upload') : LIABILITY_COLUMNS;
+    const rows = filteredEntries.map(v => {
       const row = {};
       exportCols.forEach(c => {
         const val = v[c.key];
@@ -845,7 +853,7 @@ export default function GSTPortalRegister({ onBack }) {
       return row;
     });
     import('../utils/exportCsv').then(({ exportToCsv }) =>
-      exportToCsv('gst_portal_register.xls', rows)
+      exportToCsv(activeTab === 3 ? 'printing_stationary_b2b.xls' : 'gst_portal_register.xls', rows)
     );
   };
 
@@ -865,7 +873,8 @@ export default function GSTPortalRegister({ onBack }) {
   }
 
   // Calculate Totals
-  const totals = activeTab === 1 ? {
+  const isB2bLikeTab = (activeTab === 1 || activeTab === 3);
+  const totals = isB2bLikeTab ? {
     'Invoice Value': 0,
     'Taxable Value': 0,
     'Integrated Tax': 0,
@@ -880,10 +889,12 @@ export default function GSTPortalRegister({ onBack }) {
 
   const filteredEntries = activeTab === 1
     ? entries.filter(e => !e.type || e.type === 'b2b')
+    : activeTab === 3
+    ? entries.filter(e => e.type === 'printing_stationary')
     : activeTab === 2 ? entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear)) : [];
 
   filteredEntries.forEach(row => {
-    if (activeTab === 1) {
+    if (isB2bLikeTab) {
       Object.keys(totals).forEach(k => {
         const val = parseFloat(row[k]);
         if (!isNaN(val)) totals[k] += val;
@@ -998,7 +1009,7 @@ export default function GSTPortalRegister({ onBack }) {
           <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={handleAddNewRow}
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>New Row</Button>
 
-          {activeTab === 1 && (
+          {(activeTab === 1 || activeTab === 3) && (
             <Button size="small" variant="outlined" startIcon={<FileUploadIcon />} onClick={handleTriggerExcelUpload}
               sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>Upload XLS</Button>
           )}
@@ -1024,6 +1035,7 @@ export default function GSTPortalRegister({ onBack }) {
           <Tab label="GSTR_1" />
           <Tab label="B2B" />
           <Tab label="GST LIABILITIES" />
+          <Tab label="PRINTING & STATIONARY" />
         </Tabs>
       </Box>
 
@@ -1032,7 +1044,7 @@ export default function GSTPortalRegister({ onBack }) {
         <Gstr1Tab entries={entries} filterMonth={filterMonth} filterYear={filterYear} />
       )}
 
-      {activeTab === 1 && (
+      {(activeTab === 1 || activeTab === 3) && (
         <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
           <table style={{
             borderCollapse: 'collapse', minWidth: '100%',
@@ -1085,7 +1097,7 @@ export default function GSTPortalRegister({ onBack }) {
             </thead>
 
             <tbody>
-              {entries.filter(e => !e.type || e.type === 'b2b').length === 0 && (
+              {filteredEntries.length === 0 && (
                 <tr>
                   <td colSpan={COLUMNS.length + 1} style={{
                     textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px'
@@ -1094,7 +1106,7 @@ export default function GSTPortalRegister({ onBack }) {
                   </td>
                 </tr>
               )}
-              {entries.filter(e => !e.type || e.type === 'b2b').map((row, ri) => {
+              {filteredEntries.map((row, ri) => {
                 const isSelected = selectedIds.has(row._id);
                 return (
                   <tr key={row._id} style={{
