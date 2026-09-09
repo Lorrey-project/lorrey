@@ -52,7 +52,7 @@ const _dashSocket = io(SOCKET_URL, {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenOthersCreditor }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenPrintingStationary, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenOthersCreditor }) => {
 
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
@@ -771,6 +771,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                 <SectionHeading title="FINANCIAL MANAGEMENT" accentColor="#10b981" />
                                 <Grid container spacing={3}>
                                     <ActionCard title="BANK BOOK" subtitle="Transactions & Balances" icon={<AccountBalanceWalletIcon />} accentColor="#10b981" onClick={onOpenAccountDetails} />
+                                    <ActionCard title="PRINTING & STATIONARY" subtitle="Stationary & B2B Bills" icon={<PrintIcon />} accentColor="#e11d48" onClick={onOpenPrintingStationary} />
                                     <ActionCard title="MAIN CASH BOOK" subtitle="Daily Cash Flow" icon={<DescriptionIcon />} accentColor="#06b6d4" onClick={onOpenMainCashbook} />
                                     <ActionCard title="PUMP PAYMENT DETAILS" subtitle="Clear Pump Dues" icon={<LocalGasStationIcon />} accentColor="#0ea5e9" onClick={onOpenPumpPayment} />
                                     <ActionCard title="PUMP PAYMENT REGISTER" subtitle="Payment Register" icon={<ReceiptLongIcon />} accentColor="#38bdf8" onClick={onOpenPumpPaymentRegister} />

@@ -194,7 +194,8 @@ function formatExcelDate(rawDate) {
 }
 
 
-export default function AccountDetails({ onBack }) {
+export default function AccountDetails({ onBack, initialLedgerFilter = '' }) {
+  const [activeLedgerFilter, setActiveLedgerFilter] = useState(initialLedgerFilter);
   const [entries, setEntries] = useState([]);
   const [vehicleList, setVehicleList] = useState([]);
   const [ownerVehicleMap, setOwnerVehicleMap] = useState({});
@@ -745,14 +746,24 @@ export default function AccountDetails({ onBack }) {
       return 0;
     });
 
+    if (activeLedgerFilter) {
+      result = result.filter(row => {
+        const ledger = localData[row._id]?.['Ledger Name'] !== undefined ? localData[row._id]['Ledger Name'] : (row['Ledger Name'] || row.ledgerName || '');
+        if (isPrintingAndStationary(activeLedgerFilter)) {
+          return isPrintingAndStationary(ledger);
+        }
+        return String(ledger).toLowerCase() === String(activeLedgerFilter).toLowerCase();
+      });
+    }
+
     return result;
-  }, [computedRows, filterFrom, filterTo, unsavedImportRows, localData]);
+  }, [computedRows, filterFrom, filterTo, unsavedImportRows, localData, activeLedgerFilter]);
 
   const displayedRows = useMemo(() => {
     return filteredRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   }, [filteredRows, page, rowsPerPage]);
 
-  const isFiltered = !!(filterFrom || filterTo);
+  const isFiltered = !!(filterFrom || filterTo || activeLedgerFilter);
 
   const handleCellEdit = useCallback((rowId, field, value) => {
     setLocalData(prev => ({ ...prev, [rowId]: { ...(prev[rowId] || {}), [field]: value } }));
@@ -761,12 +772,14 @@ export default function AccountDetails({ onBack }) {
   const handleAddRow = () => {
     const newId = 'new_' + Date.now();
     const today = new Date().toISOString().split('T')[0]; // Auto-fill today's date (YYYY-MM-DD)
-    setEntries(prev => [{ _id: newId, isNewRow: true }, ...prev]);
+    const initLedger = activeLedgerFilter || '';
+    setEntries(prev => [{ _id: newId, isNewRow: true, 'Ledger Name': initLedger }, ...prev]);
     setLocalData(prev => ({
       ...prev,
       [newId]: {
         isNewRow: true,
         'Transaction Date': today,
+        ...(initLedger ? { 'Ledger Name': initLedger } : {}),
         selectedMonth: displayMonth,
         selectedYear: displayYear
       }
@@ -1194,9 +1207,19 @@ export default function AccountDetails({ onBack }) {
             <ArrowBackIcon />
           </IconButton>
           <Box>
-            <Typography variant="h5" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.1 }}>
-              Bank Book
-            </Typography>
+            <Box display="flex" alignItems="center" gap={1.5}>
+              <Typography variant="h5" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.1 }}>
+                {activeLedgerFilter ? `${activeLedgerFilter} Book` : 'Bank Book'}
+              </Typography>
+              {activeLedgerFilter && (
+                <Chip
+                  label={`${activeLedgerFilter} Only`}
+                  size="small"
+                  onDelete={() => setActiveLedgerFilter('')}
+                  sx={{ bgcolor: '#ffe4e6', color: '#e11d48', fontWeight: 800, border: '1px solid #fecdd3' }}
+                />
+              )}
+            </Box>
             <Typography variant="caption" fontWeight={600} color="#64748b">
               Financial Year {displayYear} • {displayMonth}
             </Typography>

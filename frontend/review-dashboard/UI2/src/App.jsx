@@ -269,6 +269,10 @@ function AppContent() {
     return <AccountDetails onBack={() => handleViewChange('dashboard')} />;
   }
 
+  if (currentView === 'printingStationary') {
+    return <AccountDetails initialLedgerFilter="Printing & Stationary" onBack={() => handleViewChange('dashboard')} />;
+  }
+
   if (currentView === 'accountApprovals') {
     return <AccountApprovalsPage onBack={() => handleViewChange('dashboard')} />;
   }
@@ -387,6 +391,7 @@ function AppContent() {
         onOpenPieChart={() => handleViewChange('pieChart')}
         onOpenFuelRateSettings={() => handleViewChange('fuelRateSettings')}
         onOpenAccountDetails={() => handleViewChange('accountDetails')}
+        onOpenPrintingStationary={() => handleViewChange('printingStationary')}
         onOpenAccountApprovals={() => handleViewChange('accountApprovals')}
         onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
         onOpenAiExtraExpense={() => handleViewChange('aiExtraExpense')}
