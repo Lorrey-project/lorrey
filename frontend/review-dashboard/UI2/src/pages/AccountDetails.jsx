@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
-  Autocomplete, TextField, Divider, LinearProgress,
+  Autocomplete, TextField, Divider, LinearProgress, Tabs, Tab,
   TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Checkbox, TablePagination
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -1238,7 +1238,35 @@ export default function AccountDetails({ onBack, initialLedgerFilter = '' }) {
           </Box>
         </Box>
 
-
+        {/* ── Top Tabs Navigation ── */}
+        <Box sx={{ px: 3, pt: 1, borderTop: '1px solid #f1f5f9' }}>
+          <Tabs
+            value={isPrintingAndStationary(activeLedgerFilter) ? 'Printing & Stationary' : (activeLedgerFilter || '')}
+            onChange={(e, val) => setActiveLedgerFilter(val)}
+            aria-label="bank book tabs"
+            sx={{
+              minHeight: 40,
+              '& .MuiTab-root': {
+                fontWeight: 700,
+                fontSize: '13px',
+                textTransform: 'none',
+                minHeight: 40,
+                px: 2.5,
+                color: '#64748b',
+                '&.Mui-selected': { color: '#0f766e !important' }
+              },
+              '& .MuiTabs-indicator': { backgroundColor: '#0f766e', height: 3, borderRadius: '3px 3px 0 0' }
+            }}
+          >
+            <Tab label="All Transactions" value="" />
+            <Tab
+              label="Printing & Stationary"
+              value="Printing & Stationary"
+              icon={<PrintIcon sx={{ fontSize: 16 }} />}
+              iconPosition="start"
+            />
+          </Tabs>
+        </Box>
       </Box>
 
       {/* ── ERP Toolbar ── */}
