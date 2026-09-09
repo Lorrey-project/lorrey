@@ -71,12 +71,12 @@ const MONTH_NAMES = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 const socket = io(SOCKET_URL, {
-    autoConnect: true,
-    transports: ["websocket", "polling"]
+  autoConnect: true,
+  transports: ["websocket", "polling"]
 });
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
+export default function GSTPortalRegister({ onBack }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [snack, setSnack] = useState(null);
@@ -84,13 +84,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [uploadingObj, setUploadingObj] = useState(null); // { id: rowId }
-  const [activeTab, setActiveTab] = useState(initialTab);
-
-  useEffect(() => {
-    if (initialTab !== undefined) {
-      setActiveTab(initialTab);
-    }
-  }, [initialTab]);
+  const [activeTab, setActiveTab] = useState(0);
   const now = new Date();
   const [filterMonth, setFilterMonth] = useState(now.getMonth() + 1);
   const [filterYear, setFilterYear] = useState(now.getFullYear());
@@ -103,25 +97,8 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
   const tableContainerRef = useRef(null);
   useTableNavigation(tableContainerRef);
 
-  const currentEntries = useMemo(() => {
-    if (activeTab === 1) return entries.filter(e => !e.type || e.type === 'b2b');
-    if (activeTab === 3) return entries.filter(e => e.type === 'printing_stationary');
-    if (activeTab === 2) return entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear));
-    return [];
-  }, [entries, activeTab, filterMonth, filterYear]);
-
-  const allSelected = currentEntries.length > 0 && selectedIds.size === currentEntries.length;
+  const allSelected = entries.length > 0 && selectedIds.size === entries.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
-
-  const toggleSelect = (id) => setSelectedIds(prev => {
-    const s = new Set(prev);
-    s.has(id) ? s.delete(id) : s.add(id);
-    return s;
-  });
-  const toggleSelectAll = () => {
-    if (allSelected || someSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(currentEntries.map(v => v._id)));
-  };
 
   const fileInputRef = useRef(null);
   const [targetRowIdForUpload, setTargetRowIdForUpload] = useState(null);
@@ -135,6 +112,16 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
   const [duplicateHandlingMode, setDuplicateHandlingMode] = useState('skip');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null); // { imported: 0, skipped: 0, failed: 0 }
+
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const s = new Set(prev);
+    s.has(id) ? s.delete(id) : s.add(id);
+    return s;
+  });
+  const toggleSelectAll = () => {
+    if (allSelected || someSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(entries.map(v => v._id)));
+  };
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -244,7 +231,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
 
       const nextSlNo = currentEntries.length > 0 ? Math.max(...currentEntries.map(e => e['SL NO'] || 0)) + 1 : 1;
 
-      const payload = { "SL NO": nextSlNo, type: activeTab === 3 ? 'printing_stationary' : (activeTab === 1 ? 'b2b' : 'liability') };
+      const payload = { "SL NO": nextSlNo, type: activeTab === 1 ? 'b2b' : 'liability' };
       if (activeTab === 2) {
         payload.filterMonth = filterMonth;
         payload.filterYear = filterYear;
@@ -283,7 +270,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
   const handleBulkDelete = async () => {
     setConfirmDel(true);
   };
-  const handleSave = () => {};
+  const handleSave = () => { };
   const handleDelete = async () => {
     setDeleting(true);
     try {
@@ -341,12 +328,12 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
     const map = {};
     COLUMNS.forEach(col => {
       if (col.key === 'SL NO' || col.key === 'GST_FILE_URL') return;
-      
+
       const possibleMatches = new Set([
         normalizeHeader(col.key),
         normalizeHeader(col.label)
       ]);
-      
+
       // Also add explicit clean variants for standard B2B columns
       if (col.key === 'GSTIN of Supplier') {
         possibleMatches.add('gstin');
@@ -403,7 +390,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
         possibleMatches.add('cess (inr)');
         possibleMatches.add('cess (₹)');
       }
-      
+
       map[col.key] = Array.from(possibleMatches);
     });
     return map;
@@ -419,14 +406,14 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
 
   const parseExcelDate = (val) => {
     if (!val) return { isValid: false, reason: 'Empty date' };
-    
+
     if (val instanceof Date) {
       if (isNaN(val.getTime())) {
         return { isValid: false, reason: 'Invalid Date Object' };
       }
       return { isValid: true, date: val };
     }
-    
+
     if (typeof val === 'number') {
       const date = new Date((val - 25569) * 86400 * 1000);
       if (isNaN(date.getTime())) {
@@ -434,16 +421,16 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
       }
       return { isValid: true, date };
     }
-    
+
     const str = String(val).trim();
-    
+
     // Pattern 1: DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
     const ddmmyyyy = str.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})$/);
     if (ddmmyyyy) {
       const d = parseInt(ddmmyyyy[1], 10);
       const m = parseInt(ddmmyyyy[2], 10);
       const y = parseInt(ddmmyyyy[3], 10);
-      
+
       if (m < 1 || m > 12) {
         return { isValid: false, reason: 'Month must be between 1 and 12' };
       }
@@ -451,17 +438,17 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
       if (d < 1 || d > daysInMonth) {
         return { isValid: false, reason: `Day must be between 1 and ${daysInMonth} for month ${m}` };
       }
-      
+
       return { isValid: true, date: new Date(y, m - 1, d) };
     }
-    
+
     // Pattern 2: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
     const yyyymmdd = str.match(/^(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})$/);
     if (yyyymmdd) {
       const y = parseInt(yyyymmdd[1], 10);
       const m = parseInt(yyyymmdd[2], 10);
       const d = parseInt(yyyymmdd[3], 10);
-      
+
       if (m < 1 || m > 12) {
         return { isValid: false, reason: 'Month must be between 1 and 12' };
       }
@@ -469,10 +456,10 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
       if (d < 1 || d > daysInMonth) {
         return { isValid: false, reason: `Day must be between 1 and ${daysInMonth} for month ${m}` };
       }
-      
+
       return { isValid: true, date: new Date(y, m - 1, d) };
     }
-    
+
     return { isValid: false, reason: 'Ambiguous format (use DD/MM/YYYY or YYYY-MM-DD)' };
   };
 
@@ -540,7 +527,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
         rawHeaders.forEach((rawHeader, index) => {
           if (!rawHeader) return;
           const normalized = normalizeHeader(rawHeader);
-          
+
           let matchedKey = null;
           for (const key of Object.keys(B2B_COLUMN_MATCHES)) {
             const matches = B2B_COLUMN_MATCHES[key];
@@ -573,18 +560,18 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
         for (let R = range.s.r + 1; R <= range.e.r; ++R) {
           const rowData = {};
           let rowHasData = false;
-          
+
           for (let C = range.s.c; C <= range.e.c; ++C) {
             const b2bKey = headerMapping[C];
             if (!b2bKey) continue;
-            
+
             const cell_ref = XLSX.utils.encode_cell({ c: C, r: R });
             const cell = worksheet[cell_ref];
-            
+
             let val = '';
             if (cell) {
               rowHasData = true;
-              
+
               if (cell.t === 'd' || (cell.v instanceof Date)) {
                 val = cell.v;
               } else if (cell.t === 'n') {
@@ -599,7 +586,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
             }
             rowData[b2bKey] = val;
           }
-          
+
           if (rowHasData) {
             excelRows.push(rowData);
           }
@@ -613,7 +600,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
         // 5. Perform validation and duplicate check
         const validated = excelRows.map((mappedRow, index) => {
           const errors = [];
-          
+
           let gstin = '';
           if (mappedRow['GSTIN of Supplier'] !== undefined && mappedRow['GSTIN of Supplier'] !== null) {
             gstin = String(mappedRow['GSTIN of Supplier']).trim();
@@ -753,7 +740,8 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
       const invalidCount = parsedRows.length - validRows.length;
       let skippedCount = 0;
 
-      const b2bEntries = activeTab === 3 ? entries.filter(e => e.type === 'printing_stationary') : entries.filter(e => !e.type || e.type === 'b2b');
+      const token = localStorage.getItem('token');
+      const b2bEntries = entries.filter(e => !e.type || e.type === 'b2b');
       const nextSlNo = b2bEntries.length > 0 ? Math.max(...b2bEntries.map(e => e['SL NO'] || 0)) + 1 : 1;
       let currentNextSl = nextSlNo;
 
@@ -792,8 +780,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
         } else {
           toInsertRows.push({
             ...row.mapped,
-            'SL NO': currentNextSl,
-            type: activeTab === 3 ? 'printing_stationary' : 'b2b'
+            'SL NO': currentNextSl
           });
           currentNextSl++;
         }
@@ -848,9 +835,8 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
       setSnack({ severity: 'info', msg: 'Export for GSTR_1 is not yet available.' });
       return;
     }
-    const isB2bLikeTab = (activeTab === 1 || activeTab === 3);
-    const exportCols = isB2bLikeTab ? COLUMNS.filter(c => c.type !== 'upload') : LIABILITY_COLUMNS;
-    const rows = filteredEntries.map(v => {
+    const exportCols = activeTab === 1 ? COLUMNS.filter(c => c.type !== 'upload') : LIABILITY_COLUMNS;
+    const rows = (activeTab === 1 ? entries.filter(e => !e.type || e.type === 'b2b') : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))).map(v => {
       const row = {};
       exportCols.forEach(c => {
         const val = v[c.key];
@@ -859,7 +845,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
       return row;
     });
     import('../utils/exportCsv').then(({ exportToCsv }) =>
-      exportToCsv(activeTab === 3 ? 'printing_stationary_b2b.xls' : 'gst_portal_register.xls', rows)
+      exportToCsv('gst_portal_register.xls', rows)
     );
   };
 
@@ -879,8 +865,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
   }
 
   // Calculate Totals
-  const isB2bLikeTab = (activeTab === 1 || activeTab === 3);
-  const totals = isB2bLikeTab ? {
+  const totals = activeTab === 1 ? {
     'Invoice Value': 0,
     'Taxable Value': 0,
     'Integrated Tax': 0,
@@ -895,12 +880,10 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
 
   const filteredEntries = activeTab === 1
     ? entries.filter(e => !e.type || e.type === 'b2b')
-    : activeTab === 3
-    ? entries.filter(e => e.type === 'printing_stationary')
     : activeTab === 2 ? entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear)) : [];
 
   filteredEntries.forEach(row => {
-    if (isB2bLikeTab) {
+    if (activeTab === 1) {
       Object.keys(totals).forEach(k => {
         const val = parseFloat(row[k]);
         if (!isNaN(val)) totals[k] += val;
@@ -937,12 +920,12 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TableChartIcon sx={{ color: '#0ea5e9', fontSize: 18 }} />
           <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-            {activeTab === 3 ? 'Printing & Stationary B2B Register' : activeTab === 1 ? 'GST B2B Register' : activeTab === 2 ? 'GST Liabilities' : 'GST Portal Details'}
+            GST Portal Details
           </Typography>
         </Box>
 
         <Chip
-          label={`${filteredEntries.length} entries`}
+          label={`${entries.length} entries`}
           size="small"
           sx={{ fontWeight: 700, bgcolor: '#e0f2fe', color: '#0ea5e9' }}
         />
@@ -1015,7 +998,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
           <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={handleAddNewRow}
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>New Row</Button>
 
-          {(activeTab === 1 || activeTab === 3) && (
+          {activeTab === 1 && (
             <Button size="small" variant="outlined" startIcon={<FileUploadIcon />} onClick={handleTriggerExcelUpload}
               sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>Upload XLS</Button>
           )}
@@ -1041,7 +1024,6 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
           <Tab label="GSTR_1" />
           <Tab label="B2B" />
           <Tab label="GST LIABILITIES" />
-          <Tab label="PRINTING & STATIONARY" />
         </Tabs>
       </Box>
 
@@ -1050,7 +1032,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
         <Gstr1Tab entries={entries} filterMonth={filterMonth} filterYear={filterYear} />
       )}
 
-      {(activeTab === 1 || activeTab === 3) && (
+      {activeTab === 1 && (
         <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
           <table style={{
             borderCollapse: 'collapse', minWidth: '100%',
@@ -1103,7 +1085,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
             </thead>
 
             <tbody>
-              {filteredEntries.length === 0 && (
+              {entries.filter(e => !e.type || e.type === 'b2b').length === 0 && (
                 <tr>
                   <td colSpan={COLUMNS.length + 1} style={{
                     textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px'
@@ -1112,7 +1094,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
                   </td>
                 </tr>
               )}
-              {filteredEntries.map((row, ri) => {
+              {entries.filter(e => !e.type || e.type === 'b2b').map((row, ri) => {
                 const isSelected = selectedIds.has(row._id);
                 return (
                   <tr key={row._id} style={{
@@ -1420,7 +1402,7 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
                   <Typography fontSize="13px"><strong>Total Rows:</strong> {totalParsed}</Typography>
                   <Typography fontSize="13px"><strong>Total Columns Match:</strong> {importColCount}</Typography>
                 </Box>
-                
+
                 <Box display="flex" gap={1.5} mb={2.5} flexWrap="wrap">
                   <Chip label={`${totalParsed} Rows Detected`} variant="outlined" sx={{ fontWeight: 700 }} />
                   <Chip label={`${validCount} Valid`} color="success" variant="outlined" sx={{ fontWeight: 700 }} />

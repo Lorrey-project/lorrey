@@ -237,10 +237,6 @@ function AppContent() {
       return <GSTPortalRegister onBack={() => handleViewChange('dashboard')} />;
     }
 
-    if (currentView === 'printingStationary') {
-      return <GSTPortalRegister onBack={() => handleViewChange('dashboard')} initialTab={3} />;
-    }
-
     if (currentView === 'mainCashbook') {
       return <MainCashbook onBack={() => handleViewChange('dashboard')} />;
     }
@@ -326,7 +322,6 @@ function AppContent() {
             onOpenMainCashbook={() => handleViewChange('mainCashbook')}
             onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
             onOpenDashboard={() => handleViewChange('dashboard')}
-            onOpenPrintingStationary={() => handleViewChange('printingStationary')}
           />
         );
       }
@@ -399,7 +394,6 @@ function AppContent() {
           onOpenAttendancePanel={() => handleViewChange('attendancePanel')}
           onOpenTdsReports={() => handleViewChange('tdsReports')}
           onOpenOthersCreditor={() => handleViewChange('othersCreditor')}
-          onOpenPrintingStationary={() => handleViewChange('printingStationary')}
         />
       );
     }
