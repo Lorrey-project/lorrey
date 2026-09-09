@@ -937,12 +937,12 @@ export default function GSTPortalRegister({ onBack, initialTab = 0 }) {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TableChartIcon sx={{ color: '#0ea5e9', fontSize: 18 }} />
           <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-            GST Portal Details
+            {activeTab === 3 ? 'Printing & Stationary B2B Register' : activeTab === 1 ? 'GST B2B Register' : activeTab === 2 ? 'GST Liabilities' : 'GST Portal Details'}
           </Typography>
         </Box>
 
         <Chip
-          label={`${entries.length} entries`}
+          label={`${filteredEntries.length} entries`}
           size="small"
           sx={{ fontWeight: 700, bgcolor: '#e0f2fe', color: '#0ea5e9' }}
         />
