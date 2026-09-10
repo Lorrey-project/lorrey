@@ -52,7 +52,7 @@ const _dashSocket = io(SOCKET_URL, {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenOthersCreditor }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenOthersCreditor, onOpenPrintingStationary }) => {
 
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
