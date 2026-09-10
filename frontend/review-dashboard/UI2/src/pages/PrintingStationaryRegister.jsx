@@ -66,18 +66,33 @@ export default function PrintingStationaryRegister({ onBack }) {
     try {
       const res = await axios.get(`${API_URL}/printing-stationary`, getAuthHeaders());
       if (res.data && res.data.success) {
-        const fetchedRows = res.data.entries.map((item, idx) => ({
-          _id: item._id,
-          slNo: item['SL NO'] || idx + 1,
-          purchase_item_name: item.purchase_item_name || '',
-          date: item.date || '',
-          amount: item.amount !== undefined ? item.amount : '',
-          reason: item.reason || '',
-          bill_pdf_url: item.bill_pdf_url || '',
-          bill_pdf_name: item.bill_pdf_name || '',
-          isDirty: false,
-          isNew: false
-        }));
+        const fetchedRows = res.data.entries.map((item, idx) => {
+          const numAmt = Number(item.amount) || 0;
+          const numPaid = Number(item.paid_amount) || 0;
+          const status = item.status || '';
+
+          let effectiveReason = item.reason || '';
+          if (status === 'DONE' || (numAmt > 0 && numPaid >= numAmt)) {
+            effectiveReason = 'DONE';
+          } else if (numPaid > 0 && numPaid < numAmt && !effectiveReason.startsWith('Paid:')) {
+            effectiveReason = `Paid: ₹${numPaid.toLocaleString('en-IN')} (Bal: ₹${(numAmt - numPaid).toLocaleString('en-IN')})`;
+          }
+
+          return {
+            _id: item._id,
+            slNo: item['SL NO'] || idx + 1,
+            purchase_item_name: item.purchase_item_name || '',
+            date: item.date || '',
+            amount: item.amount !== undefined ? item.amount : '',
+            reason: effectiveReason,
+            paid_amount: numPaid,
+            status: status,
+            bill_pdf_url: item.bill_pdf_url || '',
+            bill_pdf_name: item.bill_pdf_name || '',
+            isDirty: false,
+            isNew: false
+          };
+        });
         setRows(fetchedRows);
       }
     } catch (err) {
