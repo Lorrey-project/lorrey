@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery, Typography, IconButton } from '@mui/material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { ShortcutProvider } from './context/ShortcutContext';
 import GlobalShortcutHandler from './components/GlobalShortcutHandler';
 import InvoiceForm from './components/InvoiceForm';
@@ -94,6 +94,43 @@ const theme = createTheme({
     }
   }
 });
+
+const PrintingStationaryPage = ({ onBack }) => (
+  <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', p: { xs: 2, md: 4 }, color: '#f8fafc' }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
+      <IconButton onClick={onBack} sx={{ bgcolor: 'background.paper', border: '1px solid #334155', color: '#fff', '&:hover': { bgcolor: '#334155' } }}>
+        <ArrowBackIcon />
+      </IconButton>
+      <Box>
+        <Typography variant="h5" fontWeight={900} sx={{ color: '#f8fafc', letterSpacing: '-0.5px' }}>
+          PRINTING & STATIONARY
+        </Typography>
+        <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+          Homepage Tab &bull; Basic View
+        </Typography>
+      </Box>
+    </Box>
+
+    <Box sx={{
+      bgcolor: 'background.paper',
+      p: 6,
+      borderRadius: 4,
+      border: '1px solid #334155',
+      textAlign: 'center',
+      maxWidth: 600,
+      mx: 'auto',
+      mt: 6,
+      boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+    }}>
+      <Typography variant="h6" fontWeight={800} color="#f8fafc" mb={1}>
+        PRINTING & STATIONARY
+      </Typography>
+      <Typography variant="body2" color="#94a3b8">
+        This tab is ready. No forms, tables, or fields are added.
+      </Typography>
+    </Box>
+  </Box>
+);
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -235,6 +272,10 @@ function AppContent() {
 
     if (currentView === 'gstPortalRegister') {
       return <GSTPortalRegister onBack={() => handleViewChange('dashboard')} />;
+    }
+
+    if (currentView === 'printingStationary') {
+      return <PrintingStationaryPage onBack={() => handleViewChange('dashboard')} />;
     }
 
     if (currentView === 'mainCashbook') {
