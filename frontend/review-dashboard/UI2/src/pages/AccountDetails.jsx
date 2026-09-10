@@ -86,7 +86,7 @@ const NAMES_OPTIONS = [
   "Dipali Association", "Endhaan Cash Book", "Fasttag Payment", "Gorachand Dutta",
   "Goutam Kumar roy", "Haradhan Mondal", "Indranil Ray", "Interest paid",
   "ITR retund", "Jayanta maji", "Kanika nayak", "Kush Singh", "Main Cash",
-  "Manas Sarkar", "Manoj Modak", "Md Faiyaz Alam", "Mir Ahasan Ali", "NVCL",
+  "Manas Sarkar", "Manoj Modak", "Md Faiyaz Alam", "Mir Ahasan Ali", "NON_GST PURCHASE", "NVCL",
   "NVL", "Office Exp.", "Pbd Associations", "Prasanta Maji",
   "Printing & Stationary", "Ragunath guin", "Room Rent", "Ruhul Sk",
   "Sajal Banerjee", "satyanarayan Ghosh", "Sekh mustafa", "Suvadip Konar",
