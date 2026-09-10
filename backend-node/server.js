@@ -91,6 +91,7 @@ app.use("/settings", require("./routes/settingsRoutes"));
 app.use("/pie-chart", require("./routes/pieChartRoutes"));
 app.use("/others-creditors", require("./routes/othersCreditorRoutes"));
 app.use("/tds-reports", require("./routes/tdsReportRoutes"));
+app.use("/printing-stationary", require("./routes/printingStationaryRoutes"));
 
 
 const activePortals = {

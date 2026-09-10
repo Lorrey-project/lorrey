@@ -4,7 +4,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import PrintIcon from '@mui/icons-material/Print';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { useAuth } from '../../context/AuthContext';
 import { CreditorVehicleLedgerSection } from '../../pages/OthersCreditor';
 
@@ -13,8 +13,7 @@ const BrindaPortal = ({
   onOpenCementRegister,
   onOpenMainCashbook,
   onOpenDailySummaryReport,
-  onOpenDashboard,
-  onOpenPrintingStationary
+  onOpenDashboard
 }) => {
   const { user, logout } = useAuth();
 
@@ -85,18 +84,6 @@ const BrindaPortal = ({
               sx={{ color: '#e2e8f0', borderColor: '#475569', borderRadius: '8px', textTransform: 'none', fontWeight: 700, '&:hover': { borderColor: '#94a3b8', bgcolor: 'rgba(255,255,255,0.05)' } }}
             >
               Daily Summary
-            </Button>
-          )}
-
-          {onOpenPrintingStationary && (
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={onOpenPrintingStationary}
-              startIcon={<PrintIcon />}
-              sx={{ color: '#f43f5e', borderColor: 'rgba(244,63,94,0.4)', borderRadius: '8px', textTransform: 'none', fontWeight: 700, bgcolor: 'rgba(244,63,94,0.1)', '&:hover': { borderColor: '#f43f5e', bgcolor: 'rgba(244,63,94,0.2)' } }}
-            >
-              Printing & Stationary
             </Button>
           )}
 

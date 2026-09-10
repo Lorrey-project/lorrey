@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
-  Autocomplete, TextField, Divider, LinearProgress, Tabs, Tab,
+  Autocomplete, TextField, Divider, LinearProgress,
   TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Checkbox, TablePagination
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -194,8 +194,7 @@ function formatExcelDate(rawDate) {
 }
 
 
-export default function AccountDetails({ onBack, initialLedgerFilter = '' }) {
-  const [activeLedgerFilter, setActiveLedgerFilter] = useState(initialLedgerFilter);
+export default function AccountDetails({ onBack }) {
   const [entries, setEntries] = useState([]);
   const [vehicleList, setVehicleList] = useState([]);
   const [ownerVehicleMap, setOwnerVehicleMap] = useState({});
@@ -746,24 +745,14 @@ export default function AccountDetails({ onBack, initialLedgerFilter = '' }) {
       return 0;
     });
 
-    if (activeLedgerFilter) {
-      result = result.filter(row => {
-        const ledger = localData[row._id]?.['Ledger Name'] !== undefined ? localData[row._id]['Ledger Name'] : (row['Ledger Name'] || row.ledgerName || '');
-        if (isPrintingAndStationary(activeLedgerFilter)) {
-          return isPrintingAndStationary(ledger);
-        }
-        return String(ledger).toLowerCase() === String(activeLedgerFilter).toLowerCase();
-      });
-    }
-
     return result;
-  }, [computedRows, filterFrom, filterTo, unsavedImportRows, localData, activeLedgerFilter]);
+  }, [computedRows, filterFrom, filterTo, unsavedImportRows, localData]);
 
   const displayedRows = useMemo(() => {
     return filteredRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   }, [filteredRows, page, rowsPerPage]);
 
-  const isFiltered = !!(filterFrom || filterTo || activeLedgerFilter);
+  const isFiltered = !!(filterFrom || filterTo);
 
   const handleCellEdit = useCallback((rowId, field, value) => {
     setLocalData(prev => ({ ...prev, [rowId]: { ...(prev[rowId] || {}), [field]: value } }));
@@ -772,14 +761,12 @@ export default function AccountDetails({ onBack, initialLedgerFilter = '' }) {
   const handleAddRow = () => {
     const newId = 'new_' + Date.now();
     const today = new Date().toISOString().split('T')[0]; // Auto-fill today's date (YYYY-MM-DD)
-    const initLedger = activeLedgerFilter || '';
-    setEntries(prev => [{ _id: newId, isNewRow: true, 'Ledger Name': initLedger }, ...prev]);
+    setEntries(prev => [{ _id: newId, isNewRow: true }, ...prev]);
     setLocalData(prev => ({
       ...prev,
       [newId]: {
         isNewRow: true,
         'Transaction Date': today,
-        ...(initLedger ? { 'Ledger Name': initLedger } : {}),
         selectedMonth: displayMonth,
         selectedYear: displayYear
       }
@@ -1207,19 +1194,9 @@ export default function AccountDetails({ onBack, initialLedgerFilter = '' }) {
             <ArrowBackIcon />
           </IconButton>
           <Box>
-            <Box display="flex" alignItems="center" gap={1.5}>
-              <Typography variant="h5" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.1 }}>
-                {activeLedgerFilter ? `${activeLedgerFilter} Book` : 'Bank Book'}
-              </Typography>
-              {activeLedgerFilter && (
-                <Chip
-                  label={`${activeLedgerFilter} Only`}
-                  size="small"
-                  onDelete={() => setActiveLedgerFilter('')}
-                  sx={{ bgcolor: '#ffe4e6', color: '#e11d48', fontWeight: 800, border: '1px solid #fecdd3' }}
-                />
-              )}
-            </Box>
+            <Typography variant="h5" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.1 }}>
+              Bank Book
+            </Typography>
             <Typography variant="caption" fontWeight={600} color="#64748b">
               Financial Year {displayYear} • {displayMonth}
             </Typography>
@@ -1238,35 +1215,7 @@ export default function AccountDetails({ onBack, initialLedgerFilter = '' }) {
           </Box>
         </Box>
 
-        {/* ── Top Tabs Navigation ── */}
-        <Box sx={{ px: 3, pt: 1, borderTop: '1px solid #f1f5f9' }}>
-          <Tabs
-            value={isPrintingAndStationary(activeLedgerFilter) ? 'Printing & Stationary' : (activeLedgerFilter || '')}
-            onChange={(e, val) => setActiveLedgerFilter(val)}
-            aria-label="bank book tabs"
-            sx={{
-              minHeight: 40,
-              '& .MuiTab-root': {
-                fontWeight: 700,
-                fontSize: '13px',
-                textTransform: 'none',
-                minHeight: 40,
-                px: 2.5,
-                color: '#64748b',
-                '&.Mui-selected': { color: '#0f766e !important' }
-              },
-              '& .MuiTabs-indicator': { backgroundColor: '#0f766e', height: 3, borderRadius: '3px 3px 0 0' }
-            }}
-          >
-            <Tab label="All Transactions" value="" />
-            <Tab
-              label="Printing & Stationary"
-              value="Printing & Stationary"
-              icon={<PrintIcon sx={{ fontSize: 16 }} />}
-              iconPosition="start"
-            />
-          </Tabs>
-        </Box>
+
       </Box>
 
       {/* ── ERP Toolbar ── */}
@@ -1463,16 +1412,16 @@ export default function AccountDetails({ onBack, initialLedgerFilter = '' }) {
                           options={
                             col.key === 'Month'
                               ? (() => {
-                                  const ledger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim();
-                                  if (ledger.toLowerCase() === 'freight advance') {
-                                    const curMonthName = MONTHS[new Date().getMonth()];
-                                    return [curMonthName];
-                                  }
-                                  if (isPrintingAndStationary(ledger)) {
-                                    return getPrintingStationaryMonths();
-                                  }
-                                  return MONTHS;
-                                })()
+                                const ledger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim();
+                                if (ledger.toLowerCase() === 'freight advance') {
+                                  const curMonthName = MONTHS[new Date().getMonth()];
+                                  return [curMonthName];
+                                }
+                                if (isPrintingAndStationary(ledger)) {
+                                  return getPrintingStationaryMonths();
+                                }
+                                return MONTHS;
+                              })()
                               : col.key === 'Vehicle'
                                 ? (() => {
                                   const typed = String(localData[row._id]?.['Names'] || row['Names'] || '').trim();
