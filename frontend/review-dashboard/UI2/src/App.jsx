@@ -401,6 +401,7 @@ function AppContent() {
           onOpenAttendancePanel={() => handleViewChange('attendancePanel')}
           onOpenTdsReports={() => handleViewChange('tdsReports')}
           onOpenOthersCreditor={() => handleViewChange('othersCreditor')}
+          onOpenPrintingStationary={() => handleViewChange('printingStationary')}
         />
       );
     }
