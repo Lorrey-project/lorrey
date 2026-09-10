@@ -771,7 +771,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                 <SectionHeading title="FINANCIAL MANAGEMENT" accentColor="#10b981" />
                                 <Grid container spacing={3}>
                                     <ActionCard title="BANK BOOK" subtitle="Transactions & Balances" icon={<AccountBalanceWalletIcon />} accentColor="#10b981" onClick={onOpenAccountDetails} />
-                                    <ActionCard title="PRINTING & STATIONARY" subtitle="Printing & Stationary" icon={<PrintIcon />} accentColor="#f43f5e" onClick={onOpenPrintingStationary} />
+                                    <ActionCard title="PRINTING & STATIONARY OR OTHERS NON_GST" subtitle="Printing & Stationary / Others Non_GST" icon={<PrintIcon />} accentColor="#f43f5e" onClick={onOpenPrintingStationary} />
                                     <ActionCard title="MAIN CASH BOOK" subtitle="Daily Cash Flow" icon={<DescriptionIcon />} accentColor="#06b6d4" onClick={onOpenMainCashbook} />
                                     <ActionCard title="PUMP PAYMENT DETAILS" subtitle="Clear Pump Dues" icon={<LocalGasStationIcon />} accentColor="#0ea5e9" onClick={onOpenPumpPayment} />
                                     <ActionCard title="PUMP PAYMENT REGISTER" subtitle="Payment Register" icon={<ReceiptLongIcon />} accentColor="#38bdf8" onClick={onOpenPumpPaymentRegister} />

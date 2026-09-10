@@ -374,7 +374,7 @@ export default function PrintingStationaryRegister({ onBack }) {
           <Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Typography variant="h5" fontWeight={900} sx={{ color: '#f8fafc', letterSpacing: '-0.5px' }}>
-                PRINTING & STATIONARY
+                PRINTING & STATIONARY OR OTHERS NON_GST
               </Typography>
               <Chip
                 label={`${rows.length} RECORD${rows.length !== 1 ? 'S' : ''}`}
