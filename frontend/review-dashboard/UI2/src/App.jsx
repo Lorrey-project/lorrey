@@ -273,7 +273,7 @@ function AppContent() {
     }
 
     if (currentView === 'accountDetails') {
-      return <AccountDetails onBack={() => handleViewChange('dashboard')} />;
+      return <AccountDetails onBack={() => handleViewChange('dashboard')} onOpenPrintingStationary={() => handleViewChange('printingStationary')} />;
     }
 
     if (currentView === 'accountApprovals') {

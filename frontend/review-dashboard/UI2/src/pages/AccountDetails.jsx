@@ -195,7 +195,7 @@ function formatExcelDate(rawDate) {
 }
 
 
-export default function AccountDetails({ onBack }) {
+export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
   const [entries, setEntries] = useState([]);
   const [vehicleList, setVehicleList] = useState([]);
   const [ownerVehicleMap, setOwnerVehicleMap] = useState({});
@@ -343,7 +343,11 @@ export default function AccountDetails({ onBack }) {
     });
 
     setDirtyCount(prev => prev + 1);
-    setNonGstPurchaseModal(prev => ({ ...prev, open: false }));
+    setNonGstPurchaseModal(prev => ({
+      ...prev,
+      linkedSuccess: true,
+      linkedAmount: totalRemaining
+    }));
     setSnack({ severity: 'success', msg: `Linked ${selectedArr.length} purchase record(s) to Bank Book entry.` });
   };
 
@@ -2203,12 +2207,41 @@ export default function AccountDetails({ onBack }) {
               PRINTING & STATIONARY OR OTHERS NON_GST &bull; Month: {nonGstPurchaseModal.month}
             </Typography>
           </Box>
-          <IconButton onClick={() => setNonGstPurchaseModal(prev => ({ ...prev, open: false }))} sx={{ color: '#94a3b8' }}>
-            <CloseIcon />
-          </IconButton>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            {onOpenPrintingStationary && (
+              <Button
+                size="small"
+                startIcon={<PrintIcon />}
+                onClick={() => {
+                  setNonGstPurchaseModal(prev => ({ ...prev, open: false }));
+                  onOpenPrintingStationary();
+                }}
+                sx={{
+                  color: '#38bdf8',
+                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                  bgcolor: 'rgba(56, 189, 248, 0.1)',
+                  textTransform: 'none',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  '&:hover': { bgcolor: 'rgba(56, 189, 248, 0.2)' }
+                }}
+              >
+                Open Register
+              </Button>
+            )}
+            <IconButton onClick={() => setNonGstPurchaseModal(prev => ({ ...prev, open: false }))} sx={{ color: '#94a3b8' }}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
         </DialogTitle>
 
         <DialogContent sx={{ p: 2, bgcolor: '#0b0f19' }}>
+          {nonGstPurchaseModal.linkedSuccess && (
+            <Alert severity="success" sx={{ mb: 2, bgcolor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 700 }}>
+              ✓ Linked {nonGstPurchaseModal.selectedIds.size} purchase record(s) to Bank Book entry (Withdraw: ₹{nonGstPurchaseModal.linkedAmount?.toLocaleString('en-IN')}). Window remains open.
+            </Alert>
+          )}
+
           {nonGstPurchaseModal.loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
               <CircularProgress size={36} sx={{ color: '#38bdf8' }} />
@@ -2301,7 +2334,7 @@ export default function AccountDetails({ onBack }) {
           </Typography>
           <Box sx={{ display: 'flex', gap: 1.5 }}>
             <Button onClick={() => setNonGstPurchaseModal(prev => ({ ...prev, open: false }))} sx={{ color: '#94a3b8' }}>
-              Cancel
+              Close
             </Button>
             <Button
               variant="contained"
