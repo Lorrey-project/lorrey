@@ -25,6 +25,7 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import CloseIcon from '@mui/icons-material/Close';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
@@ -235,6 +236,117 @@ export default function AccountDetails({ onBack }) {
   const [pumpPaymentModal, setPumpPaymentModal] = useState({ open: false, rowId: null, month: null, bills: [], loading: false, selectedBills: [], allocations: {} });
 
   // ── Printing & Stationary Workflow Modals ─────────────────────────────────
+  const [nonGstPurchaseModal, setNonGstPurchaseModal] = useState({
+    open: false,
+    rowId: null,
+    month: '',
+    records: [],
+    loading: false,
+    selectedIds: new Set()
+  });
+
+  const openNonGstPurchaseModal = async (rowId, month) => {
+    const effectiveMonth = month || displayMonth;
+    const previouslyLinked = localData[rowId]?.linkedPurchaseIds || [];
+    setNonGstPurchaseModal({
+      open: true,
+      rowId,
+      month: effectiveMonth,
+      records: [],
+      loading: true,
+      selectedIds: new Set(previouslyLinked)
+    });
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/printing-stationary`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data && res.data.success) {
+        const allRecords = res.data.entries || [];
+        const matchingRecords = allRecords.filter(r => {
+          if (r.reason === 'DONE' && !previouslyLinked.includes(r._id)) {
+            return false;
+          }
+          if (effectiveMonth && r.date) {
+            const rDt = new Date(r.date);
+            if (!isNaN(rDt)) {
+              const rMonthName = MONTHS[rDt.getMonth()];
+              const allowedMonths = getPrintingStationaryMonths();
+              return allowedMonths.map(m => m.toLowerCase()).includes(rMonthName.toLowerCase());
+            }
+          }
+          return true;
+        });
+
+        setNonGstPurchaseModal(prev => ({
+          ...prev,
+          records: matchingRecords,
+          loading: false
+        }));
+      }
+    } catch (err) {
+      console.error('Error fetching printing & stationary records for bank book link:', err);
+      setSnack({ severity: 'error', msg: 'Failed to fetch purchase records for selection.' });
+      setNonGstPurchaseModal(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const toggleNonGstRecordSelection = (recId) => {
+    setNonGstPurchaseModal(prev => {
+      const next = new Set(prev.selectedIds);
+      if (next.has(recId)) next.delete(recId);
+      else next.add(recId);
+      return { ...prev, selectedIds: next };
+    });
+  };
+
+  const calcModalTotalSelectedBalance = () => {
+    const { records, selectedIds } = nonGstPurchaseModal;
+    return records.filter(r => selectedIds.has(r._id)).reduce((sum, r) => {
+      const rAmt = Number(r.amount) || 0;
+      const rPaid = Number(r.paid_amount) || (r.reason && r.reason.startsWith('Paid:') ? Number(r.reason.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '')) || 0 : (r.reason === 'DONE' ? rAmt : 0));
+      return sum + Math.max(0, rAmt - rPaid);
+    }, 0);
+  };
+
+  const handleConfirmNonGstPurchaseSelection = () => {
+    const { rowId, selectedIds, records } = nonGstPurchaseModal;
+    const selectedArr = Array.from(selectedIds);
+    if (selectedArr.length === 0) return;
+
+    const selectedRecords = records.filter(r => selectedIds.has(r._id));
+    let totalRemaining = 0;
+    selectedRecords.forEach(r => {
+      const rAmt = Number(r.amount) || 0;
+      const rPaid = Number(r.paid_amount) || (r.reason && r.reason.startsWith('Paid:') ? Number(r.reason.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '')) || 0 : (r.reason === 'DONE' ? rAmt : 0));
+      totalRemaining += Math.max(0, rAmt - rPaid);
+    });
+
+    const itemNames = selectedRecords.map(r => r.purchase_item_name).filter(Boolean).join(', ');
+
+    setLocalData(prev => {
+      const currentRow = prev[rowId] || {};
+      const currentWithdraw = currentRow['Withdraw'] || '';
+      const newWithdraw = (currentWithdraw && parseFloat(currentWithdraw) > 0) ? currentWithdraw : String(totalRemaining);
+
+      return {
+        ...prev,
+        [rowId]: {
+          ...currentRow,
+          linkedPurchaseIds: selectedArr,
+          Withdraw: newWithdraw,
+          Particulars: itemNames ? `Purchase: ${itemNames}` : (currentRow.Particulars || '')
+        }
+      };
+    });
+
+    setDirtyCount(prev => prev + 1);
+    setNonGstPurchaseModal(prev => ({ ...prev, open: false }));
+    setSnack({ severity: 'success', msg: `Linked ${selectedArr.length} purchase record(s) to Bank Book entry.` });
+  };
+
   const [billTypeModal, setBillTypeModal] = useState({
     open: false,
     rowId: null,
@@ -935,10 +1047,36 @@ export default function AccountDetails({ onBack }) {
         }
       }
 
+      // Link Printing & Stationary NON_GST PURCHASE payments
+      for (const [rowId, changes] of Object.entries(localData)) {
+        const originalEntry = entries.find(e => e._id === rowId);
+        const mergedRow = { ...originalEntry, ...changes };
+        const ledger = mergedRow['Ledger Name'];
+        const party = mergedRow['Names'];
+        const withdrawAmt = parseFloat(String(mergedRow['Withdraw'] || 0).replace(/,/g, ''));
+        const linkedIds = mergedRow.linkedPurchaseIds || localData[rowId]?.linkedPurchaseIds;
+        const rowMonth = mergedRow['Month'] || mergedRow.selectedMonth || displayMonth;
+
+        if (isPrintingAndStationary(ledger) && party === 'NON_GST PURCHASE' && Array.isArray(linkedIds) && linkedIds.length > 0 && withdrawAmt > 0) {
+          try {
+            await axios.post(`${API_URL}/printing-stationary/link-bank-payment`, {
+              bankTxId: rowId.startsWith('new_') ? null : rowId,
+              month: rowMonth,
+              paymentAmount: withdrawAmt,
+              selectedPurchaseIds: linkedIds
+            }, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+          } catch (linkErr) {
+            syncErrors.push(linkErr.response?.data?.error || `Printing Stationary link failed: ${linkErr.message}`);
+          }
+        }
+      }
+
       if (syncErrors.length > 0) {
-        setSnack({ severity: 'warning', msg: `Saved ✓ — Cashbook sync issue: ${syncErrors[0]}` });
+        setSnack({ severity: 'warning', msg: `Saved ✓ — Sync notice: ${syncErrors[0]}` });
       } else {
-        setSnack({ severity: 'success', msg: 'Saved! Main Cashbook updated.' });
+        setSnack({ severity: 'success', msg: 'Saved successfully!' });
       }
       fetchData();
     } catch (err) {
@@ -1484,7 +1622,11 @@ export default function AccountDetails({ onBack }) {
                                 handleCellEdit(row._id, 'Month', effectiveMonth);
                               }
                               if (effectiveMonth && curParty) {
-                                openBillTypeModal(row._id, effectiveMonth, curParty);
+                                if (curParty === 'NON_GST PURCHASE') {
+                                  openNonGstPurchaseModal(row._id, effectiveMonth);
+                                } else {
+                                  openBillTypeModal(row._id, effectiveMonth, curParty);
+                                }
                               }
                             }
 
@@ -2039,6 +2181,137 @@ export default function AccountDetails({ onBack }) {
           <Button onClick={handlePumpPaymentApply} variant="contained" disabled={pumpPaymentModal.selectedBills.length === 0}>
             Link Selected Bill
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── NON_GST PURCHASE Selection Modal ── */}
+      <Dialog
+        open={nonGstPurchaseModal.open}
+        onClose={() => setNonGstPurchaseModal(prev => ({ ...prev, open: false }))}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: { bgcolor: '#0f172a', color: '#f8fafc', borderRadius: '12px', border: '1px solid #334155' }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 800, borderBottom: '1px solid #334155', color: '#38bdf8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Typography variant="h6" fontWeight={800}>
+              SELECT NON_GST PURCHASE RECORDS
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+              PRINTING & STATIONARY OR OTHERS NON_GST &bull; Month: {nonGstPurchaseModal.month}
+            </Typography>
+          </Box>
+          <IconButton onClick={() => setNonGstPurchaseModal(prev => ({ ...prev, open: false }))} sx={{ color: '#94a3b8' }}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 2, bgcolor: '#0b0f19' }}>
+          {nonGstPurchaseModal.loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+              <CircularProgress size={36} sx={{ color: '#38bdf8' }} />
+            </Box>
+          ) : nonGstPurchaseModal.records.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 6, color: '#64748b' }}>
+              <Typography variant="body1" fontWeight={600}>No pending purchase records found for {nonGstPurchaseModal.month}</Typography>
+              <Typography variant="caption" sx={{ mt: 0.5, display: 'block' }}>
+                Please add purchase records in the PRINTING & STATIONARY OR OTHERS NON_GST tab first.
+              </Typography>
+            </Box>
+          ) : (
+            <Box sx={{ overflowX: 'auto', maxHeight: '400px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', color: '#f8fafc', fontSize: '13px', textAlign: 'left' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 5, backgroundColor: '#1e293b' }}>
+                  <tr style={{ borderBottom: '2px solid #334155' }}>
+                    <th style={{ width: '40px', padding: '10px', textAlign: 'center' }}>
+                      <Checkbox
+                        size="small"
+                        checked={nonGstPurchaseModal.records.length > 0 && nonGstPurchaseModal.selectedIds.size === nonGstPurchaseModal.records.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setNonGstPurchaseModal(prev => ({ ...prev, selectedIds: new Set(prev.records.map(r => r._id)) }));
+                          } else {
+                            setNonGstPurchaseModal(prev => ({ ...prev, selectedIds: new Set() }));
+                          }
+                        }}
+                        sx={{ color: '#64748b', '&.Mui-checked': { color: '#38bdf8' }, p: 0 }}
+                      />
+                    </th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>SL NO</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>PURCHASE ITEM NAME</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>DATE</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>AMOUNT</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>PAID / REASON</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>REMAINING</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nonGstPurchaseModal.records.map((r, idx) => {
+                    const isSel = nonGstPurchaseModal.selectedIds.has(r._id);
+                    const rAmount = Number(r.amount) || 0;
+                    const rPaid = Number(r.paid_amount) || (r.reason && r.reason.startsWith('Paid:') ? Number(r.reason.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '')) || 0 : (r.reason === 'DONE' ? rAmount : 0));
+                    const rBal = Math.max(0, rAmount - rPaid);
+
+                    return (
+                      <tr
+                        key={r._id}
+                        style={{
+                          borderBottom: '1px solid #1e293b',
+                          backgroundColor: isSel ? 'rgba(56, 189, 248, 0.12)' : (idx % 2 === 0 ? '#0b0f19' : '#131c2e'),
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => toggleNonGstRecordSelection(r._id)}
+                      >
+                        <td style={{ textAlign: 'center', padding: '10px' }} onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            size="small"
+                            checked={isSel}
+                            onChange={() => toggleNonGstRecordSelection(r._id)}
+                            sx={{ color: '#64748b', '&.Mui-checked': { color: '#38bdf8' }, p: 0 }}
+                          />
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#38bdf8', fontWeight: 700 }}>{r['SL NO'] || idx + 1}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>{r.purchase_item_name}</td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{r.date}</td>
+                        <td style={{ padding: '10px 12px', color: '#10b981', fontWeight: 700 }}>₹{rAmount.toLocaleString('en-IN')}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          {rBal === 0 ? (
+                            <Chip label="DONE" size="small" sx={{ bgcolor: '#10b981', color: '#fff', fontWeight: 800, height: 22 }} />
+                          ) : (
+                            <Typography variant="caption" sx={{ color: '#f59e0b', fontWeight: 600 }}>
+                              ₹{rPaid.toLocaleString('en-IN')}
+                            </Typography>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#ef4444', fontWeight: 700 }}>₹{rBal.toLocaleString('en-IN')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Box>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: '#0f172a', borderTop: '1px solid #334155', justifyContent: 'space-between' }}>
+          <Typography variant="body2" sx={{ color: '#38bdf8', fontWeight: 700 }}>
+            Selected: {nonGstPurchaseModal.selectedIds.size} record(s) | Total Balance: ₹{calcModalTotalSelectedBalance().toLocaleString('en-IN')}
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <Button onClick={() => setNonGstPurchaseModal(prev => ({ ...prev, open: false }))} sx={{ color: '#94a3b8' }}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleConfirmNonGstPurchaseSelection}
+              disabled={nonGstPurchaseModal.selectedIds.size === 0}
+              sx={{ bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' }, fontWeight: 800 }}
+            >
+              SELECT / DONE
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
 

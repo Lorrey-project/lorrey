@@ -643,23 +643,29 @@ export default function PrintingStationaryRegister({ onBack }) {
 
                         {/* 5. REASON */}
                         <td style={{ padding: '8px 12px' }}>
-                          <input
-                            type="text"
-                            placeholder="Enter Reason/Purpose..."
-                            value={row.reason}
-                            onChange={(e) => handleCellChange(row._id, 'reason', e.target.value)}
-                            style={{
-                              width: '100%',
-                              backgroundColor: '#0b0f19',
-                              border: '1px solid #334155',
-                              borderRadius: '6px',
-                              color: '#f8fafc',
-                              padding: '8px 12px',
-                              fontSize: '13px',
-                              outline: 'none',
-                              boxSizing: 'border-box'
-                            }}
-                          />
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            {(row.reason === 'DONE' || (row.amount && Number(row.amount) > 0 && (Number(row.amount) - (Number(row.paid_amount) || (row.reason && row.reason.includes('DONE') ? Number(row.amount) : 0))) <= 0)) && (
+                              <Chip label="DONE" size="small" sx={{ bgcolor: '#10b981', color: '#ffffff', fontWeight: 800, height: 24, fontSize: '11px' }} />
+                            )}
+                            <input
+                              type="text"
+                              placeholder="Enter Reason/Purpose..."
+                              value={row.reason}
+                              onChange={(e) => handleCellChange(row._id, 'reason', e.target.value)}
+                              style={{
+                                width: '100%',
+                                backgroundColor: '#0b0f19',
+                                border: (row.reason === 'DONE' || (row.amount && Number(row.amount) > 0 && (Number(row.amount) - (Number(row.paid_amount) || (row.reason && row.reason.includes('DONE') ? Number(row.amount) : 0))) <= 0)) ? '1px solid #10b981' : '1px solid #334155',
+                                borderRadius: '6px',
+                                color: (row.reason === 'DONE' || (row.amount && Number(row.amount) > 0 && (Number(row.amount) - (Number(row.paid_amount) || (row.reason && row.reason.includes('DONE') ? Number(row.amount) : 0))) <= 0)) ? '#10b981' : '#f8fafc',
+                                fontWeight: (row.reason === 'DONE' || (row.amount && Number(row.amount) > 0 && (Number(row.amount) - (Number(row.paid_amount) || (row.reason && row.reason.includes('DONE') ? Number(row.amount) : 0))) <= 0)) ? 700 : 400,
+                                padding: '8px 12px',
+                                fontSize: '13px',
+                                outline: 'none',
+                                boxSizing: 'border-box'
+                              }}
+                            />
+                          </Box>
                         </td>
 
                         {/* 6. BILL ATTACHD */}

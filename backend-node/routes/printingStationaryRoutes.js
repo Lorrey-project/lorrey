@@ -174,4 +174,108 @@ router.delete('/detach/:rowId', optionalAuth, async (req, res) => {
   }
 });
 
+// ── POST /printing-stationary/link-bank-payment ─────────────────────────────
+router.post('/link-bank-payment', optionalAuth, async (req, res) => {
+  try {
+    const col = getCollection();
+    const { bankTxId, month, paymentAmount, selectedPurchaseIds } = req.body;
+
+    if (!Array.isArray(selectedPurchaseIds) || selectedPurchaseIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'No purchase records selected' });
+    }
+
+    const payAmt = Number(paymentAmount) || 0;
+    if (payAmt <= 0) {
+      return res.status(400).json({ success: false, error: 'Payment amount must be greater than 0' });
+    }
+
+    // Fetch target purchase records
+    const objectIds = selectedPurchaseIds.map(id => new ObjectId(id));
+    const records = await col.find({ _id: { $in: objectIds } }).toArray();
+
+    if (records.length === 0) {
+      return res.status(404).json({ success: false, error: 'Selected purchase records not found' });
+    }
+
+    // Validate Overpayment
+    let totalRemaining = 0;
+    records.forEach(rec => {
+      const recAmount = Number(rec.amount) || 0;
+      const currentPaid = Number(rec.paid_amount) || (rec.reason && rec.reason.startsWith('Paid:') ? Number(rec.reason.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '')) || 0 : (rec.reason === 'DONE' ? recAmount : 0));
+      const remaining = Math.max(0, recAmount - currentPaid);
+      totalRemaining += remaining;
+    });
+
+    if (payAmt > totalRemaining + 0.01) {
+      return res.status(400).json({
+        success: false,
+        error: `Overpayment Warning: Withdraw amount (₹${payAmt.toLocaleString('en-IN')}) exceeds total remaining balance (₹${totalRemaining.toLocaleString('en-IN')}) for selected purchase(s).`
+      });
+    }
+
+    // Allocate payment across selected records
+    let remainingPaymentToAllocate = payAmt;
+    const updatedRecords = [];
+
+    for (const rec of records) {
+      if (remainingPaymentToAllocate <= 0) break;
+
+      const recAmount = Number(rec.amount) || 0;
+      const currentPaid = Number(rec.paid_amount) || (rec.reason && rec.reason.startsWith('Paid:') ? Number(rec.reason.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '')) || 0 : (rec.reason === 'DONE' ? recAmount : 0));
+      const currentRemaining = Math.max(0, recAmount - currentPaid);
+
+      if (currentRemaining <= 0) continue;
+
+      const allocation = Math.min(remainingPaymentToAllocate, currentRemaining);
+      const newPaidAmount = currentPaid + allocation;
+      const newBalance = recAmount - newPaidAmount;
+      remainingPaymentToAllocate -= allocation;
+
+      let newReason = rec.reason || '';
+      if (newBalance <= 0) {
+        newReason = 'DONE';
+      } else {
+        newReason = `Paid: ₹${newPaidAmount.toLocaleString('en-IN')} (Bal: ₹${newBalance.toLocaleString('en-IN')})`;
+      }
+
+      const txEntry = {
+        bankTxId: bankTxId || `bank_${Date.now()}`,
+        amount: allocation,
+        date: new Date(),
+        month: month || ''
+      };
+
+      await col.updateOne(
+        { _id: rec._id },
+        {
+          $set: {
+            paid_amount: newPaidAmount,
+            reason: newReason,
+            status: newBalance <= 0 ? 'DONE' : 'PARTIAL',
+            updated_at: new Date()
+          },
+          $push: {
+            linked_bank_transactions: txEntry
+          }
+        }
+      );
+
+      updatedRecords.push({
+        _id: rec._id,
+        paid_amount: newPaidAmount,
+        reason: newReason,
+        status: newBalance <= 0 ? 'DONE' : 'PARTIAL'
+      });
+    }
+
+    const io = getIO();
+    if (io) io.emit('printingStationaryUpdates', { action: 'linkBankPayment', updatedRecords });
+
+    res.json({ success: true, updatedRecords });
+  } catch (err) {
+    console.error('Error linking bank payment:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
