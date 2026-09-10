@@ -29,10 +29,7 @@ console.log("Running on HTTP (no SSL)");
 initSocket(server);
 startWatcher();
 
-const allowedOrigins = [
-  /^http:\/\/localhost:\d+$/,
-  /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/
-];
+const allowedOrigins = [ /^http:\/\/localhost:\d+$/, /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/, /^https:\/\/(www\.)?depaliassociatesco\.com$/, ];
 
 app.use(cors({
   origin: (origin, callback) => {
