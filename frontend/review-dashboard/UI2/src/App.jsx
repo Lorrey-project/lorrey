@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery, Typography, IconButton } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { ShortcutProvider } from './context/ShortcutContext';
