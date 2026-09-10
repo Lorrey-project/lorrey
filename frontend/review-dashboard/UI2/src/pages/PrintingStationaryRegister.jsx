@@ -470,54 +470,6 @@ export default function PrintingStationaryRegister({ onBack }) {
         </Box>
       </Box>
 
-      {/* Summary Header Card */}
-      <Box sx={{ mb: 3, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2,
-            bgcolor: '#131c2e',
-            border: '1px solid #1e293b',
-            borderRadius: '10px',
-            display: 'flex',
-            alignItems: 'center',
-            justify: 'space-between'
-          }}
-        >
-          <Box>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Total Records
-            </Typography>
-            <Typography variant="h5" fontWeight={800} sx={{ color: '#38bdf8', mt: 0.5 }}>
-              {rows.length}
-            </Typography>
-          </Box>
-          <Chip label="Manual Entries" size="small" sx={{ bgcolor: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8' }} />
-        </Paper>
-
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2,
-            bgcolor: '#131c2e',
-            border: '1px solid #1e293b',
-            borderRadius: '10px',
-            display: 'flex',
-            alignItems: 'center',
-            justify: 'space-between'
-          }}
-        >
-          <Box>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Total Amount (₹)
-            </Typography>
-            <Typography variant="h5" fontWeight={800} sx={{ color: '#10b981', mt: 0.5 }}>
-              {fmtAmt(totalAmount)}
-            </Typography>
-          </Box>
-          <Chip label="Cumulative Total" size="small" sx={{ bgcolor: 'rgba(16, 185, 129, 0.1)', color: '#10b981' }} />
-        </Paper>
-      </Box>
 
       {/* ── Table Container ─────────────────────────────────────────────────── */}
       <Paper
