@@ -15,7 +15,7 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ['OFFICE', 'PETROL PUMP', 'HEAD_OFFICE', 'BRINDA SHYAM'],
+        enum: ['OFFICE', 'PETROL PUMP', 'HEAD_OFFICE', 'BRINDA SHYAM', 'SITE'],
         default: 'OFFICE'
     },
     status: {

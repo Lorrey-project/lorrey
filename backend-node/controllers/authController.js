@@ -59,7 +59,7 @@ exports.login = async (req, res) => {
 
         const user = await User.findOne({ email });
         if (!user) {
-            return res.status(400).json({ message: "Invalid credentials" });
+            return res.status(400).json({ message: "Invalid email or password" });
         }
 
         // ── Block pending / rejected accounts ────────────────────────────────────
@@ -82,7 +82,7 @@ exports.login = async (req, res) => {
 
         const isMatch = await user.comparePassword(password);
         if (!isMatch) {
-            return res.status(400).json({ message: "Invalid credentials" });
+            return res.status(400).json({ message: "Invalid email or password" });
         }
 
         const token = jwt.sign({ userId: user._id, role: user.role, pumpName: user.pumpName || null }, JWT_SECRET, { expiresIn: "1h" });

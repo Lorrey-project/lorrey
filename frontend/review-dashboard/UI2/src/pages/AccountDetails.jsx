@@ -304,51 +304,82 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
 
   const calcModalTotalSelectedBalance = () => {
     const { records, selectedIds } = nonGstPurchaseModal;
-    return records.filter(r => selectedIds.has(r._id)).reduce((sum, r) => {
+    const selectedSet = selectedIds instanceof Set ? selectedIds : new Set(Array.isArray(selectedIds) ? selectedIds : []);
+    return (records || []).filter(r => r && r._id && selectedSet.has(r._id)).reduce((sum, r) => {
       const rAmt = Number(r.amount) || 0;
-      const rPaid = Number(r.paid_amount) || (r.reason && r.reason.startsWith('Paid:') ? Number(r.reason.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '')) || 0 : (r.reason === 'DONE' ? rAmt : 0));
+      const reasonStr = typeof r.reason === 'string' ? r.reason : '';
+      let rPaid = Number(r.paid_amount) || 0;
+      if (!rPaid && reasonStr.startsWith('Paid:')) {
+        const match = reasonStr.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '');
+        rPaid = Number(match) || 0;
+      } else if (!rPaid && reasonStr === 'DONE') {
+        rPaid = rAmt;
+      }
       return sum + Math.max(0, rAmt - rPaid);
     }, 0);
   };
 
-  const handleConfirmNonGstPurchaseSelection = () => {
+  const handleConfirmNonGstPurchaseSelection = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     const { rowId, selectedIds, records } = nonGstPurchaseModal;
-    const selectedArr = Array.from(selectedIds);
-    if (selectedArr.length === 0) return;
+    const selectedSet = selectedIds instanceof Set ? selectedIds : new Set(Array.isArray(selectedIds) ? selectedIds : []);
+    const selectedArr = Array.from(selectedSet);
 
-    const selectedRecords = records.filter(r => selectedIds.has(r._id));
-    let totalRemaining = 0;
-    selectedRecords.forEach(r => {
-      const rAmt = Number(r.amount) || 0;
-      const rPaid = Number(r.paid_amount) || (r.reason && r.reason.startsWith('Paid:') ? Number(r.reason.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '')) || 0 : (r.reason === 'DONE' ? rAmt : 0));
-      totalRemaining += Math.max(0, rAmt - rPaid);
-    });
+    if (selectedArr.length === 0) {
+      setSnack({ severity: 'warning', msg: 'Please select at least one NON_GST PURCHASE record.' });
+      return;
+    }
 
-    const itemNames = selectedRecords.map(r => r.purchase_item_name).filter(Boolean).join(', ');
-
-    setLocalData(prev => {
-      const currentRow = prev[rowId] || {};
-      const currentWithdraw = currentRow['Withdraw'] || '';
-      const newWithdraw = (currentWithdraw && parseFloat(currentWithdraw) > 0) ? currentWithdraw : String(totalRemaining);
-
-      return {
-        ...prev,
-        [rowId]: {
-          ...currentRow,
-          linkedPurchaseIds: selectedArr,
-          Withdraw: newWithdraw,
-          Particulars: itemNames ? `Purchase: ${itemNames}` : (currentRow.Particulars || '')
+    try {
+      const selectedRecords = (records || []).filter(r => r && (selectedSet.has(r._id) || selectedSet.has(String(r._id))));
+      let totalRemaining = 0;
+      selectedRecords.forEach(r => {
+        const rAmt = Number(r.amount) || 0;
+        const reasonStr = String(r.reason || '');
+        let rPaid = Number(r.paid_amount) || 0;
+        if (!rPaid && reasonStr.startsWith('Paid:')) {
+          const match = reasonStr.split('₹')[1]?.split(' ')[0]?.replace(/,/g, '');
+          rPaid = Number(match) || 0;
+        } else if (!rPaid && reasonStr === 'DONE') {
+          rPaid = rAmt;
         }
-      };
-    });
+        totalRemaining += Math.max(0, rAmt - rPaid);
+      });
 
-    setDirtyCount(prev => prev + 1);
-    setNonGstPurchaseModal(prev => ({
-      ...prev,
-      linkedSuccess: true,
-      linkedAmount: totalRemaining
-    }));
-    setSnack({ severity: 'success', msg: `Linked ${selectedArr.length} purchase record(s) to Bank Book entry.` });
+      const itemNames = selectedRecords.map(r => r.purchase_item_name || r.itemName || r.name).filter(Boolean).join(', ');
+
+      if (rowId) {
+        setLocalData(prev => {
+          const currentRow = (prev && prev[rowId]) ? prev[rowId] : {};
+          const currentWithdraw = currentRow['Withdraw'] || '';
+          const newWithdraw = (currentWithdraw && parseFloat(String(currentWithdraw).replace(/,/g, '')) > 0) ? currentWithdraw : String(totalRemaining);
+
+          return {
+            ...prev,
+            [rowId]: {
+              ...currentRow,
+              linkedPurchaseIds: selectedArr,
+              Withdraw: newWithdraw,
+              Particulars: itemNames ? `Purchase: ${itemNames}` : (currentRow.Particulars || '')
+            }
+          };
+        });
+      }
+
+      setSnack({ severity: 'success', msg: `Linked ${selectedArr.length} purchase record(s) to Bank Book entry.` });
+    } catch (err) {
+      console.error('Error in handleConfirmNonGstPurchaseSelection:', err);
+      setSnack({ severity: 'error', msg: 'Failed to complete selection: ' + (err?.message || err) });
+    } finally {
+      setNonGstPurchaseModal({
+        open: false,
+        rowId: null,
+        month: '',
+        records: [],
+        loading: false,
+        selectedIds: new Set()
+      });
+    }
   };
 
   const [billTypeModal, setBillTypeModal] = useState({
@@ -2339,7 +2370,6 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
             <Button
               variant="contained"
               onClick={handleConfirmNonGstPurchaseSelection}
-              disabled={nonGstPurchaseModal.selectedIds.size === 0}
               sx={{ bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' }, fontWeight: 800 }}
             >
               SELECT / DONE

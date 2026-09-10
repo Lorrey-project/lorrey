@@ -210,10 +210,13 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
 
+const seedUsers = require('./utils/seedUsers');
+
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("Connected to MongoDB Atlas");
+    await seedUsers();
     
     // Create indexes for optimized queries
     try {

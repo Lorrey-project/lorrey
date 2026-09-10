@@ -1,13 +1,10 @@
-import React, { useState } from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery, Typography, IconButton } from '@mui/material';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import React, { useState, useEffect } from 'react';
+import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery } from '@mui/material';
 import { ShortcutProvider } from './context/ShortcutContext';
 import GlobalShortcutHandler from './components/GlobalShortcutHandler';
 import InvoiceForm from './components/InvoiceForm';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
-import Signup from './components/Signup';
-import PumpLogin from './components/PumpLogin';
 import Dashboard from './components/Dashboard';
 import PumpDashboard from './components/PumpDashboard';
 import LorryHireSlipReview from './components/LorryHireSlipReview';
@@ -38,9 +35,6 @@ import TdsReportsPage from './pages/TdsReportsPage';
 import OthersCreditor from './pages/OthersCreditor';
 import PrintingStationaryRegister from './pages/PrintingStationaryRegister';
 import VantaTrunkBackground from './components/VantaTrunkBackground';
-
-
-
 
 const theme = createTheme({
   palette: {
@@ -97,12 +91,31 @@ const theme = createTheme({
   }
 });
 
+const getUserPanelKey = (user) => {
+  if (!user) return null;
+  const email = (user.email || '').toLowerCase();
+  if (email === 'site@nuvoco.com' || user.role === 'SITE') return 'site';
+  if (email === 'sas1@sas.com' || (user.role === 'PETROL PUMP' && user.pumpName === 'SAS-1')) return 'sas1';
+  if (email === 'sas2@sas.com' || (user.role === 'PETROL PUMP' && user.pumpName === 'SAS-2')) return 'sas2';
+  if (email === 'brindashyam@dac.com' || user.role === 'BRINDA SHYAM') return 'brinda';
+  return 'office';
+};
+
+const getPanelPath = (panelKey) => {
+  switch (panelKey) {
+    case 'office': return '/office';
+    case 'site': return '/site';
+    case 'sas1': return '/pump-sas1';
+    case 'sas2': return '/pump-sas2';
+    case 'brinda': return '/brinda-shyam';
+    default: return '/office';
+  }
+};
 
 function AppContent() {
-  const { user, loading } = useAuth();
-  const theme = createTheme(); // Need theme for media query
+  const { user, logout, loading } = useAuth();
+  const theme = createTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [showSignup, setShowSignup] = useState(false);
   const [currentView, setCurrentView] = useState('dashboard');
   const [lorrySlipInvoiceId, setLorrySlipInvoiceId] = useState(null);
   const [fuelSlipInvoiceId, setFuelSlipInvoiceId] = useState(null);
@@ -110,14 +123,28 @@ function AppContent() {
   const [voucherInvoiceData, setVoucherInvoiceData] = useState(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
+  useEffect(() => {
+    if (!user) {
+      if (window.location.pathname !== '/') {
+        window.history.replaceState({}, '', '/');
+      }
+      return;
+    }
+
+    const panelKey = getUserPanelKey(user);
+    const targetPath = getPanelPath(panelKey);
+    if (window.location.pathname !== targetPath && !window.location.pathname.startsWith(targetPath)) {
+      window.history.replaceState({}, '', targetPath);
+    }
+  }, [user]);
+
   const handleViewChange = (newView) => {
     setIsTransitioning(true);
     setTimeout(() => {
       setCurrentView(newView);
       setIsTransitioning(false);
-    }, 400); // Cinematic transition duration
+    }, 400);
   };
-
 
   if (loading) {
     return (
@@ -127,53 +154,9 @@ function AppContent() {
     );
   }
 
-
   const renderView = () => {
     if (!user) {
-      const portal = import.meta.env.VITE_PORTAL; // undefined | 'site' | 'sas1' | 'sas2' | 'brinda'
-
-      // Port 5177 — Brinda Shyam panel only
-      if (portal === 'brinda') {
-        return showSignup ? (
-          <Signup onToggle={() => setShowSignup(false)} lockedPortal="BRINDA SHYAM" />
-        ) : (
-          <Login onToggle={() => setShowSignup(true)} lockedPortal="BRINDA SHYAM" />
-        );
-      }
-
-      // Port 5175 — SAS-1 pump only
-      if (portal === 'sas1') {
-        return showSignup ? (
-          <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-1" />
-        ) : (
-          <Login onToggle={() => setShowSignup(true)} lockedPortal="PETROL PUMP" lockedPump="SAS-1" />
-        );
-      }
-
-      // Port 5176 — SAS-2 pump only
-      if (portal === 'sas2') {
-        return showSignup ? (
-          <Signup onToggle={() => setShowSignup(false)} lockedPump="SAS-2" />
-        ) : (
-          <Login onToggle={() => setShowSignup(true)} lockedPortal="PETROL PUMP" lockedPump="SAS-2" />
-        );
-      }
-
-      // Port 5174 — Site admin only (OFFICE role)
-      if (portal === 'site') {
-        return showSignup ? (
-          <Signup onToggle={() => setShowSignup(false)} lockedPortal="OFFICE" />
-        ) : (
-          <Login onToggle={() => setShowSignup(true)} lockedPortal="OFFICE" />
-        );
-      }
-
-      // Port 5173 — Full office portal (all roles: HEAD_OFFICE, OFFICE, PETROL PUMP)
-      return showSignup ? (
-        <Signup onToggle={() => setShowSignup(false)} />
-      ) : (
-        <Login onToggle={() => setShowSignup(true)} />
-      );
+      return <Login />;
     }
 
     if (currentView === 'lorryHireSlip' && lorrySlipInvoiceId) {
@@ -288,7 +271,7 @@ function AppContent() {
       return (
         <DailySummaryReport
           onBack={() => handleViewChange('dashboard')}
-          onUploadNew={() => handleViewChange('dashboard')} // Will trigger upload via dashboard or we can just go dashboard
+          onUploadNew={() => handleViewChange('dashboard')}
           onOpenCementRegister={() => handleViewChange('cementRegister')}
           onOpenPartyPayment={() => handleViewChange('partyPayment')}
           onOpenPumpPaymentRegister={() => handleViewChange('pumpPaymentRegister')}
@@ -317,14 +300,12 @@ function AppContent() {
     }
 
     if (currentView === 'dashboard') {
-      if (import.meta.env.VITE_PORTAL === 'brinda') {
+      const panelKey = getUserPanelKey(user);
+
+      if (panelKey === 'brinda') {
         return (
           <BrindaPortal
-            onLogout={() => {
-              localStorage.removeItem('token');
-              localStorage.removeItem('user');
-              window.location.reload();
-            }}
+            onLogout={logout}
             onOpenCementRegister={() => handleViewChange('cementRegister')}
             onOpenMainCashbook={() => handleViewChange('mainCashbook')}
             onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
@@ -333,8 +314,20 @@ function AppContent() {
         );
       }
 
-      if (isMobile) {
-        if (user.role === 'PETROL PUMP') {
+      if (panelKey === 'site') {
+        return (
+          <SitePortal
+            onUploadNew={() => handleViewChange('upload')}
+            onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); handleViewChange('lorryHireSlip'); }}
+            onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); handleViewChange('fuelSlip'); }}
+            onOpenRegisters={() => handleViewChange('cementRegister')}
+            onOpenVouchers={() => handleViewChange('voucherRegister')}
+          />
+        );
+      }
+
+      if (panelKey === 'sas1' || panelKey === 'sas2') {
+        if (isMobile) {
           return (
             <PumpPortal
               onOpenBillingSheet={() => handleViewChange('pumpPayment')}
@@ -344,17 +337,15 @@ function AppContent() {
             />
           );
         }
-        if (import.meta.env.VITE_PORTAL === 'site' || user.role === 'OFFICE') {
-          return (
-            <SitePortal
-              onUploadNew={() => handleViewChange('upload')}
-              onOpenLorrySlip={(id) => { setLorrySlipInvoiceId(id); handleViewChange('lorryHireSlip'); }}
-              onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); handleViewChange('fuelSlip'); }}
-              onOpenRegisters={() => handleViewChange('cementRegister')}
-              onOpenVouchers={() => handleViewChange('voucherRegister')}
-            />
-          );
-        }
+        return (
+          <PumpDashboard
+            onOpenPumpPayment={() => handleViewChange('pumpPayment')}
+          />
+        );
+      }
+
+      // Office Panel
+      if (isMobile) {
         return (
           <OfficePortal
             onUploadNew={() => handleViewChange('upload')}
@@ -364,15 +355,6 @@ function AppContent() {
             onOpenVouchers={() => handleViewChange('voucherRegister')}
             onOpenContacts="truckManager"
             onOpenAccountApprovals={() => handleViewChange('accountApprovals')}
-          />
-        );
-      }
-
-      // Desktop Routing
-      if (user.role === 'PETROL PUMP') {
-        return (
-          <PumpDashboard
-            onOpenPumpPayment={() => handleViewChange('pumpPayment')}
           />
         );
       }
@@ -406,7 +388,6 @@ function AppContent() {
       );
     }
 
-
     return (
       <InvoiceForm onBack={() => handleViewChange('dashboard')} />
     );
@@ -417,7 +398,7 @@ function AppContent() {
       <VantaTrunkBackground />
       <Box sx={{
         minHeight: '100vh',
-        bgcolor: 'rgba(15, 20, 25, 0.2)', // Subtle dark overlay for Vanta
+        bgcolor: 'rgba(15, 20, 25, 0.2)',
         transition: 'opacity 0.3s ease',
         opacity: isTransitioning ? 0 : 1
       }}>
