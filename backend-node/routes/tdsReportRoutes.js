@@ -37,6 +37,79 @@ function parseDate(val) {
   return null;
 }
 
+// ── GET /api/tds-reports/party-tds ──────────────────────────────────────────
+router.get('/party-tds', async (req, res) => {
+  try {
+    const { search } = req.query;
+
+    const db = mongoose.connection.useDb('invoice_system');
+    const ownerCol = db.collection('owner details');
+    const ownerDocs = await ownerCol.find({}).toArray();
+
+    // Group by unique owner name (case-insensitive deduplication)
+    const uniqueOwnersMap = new Map();
+    ownerDocs.forEach(d => {
+      const rawName = (d["Owner Name"] || d["Owner Name "] || d.owner_name || "").trim();
+      if (!rawName) return;
+      const key = rawName.toUpperCase();
+      if (!uniqueOwnersMap.has(key)) {
+        uniqueOwnersMap.set(key, {
+          name: rawName,
+          pan: (d["PAN No."] || d["PAN No. "] || d.pan_no || "-").trim(),
+          aadhar: (d["Aadhar No."] || d["Aadhar No. "] || d.aadhar_no || "-").trim(),
+          panAadharLink: (d["PAN Addahar Link"] || d["PAN Addahar Link "] || d.pan_aadhar_link || "-").trim()
+        });
+      }
+    });
+
+    let uniqueOwners = Array.from(uniqueOwnersMap.values());
+
+    // Optional Search Filter by Owner Name, PAN, or Aadhaar
+    if (search && search.trim()) {
+      const term = search.toLowerCase().trim();
+      uniqueOwners = uniqueOwners.filter(o =>
+        o.name.toLowerCase().includes(term) ||
+        o.pan.toLowerCase().includes(term) ||
+        o.aadhar.toLowerCase().includes(term)
+      );
+    }
+
+    // Generate EXACTLY 4 rows per unique owner with continuous SL NO (1..N*4)
+    const entries = [];
+    let slNo = 1;
+
+    uniqueOwners.forEach(ownerObj => {
+      for (let r = 1; r <= 4; r++) {
+        entries.push({
+          slNo: slNo++,
+          ownerIndexRow: r,
+          name: ownerObj.name,
+          billNo: "-",
+          billDate: "-",
+          billType: "-",
+          basicAmount: 0,
+          tdsPercent: 0,
+          tdsAmount: 0,
+          tdsDeducted: 0,
+          panCardNumber: ownerObj.pan,
+          aadharNo: ownerObj.aadhar,
+          aadhaarPanLinked: (ownerObj.panAadharLink.toUpperCase() === "YES" || (ownerObj.pan !== "-" && ownerObj.aadhar !== "-")) ? "YES" : "NO"
+        });
+      }
+    });
+
+    res.json({
+      success: true,
+      uniqueOwnerCount: uniqueOwners.length,
+      count: entries.length,
+      entries
+    });
+  } catch (err) {
+    console.error('[TdsReports] Party TDS fetch error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── GET /api/tds-reports ────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
@@ -178,6 +251,129 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[TdsReports] Fetch error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── GET /api/tds-reports/billing-tds ─────────────────────────────────────────
+router.get('/billing-tds', async (req, res) => {
+  try {
+    const { site = 'NVL', month, year, search } = req.query;
+    const targetSite = site.trim().toUpperCase();
+
+    const targetMonth = (month && month !== 'ALL') ? parseInt(month, 10) : null;
+    let targetFyStartYear = null;
+
+    if (year && year !== 'ALL') {
+      const parts = String(year).split('-');
+      targetFyStartYear = parseInt(parts[0], 10);
+      if (isNaN(targetFyStartYear)) {
+        targetFyStartYear = parseInt(year, 10);
+      }
+    }
+
+    const cementCol = mongoose.connection.useDb('cement_register').collection('entries');
+    const allCement = await cementCol.find({}).toArray();
+
+    // 1. Filter by SITE (NVL or NVCL)
+    let filtered = allCement.filter(e => {
+      const entrySite = (e["SITE"] || "").trim().toUpperCase();
+      if (entrySite !== targetSite) return false;
+
+      // Date filtering (Month & FY)
+      const dateVal = e["BILL DATE"] || e["LOADING DT"] || e["LOADING DATE"];
+      if (targetMonth || targetFyStartYear) {
+        const d = parseDate(dateVal);
+        if (!d) return false;
+
+        const m = d.getMonth() + 1;
+        const calYear = d.getFullYear();
+
+        if (targetMonth && m !== targetMonth) return false;
+
+        if (targetFyStartYear) {
+          const entryFyStart = m >= 4 ? calYear : calYear - 1;
+          if (entryFyStart !== targetFyStartYear) return false;
+        }
+      }
+
+      return true;
+    });
+
+    // 2. Map fields and calculate TDS
+    let rawRecords = filtered.map(e => {
+      const billNo = (e["BILL NO"] || e["INVOICE NO"] || e["SHIPMENT NO"] || "-").trim();
+      const billDate = (e["BILL DATE"] || e["LOADING DT"] || e["LOADING DATE"] || "-").trim();
+      const billType = (e["Bill Type"] || e["BILL TYPE"] || "Freight").trim();
+      const partyName = (e["PARTY NAME"] || e["OWNER NAME"] || e["TRANSPORTER NAME"] || "-").trim();
+      const vehicleNo = normVeh(e["VEHICLE NUMBER"] || e["VEHICLE NO"]) || (e["VEHICLE NUMBER"] || e["VEHICLE NO"] || "-").trim();
+      
+      const basicFreight = num(e["Billing Amount"]) || num(e["BASIC FREIGHT"]) || num(e["BILLING ER 95%"]) || num(e["AMOUNT"]);
+
+      let tdsPercent = 2;
+      let tdsAmount = 0;
+
+      // NVL Rule: NVL + TOLL => TDS = 0
+      if (targetSite === 'NVL' && billType.toUpperCase().includes('TOLL')) {
+        tdsPercent = 0;
+        tdsAmount = 0;
+      } else {
+        tdsPercent = 2;
+        tdsAmount = Math.round((basicFreight * 0.02) * 100) / 100;
+      }
+
+      return {
+        id: String(e._id || ''),
+        site: targetSite,
+        billNo,
+        billDate,
+        billType,
+        partyName,
+        vehicleNo,
+        basicFreight,
+        tdsPercent,
+        tdsAmount
+      };
+    });
+
+    // 3. Search Filter
+    if (search && search.trim()) {
+      const term = search.toLowerCase().trim();
+      rawRecords = rawRecords.filter(r =>
+        r.billNo.toLowerCase().includes(term) ||
+        r.partyName.toLowerCase().includes(term) ||
+        r.vehicleNo.toLowerCase().includes(term) ||
+        r.billType.toLowerCase().includes(term)
+      );
+    }
+
+    // 4. Attach sequential SL NO
+    const entries = rawRecords.map((r, idx) => ({
+      slNo: idx + 1,
+      ...r
+    }));
+
+    // 5. Totals
+    let totalBasicFreight = 0;
+    let totalTdsAmount = 0;
+
+    entries.forEach(r => {
+      totalBasicFreight += r.basicFreight;
+      totalTdsAmount += r.tdsAmount;
+    });
+
+    res.json({
+      success: true,
+      site: targetSite,
+      count: entries.length,
+      entries,
+      summary: {
+        totalBasicFreight: Math.round(totalBasicFreight * 100) / 100,
+        totalTdsAmount: Math.round(totalTdsAmount * 100) / 100
+      }
+    });
+  } catch (err) {
+    console.error('[TdsReports] Billing TDS fetch error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

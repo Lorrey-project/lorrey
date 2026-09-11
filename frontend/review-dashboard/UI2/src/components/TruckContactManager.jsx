@@ -80,7 +80,9 @@ const DB_KEYS = {
   puc: 'PUC ',
   npValidity: 'NP Validity ',
   driverName: 'Driver Name ',
+  licenseNo: 'License No ',
   licenseValidity: 'License Validity ',
+  driverAuthoriseValidity: 'Driver Authorise Validity ',
   ownerBankAcc: 'Owner Bank Account No ',
   ownerIfsc: 'Owner IFSC Code ',
   driverContactNo: 'Driver Contact No ',
@@ -98,7 +100,15 @@ const DB_KEYS = {
 
 const getStr = (...candidates) => {
   for (const v of candidates) {
-    if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
+    if (v !== undefined && v !== null) {
+      let s = String(v).trim();
+      if (s !== '') {
+        if (s.includes('T00:00:00')) {
+          s = s.split('T')[0];
+        }
+        return s;
+      }
+    }
   }
   return '';
 };
@@ -116,6 +126,7 @@ export default function TruckContactManager({ open, onClose }) {
   const [errors, setErrors] = useState({});
   const [editId, setEditId] = useState(null);
   const [formTab, setFormTab] = useState(0); // Sub-tab within form (Owner, Driver, Vehicle)
+  const [searchQuery, setSearchQuery] = useState('');
   const [approvals, setApprovals] = useState([]);
   const [approvalLoading, setApprovalLoading] = useState(false);
   const userRole = localStorage.getItem('role') || 'Site';
@@ -239,6 +250,7 @@ export default function TruckContactManager({ open, onClose }) {
         driverName: form.driverName,
         licenseNo: form.licenseNo,
         licenseValidity: form.licenseValidity,
+        driverAuthoriseValidity: form.driverAuthoriseValidity,
         ownerBankAcc: form.ownerBankAcc,
         ownerIfsc: form.ownerIfsc,
         driverContactNo: form.driverContactNo,
@@ -344,8 +356,9 @@ export default function TruckContactManager({ open, onClose }) {
       puc: getStr(c["PUC "], c.puc),
       npValidity: getStr(c["NP Validity "], c.np_validity),
       permit: getStr(c["Permit "], c.permit),
-      licenseNo: getStr(c["License No "], c.license_no),
+      licenseNo: getStr(c["License No "], c["License No"], c.license_no),
       licenseValidity: getStr(c["License Validity "], c.license_validity),
+      driverAuthoriseValidity: getStr(c["Driver Authorise Validity "], c.driver_authorise_validity, c.driver_auth_validity),
       ownerBankAcc: getStr(c["Owner Bank Account No "], c.owner_bank_acc),
       ownerIfsc: getStr(c["Owner IFSC Code "], c.owner_ifsc),
       driverContactNo: getStr(c["Driver Contact No "], c.driver_contact_no),
@@ -1162,25 +1175,35 @@ export default function TruckContactManager({ open, onClose }) {
             {/* ── TAB 2: EXISTING CONTACTS ── */}
             <TabPanel value={tab} index={2}>
               <Box sx={{ p: 3 }}>
-                <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <PersonIcon sx={{ color: '#475569' }} />
+                <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', flex: 1 }}>
+                    <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <PersonIcon sx={{ color: '#475569' }} />
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Owners</Typography>
+                        <Typography variant="h6" fontWeight={800} color="#0f172a">{uniqueOwners.length}</Typography>
+                      </Box>
                     </Box>
-                    <Box>
-                      <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Owners</Typography>
-                      <Typography variant="h6" fontWeight={800} color="#0f172a">{uniqueOwners.length}</Typography>
+                    <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <LocalShippingIcon sx={{ color: '#10b981' }} />
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Vehicles</Typography>
+                        <Typography variant="h6" fontWeight={800} color="#047857">{contacts.length}</Typography>
+                      </Box>
                     </Box>
                   </Box>
-                  <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <LocalShippingIcon sx={{ color: '#10b981' }} />
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Vehicles</Typography>
-                      <Typography variant="h6" fontWeight={800} color="#047857">{contacts.length}</Typography>
-                    </Box>
-                  </Box>
+
+                  <TextField
+                    size="small"
+                    placeholder="Search by Truck No, Owner, Driver, or PAN..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    sx={{ minWidth: 300, bgcolor: 'background.paper', borderRadius: '10px', '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+                  />
                 </Box>
 
                 {loading ? (
@@ -1190,49 +1213,116 @@ export default function TruckContactManager({ open, onClose }) {
                 ) : contacts.length === 0 ? (
                   <Box sx={{ textAlign: 'center', py: 8, opacity: 0.5 }}>
                     <LocalShippingIcon sx={{ fontSize: 48, color: '#64748b', mb: 1 }} />
-                    <Typography color="text.secondary">No contacts found</Typography>
+                    <Typography color="text.secondary">No contacts found in MongoDB</Typography>
                   </Box>
                 ) : (
-                  <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: '12px', maxHeight: '55vh' }}>
+                  <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: '12px', maxHeight: '65vh', overflowX: 'auto' }}>
                     <Table stickyHeader size="small">
                       <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 50 }}>#</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 120 }}>Vehicle No</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 150 }}>Owner Name</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 150 }}>Driver Name</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 120 }}>Phone</TableCell>
-                          <TableCell sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 120 }}>PAN</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 800, bgcolor: 'background.default', color: '#475569', minWidth: 100 }}>Actions</TableCell>
+                        <TableRow sx={{ '& th': { borderRight: '1px solid #e2e8f0', whiteSpace: 'nowrap', fontSize: '11px', fontWeight: 800, bgcolor: 'background.default', color: '#475569' } }}>
+                          <TableCell sx={{ minWidth: 50, textAlign: 'center' }}>#</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>TRUCK / VEHICLE NO</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>TYPE OF VEHICLE</TableCell>
+                          <TableCell sx={{ minWidth: 160 }}>OWNER NAME</TableCell>
+                          <TableCell sx={{ minWidth: 160 }}>DRIVER NAME</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>TYPE OF CUSTOMER</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>PAN NO</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>AADHAAR NO</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>PAN-AADHAAR LINK</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>CONTACT NO</TableCell>
+                          <TableCell sx={{ minWidth: 160 }}>DRIVER CONTACT NUMBER</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>TDS</TableCell>
+                          <TableCell sx={{ minWidth: 180 }}>BASIC FREIGHT COMMISSION</TableCell>
+                          <TableCell sx={{ minWidth: 160 }}>INCENTIVE COMMISSION</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>GST NO</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>RC VALIDITY</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>INSURANCE VALIDITY</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>FITNESS VALIDITY</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>ROAD TAX VALIDITY</TableCell>
+                          <TableCell sx={{ minWidth: 120 }}>PERMIT</TableCell>
+                          <TableCell sx={{ minWidth: 110 }}>PUC</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>NP VALIDITY</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>LICENSE NO</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>LICENSE VALIDITY</TableCell>
+                          <TableCell sx={{ minWidth: 180 }}>DRIVER AUTHORISE VALIDITY</TableCell>
+                          <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 10, bgcolor: '#f8fafc !important', borderLeft: '2px solid #cbd5e1', minWidth: 90 }}>ACTIONS</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {contacts.map((c, idx) => {
-                          const tNo = getStr(c["Truck No "], c["Truck No"], c.truck_no) || '-';
-                          const oName = getStr(c["Owner Name "], c["Owner Name"], c.owner_name) || '-';
-                          const dName = getStr(c["Driver Name "], c["Driver Name"], c.driver_name) || '-';
-                          const phone = getStr(c["Contact No. "], c["Contact No."], c.contact_no) || '-';
-                          const pan = getStr(c["PAN No. "], c["PAN No."], c.pan_no) || '-';
+                        {contacts
+                          .filter(c => {
+                            if (!searchQuery) return true;
+                            const q = searchQuery.toLowerCase().trim();
+                            const tNo = getStr(c["Truck No "], c["Truck No"], c.truck_no).toLowerCase();
+                            const oName = getStr(c["Owner Name "], c["Owner Name"], c.owner_name).toLowerCase();
+                            const dName = getStr(c["Driver Name "], c["Driver Name"], c.driver_name).toLowerCase();
+                            const pan = getStr(c["PAN No. "], c["PAN No."], c.pan_no).toLowerCase();
+                            return tNo.includes(q) || oName.includes(q) || dName.includes(q) || pan.includes(q);
+                          })
+                          .map((c, idx) => {
+                            const tNo = getStr(c["Truck No"], c["Truck No "], c.truck_no);
+                            const vehType = getStr(c["Type of vehicle"], c["Type of vehicle "], c.type_of_vehicle, c.type, c.vehType, c.wheel_type, c.wheelType);
+                            const oName = getStr(c["Owner Name"], c["Owner Name "], c.owner_name);
+                            const dName = getStr(c["Driver Name"], c["Driver Name "], c.driver_name);
+                            const custType = getStr(c["TYPE OF CUSTOMER"], c["TYPE OF CUSTOMER "], c.type_of_customer, c.customer_type, c.custType, c.type);
+                            const pan = getStr(c["PAN No."], c["PAN No. "], c["PAN No"], c.pan_no);
+                            const aadhar = getStr(c["Aadhar No."], c["Aadhar No. "], c["Aadhaar No."], c["Aadhaar No"], c.aadhar_no);
+                            const panAadharLink = getStr(c["PAN Addahar Link"], c["PAN Addahar Link "], c["PAN Aadhar Link"], c.pan_aadhar_link);
+                            const contactNo = getStr(c["Contact No."], c["Contact No. "], c["Contact No"], c.contact_no);
+                            const driverContactNo = getStr(c["DRIVER CONTACT"], c["Driver Contact No "], c["Driver Contact No"], c.driver_contact, c.driver_contact_no, c.driver_contact_number);
+                            const tds = getStr(c["TDS Applicability"], c["TDS Applicability "], c["NIL TDS Declaration"], c["NIL TDS Declaration "], c.tds_applicability, c.nil_tds_declaration, c.tdsApp, c.nilTds);
+                            const basicFreightComm = getStr(c["Basic Freight Comission Appliciability"], c["Basic Freight Comission Applicability "], c.basic_freight_commission, c.basicFreightComm);
+                            const incentiveComm = getStr(c["Incentive Comission Appliciability"], c["Incentive Comission Applicability "], c.incentive_commission, c.incentiveCommVal);
+                            const gstNo = getStr(c["GST NO"], c["GST NO "], c["GST No"], c["GST No "], c.gst_no, c.gstNo);
+                            const rcValidity = getStr(c["RC Validity"], c["RC Validity "], c.rc_validity, c.rcValidity);
+                            const insValidity = getStr(c["Insurance Validity"], c["Insurance Validity "], c.insurance_validity, c.insuranceValidity);
+                            const fitValidity = getStr(c["Fitness Validity"], c["Fitness Validity "], c.fitness_validity, c.fitnessValidity);
+                            const taxValidity = getStr(c["Road Tax Validity"], c["Road Tax Validity "], c.road_tax_validity, c.roadTaxValidity);
+                            const permit = getStr(c["Permit"], c["Permit "], c.permit);
+                            const puc = getStr(c["PUC"], c["PUC "], c.puc);
+                            const npValidity = getStr(c["NP Validity"], c["NP Validity "], c.np_validity, c.npValidity);
+                            const licenseNo = getStr(c["License No."], c["License No. "], c["License No"], c["License No "], c.license_no, c.licenseNo);
+                            const licenseValidity = getStr(c["License Validity"], c["License Validity "], c.license_validity, c.licenseValidity);
+                            const driverAuthValidity = getStr(c["Driver Authoraization validity"], c["Driver Authorise Validity"], c["Driver Authorise Validity "], c.driver_authorization_validity, c.driver_authorise_validity, c.driver_auth_validity);
 
-                          return (
-                            <TableRow key={c._id} hover sx={{ '&:nth-of-type(even)': { bgcolor: '#fbfbff' } }}>
-                              <TableCell sx={{ color: '#64748b', fontSize: '13px' }}>{idx + 1}</TableCell>
-                              <TableCell sx={{ fontWeight: 700, color: '#0f172a', fontSize: '13px' }}>{tNo}</TableCell>
-                              <TableCell sx={{ fontSize: '13px' }}>{oName}</TableCell>
-                              <TableCell sx={{ fontSize: '13px' }}>{dName}</TableCell>
-                              <TableCell sx={{ fontSize: '13px' }}>{phone}</TableCell>
-                              <TableCell sx={{ fontSize: '13px' }}>{pan}</TableCell>
-                              <TableCell align="right">
-                                <IconButton size="small" onClick={() => handleEdit(c)} sx={{ color: '#1a73e8' }}>
-                                  <EditIcon fontSize="small" />
-                                </IconButton>
-                                <IconButton size="small" onClick={() => handleDelete(c._id)} sx={{ color: '#d32f2f' }}>
-                                  <DeleteIcon fontSize="small" />
-                                </IconButton>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
+                            return (
+                              <TableRow key={c._id} hover sx={{ '&:nth-of-type(even)': { bgcolor: '#fbfbff' }, '& td': { borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', fontSize: '12px' } }}>
+                                <TableCell sx={{ color: '#64748b', textAlign: 'center' }}>{idx + 1}</TableCell>
+                                <TableCell sx={{ fontWeight: 700, color: '#0f172a' }}>{tNo}</TableCell>
+                                <TableCell>{vehType}</TableCell>
+                                <TableCell sx={{ fontWeight: 600 }}>{oName}</TableCell>
+                                <TableCell>{dName}</TableCell>
+                                <TableCell>{custType}</TableCell>
+                                <TableCell>{pan}</TableCell>
+                                <TableCell>{aadhar}</TableCell>
+                                <TableCell>{panAadharLink}</TableCell>
+                                <TableCell>{contactNo}</TableCell>
+                                <TableCell>{driverContactNo}</TableCell>
+                                <TableCell>{tds}</TableCell>
+                                <TableCell>{basicFreightComm}</TableCell>
+                                <TableCell>{incentiveComm}</TableCell>
+                                <TableCell>{gstNo}</TableCell>
+                                <TableCell>{rcValidity}</TableCell>
+                                <TableCell>{insValidity}</TableCell>
+                                <TableCell>{fitValidity}</TableCell>
+                                <TableCell>{taxValidity}</TableCell>
+                                <TableCell>{permit}</TableCell>
+                                <TableCell>{puc}</TableCell>
+                                <TableCell>{npValidity}</TableCell>
+                                <TableCell>{licenseNo}</TableCell>
+                                <TableCell>{licenseValidity}</TableCell>
+                                <TableCell>{driverAuthValidity}</TableCell>
+                                <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 5, bgcolor: idx % 2 === 1 ? '#fbfbff' : '#ffffff', borderLeft: '2px solid #cbd5e1' }}>
+                                  <IconButton size="small" onClick={() => handleEdit(c)} sx={{ color: '#1a73e8' }}>
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                  <IconButton size="small" onClick={() => handleDelete(c._id)} sx={{ color: '#d32f2f' }}>
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                       </TableBody>
                     </Table>
                   </TableContainer>

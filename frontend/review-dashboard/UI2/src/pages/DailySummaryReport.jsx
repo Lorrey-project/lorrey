@@ -376,11 +376,73 @@ function DailySummaryTab({
   const [alertModalTitle, setAlertModalTitle] = useState('');
   const [alertModalData, setAlertModalData] = useState([]);
 
+  // ── Live Validity End Alerts State ──────────────────────────────────────────
+  const [validityAlerts, setValidityAlerts] = useState({
+    count: 0,
+    expiredCount: 0,
+    expiringSoonCount: 0,
+    alerts: []
+  });
+  const [loadingValidityAlerts, setLoadingValidityAlerts] = useState(false);
+
+  const [extendValidityItem, setExtendValidityItem] = useState(null);
+  const [extendValidityDate, setExtendValidityDate] = useState('');
+  const [savingValidityExt, setSavingValidityExt] = useState(false);
+
   const [extensionDialogOpen, setExtensionDialogOpen] = useState(false);
   const [extensionRecords, setExtensionRecords] = useState([]);
   const [extensionDraft, setExtensionDraft] = useState({});
   const [extensionErrors, setExtensionErrors] = useState({});
   const [savingExtensions, setSavingExtensions] = useState(false);
+
+  const fetchValidityAlerts = useCallback(async () => {
+    setLoadingValidityAlerts(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.get(`${API_URL}/truck-contacts/validity-alerts`, { headers });
+      if (res.data?.success) {
+        setValidityAlerts({
+          count: res.data.count || 0,
+          expiredCount: res.data.expiredCount || 0,
+          expiringSoonCount: res.data.expiringSoonCount || 0,
+          alerts: res.data.alerts || []
+        });
+      }
+    } catch (err) {
+      console.error('[DailySummaryReport] Fetch validity alerts error:', err);
+    } finally {
+      setLoadingValidityAlerts(false);
+    }
+  }, []);
+
+  const handleSaveVehicleValidityExtension = async () => {
+    if (!extendValidityItem || !extendValidityDate) return;
+    setSavingValidityExt(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const payload = {
+        [extendValidityItem.fieldKey]: extendValidityDate
+      };
+
+      const res = await axios.put(`${API_URL}/truck-contacts/${extendValidityItem.recordId}`, payload, { headers });
+      if (res.data?.success) {
+        setSnack({ severity: 'success', msg: `${extendValidityItem.validityType} validity updated for ${extendValidityItem.truckNo}!` });
+        setExtendValidityItem(null);
+        setExtendValidityDate('');
+        await fetchValidityAlerts();
+      } else {
+        setSnack({ severity: 'error', msg: res.data?.error || 'Failed to update validity' });
+      }
+    } catch (err) {
+      console.error('[DailySummaryReport] Update validity error:', err);
+      setSnack({ severity: 'error', msg: err.message || 'Error updating validity' });
+    } finally {
+      setSavingValidityExt(false);
+    }
+  };
 
   const getRowUniqueKey = (row, idx) => {
     if (row._id) return String(row._id);
@@ -461,20 +523,22 @@ function DailySummaryTab({
     setSavingExtensions(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API_URL}/daily-summary/extend-eway-validity`, { extensions: payload }, {
+      const res = await axios.put(`${API_URL}/cement-register/bulk-extend-eway`, {
+        extensions: payload
+      }, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
       if (res.data.success) {
-        setSnack({ severity: 'success', msg: res.data.message || 'E-Way Bill validity extended successfully.' });
+        setSnack({ severity: 'success', msg: `Successfully updated ${res.data.modifiedCount || payload.length} E-Way bill validity dates!` });
         setExtensionDialogOpen(false);
-        await fetchData(date);
+        fetchData(date);
       } else {
-        setSnack({ severity: 'error', msg: res.data.error || 'Failed to save extension dates.' });
+        setSnack({ severity: 'error', msg: res.data.error || 'Failed to update E-Way bill validities.' });
       }
     } catch (err) {
       console.error(err);
-      setSnack({ severity: 'error', msg: err.response?.data?.error || 'Error saving E-Way Bill extensions.' });
+      setSnack({ severity: 'error', msg: 'Error updating E-Way bill validities.' });
     } finally {
       setSavingExtensions(false);
     }
@@ -484,6 +548,7 @@ function DailySummaryTab({
 
   const fetchData = useCallback(async (targetDate) => {
     setLoading(true);
+    fetchValidityAlerts();
     try {
       const token = localStorage.getItem('token');
 
@@ -502,7 +567,7 @@ function DailySummaryTab({
     } finally {
       setLoading(false);
     }
-  }, [dateOptions]);
+  }, [dateOptions, fetchValidityAlerts]);
 
   useEffect(() => {
     fetchData(date);
@@ -512,6 +577,7 @@ function DailySummaryTab({
   useEffect(() => {
     const handler = () => {
       fetchData(date);
+      fetchValidityAlerts();
     };
     socket.on('mainCashbookUpdates', handler);
     socket.on('cementUpdates', handler);
@@ -519,7 +585,7 @@ function DailySummaryTab({
       socket.off('mainCashbookUpdates', handler);
       socket.off('cementUpdates', handler);
     };
-  }, [date, fetchData]);
+  }, [date, fetchData, fetchValidityAlerts]);
 
   const handleExportExcel = () => {
     if (!data) return;
@@ -784,6 +850,7 @@ function DailySummaryTab({
     else if (type === 'STAMP') setAlertModalTitle('STAMP BILL DETAILS');
     else if (type === 'NON-STAMP') setAlertModalTitle('NON-STAMP BILL DETAILS');
     else if (type === 'E-WAY-BILL') setAlertModalTitle('E-WAY BILL VALIDITY ALERTS');
+    else if (type === 'VALIDITY-END') setAlertModalTitle('VALIDITY END');
 
     setAlertModalData(records);
     setAlertModalOpen(true);
@@ -792,8 +859,10 @@ function DailySummaryTab({
   useEffect(() => {
     if (alertModalOpen && alertModalTitle === 'E-WAY BILL VALIDITY ALERTS') {
       setAlertModalData(eWayAlerts.urgentRecords);
+    } else if (alertModalOpen && alertModalTitle === 'VALIDITY END') {
+      setAlertModalData(validityAlerts.alerts);
     }
-  }, [data, alertModalOpen, alertModalTitle, eWayAlerts.urgentRecords]);
+  }, [data, alertModalOpen, alertModalTitle, eWayAlerts.urgentRecords, validityAlerts.alerts]);
 
 
   return (
@@ -1162,6 +1231,31 @@ function DailySummaryTab({
                       <Typography variant="caption" fontWeight={600} color={eWayAlerts.urgentCount > 0 ? '#e11d48' : '#94a3b8'}>Click to view E-Way Bills requiring attention</Typography>
                     </Box>
                     <Typography variant="h5" fontWeight={900} color={eWayAlerts.urgentCount > 0 ? '#881337' : '#64748b'}>{eWayAlerts.urgentCount}</Typography>
+                  </Box>
+
+                  {/* ── VALIDITY END ALERT ──────────────────────────────────────── */}
+                  <Box
+                    onClick={() => handleAlertClick('VALIDITY-END', validityAlerts.alerts)}
+                    display="flex" alignItems="center" gap={2} p={2} mt={2} borderRadius="12px"
+                    sx={{
+                      cursor: 'pointer',
+                      bgcolor: validityAlerts.count > 0 ? '#fff1f2' : '#f8fafc',
+                      border: `1px solid ${validityAlerts.count > 0 ? '#fecdd3' : '#e2e8f0'}`,
+                      transition: 'all 0.2s',
+                      '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
+                      animation: validityAlerts.count > 0 ? 'pulseValidityCardRed 1.5s infinite ease-in-out' : 'none',
+                      '@keyframes pulseValidityCardRed': {
+                        '0%, 100%': { boxShadow: '0 0 0 0 rgba(225, 29, 72, 0.4)' },
+                        '50%': { boxShadow: '0 0 0 8px rgba(225, 29, 72, 0)' }
+                      }
+                    }}
+                  >
+                    <WarningAmberIcon sx={{ color: validityAlerts.count > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" fontWeight={800} color={validityAlerts.count > 0 ? '#be123c' : '#64748b'}>VALIDITY END</Typography>
+                      <Typography variant="caption" fontWeight={600} color={validityAlerts.count > 0 ? '#e11d48' : '#94a3b8'}>Click to view vehicle &amp; document validities ending</Typography>
+                    </Box>
+                    <Typography variant="h5" fontWeight={900} color={validityAlerts.count > 0 ? '#881337' : '#64748b'}>{validityAlerts.count}</Typography>
                   </Box>
 
                 </CardContent>
@@ -1614,6 +1708,17 @@ function DailySummaryTab({
                     <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
                     <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>STATUS</TableCell>
                   </TableRow>
+                ) : alertModalTitle === 'VALIDITY END' ? (
+                  <TableRow sx={{ bgcolor: 'background.default' }}>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2, whiteSpace: 'nowrap' }}>SL</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>OWNER NAME</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VALIDITY TYPE</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>EXPIRY DATE</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>DAYS REMAINING</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>STATUS</TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap', textAlign: 'center' }}>ACTION</TableCell>
+                  </TableRow>
                 ) : (
                   <TableRow sx={{ bgcolor: 'background.default' }}>
                     <TableCell sx={{ fontWeight: 800, color: '#475569', py: 2 }}>SL</TableCell>
@@ -1628,7 +1733,7 @@ function DailySummaryTab({
               <TableBody>
                 {alertModalData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? 11 : 6} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
+                    <TableCell colSpan={alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? 11 : alertModalTitle === 'VALIDITY END' ? 8 : 6} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
                       No records found.
                     </TableCell>
                   </TableRow>
@@ -1691,6 +1796,65 @@ function DailySummaryTab({
                       </TableRow>
                     );
                   })
+                ) : alertModalTitle === 'VALIDITY END' ? (
+                  alertModalData.map((row, idx) => {
+                    return (
+                      <TableRow key={row.id || idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#64748b' }}>{idx + 1}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#0f172a' }}>{row.truckNo}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#334155' }}>{row.ownerName}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Chip
+                            size="small"
+                            label={row.validityType}
+                            sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 800, fontSize: '0.75rem' }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#d97706' }}>
+                          {row.expiryDateFormatted}
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#0284c7' }}>
+                          {row.statusLabel}
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Chip
+                            size="small"
+                            label="EXPIRING SOON"
+                            sx={{
+                              fontWeight: 800,
+                              fontSize: '0.7rem',
+                              bgcolor: '#fffbe6',
+                              color: '#b45309',
+                              border: '1px solid #fef08a'
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', textAlign: 'center' }}>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            onClick={() => {
+                              setExtendValidityItem(row);
+                              setExtendValidityDate(formatDateToYYYYMMDD(row.expiryDateFormatted));
+                            }}
+                            sx={{
+                              bgcolor: '#059669',
+                              color: '#ffffff',
+                              fontWeight: 800,
+                              fontSize: '0.75rem',
+                              px: 2,
+                              py: 0.5,
+                              borderRadius: '6px',
+                              textTransform: 'none',
+                              '&:hover': { bgcolor: '#047857' }
+                            }}
+                          >
+                            EXTEND
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 ) : (
                   alertModalData.map((row, idx) => (
                     <TableRow key={idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
@@ -1712,6 +1876,40 @@ function DailySummaryTab({
         <DialogActions sx={{ p: 3, pt: 0 }}>
           <Button onClick={() => setAlertModalOpen(false)} variant="contained" sx={{ bgcolor: '#0f172a', color: '#fff', borderRadius: '8px', px: 4, fontWeight: 700, '&:hover': { bgcolor: '#1e293b' } }}>
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* --- Single Vehicle Validity Extension Dialog --- */}
+      <Dialog open={Boolean(extendValidityItem)} onClose={() => setExtendValidityItem(null)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: '16px' } }}>
+        <DialogTitle sx={{ fontWeight: 800, pb: 1, color: '#0f172a' }}>
+          Extend {extendValidityItem?.validityType} Validity
+        </DialogTitle>
+        <DialogContent sx={{ pt: 1 }}>
+          <Typography variant="body2" color="text.secondary" mb={2} sx={{ lineHeight: 1.6 }}>
+            Vehicle No: <b>{extendValidityItem?.truckNo}</b><br />
+            Owner: <b>{extendValidityItem?.ownerName}</b><br />
+            Current Expiry: <b>{extendValidityItem?.expiryDateFormatted}</b>
+          </Typography>
+          <TextField
+            fullWidth
+            type="date"
+            label="New Expiry Date"
+            InputLabelProps={{ shrink: true }}
+            value={extendValidityDate}
+            onChange={(e) => setExtendValidityDate(e.target.value)}
+            sx={{ mt: 1 }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5, pt: 0 }}>
+          <Button onClick={() => setExtendValidityItem(null)} sx={{ color: '#64748b', fontWeight: 700 }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveVehicleValidityExtension}
+            disabled={savingValidityExt}
+            sx={{ bgcolor: '#0284c7', fontWeight: 800, px: 3, '&:hover': { bgcolor: '#0369a1' } }}
+          >
+            {savingValidityExt ? <CircularProgress size={20} color="inherit" /> : 'Save Extension'}
           </Button>
         </DialogActions>
       </Dialog>

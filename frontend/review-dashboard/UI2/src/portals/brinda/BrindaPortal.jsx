@@ -6,7 +6,7 @@ import TableChartIcon from '@mui/icons-material/TableChart';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { useAuth } from '../../context/AuthContext';
-import { CreditorVehicleLedgerSection } from '../../pages/OthersCreditor';
+import RoadTaxRegisterSection from '../../components/RoadTaxRegisterSection';
 
 const BrindaPortal = ({
   onLogout,
@@ -45,7 +45,7 @@ const BrindaPortal = ({
               <Chip label="PORT 5177" size="small" sx={{ bgcolor: 'rgba(192, 132, 252, 0.2)', color: '#e9d5ff', fontWeight: 800, fontSize: '0.7rem', border: '1px solid rgba(192, 132, 252, 0.4)' }} />
             </Box>
             <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
-              Dipali Associates & Co. &bull; Creditor Account & Vehicle Ledger
+              Dipali Associates & Co. &bull; Road Tax Register
             </Typography>
           </Box>
         </Box>
@@ -99,9 +99,9 @@ const BrindaPortal = ({
         </Box>
       </Paper>
 
-      {/* ── MAIN CREDITOR LEDGER SECTION ──────────────────────────── */}
+      {/* ── MAIN ROAD TAX REGISTER SECTION ─────────────────────────── */}
       <Box sx={{ flex: 1 }}>
-        <CreditorVehicleLedgerSection creditorName="BRINDA SHYAM" />
+        <RoadTaxRegisterSection />
       </Box>
     </Box>
   );
