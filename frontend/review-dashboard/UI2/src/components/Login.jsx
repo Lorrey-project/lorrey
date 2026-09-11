@@ -18,14 +18,16 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import { useAuth } from '../context/AuthContext';
 
-// Background images: Aerial logistics green winding road background
+// Background aerial logistics winding road image
 import aerialBg from '../assets/dac_aerial_logistics_bg.jpg';
 import heroBgFallback from '../assets/logistics_hero_bg.jpg';
 
-const pillInputSx = {
+// Transparent Glass Input Styling
+const transparentGlassInputSx = {
     '& .MuiOutlinedInput-root': {
-        bgcolor: 'rgba(255, 255, 255, 0.12)',
-        backdropFilter: 'blur(12px)',
+        bgcolor: 'rgba(255, 255, 255, 0.14)',
+        backdropFilter: 'blur(14px)',
+        WebkitBackdropFilter: 'blur(14px)',
         borderRadius: '28px',
         color: '#ffffff',
         fontSize: '15px',
@@ -33,16 +35,16 @@ const pillInputSx = {
         px: '6px',
         transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         '& fieldset': {
-            borderColor: 'rgba(255, 255, 255, 0.25)',
+            borderColor: 'rgba(255, 255, 255, 0.32)',
             borderWidth: '1px',
         },
         '&:hover fieldset': {
-            borderColor: 'rgba(52, 211, 153, 0.6)',
+            borderColor: 'rgba(52, 211, 153, 0.7)',
         },
         '&.Mui-focused fieldset': {
-            borderColor: '#34d399',
+            borderColor: '#38bdf8',
             borderWidth: '2px',
-            boxShadow: '0 0 20px rgba(52, 211, 153, 0.35)',
+            boxShadow: '0 0 22px rgba(56, 189, 248, 0.4)',
         },
         '& input': {
             py: '13px',
@@ -50,11 +52,11 @@ const pillInputSx = {
             fontSize: '14.5px',
             fontWeight: 500,
             '&::placeholder': {
-                color: 'rgba(255, 255, 255, 0.55)',
+                color: 'rgba(255, 255, 255, 0.6)',
                 opacity: 1,
             },
             '&:-webkit-autofill': {
-                WebkitBoxShadow: '0 0 0 1000px #064e3b inset !important',
+                WebkitBoxShadow: '0 0 0 1000px rgba(15, 23, 42, 0.8) inset !important',
                 WebkitTextFillColor: '#ffffff !important',
             },
         },
@@ -123,11 +125,11 @@ const Login = () => {
                 to: { opacity: 1, transform: 'translateX(0)' }
             }
         }}>
-            {/* Atmospheric Dark & Green Gradient Overlay */}
+            {/* Subtle Dark Navy + Teal Atmospheric Overlay - Allows Background Road & Mountains to remain clearly visible */}
             <Box sx={{
                 position: 'absolute',
                 inset: 0,
-                background: `linear-gradient(135deg, rgba(6, 78, 59, 0.72) 0%, rgba(15, 23, 42, 0.82) 50%, rgba(15, 23, 42, 0.92) 100%)`,
+                background: `linear-gradient(135deg, rgba(6, 78, 59, 0.45) 0%, rgba(15, 23, 42, 0.62) 50%, rgba(15, 23, 42, 0.78) 100%)`,
                 backdropFilter: 'brightness(0.95) contrast(1.05)',
                 zIndex: 1,
                 pointerEvents: 'none'
@@ -145,36 +147,37 @@ const Login = () => {
                 justify: 'space-between',
                 boxSizing: 'border-box'
             }}>
-                {/* Left: Hamburger Button + DAC Logo Brand */}
+                {/* Left: Circular Hamburger Button + DAC Brand Logo & Emblem */}
                 <Box display="flex" alignItems="center" gap={{ xs: 1.5, sm: 2 }}>
                     <IconButton
                         onClick={() => setMobileMenuOpen(true)}
                         sx={{
                             color: '#ffffff',
-                            bgcolor: 'rgba(255, 255, 255, 0.12)',
+                            bgcolor: 'rgba(255, 255, 255, 0.15)',
                             backdropFilter: 'blur(12px)',
-                            border: '1px solid rgba(255, 255, 255, 0.2)',
-                            p: 1,
-                            '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.22)' }
+                            border: '1px solid rgba(255, 255, 255, 0.28)',
+                            borderRadius: '50%',
+                            p: 1.1,
+                            '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.28)' }
                         }}
                     >
                         <MenuIcon sx={{ fontSize: 22 }} />
                     </IconButton>
 
-                    {/* Brand Badge */}
-                    <Box display="flex" alignItems="center" gap={1.2}>
+                    {/* Official DAC Geometric Logo Badge */}
+                    <Box display="flex" alignItems="center" gap={1.4}>
                         <Box sx={{
-                            width: { xs: 38, sm: 42 },
-                            height: { xs: 38, sm: 42 },
-                            borderRadius: '12px',
+                            width: { xs: 40, sm: 44 },
+                            height: { xs: 40, sm: 44 },
+                            borderRadius: '14px',
                             background: 'linear-gradient(135deg, #059669 0%, #0d9488 50%, #1d4ed8 100%)',
                             display: 'flex',
                             alignItems: 'center',
                             justify: 'center',
-                            boxShadow: '0 8px 20px rgba(5, 150, 105, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3)',
-                            border: '1px solid rgba(255, 255, 255, 0.25)'
+                            boxShadow: '0 8px 22px rgba(5, 150, 105, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.35)',
+                            border: '1px solid rgba(255, 255, 255, 0.3)'
                         }}>
-                            <Typography sx={{ color: '#ffffff', fontWeight: 900, fontSize: { xs: 13, sm: 15 }, letterSpacing: '0.5px' }}>
+                            <Typography sx={{ color: '#ffffff', fontWeight: 900, fontSize: { xs: 14, sm: 16 }, letterSpacing: '0.5px' }}>
                                 DAC
                             </Typography>
                         </Box>
@@ -182,7 +185,7 @@ const Login = () => {
                             <Typography variant="h6" fontWeight={900} sx={{ color: '#ffffff', fontSize: '16px', letterSpacing: '-0.3px', lineHeight: 1.1 }}>
                                 DIPALI ASSOCIATES & CO.
                             </Typography>
-                            <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)', fontWeight: 700, fontSize: '10px', letterSpacing: '1px' }}>
+                            <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.75)', fontWeight: 700, fontSize: '10px', letterSpacing: '1px' }}>
                                 DIGITAL LOGISTICS MANAGEMENT
                             </Typography>
                         </Box>
@@ -200,7 +203,7 @@ const Login = () => {
                                 sx={{
                                     position: 'relative',
                                     cursor: 'pointer',
-                                    color: isActive ? '#ffffff' : 'rgba(255, 255, 255, 0.75)',
+                                    color: isActive ? '#ffffff' : 'rgba(255, 255, 255, 0.78)',
                                     fontWeight: isActive ? 800 : 600,
                                     fontSize: '14.5px',
                                     letterSpacing: '0.2px',
@@ -216,7 +219,7 @@ const Login = () => {
                                         height: '2px',
                                         borderRadius: '2px',
                                         background: 'linear-gradient(90deg, #34d399 0%, #38bdf8 100%)',
-                                        boxShadow: '0 0 8px #34d399'
+                                        boxShadow: '0 0 10px #34d399'
                                     } : {}
                                 }}
                             >
@@ -244,8 +247,8 @@ const Login = () => {
             >
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
                     <Box display="flex" alignItems="center" gap={1}>
-                        <Box sx={{ width: 32, height: 32, borderRadius: '8px', bgcolor: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Typography fontWeight={900} fontSize={12}>DAC</Typography>
+                        <Box sx={{ width: 34, height: 34, borderRadius: '10px', bgcolor: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Typography fontWeight={900} fontSize={13}>DAC</Typography>
                         </Box>
                         <Typography fontWeight={800} fontSize={14}>DIPALI ASSOCIATES</Typography>
                     </Box>
@@ -263,7 +266,7 @@ const Login = () => {
                             sx={{
                                 borderRadius: '12px',
                                 mb: 1,
-                                bgcolor: activeNav === item.label ? 'rgba(255,255,255,0.15)' : 'transparent',
+                                bgcolor: activeNav === item.label ? 'rgba(255,255,255,0.18)' : 'transparent',
                                 '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
                             }}
                         >
@@ -276,7 +279,7 @@ const Login = () => {
                 </List>
             </Drawer>
 
-            {/* ── 2. HERO CONTENT & RIGHT-SIDE GLASS LOGIN CARD ─────────────────────── */}
+            {/* ── 2. HERO CONTENT & RIGHT-SIDE FROSTED GLASS LOGIN CARD ─────────────────────── */}
             <Box sx={{
                 position: 'relative',
                 zIndex: 10,
@@ -296,14 +299,14 @@ const Login = () => {
                 {/* ── LEFT HERO SECTION ──────────────────────────────────────────────── */}
                 <Box sx={{
                     flex: 1,
-                    maxWidth: { lg: 580 },
+                    maxWidth: { lg: 600 },
                     animation: 'slideRightFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards',
                     textAlign: { xs: 'center', lg: 'left' },
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: { xs: 'center', lg: 'flex-start' }
                 }}>
-                    {/* Small Subtitle Badge */}
+                    {/* Small Subtitle Glass Badge */}
                     <Box sx={{
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -311,10 +314,10 @@ const Login = () => {
                         px: 2,
                         py: 0.75,
                         borderRadius: '30px',
-                        bgcolor: 'rgba(52, 211, 153, 0.15)',
-                        border: '1px solid rgba(52, 211, 153, 0.35)',
+                        bgcolor: 'rgba(52, 211, 153, 0.16)',
+                        border: '1px solid rgba(52, 211, 153, 0.38)',
                         mb: 2.5,
-                        backdropFilter: 'blur(10px)'
+                        backdropFilter: 'blur(12px)'
                     }}>
                         <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#34d399' }} />
                         <Typography variant="caption" sx={{ color: '#6ee7b7', fontWeight: 800, fontSize: '11px', letterSpacing: '1px' }}>
@@ -322,34 +325,33 @@ const Login = () => {
                         </Typography>
                     </Box>
 
-                    {/* Main Bold Headline */}
+                    {/* Exact Hero Title: DIPALI ASSOCIATES & CO. */}
                     <Typography
                         variant="h1"
                         fontWeight={900}
                         sx={{
-                            color: '#ffffff',
-                            fontSize: { xs: '32px', sm: '46px', md: '56px', lg: '62px' },
+                            fontSize: { xs: '34px', sm: '48px', md: '58px', lg: '64px' },
                             lineHeight: 1.05,
                             letterSpacing: '-1.5px',
                             mb: 2.5,
                             textShadow: '0 4px 20px rgba(0, 0, 0, 0.4)'
                         }}
                     >
-                        MANAGE <br />
+                        <span style={{ color: '#ffffff' }}>DIPALI</span> <br />
                         <span style={{
-                            background: 'linear-gradient(135deg, #34d399 0%, #38bdf8 100%)',
+                            background: 'linear-gradient(135deg, #38bdf8 0%, #34d399 50%, #60a5fa 100%)',
                             WebkitBackgroundClip: 'text',
                             WebkitTextFillColor: 'transparent'
                         }}>
-                            YOUR LOGISTICS
+                            ASSOCIATES & CO.
                         </span>
                     </Typography>
 
-                    {/* Description Paragraph */}
+                    {/* Concise Description */}
                     <Typography
                         variant="body1"
                         sx={{
-                            color: 'rgba(255, 255, 255, 0.82)',
+                            color: 'rgba(255, 255, 255, 0.85)',
                             fontSize: { xs: '14px', sm: '16px' },
                             lineHeight: 1.6,
                             fontWeight: 500,
@@ -357,10 +359,10 @@ const Login = () => {
                             mb: 4
                         }}
                     >
-                        Centralized digital portal for Dipali Associates & Co. Streamline fleet operations, vehicle directory, billing, pump slips, GST & TDS reports with precision.
+                        Centralized digital portal for transport, fleet operations, vehicle directory, billing, GST, TDS, payments and daily logistics management.
                     </Typography>
 
-                    {/* CTA Buttons */}
+                    {/* Outlined / Glass CTA Buttons */}
                     <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
                         <Button
                             variant="outlined"
@@ -369,17 +371,17 @@ const Login = () => {
                                 py: '11px',
                                 px: 3,
                                 borderRadius: '24px',
-                                borderColor: 'rgba(255, 255, 255, 0.4)',
+                                borderColor: 'rgba(255, 255, 255, 0.45)',
                                 color: '#ffffff',
                                 fontWeight: 800,
                                 fontSize: '14px',
                                 textTransform: 'none',
-                                backdropFilter: 'blur(10px)',
-                                bgcolor: 'rgba(255, 255, 255, 0.08)',
+                                backdropFilter: 'blur(12px)',
+                                bgcolor: 'rgba(255, 255, 255, 0.1)',
                                 transition: 'all 0.3s ease',
                                 '&:hover': {
                                     borderColor: '#34d399',
-                                    bgcolor: 'rgba(52, 211, 153, 0.2)',
+                                    bgcolor: 'rgba(52, 211, 153, 0.22)',
                                     transform: 'translateY(-2px)'
                                 }
                             }}
@@ -393,11 +395,11 @@ const Login = () => {
                             sx={{
                                 py: '11px',
                                 px: 2.5,
-                                color: 'rgba(255, 255, 255, 0.8)',
+                                color: 'rgba(255, 255, 255, 0.85)',
                                 fontWeight: 700,
                                 fontSize: '14px',
                                 textTransform: 'none',
-                                '&:hover': { color: '#ffffff', bgcolor: 'rgba(255, 255, 255, 0.05)' }
+                                '&:hover': { color: '#ffffff', bgcolor: 'rgba(255, 255, 255, 0.08)' }
                             }}
                         >
                             Learn More
@@ -405,54 +407,54 @@ const Login = () => {
                     </Box>
                 </Box>
 
-                {/* ── 3. RIGHT-SIDE FROSTED GLASS LOGIN CARD ──────────────────────────── */}
+                {/* ── 3. RIGHT-SIDE REAL FROSTED GLASS LOGIN CARD ─────────────────────── */}
                 <Box sx={{
                     width: '100%',
-                    maxWidth: { xs: '100%', sm: 410, md: 430 },
-                    bgcolor: 'rgba(6, 78, 59, 0.32)',
-                    backdropFilter: 'blur(28px) saturate(180%)',
-                    WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-                    borderRadius: '32px',
-                    border: '1px solid rgba(255, 255, 255, 0.25)',
-                    boxShadow: '0 30px 60px -12px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.3)',
+                    maxWidth: { xs: '100%', sm: 400, md: 420 },
+                    bgcolor: 'rgba(255, 255, 255, 0.13)',
+                    backdropFilter: 'blur(24px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+                    borderRadius: '30px',
+                    border: '1px solid rgba(255, 255, 255, 0.32)',
+                    boxShadow: '0 25px 60px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35)',
                     p: { xs: 3, sm: 4 },
                     boxSizing: 'border-box',
                     animation: 'slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards',
                     transition: 'transform 0.3s ease, box-shadow 0.3s ease',
                     '&:hover': {
-                        boxShadow: '0 35px 70px -10px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.4)',
+                        boxShadow: '0 30px 70px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
                     }
                 }}>
-                    {/* Raised Rounded Glass/Green Logo Header Section */}
+                    {/* Natural Transparent Glass Logo Header Section */}
                     <Box sx={{
-                        bgcolor: 'rgba(5, 150, 105, 0.35)',
-                        backdropFilter: 'blur(16px)',
-                        borderRadius: '24px',
-                        border: '1px solid rgba(52, 211, 153, 0.35)',
-                        p: 2,
+                        bgcolor: 'rgba(255, 255, 255, 0.1)',
+                        backdropFilter: 'blur(14px)',
+                        borderRadius: '22px',
+                        border: '1px solid rgba(255, 255, 255, 0.28)',
+                        p: 1.8,
                         mb: 3,
                         display: 'flex',
                         alignItems: 'center',
-                        gap: 2,
+                        gap: 1.8,
                         boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.3)'
                     }}>
                         <Box sx={{
-                            width: 48,
-                            height: 48,
-                            borderRadius: '16px',
-                            background: 'linear-gradient(135deg, #059669 0%, #10b981 50%, #3b82f6 100%)',
+                            width: 44,
+                            height: 44,
+                            borderRadius: '14px',
+                            background: 'linear-gradient(135deg, #059669 0%, #10b981 50%, #2563eb 100%)',
                             display: 'flex',
                             alignItems: 'center',
                             justify: 'center',
                             boxShadow: '0 8px 20px rgba(5, 150, 105, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4)',
-                            border: '1px solid rgba(255, 255, 255, 0.3)'
+                            border: '1px solid rgba(255, 255, 255, 0.35)'
                         }}>
-                            <Typography sx={{ color: '#ffffff', fontWeight: 900, fontSize: 16, letterSpacing: '0.5px' }}>
+                            <Typography sx={{ color: '#ffffff', fontWeight: 900, fontSize: 15, letterSpacing: '0.5px' }}>
                                 DAC
                             </Typography>
                         </Box>
                         <Box>
-                            <Typography variant="subtitle1" fontWeight={900} sx={{ color: '#ffffff', lineHeight: 1.2 }}>
+                            <Typography variant="subtitle1" fontWeight={900} sx={{ color: '#ffffff', lineHeight: 1.2, fontSize: '15px' }}>
                                 DIPALI ASSOCIATES & CO.
                             </Typography>
                             <Typography variant="caption" sx={{ color: '#a7f3d0', fontWeight: 700, fontSize: '11px' }}>
@@ -461,12 +463,12 @@ const Login = () => {
                         </Box>
                     </Box>
 
-                    {/* Card Titles */}
+                    {/* Card Headings */}
                     <Box mb={2.5}>
                         <Typography variant="h5" fontWeight={900} sx={{ color: '#ffffff', letterSpacing: '-0.5px', fontSize: '22px' }}>
                             Welcome Back
                         </Typography>
-                        <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mt: 0.5, fontWeight: 500, fontSize: '13px' }}>
+                        <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.75)', mt: 0.5, fontWeight: 500, fontSize: '13px' }}>
                             Login to continue to your designated panel
                         </Typography>
                     </Box>
@@ -479,7 +481,7 @@ const Login = () => {
                             py: 0.75,
                             fontSize: '13px',
                             fontWeight: 600,
-                            bgcolor: 'rgba(239, 68, 68, 0.2)',
+                            bgcolor: 'rgba(239, 68, 68, 0.22)',
                             color: '#fca5a5',
                             border: '1px solid rgba(239, 68, 68, 0.4)',
                             backdropFilter: 'blur(10px)',
@@ -496,7 +498,7 @@ const Login = () => {
                             py: 0.75,
                             fontSize: '12.5px',
                             fontWeight: 600,
-                            bgcolor: 'rgba(56, 189, 248, 0.2)',
+                            bgcolor: 'rgba(56, 189, 248, 0.22)',
                             color: '#7dd3fc',
                             border: '1px solid rgba(56, 189, 248, 0.4)',
                             backdropFilter: 'blur(10px)',
@@ -510,7 +512,7 @@ const Login = () => {
                     <form onSubmit={handleSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {/* Username / Email Field */}
                         <TextField
-                            label="Username / Email"
+                            label="Username / Email *"
                             type="email"
                             fullWidth
                             required
@@ -518,11 +520,11 @@ const Login = () => {
                             value={email}
                             onChange={e => setEmail(e.target.value)}
                             autoComplete="off"
-                            sx={pillInputSx}
+                            sx={transparentGlassInputSx}
                             InputProps={{
                                 startAdornment: (
                                     <InputAdornment position="start">
-                                        <EmailIcon sx={{ color: 'rgba(255, 255, 255, 0.65)', fontSize: 19, ml: 0.5 }} />
+                                        <EmailIcon sx={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: 19, ml: 0.5 }} />
                                     </InputAdornment>
                                 )
                             }}
@@ -530,7 +532,7 @@ const Login = () => {
 
                         {/* Password Field */}
                         <TextField
-                            label="Password"
+                            label="Password *"
                             fullWidth
                             required
                             size="small"
@@ -538,11 +540,11 @@ const Login = () => {
                             value={password}
                             onChange={e => setPassword(e.target.value)}
                             autoComplete="new-password"
-                            sx={pillInputSx}
+                            sx={transparentGlassInputSx}
                             InputProps={{
                                 startAdornment: (
                                     <InputAdornment position="start">
-                                        <LockIcon sx={{ color: 'rgba(255, 255, 255, 0.65)', fontSize: 19, ml: 0.5 }} />
+                                        <LockIcon sx={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: 19, ml: 0.5 }} />
                                     </InputAdornment>
                                 ),
                                 endAdornment: (
@@ -551,7 +553,7 @@ const Login = () => {
                                             size="small"
                                             onClick={() => setShowPass(!showPass)}
                                             edge="end"
-                                            sx={{ color: 'rgba(255, 255, 255, 0.65)', mr: 0.5, '&:hover': { color: '#ffffff' } }}
+                                            sx={{ color: 'rgba(255, 255, 255, 0.75)', mr: 0.5, '&:hover': { color: '#ffffff' } }}
                                         >
                                             {showPass ? <VisibilityOffIcon sx={{ fontSize: 19 }} /> : <VisibilityIcon sx={{ fontSize: 19 }} />}
                                         </IconButton>
@@ -571,19 +573,19 @@ const Login = () => {
                                 mt: 1,
                                 py: '14px',
                                 borderRadius: '28px',
-                                background: 'linear-gradient(135deg, #059669 0%, #0d9488 50%, #1d4ed8 100%)',
+                                background: 'linear-gradient(135deg, rgba(13, 148, 136, 0.95) 0%, rgba(37, 99, 235, 0.95) 100%)',
                                 color: '#ffffff',
                                 fontWeight: 900,
                                 fontSize: '15px',
                                 letterSpacing: '1px',
                                 textTransform: 'uppercase',
-                                boxShadow: '0 10px 25px rgba(5, 150, 105, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.35)',
-                                border: '1px solid rgba(255, 255, 255, 0.25)',
+                                boxShadow: '0 10px 25px rgba(13, 148, 136, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.35)',
+                                border: '1px solid rgba(255, 255, 255, 0.3)',
                                 transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                 '&:hover': {
                                     opacity: 0.95,
                                     transform: 'translateY(-2px)',
-                                    boxShadow: '0 14px 32px rgba(5, 150, 105, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+                                    boxShadow: '0 14px 32px rgba(13, 148, 136, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
                                 },
                                 '&:disabled': {
                                     bgcolor: 'rgba(255, 255, 255, 0.15)',
@@ -592,16 +594,16 @@ const Login = () => {
                                 }
                             }}
                         >
-                            {loading ? 'Logging in...' : 'LOG IN'}
+                            {loading ? 'Logging in...' : 'LOG IN  →'}
                         </Button>
 
-                        {/* Forgot Password */}
+                        {/* Forgot Password Link */}
                         <Box textAlign="center" mt={0.5}>
                             <Typography
                                 onClick={handleForgotPassword}
                                 variant="caption"
                                 sx={{
-                                    color: 'rgba(255, 255, 255, 0.75)',
+                                    color: 'rgba(255, 255, 255, 0.8)',
                                     fontSize: '12.5px',
                                     fontWeight: 600,
                                     cursor: 'pointer',
@@ -614,10 +616,10 @@ const Login = () => {
                         </Box>
                     </form>
 
-                    {/* Bottom Security Note */}
+                    {/* Bottom Security Footer */}
                     <Box display="flex" alignItems="center" justifyContent="center" gap={0.8} mt={3}>
                         <ShieldOutlinedIcon sx={{ color: '#34d399', fontSize: 16 }} />
-                        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.65)', fontWeight: 600, fontSize: '11px' }}>
+                        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)', fontWeight: 600, fontSize: '11px' }}>
                             Encrypted Logistics Security &bull; DAC 2.0
                         </Typography>
                     </Box>
@@ -634,7 +636,7 @@ const Login = () => {
                 textAlign: 'center',
                 boxSizing: 'border-box'
             }}>
-                <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 600, fontSize: '11.5px', letterSpacing: '0.3px' }}>
+                <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.65)', fontWeight: 600, fontSize: '11.5px', letterSpacing: '0.3px' }}>
                     &copy; {new Date().getFullYear()} DIPALI ASSOCIATES & CO. &bull; Digital Logistics Management Platform
                 </Typography>
             </Box>
