@@ -15,10 +15,27 @@ import { useAuth } from '../context/AuthContext';
 import aerialBg from '../assets/dac_aerial_logistics_bg.jpg';
 import heroBgFallback from '../assets/logistics_hero_bg.jpg';
 
-// Transparent Glass Input Styling
+// Transparent Glass Input Styling with High-Contrast White/Cyan Floating Labels
 const transparentGlassInputSx = {
+    '& .MuiInputLabel-root': {
+        color: 'rgba(255, 255, 255, 0.85)',
+        fontSize: '14px',
+        fontWeight: 600,
+        textShadow: '0 1px 3px rgba(0, 0, 0, 0.7)',
+        '&.Mui-focused': {
+            color: '#38bdf8',
+        },
+        '&.MuiInputLabel-shrink': {
+            color: '#38bdf8',
+            fontWeight: 700,
+            bgcolor: 'rgba(15, 23, 42, 0.75)',
+            px: 1,
+            borderRadius: '6px',
+            backdropFilter: 'blur(8px)',
+        },
+    },
     '& .MuiOutlinedInput-root': {
-        bgcolor: 'rgba(255, 255, 255, 0.14)',
+        bgcolor: 'rgba(255, 255, 255, 0.16)',
         backdropFilter: 'blur(14px)',
         WebkitBackdropFilter: 'blur(14px)',
         borderRadius: '28px',
@@ -28,28 +45,29 @@ const transparentGlassInputSx = {
         px: '6px',
         transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         '& fieldset': {
-            borderColor: 'rgba(255, 255, 255, 0.32)',
-            borderWidth: '1px',
+            borderColor: 'rgba(255, 255, 255, 0.38)',
+            borderWidth: '1.5px',
         },
         '&:hover fieldset': {
-            borderColor: 'rgba(52, 211, 153, 0.7)',
+            borderColor: '#34d399',
         },
         '&.Mui-focused fieldset': {
             borderColor: '#38bdf8',
             borderWidth: '2px',
-            boxShadow: '0 0 22px rgba(56, 189, 248, 0.4)',
+            boxShadow: '0 0 22px rgba(56, 189, 248, 0.45)',
         },
         '& input': {
             py: '13px',
             px: '14px',
             fontSize: '14.5px',
-            fontWeight: 500,
+            fontWeight: 600,
+            color: '#ffffff',
             '&::placeholder': {
-                color: 'rgba(255, 255, 255, 0.6)',
+                color: 'rgba(255, 255, 255, 0.7)',
                 opacity: 1,
             },
             '&:-webkit-autofill': {
-                WebkitBoxShadow: '0 0 0 1000px rgba(15, 23, 42, 0.8) inset !important',
+                WebkitBoxShadow: '0 0 0 1000px rgba(15, 23, 42, 0.85) inset !important',
                 WebkitTextFillColor: '#ffffff !important',
             },
         },
@@ -136,7 +154,7 @@ const Login = () => {
                 gap: { xs: 4, lg: 6 },
                 boxSizing: 'border-box'
             }}>
-                {/* ── LEFT HERO SECTION (UNTOUCHED EXCEPT REMOVED DESCRIPTION & BUTTONS) ── */}
+                {/* ── LEFT HERO SECTION ── */}
                 <Box sx={{
                     flex: 1,
                     maxWidth: { lg: 600 },
@@ -210,7 +228,7 @@ const Login = () => {
                         <Typography variant="h5" fontWeight={900} sx={{ color: '#ffffff', letterSpacing: '-0.5px', fontSize: '22px' }}>
                             Welcome Back
                         </Typography>
-                        <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.75)', mt: 0.5, fontWeight: 500, fontSize: '13px' }}>
+                        <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.8)', mt: 0.5, fontWeight: 500, fontSize: '13px' }}>
                             Login to continue to your designated panel
                         </Typography>
                     </Box>
@@ -254,7 +272,7 @@ const Login = () => {
                     <form onSubmit={handleSubmit} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {/* Username / Email Field */}
                         <TextField
-                            label="Username / Email *"
+                            label="Username / Email"
                             type="email"
                             fullWidth
                             required
@@ -266,7 +284,7 @@ const Login = () => {
                             InputProps={{
                                 startAdornment: (
                                     <InputAdornment position="start">
-                                        <EmailIcon sx={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: 19, ml: 0.5 }} />
+                                        <EmailIcon sx={{ color: '#38bdf8', fontSize: 19, ml: 0.5 }} />
                                     </InputAdornment>
                                 )
                             }}
@@ -274,7 +292,7 @@ const Login = () => {
 
                         {/* Password Field */}
                         <TextField
-                            label="Password *"
+                            label="Password"
                             fullWidth
                             required
                             size="small"
@@ -286,7 +304,7 @@ const Login = () => {
                             InputProps={{
                                 startAdornment: (
                                     <InputAdornment position="start">
-                                        <LockIcon sx={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: 19, ml: 0.5 }} />
+                                        <LockIcon sx={{ color: '#38bdf8', fontSize: 19, ml: 0.5 }} />
                                     </InputAdornment>
                                 ),
                                 endAdornment: (
@@ -295,7 +313,7 @@ const Login = () => {
                                             size="small"
                                             onClick={() => setShowPass(!showPass)}
                                             edge="end"
-                                            sx={{ color: 'rgba(255, 255, 255, 0.75)', mr: 0.5, '&:hover': { color: '#ffffff' } }}
+                                            sx={{ color: 'rgba(255, 255, 255, 0.85)', mr: 0.5, '&:hover': { color: '#38bdf8' } }}
                                         >
                                             {showPass ? <VisibilityOffIcon sx={{ fontSize: 19 }} /> : <VisibilityIcon sx={{ fontSize: 19 }} />}
                                         </IconButton>
@@ -336,7 +354,7 @@ const Login = () => {
                                 }
                             }}
                         >
-                            {loading ? 'Logging in...' : 'LOG IN  →'}
+                            {loading ? 'Logging in...' : 'LOG IN'}
                         </Button>
 
                         {/* Forgot Password Link */}
@@ -345,7 +363,7 @@ const Login = () => {
                                 onClick={handleForgotPassword}
                                 variant="caption"
                                 sx={{
-                                    color: 'rgba(255, 255, 255, 0.8)',
+                                    color: 'rgba(255, 255, 255, 0.85)',
                                     fontSize: '12.5px',
                                     fontWeight: 600,
                                     cursor: 'pointer',
@@ -361,7 +379,7 @@ const Login = () => {
                     {/* Bottom Security Footer */}
                     <Box display="flex" alignItems="center" justifyContent="center" gap={0.8} mt={3}>
                         <ShieldOutlinedIcon sx={{ color: '#34d399', fontSize: 16 }} />
-                        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)', fontWeight: 600, fontSize: '11px' }}>
+                        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.75)', fontWeight: 600, fontSize: '11px' }}>
                             Encrypted Logistics Security &bull; DAC 2.0
                         </Typography>
                     </Box>
