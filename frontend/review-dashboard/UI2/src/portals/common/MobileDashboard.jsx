@@ -915,7 +915,7 @@ const MobileDashboard = ({
                             {isOffice && (
                                 <ListItem button onClick={() => { setDrawerOpen(false); onOpenFuelRateSettings(); }} sx={{ borderRadius: 2 }}>
                                     <ListItemIcon><LocalGasStationIcon sx={{ color: '#94a3b8' }} /></ListItemIcon>
-                                    <ListItemText primary="HSD Pricing" primaryTypographyProps={{ fontWeight: 600 }} />
+                                    <ListItemText primary="Fuel & Deduction Settings" primaryTypographyProps={{ fontWeight: 600 }} />
                                 </ListItem>
                             )}
                         </>}

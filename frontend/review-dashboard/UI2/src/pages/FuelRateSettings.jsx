@@ -773,7 +773,7 @@ export default function FuelRateSettings({ onBack }) {
                     </IconButton>
                     <Box>
                         <Typography variant="h5" fontWeight={700}>
-                            Settings & Configurations
+                            Fuel & Deduction Settings
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
                             Manage Fuel Rates, Pump Cash Discounts, and Projected Deductions efficiently.

@@ -789,9 +789,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <ActionCard title="AI EXTRA EXPENSE" subtitle="AI Expense Management" icon={<AutoAwesomeIcon />} accentColor="#6366f1" onClick={onOpenAiExtraExpense} />
                                     <ActionCard title="OWNER & VEHICLES" subtitle="Fleet Directory" icon={<LocalShippingIcon />} accentColor="#f59e0b" onClick={() => setTruckManagerOpen(true)} />
                                     <ActionCard title="VOUCHER HISTORY" subtitle="Approved Payouts" icon={<HistoryIcon />} accentColor="#f43f5e" onClick={() => { setVoucherDialogTab(1); setVoucherDialogOpen(true); }} />
-                                    {user?.role === 'HEAD_OFFICE' && (
-                                        <ActionCard title="FUEL RATE SETTINGS" subtitle="Global Station Pricing" icon={<LocalGasStationIcon />} accentColor="#ef4444" onClick={onOpenFuelRateSettings} />
-                                    )}
+                                    <ActionCard title="FUEL & DEDUCTION SETTINGS" subtitle="Fuel Pricing & Deductions" icon={<LocalGasStationIcon />} accentColor="#ef4444" onClick={onOpenFuelRateSettings} />
                                     {user?.role === 'HEAD_OFFICE' && (
                                         <ActionCard title="ACCOUNT APPROVALS" subtitle="Manage Staff Requests" icon={<PersonAddAlt1Icon />} accentColor="#10b981" onClick={onOpenAccountApprovals} />
                                     )}
