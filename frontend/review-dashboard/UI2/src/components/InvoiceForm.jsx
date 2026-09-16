@@ -344,8 +344,20 @@ export default function InvoiceForm({ onBack }) {
     }
   };
 
+  const handleRetryExtraction = () => {
+    if (isProcessing) return;
+    if (currentFile?.file) {
+      handleFileUpload({ file: currentFile.file });
+    }
+  };
+
   const handleFileUpload = async (event) => {
-    const file = event.target.files?.[0];
+    if (isProcessing) {
+      console.warn("Upload/Processing already in progress. Duplicate upload ignored.");
+      return;
+    }
+
+    const file = event.target?.files?.[0] || event.file;
     if (!file) return;
 
     if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
@@ -358,6 +370,7 @@ export default function InvoiceForm({ onBack }) {
     }
 
     setCurrentFile({
+      file: file,
       name: file.name,
       size: file.size,
       type: file.type,
@@ -407,7 +420,9 @@ export default function InvoiceForm({ onBack }) {
       });
       setIsProcessing(false);
     } finally {
-      event.target.value = null;
+      if (event.target) {
+        event.target.value = null;
+      }
     }
   };
 
@@ -704,6 +719,7 @@ export default function InvoiceForm({ onBack }) {
           onUpload={handleFileUpload}
           onScan={handlePhysicalScan}
           onCameraOpen={() => setIsScannerOpen(true)}
+          onRetryExtraction={handleRetryExtraction}
           isProcessing={isProcessing && processingMode === 'upload'}
           isScanTriggered={isScanTriggered}
           status={status}

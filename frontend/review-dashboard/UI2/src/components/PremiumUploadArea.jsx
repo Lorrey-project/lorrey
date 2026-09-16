@@ -16,6 +16,7 @@ export default function PremiumUploadArea({
   onUpload, 
   onScan, 
   onCameraOpen,
+  onRetryExtraction,
   isProcessing, 
   isScanTriggered, 
   status, 
@@ -338,8 +339,21 @@ export default function PremiumUploadArea({
                   {status.message}
                 </Typography>
                 {(status.type === 'error') && (
-                  <Button size="small" variant="outlined" color="error" onClick={() => document.getElementById('file-upload-input')?.click()} sx={{ bgcolor: 'background.paper', '&:hover': { bgcolor: '#fef2f2' } }}>
-                    Retry
+                  <Button 
+                    size="small" 
+                    variant="outlined" 
+                    color="error" 
+                    disabled={isProcessing}
+                    onClick={() => {
+                      if (onRetryExtraction && currentFile) {
+                        onRetryExtraction();
+                      } else {
+                        document.getElementById('file-upload-input')?.click();
+                      }
+                    }} 
+                    sx={{ bgcolor: 'background.paper', '&:hover': { bgcolor: '#fef2f2' } }}
+                  >
+                    {isProcessing ? 'Retrying...' : 'Retry'}
                   </Button>
                 )}
               </Box>

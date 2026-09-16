@@ -325,30 +325,42 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
         
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
-                console.log(`[AI WORKER REQUEST] Attempt ${attempt + 1}: ${fileUrl}`);
+                console.log(`[AI WORKER REQUEST] Attempt ${attempt + 1}/${maxRetries}: ${fileUrl}`);
                 const startTime = performance.now();
                 
                 const aiResponse = await require("axios").post(
                     targetProcessUrl,
                     { file: fileUrl },
-                    { timeout: 90000 } // 90 seconds timeout
+                    { timeout: 90000 }
                 );
                 aiData = aiResponse.data;
                 
                 const duration = performance.now() - startTime;
                 console.log(`[AI WORKER RESPONSE] Duration: ${duration.toFixed(2)}ms`);
-                break; // Success, exit retry loop
+                break;
             } catch (aiErr) {
-                console.error(`[AI WORKER ERROR] Attempt ${attempt + 1} failed: ${aiErr.message}`);
+                const status = aiErr.response?.status;
+                const errDetail = aiErr.response?.data?.detail || aiErr.message;
+                console.error(`[AI WORKER ERROR] Attempt ${attempt + 1}/${maxRetries} (Status: ${status}): ${errDetail}`);
+                
                 if (attempt === maxRetries - 1) {
-                    throw aiErr; // Throw on last failure
+                    throw aiErr;
                 }
-                emitStatus("retrying", { message: `AI Error. Retrying (Attempt ${attempt + 2}/${maxRetries})...` });
-                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000)); // Exponential backoff
+
+                const isRateLimit = status === 429 || (errDetail && (errDetail.includes("rate") || errDetail.includes("429")));
+                const statusMsg = isRateLimit 
+                    ? `AI service is temporarily busy. Retrying automatically (Attempt ${attempt + 2}/${maxRetries})...` 
+                    : `AI Processing retry (Attempt ${attempt + 2}/${maxRetries})...`;
+
+                emitStatus("retrying", { message: statusMsg });
+
+                // Backoff with randomized jitter
+                const backoffMs = (Math.pow(2, attempt) * 1500) + Math.floor(Math.random() * 1000);
+                await new Promise(resolve => setTimeout(resolve, backoffMs));
             }
         }
 
-        emitStatus("validating", { message: "Saving data..." });
+        emitStatus("validating", { message: "Saving extracted data..." });
 
         const consignee_name = aiData?.invoice_data?.consignee_details?.consignee_name || '';
 
@@ -380,15 +392,21 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
     } catch (error) {
         console.error(`[Background Task Error] Invoice ${invoiceId}:`, error);
         let details = error.message;
-        if (error.response) {
-            details = error.response?.data?.detail || error.response?.data?.error || error.message;
+        if (error.response?.data?.detail) {
+            details = error.response.data.detail;
+        } else if (error.response?.data?.error) {
+            details = error.response.data.error;
         }
-        
+
+        if (details.includes("429") || details.toLowerCase().includes("rate limit")) {
+            details = "AI service is temporarily busy due to high traffic. Click 'Retry' below to extract again.";
+        }
+
         // Update DB to mark as failed
         await Invoice.findByIdAndUpdate(invoiceId, { status: "failed", error_message: details }).catch(() => {});
         
         emitStatus("error", { 
-            message: `AI Extraction Failed: ${details}`,
+            message: details,
             error: details 
         });
     }

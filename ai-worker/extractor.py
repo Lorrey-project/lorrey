@@ -88,14 +88,19 @@ Return ONLY valid JSON matching the schema exactly.
 """
 
     import time
-    
-    max_retries = 3
+    import random
+    import openai
+
+    max_retries = 4
+    content = None
+
     for attempt in range(max_retries):
         try:
+            print(f"[AI EXTRACTOR] Attempt {attempt + 1}/{max_retries} requesting gpt-4o...")
             response = client.chat.completions.create(
                 model="gpt-4o",
                 temperature=0,
-                timeout=60, # 60 seconds timeout
+                timeout=60,
                 messages=[
                     {
                         "role": "user",
@@ -115,11 +120,43 @@ Return ONLY valid JSON matching the schema exactly.
             content = response.choices[0].message.content
             print("GPT VISION EXTRACTION RESPONSE:", content[:300], "...")
             break
+        except openai.AuthenticationError as auth_err:
+            print(f"[AI EXTRACTOR AUTH ERROR] Invalid API key: {auth_err}")
+            raise ValueError(f"OpenAI Authentication Failed: {auth_err}")
+        except openai.PermissionDeniedError as perm_err:
+            print(f"[AI EXTRACTOR PERMISSION ERROR]: {perm_err}")
+            raise ValueError(f"OpenAI Permission Denied: {perm_err}")
+        except openai.BadRequestError as bad_err:
+            print(f"[AI EXTRACTOR BAD REQUEST]: {bad_err}")
+            raise ValueError(f"OpenAI Bad Request: {bad_err}")
         except Exception as e:
-            print(f"OpenAI API Error on attempt {attempt + 1}: {e}")
+            err_str = str(e)
+            is_rate_limit = isinstance(e, openai.RateLimitError) or "429" in err_str or "rate_limit" in err_str.lower()
+            
+            print(f"[AI EXTRACTOR ERROR] Attempt {attempt + 1}/{max_retries} failed: {e}")
             if attempt == max_retries - 1:
+                if is_rate_limit:
+                    raise ValueError("AI service is currently busy due to rate limits. Please try again in a few moments.")
                 raise ValueError(f"Failed GPT vision extraction after {max_retries} attempts: {e}")
-            time.sleep(2 ** attempt) # Exponential backoff
+
+            # Calculate retry wait time using Retry-After header if present, or exponential backoff + jitter
+            retry_after_sec = None
+            if hasattr(e, 'response') and e.response and hasattr(e.response, 'headers'):
+                raw_retry_after = e.response.headers.get("retry-after") or e.response.headers.get("Retry-After")
+                if raw_retry_after:
+                    try: retry_after_sec = float(raw_retry_after)
+                    except ValueError: pass
+
+            if retry_after_sec is not None and retry_after_sec > 0:
+                wait_sec = retry_after_sec + random.uniform(0.5, 1.5)
+                print(f"[AI EXTRACTOR RATE LIMIT] Respecting Retry-After header. Waiting {wait_sec:.2f}s...")
+            else:
+                base_wait = 2 ** attempt  # 1s, 2s, 4s, 8s
+                jitter = random.uniform(0.5, 1.5)
+                wait_sec = base_wait + jitter
+                print(f"[AI EXTRACTOR BACKOFF] Rate limit / error encountered. Retrying in {wait_sec:.2f}s...")
+
+            time.sleep(wait_sec)
 
     if not content:
         raise ValueError("Empty response from GPT vision extraction")

@@ -139,9 +139,29 @@ def process_invoice(data: InvoiceRequest):
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"Failed to download file from S3: {str(e)}")
 
-    # Convert PDF to Image and encode to base64 in memory
+    # Convert PDF to Image or optimize image and encode to base64 in memory
     import base64
+    from io import BytesIO
+    from PIL import Image
+
     base64_image = None
+
+    def optimize_and_encode_image(img_raw_bytes, max_dim=2048):
+        """Helper to resize large images to max 2048px dimension to save tokens & prevent 429 rate limits"""
+        try:
+            with Image.open(BytesIO(img_raw_bytes)) as img:
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                w, h = img.size
+                if w > max_dim or h > max_dim:
+                    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                buf = BytesIO()
+                img.save(buf, format="JPEG", quality=88, optimize=True)
+                return base64.b64encode(buf.getvalue()).decode("utf-8")
+        except Exception as err:
+            print(f"PIL Optimization fallback: {err}")
+            return base64.b64encode(img_raw_bytes).decode("utf-8")
+
     try:
         t0 = time.time()
         import fitz  # PyMuPDF
@@ -149,22 +169,20 @@ def process_invoice(data: InvoiceRequest):
         if doc.is_pdf:
             print("PDF detected. Converting first page to image in memory...")
             page = doc.load_page(0)
-            # Render at lower resolution for faster OCR
             pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            # Get JPEG bytes directly from memory without disk I/O
             img_bytes = pix.tobytes("jpeg")
-            base64_image = base64.b64encode(img_bytes).decode("utf-8")
+            base64_image = optimize_and_encode_image(img_bytes, max_dim=2048)
             doc.close()
         else:
-            # It's already an image, read directly to memory
             doc.close()
             with open(file_path, "rb") as img_file:
-                base64_image = base64.b64encode(img_file.read()).decode("utf-8")
+                raw_bytes = img_file.read()
+                base64_image = optimize_and_encode_image(raw_bytes, max_dim=2048)
         print(f"[Profiling] Image processing completed in {time.time() - t0:.2f}s")
     except Exception as e:
-        print(f"PyMuPDF check passed/failed: {e}. Assuming original image.")
+        print(f"PyMuPDF check fallback: {e}. Reading raw image file.")
         with open(file_path, "rb") as img_file:
-            base64_image = base64.b64encode(img_file.read()).decode("utf-8")
+            base64_image = optimize_and_encode_image(img_file.read(), max_dim=2048)
 
     # -------------------------------
     # Direct AI Vision Extraction
@@ -199,9 +217,6 @@ def process_invoice(data: InvoiceRequest):
         # Time normalization
         invoice_json = fill_invoice_time(invoice_json)
 
-        # GPT vision cross-check / correction pass — disabled (redundant, doubles cost & latency)
-        # invoice_json = validate_invoice_with_gpt(file_path, invoice_json)
-
         print(f"[Profiling] Post-processing & Validation completed in {time.time() - t0:.2f}s")
         print(f"[Profiling] Total Extraction Pipeline Time: {time.time() - total_start:.2f}s")
     except Exception as ai_e:
@@ -212,7 +227,15 @@ def process_invoice(data: InvoiceRequest):
         except Exception:
             pass
         from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=f"AI Extraction failed: {str(ai_e)}")
+        err_msg = str(ai_e)
+        if "Authentication Failed" in err_msg or "Invalid API key" in err_msg:
+            status_code = 401
+        elif "busy due to rate limits" in err_msg or "rate_limit" in err_msg.lower() or "429" in err_msg:
+            status_code = 429
+        else:
+            status_code = 500
+
+        raise HTTPException(status_code=status_code, detail=f"AI Extraction failed: {err_msg}")
 
     # Clean up temp file
     try:
