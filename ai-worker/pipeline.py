@@ -146,8 +146,8 @@ def process_invoice(data: InvoiceRequest):
 
     base64_image = None
 
-    def optimize_and_encode_image(img_raw_bytes, max_dim=2048):
-        """Helper to resize large images to max 2048px dimension to save tokens & prevent 429 rate limits"""
+    def optimize_and_encode_image(img_raw_bytes, max_dim=1600):
+        """Helper to resize large images to max 1600px dimension to save tokens & prevent 429 rate limits"""
         try:
             with Image.open(BytesIO(img_raw_bytes)) as img:
                 if img.mode != 'RGB':
@@ -156,7 +156,7 @@ def process_invoice(data: InvoiceRequest):
                 if w > max_dim or h > max_dim:
                     img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
                 buf = BytesIO()
-                img.save(buf, format="JPEG", quality=88, optimize=True)
+                img.save(buf, format="JPEG", quality=85, optimize=True)
                 return base64.b64encode(buf.getvalue()).decode("utf-8")
         except Exception as err:
             print(f"PIL Optimization fallback: {err}")
@@ -171,18 +171,18 @@ def process_invoice(data: InvoiceRequest):
             page = doc.load_page(0)
             pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_bytes = pix.tobytes("jpeg")
-            base64_image = optimize_and_encode_image(img_bytes, max_dim=2048)
+            base64_image = optimize_and_encode_image(img_bytes, max_dim=1600)
             doc.close()
         else:
             doc.close()
             with open(file_path, "rb") as img_file:
                 raw_bytes = img_file.read()
-                base64_image = optimize_and_encode_image(raw_bytes, max_dim=2048)
+                base64_image = optimize_and_encode_image(raw_bytes, max_dim=1600)
         print(f"[Profiling] Image processing completed in {time.time() - t0:.2f}s")
     except Exception as e:
         print(f"PyMuPDF check fallback: {e}. Reading raw image file.")
         with open(file_path, "rb") as img_file:
-            base64_image = optimize_and_encode_image(img_file.read(), max_dim=2048)
+            base64_image = optimize_and_encode_image(img_file.read(), max_dim=1600)
 
     # -------------------------------
     # Direct AI Vision Extraction

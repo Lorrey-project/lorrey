@@ -91,14 +91,18 @@ Return ONLY valid JSON matching the schema exactly.
     import random
     import openai
 
+    models_to_try = ["gpt-4o", "gpt-4o-mini"]
     max_retries = 4
     content = None
 
     for attempt in range(max_retries):
+        # Pick model: try gpt-4o on first attempt, fallback to gpt-4o-mini on rate limit or subsequent retries
+        model_name = models_to_try[0] if attempt == 0 else models_to_try[attempt % len(models_to_try)]
+        
         try:
-            print(f"[AI EXTRACTOR] Attempt {attempt + 1}/{max_retries} requesting gpt-4o...")
+            print(f"[AI EXTRACTOR] Attempt {attempt + 1}/{max_retries} requesting model '{model_name}'...")
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model=model_name,
                 temperature=0,
                 timeout=60,
                 messages=[
@@ -110,7 +114,7 @@ Return ONLY valid JSON matching the schema exactly.
                                 "type": "image_url",
                                 "image_url": {
                                     "url": f"data:image/jpeg;base64,{base64_image}",
-                                    "detail": "high"
+                                    "detail": "auto"
                                 }
                             }
                         ]
@@ -118,7 +122,7 @@ Return ONLY valid JSON matching the schema exactly.
                 ]
             )
             content = response.choices[0].message.content
-            print("GPT VISION EXTRACTION RESPONSE:", content[:300], "...")
+            print(f"GPT ({model_name}) VISION EXTRACTION RESPONSE:", content[:300], "...")
             break
         except openai.AuthenticationError as auth_err:
             print(f"[AI EXTRACTOR AUTH ERROR] Invalid API key: {auth_err}")
@@ -131,13 +135,19 @@ Return ONLY valid JSON matching the schema exactly.
             raise ValueError(f"OpenAI Bad Request: {bad_err}")
         except Exception as e:
             err_str = str(e)
-            is_rate_limit = isinstance(e, openai.RateLimitError) or "429" in err_str or "rate_limit" in err_str.lower()
+            is_rate_limit = isinstance(e, openai.RateLimitError) or "429" in err_str or "rate_limit" in err_str.lower() or "quota" in err_str.lower()
             
-            print(f"[AI EXTRACTOR ERROR] Attempt {attempt + 1}/{max_retries} failed: {e}")
+            print(f"[AI EXTRACTOR ERROR] Model '{model_name}' Attempt {attempt + 1}/{max_retries} failed: {e}")
             if attempt == max_retries - 1:
                 if is_rate_limit:
-                    raise ValueError("AI service is currently busy due to rate limits. Please try again in a few moments.")
-                raise ValueError(f"Failed GPT vision extraction after {max_retries} attempts: {e}")
+                    raise ValueError("AI service is currently busy due to high traffic. Please try again in a moment.")
+                raise ValueError(f"Failed AI vision extraction after {max_retries} attempts: {e}")
+
+            # If rate limit on gpt-4o, immediately switch to gpt-4o-mini with minimal pause
+            if is_rate_limit and attempt == 0:
+                print(f"[AI EXTRACTOR FALLBACK] Rate limit hit on {model_name}. Immediately falling back to gpt-4o-mini...")
+                time.sleep(0.5)
+                continue
 
             # Calculate retry wait time using Retry-After header if present, or exponential backoff + jitter
             retry_after_sec = None
@@ -148,13 +158,13 @@ Return ONLY valid JSON matching the schema exactly.
                     except ValueError: pass
 
             if retry_after_sec is not None and retry_after_sec > 0:
-                wait_sec = retry_after_sec + random.uniform(0.5, 1.5)
+                wait_sec = retry_after_sec + random.uniform(0.5, 1.2)
                 print(f"[AI EXTRACTOR RATE LIMIT] Respecting Retry-After header. Waiting {wait_sec:.2f}s...")
             else:
-                base_wait = 2 ** attempt  # 1s, 2s, 4s, 8s
-                jitter = random.uniform(0.5, 1.5)
+                base_wait = 2 ** attempt
+                jitter = random.uniform(0.3, 1.0)
                 wait_sec = base_wait + jitter
-                print(f"[AI EXTRACTOR BACKOFF] Rate limit / error encountered. Retrying in {wait_sec:.2f}s...")
+                print(f"[AI EXTRACTOR BACKOFF] Waiting {wait_sec:.2f}s before retry...")
 
             time.sleep(wait_sec)
 

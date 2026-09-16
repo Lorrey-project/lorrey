@@ -558,15 +558,27 @@ async function processScanFile(scanOutputPath, io) {
 }
 
 router.post("/process-ai", async (req, res) => {
-
     const { invoice_id, ai_data } = req.body;
-
     await Invoice.findByIdAndUpdate(invoice_id, {
         ai_data: ai_data
     });
-
     res.json({ message: "AI data saved" });
+});
 
+router.get("/status/:id", async (req, res) => {
+    try {
+        const invoice = await Invoice.findById(req.params.id).lean();
+        if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+        res.json({
+            invoiceId: invoice._id,
+            status: invoice.status,
+            ai_data: invoice.ai_data,
+            error_message: invoice.error_message,
+            file_url: invoice.file_url
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 router.get("/pending", async (req, res) => {

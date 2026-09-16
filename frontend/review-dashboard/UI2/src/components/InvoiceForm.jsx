@@ -336,6 +336,52 @@ export default function InvoiceForm({ onBack }) {
     };
   }, [pendingInvoiceId]);
 
+  // Polling fallback to guarantee extraction completion even if Socket.io connection drops on mobile
+  useEffect(() => {
+    if (!pendingInvoiceId) return;
+
+    let isMounted = true;
+    const pollInterval = setInterval(async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await axios.get(`${API_URL}/invoice/status/${pendingInvoiceId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!isMounted) return;
+
+        const inv = res.data;
+        if (inv && (inv.status === "pending" || inv.status === "approved" || inv.status === "success") && inv.ai_data?.invoice_data) {
+          setFormData({
+            _id: inv.invoiceId,
+            ...getEmptySchema(),
+            ...inv.ai_data.invoice_data,
+          });
+          setErrors({});
+          setStatus({
+            type: "success",
+            message: "AI Extraction complete! Please review the fields below.",
+          });
+          setIsProcessing(false);
+          setPendingInvoiceId(null);
+        } else if (inv && inv.status === "failed") {
+          setIsProcessing(false);
+          setStatus({
+            type: "error",
+            message: inv.error_message || "AI Extraction failed. Click 'Retry' below to extract again."
+          });
+          setPendingInvoiceId(null);
+        }
+      } catch (err) {
+        // Continue polling silently
+      }
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
+  }, [pendingInvoiceId]);
+
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragActive(false);

@@ -141,8 +141,11 @@ const CameraCaptureDialog = ({ open, onClose, onCapture }) => {
     }, 'image/jpeg', 0.95);
   };
 
+  const [isUsingPhoto, setIsUsingPhoto] = useState(false);
+
   // Retake photo: discard captured photo & restart live camera
   const handleRetake = () => {
+    setIsUsingPhoto(false);
     setCapturedImage(null);
     setCapturedBlob(null);
     startCamera();
@@ -150,14 +153,25 @@ const CameraCaptureDialog = ({ open, onClose, onCapture }) => {
 
   // Confirm "Use Photo": create File & pass to existing AI pipeline
   const handleUsePhoto = () => {
-    if (!capturedBlob) return;
-    const file = new File([capturedBlob], `captured_invoice_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    if (!capturedBlob || isUsingPhoto) return;
+    setIsUsingPhoto(true);
+
+    let file;
+    try {
+      file = new File([capturedBlob], `captured_invoice_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    } catch (e) {
+      file = capturedBlob;
+      file.name = `captured_invoice_${Date.now()}.jpg`;
+      file.lastModified = Date.now();
+    }
+
     stopCamera();
     onCapture(file);
     onClose();
   };
 
   const handleCloseDialog = () => {
+    setIsUsingPhoto(false);
     stopCamera();
     onClose();
   };
@@ -235,13 +249,36 @@ const CameraCaptureDialog = ({ open, onClose, onCapture }) => {
             <Alert severity="warning" sx={{ width: '100%', borderRadius: 3, fontWeight: 600 }}>
               {errorMsg}
             </Alert>
-            <Button
-              variant="contained"
-              onClick={startCamera}
-              sx={{ mt: 1, bgcolor: '#0284c7', fontWeight: 800, borderRadius: 2.5 }}
-            >
-              Retry Camera
-            </Button>
+            <Box display="flex" gap={2} mt={1}>
+              <Button
+                variant="contained"
+                onClick={startCamera}
+                sx={{ bgcolor: '#0284c7', fontWeight: 800, borderRadius: 2.5 }}
+              >
+                Retry Camera
+              </Button>
+              <Button
+                variant="outlined"
+                component="label"
+                sx={{ borderColor: '#38bdf8', color: '#38bdf8', fontWeight: 700, borderRadius: 2.5 }}
+              >
+                Take via Device App
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      const namedFile = new File([f], `captured_invoice_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                      onCapture(namedFile);
+                      handleCloseDialog();
+                    }
+                  }}
+                />
+              </Button>
+            </Box>
           </Box>
         )}
 
