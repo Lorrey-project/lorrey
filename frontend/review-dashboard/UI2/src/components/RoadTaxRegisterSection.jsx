@@ -12,6 +12,7 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import PendingActionsIcon from '@mui/icons-material/PendingActions';
+import SaveIcon from '@mui/icons-material/Save';
 import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
 import { useTableNavigation } from '../hooks/useTableNavigation';
@@ -61,6 +62,7 @@ export default function RoadTaxRegisterSection() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploadingIndex, setUploadingIndex] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
 
   const tableContainerRef = useRef(null);
@@ -78,7 +80,7 @@ export default function RoadTaxRegisterSection() {
   const currentMonthName = MONTH_LIST.find(m => m.value === currentMonthNum)?.name || 'Current Month';
   const prevMonthName = MONTH_LIST.find(m => m.value === prevMonthNum)?.name || 'Previous Month';
 
-  // Fetch Road Tax records
+  // Fetch Vehicle Validity records
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -97,8 +99,8 @@ export default function RoadTaxRegisterSection() {
         setRows(res.data.entries || []);
       }
     } catch (err) {
-      console.error('[RoadTax] Fetch error:', err);
-      setSnack({ severity: 'error', msg: 'Failed to load Road Tax records.' });
+      console.error('[VehicleValidity] Fetch error:', err);
+      setSnack({ severity: 'error', msg: 'Failed to load Vehicle Validity records.' });
     } finally {
       setLoading(false);
     }
@@ -133,7 +135,9 @@ export default function RoadTaxRegisterSection() {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       await axios.post(`${API_URL}/road-tax/save`, {
+        recordId: row.recordId,
         truckNo: row.truckNo,
+        validityType: row.validityType,
         month: selMonth,
         year: selYear,
         renewStatus: row.renewStatus,
@@ -144,7 +148,7 @@ export default function RoadTaxRegisterSection() {
         pdfName: row.pdfName
       }, { headers });
     } catch (err) {
-      console.error('[RoadTax] Auto save error:', err);
+      console.error('[VehicleValidity] Auto save error:', err);
     }
   };
 
@@ -152,7 +156,7 @@ export default function RoadTaxRegisterSection() {
   const handleFileUpload = async (index, file) => {
     if (!file) return;
     if (file.type !== 'application/pdf') {
-      setSnack({ severity: 'error', msg: 'Only PDF files are allowed for Road Tax renewal receipts.' });
+      setSnack({ severity: 'error', msg: 'Only PDF files are allowed for validity renewal receipts.' });
       return;
     }
 
@@ -175,12 +179,12 @@ export default function RoadTaxRegisterSection() {
 
         handleCellChange(index, 'pdfUrl', uploadedUrl);
         handleCellChange(index, 'pdfName', fileName);
-        setSnack({ severity: 'success', msg: `PDF uploaded successfully for ${rows[index].truckNo}!` });
+        setSnack({ severity: 'success', msg: `PDF uploaded successfully for ${rows[index].truckNo} (${rows[index].validityType})!` });
       } else {
         setSnack({ severity: 'error', msg: res.data?.error || 'PDF upload failed.' });
       }
     } catch (err) {
-      console.error('[RoadTax] Upload error:', err);
+      console.error('[VehicleValidity] Upload error:', err);
       setSnack({ severity: 'error', msg: 'Error uploading PDF file.' });
     } finally {
       setUploadingIndex(null);
@@ -194,7 +198,8 @@ export default function RoadTaxRegisterSection() {
       'OWNER NAME': r.ownerName,
       'VEHICLE NO': r.truckNo,
       'VEHICLE TYPE': r.vehicleType,
-      'ROAD TAX EXPIRE DATE / VALIDITY': r.roadTaxValidity,
+      'TYPE OF VALIDITY': r.validityType,
+      'EXPIRE DATE': r.expireDate,
       'RENEW STATUS': r.renewStatus,
       'RENEW DATE': r.renewDate,
       'RECEIVABLE AMOUNT (Rs)': r.receivableAmount,
@@ -202,7 +207,42 @@ export default function RoadTaxRegisterSection() {
       'BALANCE (Rs)': r.balance,
       'PDF URL': r.pdfUrl || 'No PDF'
     }));
-    exportToCsv(`ROAD_TAX_REGISTER_${selMonth}_${selYear}.csv`, exportData);
+    exportToCsv(`VEHICLE_VALIDITY_REGISTER_${selMonth}_${selYear}.csv`, exportData);
+  };
+
+  // Bulk Save all rows to MongoDB
+  const handleSaveAll = async () => {
+    if (rows.length === 0) return;
+    setSaving(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const savePromises = rows.map(row =>
+        axios.post(`${API_URL}/road-tax/save`, {
+          recordId: row.recordId,
+          truckNo: row.truckNo,
+          validityType: row.validityType,
+          month: selMonth,
+          year: selYear,
+          renewStatus: row.renewStatus,
+          renewDate: row.renewDate,
+          receivableAmount: row.receivableAmount,
+          paidAmount: row.paidAmount,
+          pdfUrl: row.pdfUrl,
+          pdfName: row.pdfName
+        }, { headers })
+      );
+
+      await Promise.all(savePromises);
+      setSnack({ severity: 'success', msg: 'Vehicle Validity Register saved successfully!' });
+      fetchData();
+    } catch (err) {
+      console.error('[VehicleValidity] Save all error:', err);
+      setSnack({ severity: 'error', msg: 'Failed to save register: ' + (err.response?.data?.error || err.message) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const thStyle = {
@@ -272,13 +312,16 @@ export default function RoadTaxRegisterSection() {
                   color: '#38bdf8',
                   fontWeight: 800,
                   borderRadius: '8px',
-                  minWidth: 220,
+                  minWidth: 230,
                   '.MuiOutlinedInput-notchedOutline': { borderColor: '#475569' },
                   '.MuiSvgIcon-root': { color: '#38bdf8' }
                 }}
               >
                 <MenuItem value={currentMonthNum} sx={{ fontWeight: 800, color: '#0284c7' }}>
                   📌 Current Month ({currentMonthName} {currentYearNum})
+                </MenuItem>
+                <MenuItem value="7_DAYS" sx={{ fontWeight: 800, color: '#eab308' }}>
+                  ⚡ Next 7 Days (Upcoming)
                 </MenuItem>
                 <MenuItem value={prevMonthNum} sx={{ fontWeight: 800, color: '#d97706' }}>
                   ⏮️ Previous Month ({prevMonthName} {prevYearNum})
@@ -314,6 +357,23 @@ export default function RoadTaxRegisterSection() {
               </Button>
 
               <Button
+                variant={selMonth === '7_DAYS' ? 'contained' : 'outlined'}
+                size="small"
+                onClick={() => { setSelMonth('7_DAYS'); }}
+                sx={{
+                  fontWeight: 800,
+                  fontSize: '12px',
+                  borderRadius: '6px',
+                  textTransform: 'none',
+                  bgcolor: selMonth === '7_DAYS' ? '#eab308' : 'transparent',
+                  borderColor: '#eab308',
+                  color: selMonth === '7_DAYS' ? '#0f172a' : '#facc15'
+                }}
+              >
+                Next 7 Days
+              </Button>
+
+              <Button
                 variant={selMonth === prevMonthNum && selYear === prevYearNum ? 'contained' : 'outlined'}
                 size="small"
                 onClick={() => { setSelMonth(prevMonthNum); setSelYear(prevYearNum); }}
@@ -337,14 +397,14 @@ export default function RoadTaxRegisterSection() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
             <TextField
               size="small"
-              placeholder="Search Owner, Vehicle No..."
+              placeholder="Search Owner, Vehicle No, Validity Type..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               InputProps={{
                 startAdornment: <SearchIcon sx={{ color: '#94a3b8', mr: 0.5, fontSize: 18 }} />
               }}
               sx={{
-                width: 220,
+                width: 240,
                 bgcolor: '#0f172a',
                 borderRadius: '8px',
                 input: { color: '#fff', fontSize: '13px' },
@@ -364,20 +424,31 @@ export default function RoadTaxRegisterSection() {
             >
               Export CSV
             </Button>
+
+            <Button
+              variant="contained"
+              color="success"
+              startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+              onClick={handleSaveAll}
+              disabled={saving}
+              sx={{ height: 36, px: 2.5, fontWeight: 800, bgcolor: '#16a34a', '&:hover': { bgcolor: '#15803d' } }}
+            >
+              Save Register
+            </Button>
           </Box>
 
         </Box>
       </Paper>
 
-      {/* ── ROAD TAX TABLE CONTAINER ─────────────────────────────────────── */}
+      {/* ── VEHICLE VALIDITY TABLE CONTAINER ─────────────────────────────────────── */}
       <Paper elevation={4} sx={{ p: { xs: 2, md: 3 }, bgcolor: '#ffffff', color: '#0f172a', borderRadius: 3, boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)', overflow: 'hidden' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Box>
             <Typography variant="h6" fontWeight="900" sx={{ color: '#0f172a', letterSpacing: '-0.3px' }}>
-              ROAD TAX REGISTER
+              VEHICLE VALIDITY REGISTER
             </Typography>
             <Typography variant="caption" color="#64748b" fontWeight="700">
-              Selected Period: {MONTH_LIST.find(m => m.value === selMonth)?.name || selMonth} {selYear} &bull; {rows.length} Vehicles
+              Selected Period: {MONTH_LIST.find(m => m.value === selMonth)?.name || selMonth} {selYear} &bull; {rows.length} Upcoming Validities (Next 7 Days)
             </Typography>
           </Box>
 
@@ -395,28 +466,29 @@ export default function RoadTaxRegisterSection() {
             </Box>
           )}
 
-          <Table size="small" style={{ width: '100%', minWidth: 1250, borderCollapse: 'collapse', fontFamily: 'Inter, system-ui, sans-serif' }}>
+          <Table size="small" style={{ width: '100%', minWidth: 1350, borderCollapse: 'collapse', fontFamily: 'Inter, system-ui, sans-serif' }}>
             <TableHead>
               <TableRow>
                 <TableCell style={{ ...thStyle, width: '60px' }}>1. SL NO</TableCell>
                 <TableCell style={{ ...thStyle, textAlign: 'left', minWidth: '180px' }}>2. OWNER NAME</TableCell>
-                <TableCell style={{ ...thStyle, minWidth: '140px' }}>3. VEHICLE NO</TableCell>
+                <TableCell style={{ ...thStyle, minWidth: '130px' }}>3. VEHICLE NO</TableCell>
                 <TableCell style={{ ...thStyle, minWidth: '110px' }}>4. VEHICLE TYPE</TableCell>
-                <TableCell style={{ ...thStyle, minWidth: '170px' }}>5. ROAD TAX EXPIRE DATE / VALIDITY</TableCell>
-                <TableCell style={{ ...thStyle, minWidth: '140px' }}>6. RENEW STATUS</TableCell>
-                <TableCell style={{ ...thStyle, minWidth: '150px' }}>7. RENEW DATE</TableCell>
-                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '160px' }}>8. RECEIVABLE AMOUNT</TableCell>
-                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '160px' }}>9. PAID AMOUNT</TableCell>
-                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '150px' }}>10. BALANCE</TableCell>
-                <TableCell style={{ ...thStyle, minWidth: '200px' }}>11. PDF UPLOAD</TableCell>
+                <TableCell style={{ ...thStyle, minWidth: '150px' }}>5. TYPE OF VALIDITY</TableCell>
+                <TableCell style={{ ...thStyle, minWidth: '130px' }}>6. EXPIRE DATE</TableCell>
+                <TableCell style={{ ...thStyle, minWidth: '140px' }}>7. RENEW STATUS</TableCell>
+                <TableCell style={{ ...thStyle, minWidth: '150px' }}>8. RENEW DATE</TableCell>
+                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '160px' }}>9. RECEIVABLE AMOUNT</TableCell>
+                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '160px' }}>10. PAID AMOUNT</TableCell>
+                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '150px' }}>11. BALANCE</TableCell>
+                <TableCell style={{ ...thStyle, minWidth: '200px' }}>12. PDF UPLOAD</TableCell>
               </TableRow>
             </TableHead>
 
             <TableBody>
               {rows.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 6, color: '#64748b', fontWeight: 600 }}>
-                    No vehicle Road Tax records due or found for {MONTH_LIST.find(m => m.value === selMonth)?.name || selMonth} {selYear}.
+                  <TableCell colSpan={12} align="center" sx={{ py: 6, color: '#64748b', fontWeight: 600 }}>
+                    No vehicle validities expiring in the next 7 days found for {MONTH_LIST.find(m => m.value === selMonth)?.name || selMonth} {selYear}.
                   </TableCell>
                 </TableRow>
               )}
@@ -453,12 +525,17 @@ export default function RoadTaxRegisterSection() {
                       <Chip label={row.vehicleType || '-'} size="small" sx={{ bgcolor: '#f1f5f9', fontWeight: 700, fontSize: '0.72rem' }} />
                     </TableCell>
 
-                    {/* 5. ROAD TAX EXPIRE DATE / VALIDITY */}
-                    <TableCell style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#d97706' }}>
-                      {row.roadTaxValidity}
+                    {/* 5. TYPE OF VALIDITY */}
+                    <TableCell style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, color: '#6b21a8' }}>
+                      <Chip label={row.validityType || '-'} size="small" sx={{ bgcolor: '#f3e8ff', color: '#7e22ce', fontWeight: 800, fontSize: '0.75rem', border: '1px solid #d8b4fe' }} />
                     </TableCell>
 
-                    {/* 6. RENEW STATUS */}
+                    {/* 6. EXPIRE DATE */}
+                    <TableCell style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, color: '#d97706' }}>
+                      {row.expireDate}
+                    </TableCell>
+
+                    {/* 7. RENEW STATUS */}
                     <TableCell style={{ ...tdStyle, textAlign: 'center' }}>
                       <Select
                         size="small"
@@ -479,7 +556,7 @@ export default function RoadTaxRegisterSection() {
                       </Select>
                     </TableCell>
 
-                    {/* 7. RENEW DATE */}
+                    {/* 8. RENEW DATE */}
                     <TableCell style={{ ...tdStyle, textAlign: 'center' }}>
                       <TextField
                         size="small"
@@ -495,7 +572,7 @@ export default function RoadTaxRegisterSection() {
                       />
                     </TableCell>
 
-                    {/* 8. RECEIVABLE AMOUNT */}
+                    {/* 9. RECEIVABLE AMOUNT */}
                     <TableCell style={{ ...tdStyle, textAlign: 'right' }}>
                       <TextField
                         size="small"
@@ -514,7 +591,7 @@ export default function RoadTaxRegisterSection() {
                       />
                     </TableCell>
 
-                    {/* 9. PAID AMOUNT */}
+                    {/* 10. PAID AMOUNT */}
                     <TableCell style={{ ...tdStyle, textAlign: 'right' }}>
                       <TextField
                         size="small"
@@ -533,18 +610,18 @@ export default function RoadTaxRegisterSection() {
                       />
                     </TableCell>
 
-                    {/* 10. BALANCE (RECEIVABLE - PAID) */}
+                    {/* 11. BALANCE (RECEIVABLE - PAID) */}
                     <TableCell style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, fontSize: '13px', color: row.balance === 0 ? '#15803d' : '#b91c1c' }}>
                       ₹{formatAmt(row.balance)}
                     </TableCell>
 
-                    {/* 11. PDF UPLOAD */}
+                    {/* 12. PDF UPLOAD */}
                     <TableCell style={{ ...tdStyle, textAlign: 'center' }}>
                       <Box display="flex" alignItems="center" justifyContent="center" gap={1}>
                         <input
                           type="file"
                           accept="application/pdf"
-                          id={`road-tax-pdf-${index}`}
+                          id={`validity-pdf-${index}`}
                           style={{ display: 'none' }}
                           onChange={(e) => {
                             if (e.target.files && e.target.files[0]) {
@@ -583,7 +660,7 @@ export default function RoadTaxRegisterSection() {
                               </Button>
                             </Tooltip>
 
-                            <label htmlFor={`road-tax-pdf-${index}`}>
+                            <label htmlFor={`validity-pdf-${index}`}>
                               <Button
                                 size="small"
                                 component="span"
@@ -594,7 +671,7 @@ export default function RoadTaxRegisterSection() {
                             </label>
                           </Box>
                         ) : (
-                          <label htmlFor={`road-tax-pdf-${index}`}>
+                          <label htmlFor={`validity-pdf-${index}`}>
                             <Button
                               size="small"
                               variant="contained"
@@ -641,3 +718,4 @@ export default function RoadTaxRegisterSection() {
     </Box>
   );
 }
+

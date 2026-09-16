@@ -14,6 +14,17 @@ export default function SearchableSelect({
   size,
   variant
 }) {
+  // Recursively extract plain string text from any React element children
+  const extractText = (node) => {
+    if (node === null || node === undefined) return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(extractText).join('');
+    if (typeof node === 'object' && node.props && node.props.children) {
+      return extractText(node.props.children);
+    }
+    return '';
+  };
+
   // Parse children to build options array
   const options = React.useMemo(() => {
     const opts = [];
@@ -23,13 +34,11 @@ export default function SearchableSelect({
         let val = child.props.value;
         if (val === undefined) val = "";
 
-        let lab = child.props.children;
-        if (Array.isArray(lab)) lab = lab.join('');
-        if (lab === undefined) lab = "";
+        let lab = extractText(child.props.children);
 
         // Prevent duplicate values causing keys conflict in MUI Autocomplete
         if (!opts.some(o => o.value === val)) {
-          opts.push({ value: val, label: String(lab), disabled: !!child.props.disabled });
+          opts.push({ value: val, label: lab, disabled: !!child.props.disabled });
         }
       }
     });

@@ -1,10 +1,7 @@
 import React from 'react';
-import { Box, Typography, Button, IconButton, Chip, Paper } from '@mui/material';
+import { Box, Typography, IconButton, Chip, Paper } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
-import TableChartIcon from '@mui/icons-material/TableChart';
-import DashboardIcon from '@mui/icons-material/Dashboard';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { useAuth } from '../../context/AuthContext';
 import RoadTaxRegisterSection from '../../components/RoadTaxRegisterSection';
 
@@ -13,7 +10,9 @@ const BrindaPortal = ({
   onOpenCementRegister,
   onOpenMainCashbook,
   onOpenDailySummaryReport,
-  onOpenDashboard
+  onOpenOthersCreditor,
+  onOpenDashboard,
+  hideHeader = false
 }) => {
   const { user, logout } = useAuth();
 
@@ -28,6 +27,14 @@ const BrindaPortal = ({
       window.location.reload();
     }
   };
+
+  if (hideHeader) {
+    return (
+      <Box sx={{ flex: 1 }}>
+        <RoadTaxRegisterSection />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#0f172a', color: '#f8fafc', p: { xs: 2, md: 4 }, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
@@ -45,48 +52,12 @@ const BrindaPortal = ({
               <Chip label="PORT 5177" size="small" sx={{ bgcolor: 'rgba(192, 132, 252, 0.2)', color: '#e9d5ff', fontWeight: 800, fontSize: '0.7rem', border: '1px solid rgba(192, 132, 252, 0.4)' }} />
             </Box>
             <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
-              Dipali Associates & Co. &bull; Road Tax Register
+              Dipali Associates & Co. &bull; Vehicle Validity Register & Creditor Accounts
             </Typography>
           </Box>
         </Box>
 
         <Box display="flex" alignItems="center" gap={1.5} flexWrap="wrap">
-          {onOpenCementRegister && (
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={onOpenCementRegister}
-              startIcon={<TableChartIcon />}
-              sx={{ color: '#e2e8f0', borderColor: '#475569', borderRadius: '8px', textTransform: 'none', fontWeight: 700, '&:hover': { borderColor: '#94a3b8', bgcolor: 'rgba(255,255,255,0.05)' } }}
-            >
-              Cement Register
-            </Button>
-          )}
-
-          {onOpenMainCashbook && (
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={onOpenMainCashbook}
-              startIcon={<AccountBalanceWalletIcon />}
-              sx={{ color: '#e2e8f0', borderColor: '#475569', borderRadius: '8px', textTransform: 'none', fontWeight: 700, '&:hover': { borderColor: '#94a3b8', bgcolor: 'rgba(255,255,255,0.05)' } }}
-            >
-              Main Cashbook
-            </Button>
-          )}
-
-          {onOpenDailySummaryReport && (
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={onOpenDailySummaryReport}
-              startIcon={<DashboardIcon />}
-              sx={{ color: '#e2e8f0', borderColor: '#475569', borderRadius: '8px', textTransform: 'none', fontWeight: 700, '&:hover': { borderColor: '#94a3b8', bgcolor: 'rgba(255,255,255,0.05)' } }}
-            >
-              Daily Summary
-            </Button>
-          )}
-
           <Chip
             avatar={<PersonIcon sx={{ color: '#c084fc !important' }} />}
             label={user?.email || 'Brinda Shyam Admin'}
@@ -99,7 +70,7 @@ const BrindaPortal = ({
         </Box>
       </Paper>
 
-      {/* ── MAIN ROAD TAX REGISTER SECTION ─────────────────────────── */}
+      {/* ── MAIN SECTION CONTENT ─────────────────────────────────────── */}
       <Box sx={{ flex: 1 }}>
         <RoadTaxRegisterSection />
       </Box>

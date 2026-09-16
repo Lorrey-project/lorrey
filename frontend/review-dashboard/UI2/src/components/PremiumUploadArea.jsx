@@ -10,10 +10,12 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 
 export default function PremiumUploadArea({ 
   onUpload, 
   onScan, 
+  onCameraOpen,
   isProcessing, 
   isScanTriggered, 
   status, 
@@ -169,13 +171,13 @@ export default function PremiumUploadArea({
           <Typography variant="body2" color="#64748b" mb={3}>
             or click to browse files
           </Typography>
-          <Box display="flex" justifyContent="center" gap={2}>
+          <Box display="flex" justifyContent="center" gap={1.5} flexWrap="wrap">
             <Button
               variant="contained"
               component="span"
               sx={{
                 borderRadius: '10px',
-                px: 4,
+                px: 3,
                 py: 1.2,
                 bgcolor: 'background.paper',
                 color: '#3b82f6',
@@ -197,7 +199,7 @@ export default function PremiumUploadArea({
               onClick={(e) => { e.stopPropagation(); onScan(); }}
               sx={{
                 borderRadius: '10px',
-                px: 3,
+                px: 2.5,
                 py: 1.2,
                 fontWeight: 600,
                 borderColor: '#e2e8f0',
@@ -207,6 +209,26 @@ export default function PremiumUploadArea({
             >
               Scan
             </Button>
+
+            {onCameraOpen && (
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<PhotoCameraIcon />}
+                onClick={(e) => { e.stopPropagation(); onCameraOpen(); }}
+                sx={{
+                  borderRadius: '10px',
+                  px: 2.5,
+                  py: 1.2,
+                  fontWeight: 700,
+                  bgcolor: '#0284c7',
+                  color: '#ffffff',
+                  '&:hover': { bgcolor: '#0369a1' }
+                }}
+              >
+                Camera
+              </Button>
+            )}
           </Box>
           <Typography variant="caption" sx={{ display: 'block', mt: 3, color: '#94a3b8' }}>
             Supported Formats: PDF, JPG, PNG • Max Size: 25MB

@@ -6,7 +6,7 @@ import {
     BottomNavigation, BottomNavigationAction,
     Drawer, List, ListItem, ListItemIcon, ListItemText,
     Divider, TextField, Dialog, DialogTitle, DialogContent, DialogActions,
-    Alert, AlertTitle, Select, MenuItem, FormControl, InputLabel, Checkbox
+    Alert, AlertTitle, MenuItem, Checkbox
 } from '@mui/material';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
@@ -28,6 +28,11 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import VoucherDialog from '../../components/VoucherDialog';
 import TruckContactManager from '../../components/TruckContactManager';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import HourglassTopIcon from '@mui/icons-material/HourglassTop';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 const MobileDashboard = ({
     onUploadNew,
@@ -169,7 +174,6 @@ const MobileDashboard = ({
         if (user?.role !== 'PETROL PUMP') {
             fetchInvoices();
         } else {
-            // Priority: Port detection -> user profile -> null
             const finalPump = autoPump || user?.pumpName;
             if (finalPump) {
                 fetchPumpData(finalPump);
@@ -218,47 +222,73 @@ const MobileDashboard = ({
         }
     };
 
-
     const isOffice = user?.role === 'HEAD_OFFICE' || (user?.role === 'OFFICE' && import.meta.env.VITE_PORTAL !== 'site');
     const isSite = import.meta.env.VITE_PORTAL === 'site';
     const isPump = user?.role === 'PETROL PUMP';
 
     const getStatusChip = (status) => {
-        const color = status === 'approved' ? 'success' : 'warning';
-        return <Chip label={status.toUpperCase()} color={color} size="small" sx={{ fontWeight: 800, fontSize: '9px', borderRadius: 1.5 }} />;
+        const isApproved = status === 'approved';
+        return (
+            <Chip
+                label={status ? status.toUpperCase() : 'PENDING'}
+                size="small"
+                sx={{
+                    fontWeight: 900,
+                    fontSize: '10px',
+                    letterSpacing: '0.5px',
+                    px: 1,
+                    py: 0.2,
+                    borderRadius: '8px',
+                    bgcolor: isApproved ? 'rgba(34, 197, 94, 0.15)' : 'rgba(245, 158, 11, 0.18)',
+                    color: isApproved ? '#4ade80' : '#fbbf24',
+                    border: isApproved ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(251, 191, 36, 0.35)',
+                    boxShadow: isApproved ? '0 0 10px rgba(34, 197, 94, 0.2)' : '0 0 10px rgba(245, 158, 11, 0.2)'
+                }}
+            />
+        );
     };
 
-    const isRecent = (dateStr) => {
-        if (!dateStr) return false;
-        try {
-            const p = dateStr.replace(/[./]/g, '-').split('-');
-            if (p.length !== 3) return true;
-            
-            let d;
-            const p0 = parseInt(p[0]);
-            const p1 = parseInt(p[1]);
-            const p2 = parseInt(p[2]);
+    const currentFyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
 
-            if (p0 > 1000) { // YYYY-MM-DD
-                d = new Date(p0, p1 - 1, p2);
-            } else { // DD-MM-YYYY or DD-MM-YY
-                const y = p2 < 50 ? 2000 + p2 : p2 > 1000 ? p2 : 1900 + p2;
-                d = new Date(y, p1 - 1, p0);
+    // Build Financial Year options (e.g. "2026-2027", "2025-2026", "2024-2025")
+    const fySet = new Set();
+    for (let y = currentFyStart + 1; y >= currentFyStart - 3; y--) {
+        fySet.add(`${y}-${y + 1}`);
+    }
+
+    invoices.forEach(inv => {
+        let dateStr = inv.human_verified_data?.invoice_details?.invoice_date || 
+                      inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
+                      inv.ai_data?.invoice_details?.invoice_date;
+        let m, y;
+        if (dateStr) {
+            const parts = dateStr.replace(/[./]/g, '-').split('-');
+            if (parts.length === 3) {
+                const p0 = parseInt(parts[0]);
+                const p1 = parseInt(parts[1]);
+                const p2 = parseInt(parts[2]);
+                if (p0 > 1000) { y = p0; m = p1; }
+                else if (p2 > 1000) { y = p2; m = p1; }
+                else { y = p2 < 50 ? 2000 + p2 : 1900 + p2; m = p1; }
             }
-            
-            const diffDays = (new Date() - d) / (1000 * 60 * 60 * 24);
-            return diffDays <= 1.5;
-        } catch { return true; }
-    };
+        }
+        if ((!m || !y) && inv.created_at) {
+            const d = new Date(inv.created_at);
+            m = d.getMonth() + 1;
+            y = d.getFullYear();
+        }
+        if (m && y) {
+            const fy = m >= 4 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+            fySet.add(fy);
+        }
+    });
 
-    const currentYear = new Date().getFullYear();
-    const yearOptions = [currentYear, currentYear - 1, currentYear - 2];
+    const yearOptions = Array.from(fySet).sort((a, b) => b.localeCompare(a));
 
     // Filter logic
     const filteredInvoices = invoices.filter(inv => {
         if (!filterMonth && !filterYear) return true;
 
-        // Try to get a date string from various possible paths
         let dateStr = inv.human_verified_data?.invoice_details?.invoice_date || 
                       inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
                       inv.ai_data?.invoice_details?.invoice_date;
@@ -268,7 +298,6 @@ const MobileDashboard = ({
         if (dateStr) {
             const parts = dateStr.replace(/[./]/g, '-').split('-');
             if (parts.length === 3) {
-                // Determine which part is the year (usually 4 digits)
                 const p0 = parseInt(parts[0]);
                 const p1 = parseInt(parts[1]);
                 const p2 = parseInt(parts[2]);
@@ -279,14 +308,13 @@ const MobileDashboard = ({
                 } else if (p2 > 1000) { // DD-MM-YYYY
                     y = p2;
                     m = p1;
-                } else { // Assume DD-MM-YY and attempt to fix year
+                } else { // Assume DD-MM-YY
                     y = p2 < 50 ? 2000 + p2 : 1900 + p2;
                     m = p1;
                 }
             }
         }
 
-        // If still no m/y, fallback to created_at
         if ((!m || !y) && inv.created_at) {
             const d = new Date(inv.created_at);
             m = d.getMonth() + 1;
@@ -296,7 +324,11 @@ const MobileDashboard = ({
         if (!m || !y) return false;
 
         if (filterMonth && m !== parseInt(filterMonth)) return false;
-        if (filterYear && y !== parseInt(filterYear)) return false;
+        
+        if (filterYear) {
+            const invoiceFy = m >= 4 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+            if (invoiceFy !== filterYear) return false;
+        }
 
         return true;
     });
@@ -305,35 +337,79 @@ const MobileDashboard = ({
 
     return (
         <Box sx={{
-            minHeight: '100vh',
-            bgcolor: 'background.default', // Light slate background
-            color: '#1e293b',
-            pb: 10,
-            fontFamily: '"Outfit", sans-serif'
+            minHeight: '100dvh',
+            bgcolor: '#0b1329', // Premium dark logistics slate
+            color: '#f8fafc',
+            pb: 14,
+            fontFamily: '"Outfit", "Inter", sans-serif',
+            boxSizing: 'border-box'
         }}>
-            {/* ── Top Bar ─────────────────────────────────────────────── */}
+
+            {/* ── TOP COMPACT HEADER BAR ─────────────────────────────────────── */}
             <Box sx={{
-                p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                background: 'rgba(255, 255, 255, 0.8)', backdropFilter: 'blur(12px)',
-                position: 'sticky', top: 0, zIndex: 1000,
-                borderBottom: '1px solid rgba(0,0,0,0.05)'
+                p: 2,
+                px: { xs: 2.5, sm: 4 },
+                display: 'flex',
+                justify: 'space-between',
+                alignItems: 'center',
+                background: 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(16px)',
+                position: 'sticky',
+                top: 0,
+                zIndex: 1000,
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
             }}>
-                <IconButton onClick={() => setDrawerOpen(true)} sx={{ color: '#1e293b' }}>
-                    <MenuIcon />
-                </IconButton>
-                <Typography variant="h6" fontWeight="900" sx={{ letterSpacing: '-0.5px', color: '#0052cc' }}>
-                    {isPump ? 'PUMP ' : 'LORREY '} <span style={{ color: '#1e293b' }}>{isPump ? 'PORTAL' : isSite ? 'SITE ADMIN' : 'ADMIN'}</span>
-                </Typography>
-                <Avatar sx={{ bgcolor: '#0052cc', width: 34, height: 34, fontSize: '16px', border: '2px solid #fff', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
-                    🙏
-                </Avatar>
+                <Box display="flex" alignItems="center" gap={1.5}>
+                    <IconButton
+                        onClick={() => setDrawerOpen(true)}
+                        sx={{
+                            color: '#f8fafc',
+                            bgcolor: 'rgba(255, 255, 255, 0.06)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: '12px',
+                            p: 1,
+                            '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.12)' }
+                        }}
+                    >
+                        <MenuIcon sx={{ fontSize: 22 }} />
+                    </IconButton>
+
+                    <Box>
+                        <Box display="flex" alignItems="center" gap={1}>
+                            <Typography variant="h6" fontWeight="900" sx={{ letterSpacing: '-0.5px', color: '#f8fafc', fontSize: '1.1rem' }}>
+                                LORREY <span style={{ color: '#38bdf8' }}>{isPump ? 'PUMP' : isSite ? 'SITE' : 'ADMIN'}</span>
+                            </Typography>
+                            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#22c55e', boxShadow: '0 0 8px #22c55e' }} />
+                        </Box>
+                        <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, display: 'block', fontSize: '0.7rem', mt: -0.2 }}>
+                            {isOffice ? 'Office Operations' : 'Site Field Operations'}
+                        </Typography>
+                    </Box>
+                </Box>
+
+                <Box display="flex" alignItems="center" gap={1.5}>
+                    <Avatar
+                        sx={{
+                            bgcolor: 'rgba(56, 189, 248, 0.15)',
+                            color: '#38bdf8',
+                            width: 38,
+                            height: 38,
+                            fontSize: '15px',
+                            fontWeight: 800,
+                            border: '1.5px solid rgba(56, 189, 248, 0.4)',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                        }}
+                    >
+                        {user?.name ? user.name.charAt(0).toUpperCase() : 'S'}
+                    </Avatar>
+                </Box>
             </Box>
 
             {/* ── Pump Info HUD (Added for Pump Role) ────────────────── */}
             {isPump && (
-                <Box sx={{ px: 2, mt: 1 }}>
+                <Box sx={{ px: { xs: 2.5, sm: 4 }, mt: 2 }}>
                     <Paper elevation={0} sx={{
-                        p: 1.5, borderRadius: 3, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
+                        p: 2, borderRadius: 3, bgcolor: '#1e293b', border: '1px solid rgba(255, 255, 255, 0.08)',
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                     }}>
                         <Box>
@@ -342,7 +418,7 @@ const MobileDashboard = ({
                         </Box>
                         <Box sx={{ textAlign: 'right' }}>
                             <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', fontSize: '9px' }}>Real-time Status</Typography>
-                            <Typography variant="body2" fontWeight={800} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                            <Typography variant="body2" fontWeight={800} sx={{ fontVariantNumeric: 'tabular-nums', color: '#38bdf8' }}>
                                 {currentTime.toLocaleDateString('en-GB')} | {currentTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                             </Typography>
                         </Box>
@@ -350,208 +426,191 @@ const MobileDashboard = ({
                 </Box>
             )}
 
-            <Container maxWidth="sm" sx={{ mt: 1, px: { xs: 2, sm: 3 } }}>
-                {/* ── Greeting with inline Portal Status (HEAD_OFFICE) ──── */}
+            <Container maxWidth="sm" sx={{ mt: 2.5, px: { xs: 2.5, sm: 4 } }}>
+
+                {/* ── GREETING BANNER ───────────────────────────────────────── */}
                 {!isPump && (
-                    <Box mb={4} sx={{ px: 0.5, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Box mb={3} display="flex" justifyContent="space-between" alignItems="center">
                         <Box>
-                            <Typography variant="h5" fontWeight="900" sx={{ color: '#0f172a' }}>
-                                Hello, {user?.name?.split(' ')[0] || (isSite ? 'Site Admin' : 'Admin')}
+                            <Typography variant="caption" sx={{ color: '#38bdf8', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', fontSize: '0.7rem' }}>
+                                Field Operations Dashboard
                             </Typography>
-                            <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500 }}>
-                                {isOffice ? 'Office Operations' : 'Site Field Operations'}
+                            <Typography variant="h5" fontWeight="900" sx={{ color: '#f8fafc', letterSpacing: '-0.5px' }}>
+                                Hello, {user?.name?.split(' ')[0] || (isSite ? 'Site' : 'Admin')}
                             </Typography>
                         </Box>
 
-                        {/* Compact portal dots — right side, HEAD_OFFICE only */}
-                        {user?.role === 'HEAD_OFFICE' && portalStatuses.length > 0 && (
-                            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.75, mt: 0.5 }}>
-                                {portalStatuses.map(ps => (
-                                    <Box key={ps.id} sx={{
-                                        display: 'flex', alignItems: 'center', gap: 0.6,
-                                        bgcolor: ps.active ? '#f0fdf4' : '#fff5f5',
-                                        border: `1px solid ${ps.active ? '#bbf7d0' : '#fecaca'}`,
-                                        borderRadius: '20px', px: 1, py: 0.4,
-                                    }}>
-                                        <Box sx={{
-                                            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-                                            bgcolor: ps.active ? '#22c55e' : '#ef4444',
-                                        }} />
-                                        <Typography sx={{ fontSize: '0.6rem', fontWeight: 800, color: ps.active ? '#166534' : '#991b1b', lineHeight: 1, whiteSpace: 'nowrap' }}>
-                                            {ps.name}
-                                        </Typography>
-                                    </Box>
-                                ))}
-                            </Box>
-                        )}
+                        <Chip
+                            icon={<Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#22c55e', ml: 1, boxShadow: '0 0 6px #22c55e' }} />}
+                            label="Live Sync"
+                            size="small"
+                            sx={{ bgcolor: 'rgba(34, 197, 94, 0.1)', color: '#4ade80', fontWeight: 800, fontSize: '0.7rem', border: '1px solid rgba(34, 197, 94, 0.25)' }}
+                        />
                     </Box>
                 )}
 
-                {/* ── Action Cards Grid ───────────────────────────────────── */}
-                {/* ── Action Cards (Office/Site Only) ────────────────── */}
-                {!isPump && (<>
-                    <Typography variant="overline" sx={{ letterSpacing: 1.5, color: '#94a3b8', fontWeight: 800, px: 0.5 }}>Quick Actions</Typography>
-                    <Box sx={{
-                        display: 'flex', gap: 1, mt: 0.5, mb: 4, px: 0.5,
-                        width: '100%', justifyContent: 'space-between'
-                    }}>
-                        <Card onClick={onUploadNew} sx={{
-                            flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
-                            display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
-                            boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-                            '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
-                        }}>
-                            <Box sx={{ p: 1, bgcolor: '#e0f2fe', borderRadius: 3, mb: 1 }}>
-                                <AddIcon sx={{ color: '#0052cc', fontSize: 20 }} />
-                            </Box>
-                            <Typography variant="caption" fontWeight="800" sx={{ color: '#1e293b', fontSize: '10px', textAlign: 'center', lineHeight: 1.1 }}>New<br />Invoice</Typography>
-                        </Card>
-
-                        {isOffice && (
-                            <Card onClick={onOpenFuelRateSettings} sx={{
-                                flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
-                                display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
-                                boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-                                '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
-                            }}>
-                                <Box sx={{ p: 1, bgcolor: '#fef3c7', borderRadius: 3, mb: 1 }}>
-                                    <LocalGasStationIcon sx={{ color: '#d97706', fontSize: 20 }} />
-                                </Box>
-                                <Typography variant="caption" fontWeight="800" sx={{ color: '#1e293b', fontSize: '10px', textAlign: 'center', lineHeight: 1.1 }}>HSD<br />Rate</Typography>
-                            </Card>
-                        )}
-
-                        {/* Contacts Card */}
-                        {isOffice && (
-                            <Card onClick={() => setTruckManagerOpen(true)} sx={{
-                                flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
-                                display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
-                                boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-                                '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
-                            }}>
-                                <Box sx={{ p: 1, bgcolor: '#dbeafe', borderRadius: 3, mb: 1 }}>
-                                    <LocalShippingIcon sx={{ color: '#1d4ed8', fontSize: 20 }} />
-                                </Box>
-                                <Typography variant="caption" fontWeight="800" sx={{ color: '#1e293b', fontSize: '10px', textAlign: 'center', lineHeight: 1.1 }}>Contacts</Typography>
-                            </Card>
-                        )}
-
-                        {/* Vouchers Card */}
-                        {(isOffice || isSite) && onOpenVouchers && (
-                            <Card onClick={() => setVoucherDialogOpen(true)} sx={{
-                                flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
-                                display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
-                                boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-                                '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
-                            }}>
-                                <Box sx={{ p: 1, bgcolor: '#ede9fe', borderRadius: 3, mb: 1 }}>
-                                    <ReceiptLongIcon sx={{ color: '#7c3aed', fontSize: 20 }} />
-                                </Box>
-                                <Typography variant="caption" fontWeight="800" sx={{ color: '#1e293b', fontSize: '10px', textAlign: 'center', lineHeight: 1.1 }}>Vouchers</Typography>
-                            </Card>
-                        )}
-
-                        <Card onClick={fetchInvoices} sx={{
-                            flex: 1, p: 1, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.05)',
-                            display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer',
-                            boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-                            '&:active': { transform: 'scale(0.95)', transition: '0.1s' }
-                        }}>
-                            <Box sx={{ p: 1, bgcolor: '#f3e8ff', borderRadius: 3, mb: 1 }}>
-                                <RefreshIcon sx={{ color: '#9333ea', fontSize: 20 }} />
-                            </Box>
-                            <Typography variant="caption" fontWeight="800" sx={{ color: '#1e293b', fontSize: '10px', textAlign: 'center', lineHeight: 1.1 }}>Refresh</Typography>
-                        </Card>
-                    </Box>
-                </>)}
-
-                {/* ── Stats Summary ────────────────────────────────────────── */}
+                {/* ── QUICK ACTIONS CARDS ───────────────────────────────────── */}
                 {!isPump && (
-                    <Paper sx={{
-                        borderRadius: 5, p: 3, mb: 4,
-                        background: 'linear-gradient(135deg, #0052cc 0%, #003d99 100%)',
-                        color: '#fff', border: 'none', boxShadow: '0 10px 30px rgba(0, 82, 204, 0.2)'
-                    }}>
-                        <Box display="flex" justifyContent="space-between" alignItems="center">
-                            <Box>
-                                <Typography variant="h3" fontWeight="900" sx={{ letterSpacing: '-1px' }}>
-                                    {(filterMonth || filterYear) ? filteredInvoices.length : invoices.length}
-                                </Typography>
-                                <Typography variant="body2" sx={{ opacity: 0.8, fontWeight: 500 }}>
-                                    {(filterMonth || filterYear) ? 'Results found' : 'Total Invoices'}
-                                </Typography>
-                            </Box>
-                            <Box sx={{ textAlign: 'right' }}>
-                                <Box display="flex" gap={1} mb={1} sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
-                                    <Chip label="Approved" size="small" sx={{ height: 18, bgcolor: 'rgba(255,255,255,0.2)', color: '#fff', fontSize: '9px', fontWeight: 900 }} />
-                                    <Typography variant="body2" fontWeight="800">
+                    <Box sx={{ mb: 3.5 }}>
+                        <Typography variant="overline" sx={{ letterSpacing: 1.5, color: '#94a3b8', fontWeight: 800, fontSize: '0.7rem' }}>
+                            QUICK ACTIONS
+                        </Typography>
+
+                        <Grid container spacing={1.5} sx={{ mt: 0.2 }}>
+                            {/* New Invoice Action Card */}
+                            <Grid item xs={6}>
+                                <Paper
+                                    elevation={0}
+                                    onClick={onUploadNew}
+                                    sx={{
+                                        p: 2,
+                                        borderRadius: 3.5,
+                                        bgcolor: '#1e293b',
+                                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                                        background: 'linear-gradient(145deg, #1e293b 0%, #0f172a 100%)',
+                                        cursor: 'pointer',
+                                        boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
+                                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        '&:active': { transform: 'scale(0.96)', bgcolor: '#334155' }
+                                    }}
+                                >
+                                    <Box sx={{ width: 40, height: 40, borderRadius: '12px', bgcolor: 'rgba(56, 189, 248, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1.5, border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                                        <AddIcon sx={{ color: '#38bdf8', fontSize: 24 }} />
+                                    </Box>
+                                    <Typography variant="body2" fontWeight="900" sx={{ color: '#f8fafc', fontSize: '0.95rem' }}>
+                                        New Invoice
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.72rem', display: 'block', mt: 0.2 }}>
+                                        Upload new slip
+                                    </Typography>
+                                </Paper>
+                            </Grid>
+
+                            {/* Refresh Action Card */}
+                            <Grid item xs={6}>
+                                <Paper
+                                    elevation={0}
+                                    onClick={fetchInvoices}
+                                    sx={{
+                                        p: 2,
+                                        borderRadius: 3.5,
+                                        bgcolor: '#1e293b',
+                                        border: '1px solid rgba(192, 132, 252, 0.25)',
+                                        background: 'linear-gradient(145deg, #1e293b 0%, #0f172a 100%)',
+                                        cursor: 'pointer',
+                                        boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
+                                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        '&:active': { transform: 'scale(0.96)', bgcolor: '#334155' }
+                                    }}
+                                >
+                                    <Box sx={{ width: 40, height: 40, borderRadius: '12px', bgcolor: 'rgba(192, 132, 252, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1.5, border: '1px solid rgba(192, 132, 252, 0.3)' }}>
+                                        <RefreshIcon sx={{ color: '#c084fc', fontSize: 22 }} />
+                                    </Box>
+                                    <Typography variant="body2" fontWeight="900" sx={{ color: '#f8fafc', fontSize: '0.95rem' }}>
+                                        Refresh
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.72rem', display: 'block', mt: 0.2 }}>
+                                        Sync latest data
+                                    </Typography>
+                                </Paper>
+                            </Grid>
+
+                            {/* Vouchers Action Card (If Site/Office) */}
+                            {(isOffice || isSite) && onOpenVouchers && (
+                                <Grid item xs={12}>
+                                    <Paper
+                                        elevation={0}
+                                        onClick={() => setVoucherDialogOpen(true)}
+                                        sx={{
+                                            p: 1.8,
+                                            px: 2.2,
+                                            borderRadius: 3.5,
+                                            bgcolor: '#1e293b',
+                                            border: '1px solid rgba(168, 85, 247, 0.25)',
+                                            background: 'linear-gradient(145deg, #1e293b 0%, #0f172a 100%)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justify: 'space-between',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
+                                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                            '&:active': { transform: 'scale(0.97)' }
+                                        }}
+                                    >
+                                        <Box display="flex" alignItems="center" gap={1.8}>
+                                            <Box sx={{ width: 38, height: 38, borderRadius: '12px', bgcolor: 'rgba(168, 85, 247, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+                                                <ReceiptLongIcon sx={{ color: '#a855f7', fontSize: 22 }} />
+                                            </Box>
+                                            <Box>
+                                                <Typography variant="body2" fontWeight="900" sx={{ color: '#f8fafc', fontSize: '0.92rem' }}>
+                                                    Voucher Register
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.72rem' }}>
+                                                    Manage site expense vouchers
+                                                </Typography>
+                                            </Box>
+                                        </Box>
+                                        <ChevronRightIcon sx={{ color: '#64748b' }} />
+                                    </Paper>
+                                </Grid>
+                            )}
+                        </Grid>
+                    </Box>
+                )}
+
+                {/* ── HERO STAT CARD (TOTAL INVOICES) ───────────────────────── */}
+                {!isPump && (
+                    <Paper
+                        elevation={0}
+                        sx={{
+                            borderRadius: 4,
+                            p: 3,
+                            mb: 3.5,
+                            background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 50%, #0f172a 100%)',
+                            color: '#ffffff',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            boxShadow: '0 12px 30px -5px rgba(2, 132, 199, 0.35)',
+                            border: '1px solid rgba(255, 255, 255, 0.15)'
+                        }}
+                    >
+                        {/* Decorative radial background glow */}
+                        <Box sx={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle, rgba(56, 189, 248, 0.3) 0%, rgba(0,0,0,0) 70%)', pointerEvents: 'none' }} />
+
+                        <Typography variant="caption" sx={{ textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 800, color: 'rgba(255, 255, 255, 0.75)', fontSize: '0.7rem' }}>
+                            {(filterMonth || filterYear) ? 'FILTERED RESULTS' : 'TOTAL INVOICES'}
+                        </Typography>
+
+                        <Box display="flex" justifyContent="space-between" alignItems="flex-end" mt={1}>
+                            <Typography variant="h2" fontWeight="900" sx={{ letterSpacing: '-1.5px', lineHeight: 1, color: '#ffffff' }}>
+                                {(filterMonth || filterYear) ? filteredInvoices.length : invoices.length}
+                            </Typography>
+
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-end' }}>
+                                {/* Approved Pill */}
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'rgba(34, 197, 94, 0.25)', border: '1px solid rgba(74, 222, 128, 0.4)', borderRadius: '20px', px: 1.5, py: 0.4 }}>
+                                    <CheckCircleIcon sx={{ fontSize: 14, color: '#4ade80' }} />
+                                    <Typography variant="caption" fontWeight="800" sx={{ color: '#ffffff', fontSize: '0.72rem' }}>
+                                        APPROVED
+                                    </Typography>
+                                    <Typography variant="caption" fontWeight="900" sx={{ color: '#ffffff', fontSize: '0.8rem', ml: 0.5 }}>
                                         {filteredInvoices.filter(i => i.status === 'approved').length}
                                     </Typography>
                                 </Box>
-                                <Box display="flex" gap={1} sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
-                                    <Chip label="Pending" size="small" sx={{ height: 18, bgcolor: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '9px', fontWeight: 900 }} />
-                                    <Typography variant="body2" fontWeight="800">
+
+                                {/* Pending Pill */}
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'rgba(245, 158, 11, 0.25)', border: '1px solid rgba(251, 191, 36, 0.4)', borderRadius: '20px', px: 1.5, py: 0.4 }}>
+                                    <HourglassTopIcon sx={{ fontSize: 14, color: '#fbbf24' }} />
+                                    <Typography variant="caption" fontWeight="800" sx={{ color: '#ffffff', fontSize: '0.72rem' }}>
+                                        PENDING
+                                    </Typography>
+                                    <Typography variant="caption" fontWeight="900" sx={{ color: '#ffffff', fontSize: '0.8rem', ml: 0.5 }}>
                                         {filteredInvoices.filter(i => i.status === 'pending').length}
                                     </Typography>
                                 </Box>
                             </Box>
                         </Box>
                     </Paper>
-                )}
-
-                {/* ── Account Approvals Mobile Banner (HEAD_OFFICE only) ─── */}
-                {user?.role === 'HEAD_OFFICE' && onOpenAccountApprovals && (
-                    <Box
-                        onClick={onOpenAccountApprovals}
-                        sx={{
-                            mb: 3, borderRadius: 5, overflow: 'hidden', cursor: 'pointer',
-                            background: 'linear-gradient(135deg, #1e0a3c 0%, #3b0764 55%, #6d28d9 100%)',
-                            boxShadow: pendingApprovals > 0 ? '0 10px 30px rgba(109,40,217,0.35)' : '0 4px 15px rgba(109,40,217,0.15)',
-                            border: pendingApprovals > 0 ? '1.5px solid rgba(251,191,36,0.4)' : '1.5px solid rgba(109,40,217,0.2)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            p: 2.5, gap: 2,
-                            transition: 'all 0.2s',
-                            '&:active': { transform: 'scale(0.98)' },
-                            position: 'relative',
-                        }}
-                    >
-                        {/* Decorative blobs */}
-                        <Box sx={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.05)', pointerEvents: 'none' }} />
-
-                        <Box display="flex" alignItems="center" gap={2}>
-                            <Box sx={{
-                                width: 46, height: 46, borderRadius: '14px',
-                                bgcolor: pendingApprovals > 0 ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.12)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                            }}>
-                                <PersonAddAlt1Icon sx={{ color: pendingApprovals > 0 ? '#fbbf24' : 'rgba(255,255,255,0.7)', fontSize: 24 }} />
-                            </Box>
-                            <Box>
-                                <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: 14, letterSpacing: '-0.3px', lineHeight: 1 }}>
-                                    Account Approvals
-                                </Typography>
-                                <Typography sx={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 600, mt: 0.4 }}>
-                                    {pendingApprovals > 0
-                                        ? `${pendingApprovals} request${pendingApprovals !== 1 ? 's' : ''} waiting for review`
-                                        : 'No pending approvals'}
-                                </Typography>
-                            </Box>
-                        </Box>
-
-                        {/* Right count badge */}
-                        <Box sx={{
-                            minWidth: 42, height: 42, borderRadius: '12px',
-                            bgcolor: pendingApprovals > 0 ? '#fbbf24' : 'rgba(255,255,255,0.1)',
-                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-                        }}>
-                            <Typography sx={{ color: pendingApprovals > 0 ? '#1e0a3c' : 'rgba(255,255,255,0.5)', fontWeight: 900, fontSize: 18, lineHeight: 1 }}>
-                                {pendingApprovals}
-                            </Typography>
-                            <Typography sx={{ color: pendingApprovals > 0 ? '#3b0764' : 'rgba(255,255,255,0.35)', fontWeight: 700, fontSize: 8, letterSpacing: 0.5 }}>
-                                PENDING
-                            </Typography>
-                        </Box>
-                    </Box>
                 )}
 
                 {/* ── Actionable Blocks Launcher ────────────────── */}
@@ -580,219 +639,301 @@ const MobileDashboard = ({
                     </Box>
                 )}
 
-                {/* ── Recent Invoices ────────────────────────── */}
-                {!isPump && (<>
-                    <Box display="flex" justifyContent="space-between" alignItems="center" px={0.5} mt={2}>
-                        <Typography variant="overline" sx={{ letterSpacing: 1.5, color: '#94a3b8', fontWeight: 800 }}>
-                            {(!filterMonth && !filterYear) ? '10 Recent Slips' : 'Filtered Slips'}
-                        </Typography>
-                    </Box>
+                {/* ── RECENT SLIPS SECTION ───────────────────────────────────── */}
+                {!isPump && (
+                    <>
+                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5}>
+                            <Typography variant="overline" sx={{ letterSpacing: 1.5, color: '#94a3b8', fontWeight: 800, fontSize: '0.7rem' }}>
+                                {(!filterMonth && !filterYear) ? '10 RECENT SLIPS' : 'FILTERED SLIPS'}
+                            </Typography>
 
-                    {/* Filters */}
-                    <Box display="flex" gap={1.5} mb={2} mt={1}>
-                        <FormControl size="small" sx={{ flex: 1, bgcolor: 'background.paper', borderRadius: 2 }}>
-                            <InputLabel sx={{ fontSize: 13, fontWeight: 600 }}>Month</InputLabel>
+                            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, fontSize: '0.72rem' }}>
+                                Total: {filteredInvoices.length}
+                            </Typography>
+                        </Box>
+
+                        {/* Month & Year Filter Dropdowns */}
+                        <Box display="flex" gap={1.5} mb={2}>
                             <SearchableSelect
                                 value={filterMonth}
                                 label="Month"
                                 onChange={(e) => setFilterMonth(e.target.value)}
-                                sx={{ borderRadius: 2, fontSize: 14, fontWeight: 600 }}
+                                sx={{ flex: 1, bgcolor: '#1e293b', borderRadius: 2, input: { color: '#fff' } }}
                             >
-                                <MenuItem value=""><em>All</em></MenuItem>
+                                <MenuItem value="">All</MenuItem>
                                 {[...Array(12)].map((_, i) => (
                                     <MenuItem key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleString('en', { month: 'short' })}</MenuItem>
                                 ))}
                             </SearchableSelect>
-                        </FormControl>
 
-                        <FormControl size="small" sx={{ flex: 1, bgcolor: 'background.paper', borderRadius: 2 }}>
-                            <InputLabel sx={{ fontSize: 13, fontWeight: 600 }}>Year</InputLabel>
                             <SearchableSelect
                                 value={filterYear}
                                 label="Year"
                                 onChange={(e) => setFilterYear(e.target.value)}
-                                sx={{ borderRadius: 2, fontSize: 14, fontWeight: 600 }}
+                                sx={{ flex: 1, bgcolor: '#1e293b', borderRadius: 2, input: { color: '#fff' } }}
                             >
-                                <MenuItem value=""><em>All</em></MenuItem>
+                                <MenuItem value="">All</MenuItem>
                                 {yearOptions.map(y => (
                                     <MenuItem key={y} value={y}>{y}</MenuItem>
                                 ))}
                             </SearchableSelect>
-                        </FormControl>
-                    </Box>
-
-                    {/* Pagination Controls */}
-                    {filteredInvoices.length > 0 && (
-                        <Box sx={{
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                            mb: 2, p: 0.5, borderRadius: 3, bgcolor: 'background.paper',
-                            border: '1px solid rgba(0,0,0,0.05)'
-                        }}>
-                            <Button
-                                disabled={page === 0}
-                                onClick={() => setPage(page - 1)}
-                                sx={{ minWidth: 40, color: '#0052cc', fontWeight: 900 }}
-                            >
-                                &lt;
-                            </Button>
-
-                            <Typography variant="caption" fontWeight="800" sx={{ color: '#64748b' }}>
-                                {page * 10 + 1}-{Math.min((page + 1) * 10, filteredInvoices.length)} of {filteredInvoices.length}
-                            </Typography>
-
-                            <Button
-                                disabled={(page + 1) * 10 >= filteredInvoices.length}
-                                onClick={() => setPage(page + 1)}
-                                sx={{ minWidth: 40, color: '#0052cc', fontWeight: 900 }}
-                            >
-                                &gt;
-                            </Button>
                         </Box>
-                    )}
 
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {displayedInvoices.length === 0 ? (
-                            <Paper elevation={0} sx={{ textAlign: 'center', py: 6, borderRadius: 4, bgcolor: 'rgba(255,255,255,0.6)', border: '1px dashed rgba(0,0,0,0.1)' }}>
-                                <Typography sx={{ color: '#94a3b8', fontWeight: 600 }}>No slips found</Typography>
+                        {/* Pagination Bar */}
+                        {filteredInvoices.length > 0 && (
+                            <Paper
+                                elevation={0}
+                                sx={{
+                                    display: 'flex',
+                                    justify: 'space-between',
+                                    alignItems: 'center',
+                                    mb: 2.5,
+                                    p: 1,
+                                    px: 2,
+                                    borderRadius: 3,
+                                    bgcolor: '#1e293b',
+                                    border: '1px solid rgba(255, 255, 255, 0.08)'
+                                }}
+                            >
+                                <IconButton
+                                    disabled={page === 0}
+                                    onClick={() => setPage(page - 1)}
+                                    size="small"
+                                    sx={{ color: '#38bdf8', '&.Mui-disabled': { color: '#475569' } }}
+                                >
+                                    <ChevronLeftIcon />
+                                </IconButton>
+
+                                <Typography variant="caption" fontWeight="800" sx={{ color: '#cbd5e1', fontSize: '0.78rem' }}>
+                                    {page * 10 + 1}–{Math.min((page + 1) * 10, filteredInvoices.length)} of {filteredInvoices.length}
+                                </Typography>
+
+                                <IconButton
+                                    disabled={(page + 1) * 10 >= filteredInvoices.length}
+                                    onClick={() => setPage(page + 1)}
+                                    size="small"
+                                    sx={{ color: '#38bdf8', '&.Mui-disabled': { color: '#475569' } }}
+                                >
+                                    <ChevronRightIcon />
+                                </IconButton>
                             </Paper>
-                        ) : displayedInvoices.map((inv) => (
-                            <Card key={inv._id} elevation={0} sx={{
-                                borderRadius: 4, bgcolor: 'background.paper',
-                                border: '1px solid rgba(0,0,0,0.06)',
-                                p: 0, overflow: 'hidden',
-                                boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-                                transition: 'all 0.2s',
-                                '&:active': { transform: 'scale(0.98)' }
-                            }}>
-                                {/* Top color accent & Header */}
-                                <Box sx={{
-                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                    p: 2, pb: 1.5, borderBottom: '1px solid rgba(0,0,0,0.04)',
-                                    bgcolor: inv.status === 'approved' ? 'rgba(22, 163, 74, 0.03)' : 'rgba(245, 158, 11, 0.03)'
-                                }}>
-                                    <Box display="flex" alignItems="center" gap={1.5}>
-                                        <Checkbox 
-                                            checked={selectedInvoices.has(inv._id)}
-                                            onChange={() => handleSelectInvoice(inv._id)}
-                                            sx={{ p: 0, color: '#cbd5e1', '&.Mui-checked': { color: '#ef4444' } }}
-                                        />
-                                        <Box sx={{
-                                            width: 36, height: 36, borderRadius: '10px',
-                                            bgcolor: inv.status === 'approved' ? '#dcfce7' : '#fef3c7',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                        }}>
-                                            <DescriptionIcon sx={{ fontSize: 18, color: inv.status === 'approved' ? '#16a34a' : '#d97706' }} />
-                                        </Box>
-                                        <Box>
-                                            <Typography variant="body2" fontWeight="900" sx={{ color: '#1e293b', fontSize: 14 }}>
-                                                {inv.human_verified_data?.invoice_details?.invoice_number || 'INV-TEMP'}
-                                            </Typography>
-                                            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
-                                                {inv.human_verified_data?.invoice_details?.invoice_date || 'N/A'}
-                                            </Typography>
-                                        </Box>
-                                    </Box>
-                                    {getStatusChip(inv.status)}
-                                </Box>
+                        )}
 
-                                {/* Content Details */}
-                                <Box sx={{ p: 2, pt: 1.5 }}>
-                                    <Box mb={2} display="flex" alignItems="center" gap={1}>
-                                        <Box sx={{ width: 4, height: 16, bgcolor: '#0052cc', borderRadius: 2 }} />
-                                        <Typography variant="body2" fontWeight="800" sx={{ color: '#0f172a' }}>
-                                            {inv.human_verified_data?.supply_details?.vehicle_number || 'UNKNOWN TRUCK'}
-                                        </Typography>
-                                    </Box>
-                                    <Box display="flex" gap={1} flexWrap="wrap">
-                                        <Button
-                                            size="small" variant="contained" disableElevation
-                                            onClick={() => window.open(inv.softcopy_url, '_blank')}
-                                            disabled={!inv.softcopy_url}
-                                            sx={{ flex: '1 1 auto', bgcolor: 'background.default', color: '#334155', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#e2e8f0' } }}
-                                        >
-                                            INV
-                                        </Button>
-                                        <Button
-                                            size="small" variant="contained" disableElevation
-                                            onClick={() => window.open(inv.gcn_url, '_blank')}
-                                            disabled={!inv.gcn_url}
-                                            sx={{ flex: '1 1 auto', bgcolor: '#fce7f3', color: '#be185d', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#fbcfe8' } }}
-                                        >
-                                            GCN
-                                        </Button>
-                                        <Button
-                                            size="small" variant="contained" disableElevation
-                                            onClick={() => onOpenLorrySlip(inv._id)}
-                                            sx={{ flex: '1 1 auto', bgcolor: '#e0e7ff', color: '#4f46e5', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#c7d2fe' } }}
-                                        >
-                                            LHR
-                                        </Button>
-                                        <Button
-                                            size="small" variant="contained" disableElevation
-                                            onClick={() => onOpenFuelSlip(inv._id)}
-                                            sx={{ flex: '1 1 auto', bgcolor: '#ecfccb', color: '#4d7c0f', fontWeight: 700, borderRadius: 2.5, '&:hover': { bgcolor: '#d9f99d' } }}
-                                        >
-                                            FUEL
-                                        </Button>
-                                    </Box>
-                                </Box>
-                            </Card>
-                        ))}
-                    </Box>
-                </>)}
+                        {/* Recent Invoice Cards */}
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            {displayedInvoices.length === 0 ? (
+                                <Paper elevation={0} sx={{ textAlign: 'center', py: 6, borderRadius: 4, bgcolor: '#1e293b', border: '1px dashed #334155' }}>
+                                    <Typography sx={{ color: '#94a3b8', fontWeight: 600 }}>No slips found for selected filter.</Typography>
+                                </Paper>
+                            ) : displayedInvoices.map((inv) => {
+                                const invNum = inv.human_verified_data?.invoice_details?.invoice_number ||
+                                               inv.ai_data?.invoice_data?.invoice_details?.invoice_number ||
+                                               inv.ai_data?.invoice_details?.invoice_number ||
+                                               'INV-TEMP';
+
+                                const invDate = inv.human_verified_data?.invoice_details?.invoice_date ||
+                                                inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
+                                                inv.ai_data?.invoice_details?.invoice_date ||
+                                                'N/A';
+
+                                const truckNo = inv.human_verified_data?.supply_details?.vehicle_number ||
+                                                inv.ai_data?.invoice_data?.supply_details?.vehicle_number ||
+                                                inv.ai_data?.supply_details?.vehicle_number ||
+                                                'UNKNOWN TRUCK';
+
+                                return (
+                                    <Paper
+                                        key={inv._id}
+                                        elevation={0}
+                                        sx={{
+                                            borderRadius: 3.5,
+                                            bgcolor: '#1e293b',
+                                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                                            p: 2,
+                                            boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                                            transition: 'transform 0.15s ease',
+                                            '&:active': { transform: 'scale(0.99)' }
+                                        }}
+                                    >
+                                        {/* Card Header: Checkbox, Invoice No, Date & Status */}
+                                        <Box display="flex" justifyContent="space-between" alignItems="center" pb={1.5} mb={1.5} sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                                            <Box display="flex" alignItems="center" gap={1.2}>
+                                                <Checkbox
+                                                    checked={selectedInvoices.has(inv._id)}
+                                                    onChange={() => handleSelectInvoice(inv._id)}
+                                                    sx={{ p: 0, color: '#64748b', '&.Mui-checked': { color: '#ef4444' } }}
+                                                />
+                                                <Box sx={{ width: 34, height: 34, borderRadius: '10px', bgcolor: 'rgba(56, 189, 248, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                                                    <DescriptionIcon sx={{ fontSize: 18, color: '#38bdf8' }} />
+                                                </Box>
+                                                <Box>
+                                                    <Typography variant="body2" fontWeight="900" sx={{ color: '#f8fafc', fontSize: '0.9rem', letterSpacing: '-0.2px' }}>
+                                                        {invNum}
+                                                    </Typography>
+                                                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.72rem' }}>
+                                                        {invDate}
+                                                    </Typography>
+                                                </Box>
+                                            </Box>
+                                            {getStatusChip(inv.status)}
+                                        </Box>
+
+                                        {/* Vehicle Number Row */}
+                                        <Box display="flex" alignItems="center" gap={1} mb={2} px={0.5}>
+                                            <LocalShippingIcon sx={{ fontSize: 18, color: '#38bdf8' }} />
+                                            <Typography variant="body2" fontWeight="900" sx={{ color: '#38bdf8', letterSpacing: '0.5px' }}>
+                                                {truckNo}
+                                            </Typography>
+                                        </Box>
+
+                                        {/* Quick Slips Buttons Row */}
+                                        <Box display="grid" gridTemplateColumns="repeat(4, 1fr)" gap={1}>
+                                            <Button
+                                                size="small"
+                                                variant="contained"
+                                                disableElevation
+                                                onClick={() => window.open(inv.softcopy_url, '_blank')}
+                                                disabled={!inv.softcopy_url}
+                                                sx={{
+                                                    bgcolor: '#0f172a',
+                                                    color: '#cbd5e1',
+                                                    fontWeight: 800,
+                                                    fontSize: '0.72rem',
+                                                    borderRadius: '8px',
+                                                    py: 0.6,
+                                                    border: '1px solid rgba(255,255,255,0.08)',
+                                                    '&:hover': { bgcolor: '#334155' }
+                                                }}
+                                            >
+                                                INV
+                                            </Button>
+
+                                            <Button
+                                                size="small"
+                                                variant="contained"
+                                                disableElevation
+                                                onClick={() => window.open(inv.gcn_url, '_blank')}
+                                                disabled={!inv.gcn_url}
+                                                sx={{
+                                                    bgcolor: 'rgba(236, 72, 153, 0.12)',
+                                                    color: '#f472b6',
+                                                    fontWeight: 800,
+                                                    fontSize: '0.72rem',
+                                                    borderRadius: '8px',
+                                                    py: 0.6,
+                                                    border: '1px solid rgba(236, 72, 153, 0.25)',
+                                                    '&:hover': { bgcolor: 'rgba(236, 72, 153, 0.2)' }
+                                                }}
+                                            >
+                                                GCN
+                                            </Button>
+
+                                            <Button
+                                                size="small"
+                                                variant="contained"
+                                                disableElevation
+                                                onClick={() => onOpenLorrySlip(inv._id)}
+                                                sx={{
+                                                    bgcolor: 'rgba(99, 102, 241, 0.15)',
+                                                    color: '#818cf8',
+                                                    fontWeight: 800,
+                                                    fontSize: '0.72rem',
+                                                    borderRadius: '8px',
+                                                    py: 0.6,
+                                                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                                                    '&:hover': { bgcolor: 'rgba(99, 102, 241, 0.25)' }
+                                                }}
+                                            >
+                                                LHR
+                                            </Button>
+
+                                            <Button
+                                                size="small"
+                                                variant="contained"
+                                                disableElevation
+                                                onClick={() => onOpenFuelSlip(inv._id)}
+                                                sx={{
+                                                    bgcolor: 'rgba(132, 204, 22, 0.15)',
+                                                    color: '#a3e635',
+                                                    fontWeight: 800,
+                                                    fontSize: '0.72rem',
+                                                    borderRadius: '8px',
+                                                    py: 0.6,
+                                                    border: '1px solid rgba(132, 204, 22, 0.3)',
+                                                    '&:hover': { bgcolor: 'rgba(132, 204, 22, 0.25)' }
+                                                }}
+                                            >
+                                                FUEL
+                                            </Button>
+                                        </Box>
+                                    </Paper>
+                                );
+                            })}
+                        </Box>
+                    </>
+                )}
+
             </Container>
 
-            {/* ── Navigation Drawer ───────────────────────────────────── */}
-            <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)} sx={{
-                '& .MuiDrawer-paper': { bgcolor: 'background.paper', color: '#1e293b', width: 280, borderRight: 'none', boxShadow: '20px 0 60px rgba(0,0,0,0.05)' }
-            }}>
+            {/* ── NAVIGATION DRAWER ────────────────────────────────────────── */}
+            <Drawer
+                anchor="left"
+                open={drawerOpen}
+                onClose={() => setDrawerOpen(false)}
+                PaperProps={{
+                    sx: {
+                        bgcolor: '#0f172a',
+                        color: '#f8fafc',
+                        width: 280,
+                        borderRight: '1px solid rgba(255,255,255,0.08)'
+                    }
+                }}
+            >
                 <Box p={3}>
                     <Typography variant="h5" fontWeight="900" sx={{ mb: 4, letterSpacing: '-1px' }}>
-                        {isPump ? 'Pump ' : 'Admin '} <span style={{ color: '#0052cc' }}>{isPump ? 'Portal' : 'Panel'}</span>
+                        LORREY <span style={{ color: '#38bdf8' }}>ADMIN</span>
                     </Typography>
                     <List sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <ListItem button sx={{ borderRadius: 2, bgcolor: '#f0f7ff' }}>
-                            <ListItemIcon><DashboardIcon sx={{ color: '#0052cc' }} /></ListItemIcon>
-                            <ListItemText primary="Dashboard" primaryTypographyProps={{ fontWeight: 800, color: '#0052cc' }} />
+                        <ListItem button sx={{ borderRadius: 2, bgcolor: 'rgba(56, 189, 248, 0.12)' }}>
+                            <ListItemIcon><DashboardIcon sx={{ color: '#38bdf8' }} /></ListItemIcon>
+                            <ListItemText primary="Dashboard" primaryTypographyProps={{ fontWeight: 800, color: '#38bdf8' }} />
                         </ListItem>
+
                         {!isPump && <>
                             {isOffice && (
                                 <ListItem button onClick={() => { setDrawerOpen(false); setTruckManagerOpen(true); }} sx={{ borderRadius: 2 }}>
-                                    <ListItemIcon><LocalShippingIcon sx={{ color: '#64748b' }} /></ListItemIcon>
+                                    <ListItemIcon><LocalShippingIcon sx={{ color: '#94a3b8' }} /></ListItemIcon>
                                     <ListItemText primary="Contacts" primaryTypographyProps={{ fontWeight: 600 }} />
                                 </ListItem>
                             )}
                             {(isOffice || isSite) && onOpenVouchers && (
                                 <ListItem button onClick={() => { setDrawerOpen(false); setVoucherDialogOpen(true); }} sx={{ borderRadius: 2 }}>
-                                    <ListItemIcon><ReceiptLongIcon sx={{ color: '#64748b' }} /></ListItemIcon>
+                                    <ListItemIcon><ReceiptLongIcon sx={{ color: '#94a3b8' }} /></ListItemIcon>
                                     <ListItemText primary="Vouchers" primaryTypographyProps={{ fontWeight: 600 }} />
                                 </ListItem>
                             )}
                             {isOffice && (
                                 <ListItem button onClick={() => { setDrawerOpen(false); onOpenFuelRateSettings(); }} sx={{ borderRadius: 2 }}>
-                                    <ListItemIcon><LocalGasStationIcon sx={{ color: '#64748b' }} /></ListItemIcon>
+                                    <ListItemIcon><LocalGasStationIcon sx={{ color: '#94a3b8' }} /></ListItemIcon>
                                     <ListItemText primary="HSD Pricing" primaryTypographyProps={{ fontWeight: 600 }} />
                                 </ListItem>
                             )}
                         </>}
-                        {isPump && (
-                            <ListItem button onClick={() => { setDrawerOpen(false); onOpenBillingSheet(); }} sx={{ borderRadius: 2 }}>
-                                <ListItemIcon><AccountBalanceWalletIcon sx={{ color: '#64748b' }} /></ListItemIcon>
-                                <ListItemText primary="Billing Sheet" primaryTypographyProps={{ fontWeight: 600 }} />
-                            </ListItem>
-                        )}
+
                         <ListItem button onClick={() => setSecurityDialogOpen(true)} sx={{ borderRadius: 2 }}>
-                            <ListItemIcon><FingerprintIcon sx={{ color: '#64748b' }} /></ListItemIcon>
+                            <ListItemIcon><FingerprintIcon sx={{ color: '#94a3b8' }} /></ListItemIcon>
                             <ListItemText primary="Security Opts" primaryTypographyProps={{ fontWeight: 600 }} />
                         </ListItem>
                     </List>
 
                     <Box sx={{ mt: 'auto', pt: 10 }}>
                         <Button
-                            fullWidth variant="outlined" color="error"
+                            fullWidth
+                            variant="outlined"
+                            color="error"
                             startIcon={<LogoutIcon />}
                             onClick={logout}
-                            sx={{ borderRadius: 3, p: 1.5, fontWeight: 900, border: '2px solid' }}
+                            sx={{ borderRadius: 3, p: 1.5, fontWeight: 900, borderColor: '#ef4444' }}
                         >
                             Log Out
                         </Button>
@@ -800,50 +941,99 @@ const MobileDashboard = ({
                 </Box>
             </Drawer>
 
-            {/* ── Bottom Nav ─────────────────────────────────────────── */}
-            <Paper sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, bgcolor: 'background.paper', borderTop: '1px solid rgba(0,0,0,0.05)', zIndex: 1000 }} elevation={10}>
+            {/* ── FIXED BOTTOM NAVIGATION BAR ──────────────────────────────── */}
+            <Paper
+                elevation={10}
+                sx={{
+                    position: 'fixed',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    bgcolor: 'rgba(15, 23, 42, 0.95)',
+                    backdropFilter: 'blur(16px)',
+                    borderTop: '1px solid rgba(255,255,255,0.08)',
+                    zIndex: 1000
+                }}
+            >
                 <BottomNavigation
                     showLabels
                     value={navValue}
                     onChange={(event, newValue) => setNavValue(newValue)}
-                    sx={{ bgcolor: 'transparent', height: 75 }}
+                    sx={{ bgcolor: 'transparent', height: 70 }}
                 >
-                    <BottomNavigationAction label="Home" icon={<DashboardIcon />} sx={{ color: '#94a3b8', '&.Mui-selected': { color: isPump ? '#059669' : '#0052cc' } }} />
-                    {!isPump && <BottomNavigationAction label="Upload" icon={<AddIcon sx={{ bgcolor: '#0052cc', color: '#fff', borderRadius: '50%', p: 0.5, fontSize: 32, boxShadow: '0 4px 12px rgba(0, 82, 204, 0.3)' }} />} onClick={onUploadNew} />}
+                    <BottomNavigationAction
+                        label="Home"
+                        icon={<DashboardIcon />}
+                        sx={{
+                            color: '#64748b',
+                            '&.Mui-selected': { color: '#38bdf8' }
+                        }}
+                    />
+                    {!isPump && (
+                        <BottomNavigationAction
+                            label="Upload"
+                            icon={
+                                <AddIcon
+                                    sx={{
+                                        bgcolor: '#0284c7',
+                                        color: '#ffffff',
+                                        borderRadius: '50%',
+                                        p: 0.5,
+                                        fontSize: 32,
+                                        boxShadow: '0 4px 15px rgba(2, 132, 199, 0.5)'
+                                    }}
+                                />
+                            }
+                            onClick={onUploadNew}
+                        />
+                    )}
                 </BottomNavigation>
             </Paper>
 
-            {/* ── Bulk Delete Bar ─────────────────────────────────────────── */}
+            {/* ── BULK DELETE BAR ─────────────────────────────────────────── */}
             {selectedInvoices.size > 0 && (
-                <Paper sx={{
-                    position: 'fixed', bottom: 85, left: 16, right: 16,
-                    bgcolor: '#ef4444', color: '#fff', borderRadius: 4,
-                    p: 2, display: 'flex', justifyContent: 'space-between',
-                    alignItems: 'center', zIndex: 1100,
-                    boxShadow: '0 10px 25px rgba(239, 68, 68, 0.4)'
-                }}>
-                    <Typography fontWeight={800}>{selectedInvoices.size} Slips Selected</Typography>
+                <Paper
+                    sx={{
+                        position: 'fixed',
+                        bottom: 80,
+                        left: 16,
+                        right: 16,
+                        bgcolor: '#ef4444',
+                        color: '#fff',
+                        borderRadius: 3.5,
+                        p: 1.8,
+                        px: 2.5,
+                        display: 'flex',
+                        justify: 'space-between',
+                        alignItems: 'center',
+                        zIndex: 1100,
+                        boxShadow: '0 10px 25px rgba(239, 68, 68, 0.4)'
+                    }}
+                >
+                    <Typography fontWeight={800} fontSize="14px">
+                        {selectedInvoices.size} Slips Selected
+                    </Typography>
                     <Button 
                         variant="contained" 
                         color="inherit" 
                         onClick={handleBulkDelete}
-                        sx={{ color: '#ef4444', bgcolor: 'background.paper', fontWeight: 900, borderRadius: 3, '&:hover': { bgcolor: 'background.default' } }}
+                        startIcon={<DeleteIcon />}
+                        sx={{ color: '#ef4444', bgcolor: '#ffffff', fontWeight: 900, borderRadius: 2.5, '&:hover': { bgcolor: '#f8fafc' } }}
                     >
                         Delete
                     </Button>
                 </Paper>
             )}
 
-
-            {/* ── Security Options Dialog ─────────────────────────── */}
+            {/* ── SECURITY OPTIONS DIALOG ─────────────────────────────────── */}
             <Dialog
                 open={securityDialogOpen}
                 onClose={() => setSecurityDialogOpen(false)}
-                PaperProps={{ sx: { borderRadius: 5, p: 1 } }}
+                PaperProps={{ sx: { borderRadius: 4, p: 1, bgcolor: '#1e293b', color: '#fff' } }}
             >
                 <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>Security Options</DialogTitle>
                 <DialogContent>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                    <Typography variant="body2" color="#94a3b8" sx={{ mb: 3 }}>
                         Register your phone to enable <b>Biometric Login</b> (Face ID / Touch ID). This allows you to skip passwords on this device.
                     </Typography>
 
@@ -861,26 +1051,26 @@ const MobileDashboard = ({
                         </Alert>
                     )}
 
-                    <Box sx={{ bgcolor: 'background.default', p: 2, borderRadius: 3, border: '1px dashed #e2e8f0' }}>
-                        <Typography variant="caption" fontWeight={800} color="primary" sx={{ display: 'block', mb: 1 }}>DEVICE TRUSTED</Typography>
+                    <Box sx={{ bgcolor: '#0f172a', p: 2, borderRadius: 3, border: '1px dashed #334155' }}>
+                        <Typography variant="caption" fontWeight={800} color="#38bdf8" sx={{ display: 'block', mb: 1 }}>DEVICE TRUSTED</Typography>
                         <Typography variant="body2" fontWeight={600}>{navigator.userAgent.split(' ')[0]} Mobile Interface</Typography>
                     </Box>
                 </DialogContent>
                 <DialogActions sx={{ p: 2, pt: 0 }}>
-                    <Button onClick={() => setSecurityDialogOpen(false)} sx={{ fontWeight: 700, color: '#64748b' }}>Close</Button>
+                    <Button onClick={() => setSecurityDialogOpen(false)} sx={{ fontWeight: 700, color: '#94a3b8' }}>Close</Button>
                     <Button
                         variant="contained"
                         onClick={handleRegisterDevice}
                         disabled={isRegistering}
                         startIcon={<FingerprintIcon />}
-                        sx={{ borderRadius: 3, fontWeight: 800, px: 3 }}
+                        sx={{ borderRadius: 3, fontWeight: 800, px: 3, bgcolor: '#0284c7' }}
                     >
                         {isRegistering ? 'Registering...' : 'Register Device'}
                     </Button>
                 </DialogActions>
             </Dialog>
 
-            {/* ── Modals ──────────────────────── */}
+            {/* ── MODALS ─────────────────────────────────────────────────── */}
             <TruckContactManager open={truckManagerOpen} onClose={() => setTruckManagerOpen(false)} />
             <VoucherDialog open={voucherDialogOpen} onClose={() => setVoucherDialogOpen(false)} initialTab={0} />
         </Box>

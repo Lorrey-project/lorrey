@@ -703,6 +703,7 @@ export default function InvoiceForm({ onBack }) {
           onBack={onBack}
           onUpload={handleFileUpload}
           onScan={handlePhysicalScan}
+          onCameraOpen={() => setIsScannerOpen(true)}
           isProcessing={isProcessing && processingMode === 'upload'}
           isScanTriggered={isScanTriggered}
           status={status}

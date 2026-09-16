@@ -122,6 +122,7 @@ function AppContent() {
   const [voucherInvoiceId, setVoucherInvoiceId] = useState(null);
   const [voucherInvoiceData, setVoucherInvoiceData] = useState(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [othersCreditorInitialTab, setOthersCreditorInitialTab] = useState(0);
 
   useEffect(() => {
     if (!user) {
@@ -296,7 +297,15 @@ function AppContent() {
     }
 
     if (currentView === 'othersCreditor') {
-      return <OthersCreditor onBack={() => handleViewChange('dashboard')} />;
+      return (
+        <OthersCreditor
+          initialTab={othersCreditorInitialTab}
+          onBack={() => handleViewChange('dashboard')}
+          onOpenCementRegister={() => handleViewChange('cementRegister')}
+          onOpenMainCashbook={() => handleViewChange('mainCashbook')}
+          onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
+        />
+      );
     }
 
     if (currentView === 'dashboard') {
@@ -309,6 +318,7 @@ function AppContent() {
             onOpenCementRegister={() => handleViewChange('cementRegister')}
             onOpenMainCashbook={() => handleViewChange('mainCashbook')}
             onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
+            onOpenOthersCreditor={() => { setOthersCreditorInitialTab(1); handleViewChange('othersCreditor'); }}
             onOpenDashboard={() => handleViewChange('dashboard')}
           />
         );
@@ -382,7 +392,7 @@ function AppContent() {
           onOpenIncentiveSheet={() => handleViewChange('incentiveCalculationSheet')}
           onOpenAttendancePanel={() => handleViewChange('attendancePanel')}
           onOpenTdsReports={() => handleViewChange('tdsReports')}
-          onOpenOthersCreditor={() => handleViewChange('othersCreditor')}
+          onOpenOthersCreditor={(tabIdx = 0) => { setOthersCreditorInitialTab(tabIdx); handleViewChange('othersCreditor'); }}
           onOpenPrintingStationary={() => handleViewChange('printingStationary')}
         />
       );

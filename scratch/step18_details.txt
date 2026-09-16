@@ -1,2 +1,0 @@
-=== STEP 18 ===
-Chunks is list: False, len=N/A
