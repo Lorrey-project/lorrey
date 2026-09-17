@@ -343,7 +343,7 @@ export default function PremiumUploadArea({
                     size="small" 
                     variant="outlined" 
                     color="error" 
-                    disabled={isProcessing}
+                    disabled={isProcessing && status.type !== 'error'}
                     onClick={() => {
                       if (onRetryExtraction && currentFile) {
                         onRetryExtraction();

@@ -342,8 +342,21 @@ export default function InvoiceForm({ onBack }) {
     if (!pendingInvoiceId) return;
 
     let isMounted = true;
+    const pollStartTime = Date.now();
     const pollInterval = setInterval(async () => {
       try {
+        // Watchdog: If an extraction request has been pending for over 160 seconds, fail gracefully
+        if (Date.now() - pollStartTime > 160000) {
+          if (!isMounted) return;
+          setIsProcessing(false);
+          setStatus({
+            type: "error",
+            message: "Extraction request timed out. Click 'Retry' below to try again."
+          });
+          setPendingInvoiceId(null);
+          return;
+        }
+
         const token = localStorage.getItem("token");
         const res = await axios.get(`${API_URL}/invoice/status/${pendingInvoiceId}`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -371,6 +384,11 @@ export default function InvoiceForm({ onBack }) {
             message: inv.error_message || "AI Extraction failed. Click 'Retry' below to extract again."
           });
           setPendingInvoiceId(null);
+        } else if (inv && inv.status === "processing" && inv.processing_message) {
+          setStatus({
+            type: "info",
+            message: inv.processing_message
+          });
         }
       } catch (err) {
         // Continue polling silently
@@ -392,14 +410,12 @@ export default function InvoiceForm({ onBack }) {
   };
 
   const handleRetryExtraction = async () => {
-    if (isProcessing) return;
-
     // Fast retry using existing S3 file & backend worker without re-uploading
     if (lastUploadedInvoiceId) {
       try {
         setIsProcessing(true);
         setProcessingMode("upload");
-        setStatus({ type: "info", message: "Connecting to AI extraction engine..." });
+        setStatus({ type: "info", message: "Connecting to AI service..." });
         const token = localStorage.getItem("token");
         const retryUrl = `${API_URL}/invoice/retry-extraction/${lastUploadedInvoiceId}`;
         const res = await axios.post(retryUrl, {}, {
@@ -429,12 +445,13 @@ export default function InvoiceForm({ onBack }) {
     }
 
     if (currentFile?.file) {
+      setIsProcessing(false);
       handleFileUpload({ file: currentFile.file });
     }
   };
 
   const handleFileUpload = async (event) => {
-    if (isProcessing) {
+    if (isProcessing && pendingInvoiceId) {
       console.warn("Upload/Processing already in progress. Duplicate upload ignored.");
       return;
     }

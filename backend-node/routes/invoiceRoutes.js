@@ -281,7 +281,8 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
         // Save a placeholder invoice to get an ID immediately
         const invoice = new Invoice({
             file_url: fileUrl,
-            status: "processing"
+            status: "processing",
+            processing_message: "Document uploaded. Initializing AI extraction..."
         });
         await invoice.save();
         const invoiceId = invoice._id.toString();
@@ -304,6 +305,66 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
     }
 });
 
+// ── AI Worker Readiness & Wake Helper ──────────────────────────────────────────────
+async function ensureAiWorkerReady(aiWorkerUrl, onProgress) {
+    if (!aiWorkerUrl || aiWorkerUrl.includes("127.0.0.1") || aiWorkerUrl.includes("localhost")) {
+        return true;
+    }
+
+    const healthEndpoints = [`${aiWorkerUrl}/health`, `${aiWorkerUrl}/`];
+    const axios = require("axios");
+
+    // Fast check: If worker is already awake, return immediately with 0 delay
+    for (const ep of healthEndpoints) {
+        try {
+            const probe = await axios.get(ep, { timeout: 3500 });
+            if (probe.status === 200) {
+                console.log(`[AI Worker Health] Worker is already awake at ${ep}`);
+                return true;
+            }
+        } catch (_) {}
+    }
+
+    // Worker is asleep / cold-starting on Render
+    console.log(`[AI Worker Health] Worker cold start detected for ${aiWorkerUrl}. Waking up...`);
+    if (onProgress) onProgress("AI service is waking up, please wait (Render cold-start)...");
+
+    // Ping root to trigger Render boot
+    axios.get(`${aiWorkerUrl}/`, { timeout: 5000 }).catch(() => {});
+
+    const maxWaitMs = 85000;
+    const pollIntervalMs = 3500;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+        await new Promise(r => setTimeout(r, pollIntervalMs));
+        const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+
+        if (onProgress) {
+            onProgress(`AI service is waking up... (${elapsedSec}s)`);
+        }
+
+        try {
+            const check = await axios.get(`${aiWorkerUrl}/health`, { timeout: 4000 });
+            if (check.status === 200) {
+                console.log(`[AI Worker Health] Worker is ready after ${elapsedSec}s!`);
+                return true;
+            }
+        } catch (err) {
+            try {
+                const rootCheck = await axios.get(`${aiWorkerUrl}/`, { timeout: 4000 });
+                if (rootCheck.status === 200) {
+                    console.log(`[AI Worker Health] Worker root ready after ${elapsedSec}s!`);
+                    return true;
+                }
+            } catch (_) {}
+            console.log(`[AI Worker Wake Poll] Elapsed: ${elapsedSec}s (Status: ${err.response?.status || err.code || err.message})`);
+        }
+    }
+
+    throw new Error(`AI extraction service failed to wake up within ${Math.round(maxWaitMs / 1000)}s. Please try again.`);
+}
+
 // ── Background Processing Function ──────────────────────────────────────────────
 async function processInvoiceBackground(invoiceId, fileUrl) {
     let io = null;
@@ -320,56 +381,64 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
         }
     };
 
-    try {
-        emitStatus("extracting", { message: "Running AI Extraction..." });
+    const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+    const targetProcessUrl = `${aiWorkerUrl}/process`;
 
-        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
-        const targetProcessUrl = `${aiWorkerUrl}/process`;
-        
+    try {
+        // Step 1: Ensure AI worker is awake and ready
+        emitStatus("waking", { message: "Connecting to AI service..." });
+        await Invoice.findByIdAndUpdate(invoiceId, { processing_message: "Connecting to AI service..." }).catch(() => {});
+
+        await ensureAiWorkerReady(aiWorkerUrl, (msg) => {
+            emitStatus("waking", { message: msg });
+            Invoice.findByIdAndUpdate(invoiceId, { processing_message: msg }).catch(() => {});
+        });
+
+        // Step 2: Worker is confirmed ready! Execute extraction
+        emitStatus("extracting", { message: "AI service ready. Extracting invoice data..." });
+        await Invoice.findByIdAndUpdate(invoiceId, { processing_message: "AI service ready. Extracting invoice data..." }).catch(() => {});
+
         let aiData = null;
-        const maxRetries = 5;
-        
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const maxAttempts = 2;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                console.log(`[AI WORKER REQUEST] Attempt ${attempt + 1}/${maxRetries}: ${fileUrl}`);
+                console.log(`[AI EXTRACTION] Executing extraction (Attempt ${attempt}/${maxAttempts}): ${fileUrl}`);
                 const startTime = performance.now();
-                
+
                 const aiResponse = await require("axios").post(
                     targetProcessUrl,
                     { file: fileUrl },
-                    { timeout: 90000 }
+                    { timeout: 120000 }
                 );
                 aiData = aiResponse.data;
-                
+
                 const duration = performance.now() - startTime;
-                console.log(`[AI WORKER RESPONSE] Duration: ${duration.toFixed(2)}ms`);
+                console.log(`[AI EXTRACTION SUCCESS] Duration: ${duration.toFixed(2)}ms`);
                 break;
-            } catch (aiErr) {
-                const status = aiErr.response?.status;
-                const errDetail = aiErr.response?.data?.detail || aiErr.message;
-                console.error(`[AI WORKER ERROR] Attempt ${attempt + 1}/${maxRetries} (Status: ${status}): ${errDetail}`);
-                
-                if (attempt === maxRetries - 1) {
-                    throw aiErr;
+            } catch (postErr) {
+                const status = postErr.response?.status;
+                const errDetail = postErr.response?.data?.detail || postErr.message;
+                console.error(`[AI EXTRACTION ERROR] Attempt ${attempt}/${maxAttempts} (Status: ${status}): ${errDetail}`);
+
+                if (attempt >= maxAttempts) {
+                    throw postErr;
                 }
 
-                const isRateLimitOrColdStart = status === 429 || status === 502 || status === 503 || status === 504 || 
-                    (errDetail && (errDetail.includes("rate") || errDetail.includes("429") || errDetail.includes("busy") || errDetail.includes("ECONNRESET") || errDetail.includes("ETIMEDOUT")));
+                const isOpenAi429 = status === 429 || (errDetail && errDetail.toLowerCase().includes("rate limit"));
+                const waitMs = isOpenAi429 ? 6000 : 3000;
+                const retryMsg = isOpenAi429
+                    ? "OpenAI busy. Retrying extraction in a few seconds..."
+                    : "Retrying extraction...";
 
-                const statusMsg = isRateLimitOrColdStart 
-                    ? `Waking AI service & retrying (Attempt ${attempt + 2}/${maxRetries})...` 
-                    : `AI Processing retry (Attempt ${attempt + 2}/${maxRetries})...`;
-
-                emitStatus("retrying", { message: statusMsg, attempt: attempt + 1, maxRetries });
-
-                // Progressive backoff with randomized jitter to handle Render spin-ups (~30-45s)
-                const backoffMs = Math.min(25000, (Math.pow(2, attempt) * 3500) + Math.floor(Math.random() * 1500));
-                console.log(`[AI WORKER RETRY] Waiting ${backoffMs}ms before attempt ${attempt + 2}...`);
-                await new Promise(resolve => setTimeout(resolve, backoffMs));
+                emitStatus("retrying", { message: retryMsg });
+                await Invoice.findByIdAndUpdate(invoiceId, { processing_message: retryMsg }).catch(() => {});
+                await new Promise(resolve => setTimeout(resolve, waitMs));
             }
         }
 
         emitStatus("validating", { message: "Saving extracted data..." });
+        await Invoice.findByIdAndUpdate(invoiceId, { processing_message: "Saving extracted data..." }).catch(() => {});
 
         const consignee_name = aiData?.invoice_data?.consignee_details?.consignee_name || '';
 
@@ -379,7 +448,8 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
             {
                 ai_data: aiData,
                 consignee_name,
-                status: "pending"
+                status: "pending",
+                processing_message: "AI Extraction complete!"
             },
             { new: true }
         );
@@ -401,7 +471,7 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
     } catch (error) {
         console.error(`[Background Task Error] Invoice ${invoiceId}:`, error);
         let details = error.message;
-        const errorStatus = error.response?.status || (error.code === 'ECONNREFUSED' ? 503 : 500);
+        const errorStatus = error.response?.status || (error.code === 'ECONNREFUSED' ? 503 : (error.code === 'ETIMEDOUT' ? 504 : 500));
         if (error.response?.data?.detail) {
             details = error.response.data.detail;
         } else if (error.response?.data?.error) {
@@ -409,13 +479,18 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
         }
 
         let userMessage = details;
-        if (details.includes("429") || details.toLowerCase().includes("rate limit") || errorStatus === 429) {
-            userMessage = "AI service is temporarily busy due to high traffic. Click 'Retry' below to extract again.";
+        if (errorStatus === 429 || details.toLowerCase().includes("rate limit")) {
+            userMessage = "AI service is temporarily rate limited by provider. Click 'Retry' below to extract again.";
+        } else if (errorStatus === 503 || details.includes("failed to wake up")) {
+            userMessage = "AI service took too long to wake up. Click 'Retry' below to try again.";
+        } else if (errorStatus === 401) {
+            userMessage = "AI credentials error (invalid API key). Please contact administrator.";
         }
 
         // Update DB to mark as failed with full details
         await Invoice.findByIdAndUpdate(invoiceId, { 
             status: "failed", 
+            processing_message: userMessage,
             error_message: details,
             error_status: errorStatus,
             error_details: {
@@ -594,6 +669,7 @@ router.get("/status/:id", async (req, res) => {
         res.json({
             invoiceId: invoice._id,
             status: invoice.status,
+            processing_message: invoice.processing_message,
             ai_data: invoice.ai_data,
             error_message: invoice.error_message,
             error_status: invoice.error_status,
@@ -623,6 +699,7 @@ router.post("/retry-extraction/:id", async (req, res) => {
         }
 
         invoice.status = "processing";
+        invoice.processing_message = "Retry initiated. Checking AI service...";
         invoice.error_message = undefined;
         invoice.error_status = undefined;
         invoice.error_details = undefined;
@@ -633,12 +710,6 @@ router.post("/retry-extraction/:id", async (req, res) => {
             invoice_id: invoice._id.toString(),
             file_url: invoice.file_url
         });
-
-        // Pre-warm AI worker
-        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
-        if (aiWorkerUrl && !aiWorkerUrl.includes("127.0.0.1") && !aiWorkerUrl.includes("localhost")) {
-            require("axios").get(aiWorkerUrl, { timeout: 4000 }).catch(() => {});
-        }
 
         // Fire and forget background processing
         processInvoiceBackground(invoice._id.toString(), invoice.file_url).catch(err => {
@@ -659,12 +730,18 @@ router.get("/diagnostic", async (req, res) => {
         let aiWorkerStatus = null;
         let aiWorkerError = null;
         try {
-            const testRes = await axios.get(aiWorkerUrl || "http://127.0.0.1:8000", { timeout: 8000 });
+            const testRes = await axios.get(`${aiWorkerUrl || "http://127.0.0.1:8000"}/health`, { timeout: 6000 });
             aiWorkerReachable = true;
             aiWorkerStatus = testRes.status;
         } catch (e) {
-            aiWorkerStatus = e.response?.status || null;
-            aiWorkerError = e.message;
+            try {
+                const rootRes = await axios.get(aiWorkerUrl || "http://127.0.0.1:8000", { timeout: 6000 });
+                aiWorkerReachable = true;
+                aiWorkerStatus = rootRes.status;
+            } catch (e2) {
+                aiWorkerStatus = e2.response?.status || null;
+                aiWorkerError = e2.message;
+            }
         }
 
         res.json({

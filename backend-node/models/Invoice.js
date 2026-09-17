@@ -36,6 +36,9 @@ const invoiceSchema = new mongoose.Schema({
         default: "pending"
     },
 
+    processing_message: String,
+    processing_step: String,
+
     error_message: String,
     error_status: Number,
     error_details: mongoose.Schema.Types.Mixed,

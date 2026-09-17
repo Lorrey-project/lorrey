@@ -116,6 +116,11 @@ def home():
     return {"message": "Invoice AI Worker Running"}
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "message": "Invoice AI Worker Running"}
+
+
 @app.post("/process")
 def process_invoice(data: InvoiceRequest):
 
