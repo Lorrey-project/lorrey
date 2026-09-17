@@ -272,6 +272,12 @@ router.post("/upload", upload.single("invoice"), async (req, res) => {
         const fileUrl = req.file.location;
         console.log("File URL:", fileUrl);
 
+        // Pre-warm AI worker asynchronously if hosted remotely (e.g. Render spin-up)
+        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+        if (aiWorkerUrl && !aiWorkerUrl.includes("127.0.0.1") && !aiWorkerUrl.includes("localhost")) {
+            require("axios").get(aiWorkerUrl, { timeout: 4000 }).catch(() => {});
+        }
+
         // Save a placeholder invoice to get an ID immediately
         const invoice = new Invoice({
             file_url: fileUrl,
@@ -321,7 +327,7 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
         const targetProcessUrl = `${aiWorkerUrl}/process`;
         
         let aiData = null;
-        const maxRetries = 3;
+        const maxRetries = 5;
         
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
@@ -347,15 +353,18 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
                     throw aiErr;
                 }
 
-                const isRateLimit = status === 429 || (errDetail && (errDetail.includes("rate") || errDetail.includes("429")));
-                const statusMsg = isRateLimit 
-                    ? `AI service is temporarily busy. Retrying automatically (Attempt ${attempt + 2}/${maxRetries})...` 
+                const isRateLimitOrColdStart = status === 429 || status === 502 || status === 503 || status === 504 || 
+                    (errDetail && (errDetail.includes("rate") || errDetail.includes("429") || errDetail.includes("busy") || errDetail.includes("ECONNRESET") || errDetail.includes("ETIMEDOUT")));
+
+                const statusMsg = isRateLimitOrColdStart 
+                    ? `Waking AI service & retrying (Attempt ${attempt + 2}/${maxRetries})...` 
                     : `AI Processing retry (Attempt ${attempt + 2}/${maxRetries})...`;
 
-                emitStatus("retrying", { message: statusMsg });
+                emitStatus("retrying", { message: statusMsg, attempt: attempt + 1, maxRetries });
 
-                // Backoff with randomized jitter
-                const backoffMs = (Math.pow(2, attempt) * 1500) + Math.floor(Math.random() * 1000);
+                // Progressive backoff with randomized jitter to handle Render spin-ups (~30-45s)
+                const backoffMs = Math.min(25000, (Math.pow(2, attempt) * 3500) + Math.floor(Math.random() * 1500));
+                console.log(`[AI WORKER RETRY] Waiting ${backoffMs}ms before attempt ${attempt + 2}...`);
                 await new Promise(resolve => setTimeout(resolve, backoffMs));
             }
         }
@@ -592,6 +601,51 @@ router.get("/status/:id", async (req, res) => {
             file_url: invoice.file_url
         });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post("/retry-extraction/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const invoice = await Invoice.findById(id);
+        if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+        if (!invoice.file_url) return res.status(400).json({ error: "No file URL found for invoice" });
+
+        // If already succeeded, return existing data immediately
+        if ((invoice.status === "pending" || invoice.status === "approved" || invoice.status === "success") && invoice.ai_data) {
+            return res.json({
+                message: "Extraction already completed",
+                invoiceId: invoice._id,
+                status: invoice.status,
+                ai_data: invoice.ai_data
+            });
+        }
+
+        invoice.status = "processing";
+        invoice.error_message = undefined;
+        invoice.error_status = undefined;
+        invoice.error_details = undefined;
+        await invoice.save();
+
+        res.status(202).json({
+            message: "Retry extraction initiated.",
+            invoice_id: invoice._id.toString(),
+            file_url: invoice.file_url
+        });
+
+        // Pre-warm AI worker
+        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+        if (aiWorkerUrl && !aiWorkerUrl.includes("127.0.0.1") && !aiWorkerUrl.includes("localhost")) {
+            require("axios").get(aiWorkerUrl, { timeout: 4000 }).catch(() => {});
+        }
+
+        // Fire and forget background processing
+        processInvoiceBackground(invoice._id.toString(), invoice.file_url).catch(err => {
+            console.error(`[Background Retry Error] Invoice ${invoice._id}:`, err);
+        });
+    } catch (err) {
+        console.error("Error in /retry-extraction:", err);
         res.status(500).json({ error: err.message });
     }
 });

@@ -71,6 +71,7 @@ export default function InvoiceForm({ onBack }) {
   const [currentFile, setCurrentFile] = useState(null);
   const [zoom, setZoom] = useState(window.innerWidth < 600 ? 0.40 : 1.0);
   const [pendingInvoiceId, setPendingInvoiceId] = useState(null);
+  const [lastUploadedInvoiceId, setLastUploadedInvoiceId] = useState(null);
   const ZOOM_STEP = 0.15;
   const ZOOM_MIN = 0.25;
   const ZOOM_MAX = 3.0;
@@ -390,8 +391,43 @@ export default function InvoiceForm({ onBack }) {
     }
   };
 
-  const handleRetryExtraction = () => {
+  const handleRetryExtraction = async () => {
     if (isProcessing) return;
+
+    // Fast retry using existing S3 file & backend worker without re-uploading
+    if (lastUploadedInvoiceId) {
+      try {
+        setIsProcessing(true);
+        setProcessingMode("upload");
+        setStatus({ type: "info", message: "Connecting to AI extraction engine..." });
+        const token = localStorage.getItem("token");
+        const retryUrl = `${API_URL}/invoice/retry-extraction/${lastUploadedInvoiceId}`;
+        const res = await axios.post(retryUrl, {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (res.data?.ai_data?.invoice_data) {
+          setFormData({
+            _id: res.data.invoiceId || lastUploadedInvoiceId,
+            ...getEmptySchema(),
+            ...res.data.ai_data.invoice_data,
+          });
+          setErrors({});
+          setStatus({
+            type: "success",
+            message: "AI Extraction complete! Please review the fields below.",
+          });
+          setIsProcessing(false);
+          setPendingInvoiceId(null);
+        } else {
+          setPendingInvoiceId(lastUploadedInvoiceId);
+        }
+        return;
+      } catch (err) {
+        console.error("Retry extraction endpoint error, falling back to file re-upload:", err);
+      }
+    }
+
     if (currentFile?.file) {
       handleFileUpload({ file: currentFile.file });
     }
@@ -441,10 +477,12 @@ export default function InvoiceForm({ onBack }) {
 
       if (response.status === 202) {
         // Backend accepted the file and AI is running in the background
+        setLastUploadedInvoiceId(response.data.invoice_id);
         setPendingInvoiceId(response.data.invoice_id);
         setStatus({ type: "info", message: "Upload successful. AI extraction started..." });
       } else {
         // Fallback for synchronous response (if any)
+        setLastUploadedInvoiceId(response.data.invoice_id);
         setFormData({
           _id: response.data.invoice_id,
           ...getEmptySchema(),
@@ -491,6 +529,8 @@ export default function InvoiceForm({ onBack }) {
     setFormData(getEmptySchema());
     setErrors({});
     setStatus(null);
+    setPendingInvoiceId(null);
+    setLastUploadedInvoiceId(null);
     setShowInvoice(false);
     setShowGCN(false);
     setShowLorrySlip(false);
