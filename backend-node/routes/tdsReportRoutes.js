@@ -256,65 +256,67 @@ router.get('/', async (req, res) => {
 });
 
 // ── GET /api/tds-reports/billing-tds ─────────────────────────────────────────
+const { getBillRegisterData, MONTH_NAMES } = require('../utils/billRegisterHelper');
+
 router.get('/billing-tds', async (req, res) => {
   try {
     const { site = 'NVL', month, year, search } = req.query;
     const targetSite = site.trim().toUpperCase();
 
-    const targetMonth = (month && month !== 'ALL') ? parseInt(month, 10) : null;
-    let targetFyStartYear = null;
+    // 1. Fetch live Bill Register rows from the single source of truth
+    const { rows } = await getBillRegisterData({ fy: year });
 
-    if (year && year !== 'ALL') {
-      const parts = String(year).split('-');
-      targetFyStartYear = parseInt(parts[0], 10);
-      if (isNaN(targetFyStartYear)) {
-        targetFyStartYear = parseInt(year, 10);
-      }
-    }
-
-    const cementCol = mongoose.connection.useDb('cement_register').collection('entries');
-    const allCement = await cementCol.find({}).toArray();
-
-    // 1. Filter by SITE (NVL or NVCL)
-    let filtered = allCement.filter(e => {
-      const entrySite = (e["SITE"] || "").trim().toUpperCase();
+    // 2. Strict Site Separation (NVL bills only in NVL, NVCL bills only in NVCL)
+    let filtered = rows.filter(r => {
+      const entrySite = (r.site || '').trim().toUpperCase();
       if (entrySite !== targetSite) return false;
 
-      // Date filtering (Month & FY)
-      const dateVal = e["BILL DATE"] || e["LOADING DT"] || e["LOADING DATE"];
-      if (targetMonth || targetFyStartYear) {
-        const d = parseDate(dateVal);
-        if (!d) return false;
-
-        const m = d.getMonth() + 1;
-        const calYear = d.getFullYear();
-
-        if (targetMonth && m !== targetMonth) return false;
-
-        if (targetFyStartYear) {
-          const entryFyStart = m >= 4 ? calYear : calYear - 1;
-          if (entryFyStart !== targetFyStartYear) return false;
+      // Month filtering (1 - 12 or 'ALL')
+      if (month && month !== 'ALL') {
+        const targetMonth = parseInt(month, 10);
+        let m = null;
+        const d = parseDate(r.invoiceDate);
+        if (d) {
+          m = d.getMonth() + 1;
+        } else if (r.month) {
+          const mIdx = MONTH_NAMES.findIndex(name => String(r.month).toUpperCase().startsWith(name));
+          if (mIdx !== -1) {
+            m = mIdx + 1;
+          } else {
+            const rawM = parseInt(r.month, 10);
+            if (rawM >= 1 && rawM <= 12) m = rawM;
+          }
         }
+        if (m !== targetMonth) return false;
       }
 
       return true;
     });
 
-    // 2. Map fields and calculate TDS
-    let rawRecords = filtered.map(e => {
-      const billNo = (e["BILL NO"] || e["INVOICE NO"] || e["SHIPMENT NO"] || "-").trim();
-      const billDate = (e["BILL DATE"] || e["LOADING DT"] || e["LOADING DATE"] || "-").trim();
-      const billType = (e["Bill Type"] || e["BILL TYPE"] || "Freight").trim();
-      const partyName = (e["PARTY NAME"] || e["OWNER NAME"] || e["TRANSPORTER NAME"] || "-").trim();
-      const vehicleNo = normVeh(e["VEHICLE NUMBER"] || e["VEHICLE NO"]) || (e["VEHICLE NUMBER"] || e["VEHICLE NO"] || "-").trim();
-      
-      const basicFreight = num(e["Billing Amount"]) || num(e["BASIC FREIGHT"]) || num(e["BILLING ER 95%"]) || num(e["AMOUNT"]);
+    // 3. Map fields and calculate TDS according to exact rules
+    let rawRecords = filtered.map(r => {
+      const billNo = (r.displayInvoiceNumber || r.invoiceNumber || r.billNo || '-').trim();
+      const billDate = (r.invoiceDate || '-').trim();
+      const billType = (r.billType || 'FREIGHT').trim();
+      const partyName = (
+        r.partyName ||
+        (Array.isArray(r.partyNames) && r.partyNames.length > 0 ? r.partyNames.join(', ') : '') ||
+        (targetSite === 'NVL' ? 'NUVOCO VISTAS LIMITED' : (targetSite === 'NVCL' ? 'NUVOCO VISTAS CORPORATION LIMITED' : '-'))
+      ).trim();
+      const vehicleNo = (
+        r.vehicleNo ||
+        (Array.isArray(r.vehicleNumbers) && r.vehicleNumbers.length > 0 ? r.vehicleNumbers.join(', ') : '') ||
+        '-'
+      ).trim();
+
+      const basicFreight = num(r.amount);
 
       let tdsPercent = 2;
       let tdsAmount = 0;
 
-      // NVL Rule: NVL + TOLL => TDS = 0
-      if (targetSite === 'NVL' && billType.toUpperCase().includes('TOLL')) {
+      // SPECIAL NVL RULE: NVL + TOLL => TDS % = 0%, TDS Amount = ₹0.00
+      const isNvlToll = targetSite === 'NVL' && billType.toUpperCase().includes('TOLL');
+      if (isNvlToll) {
         tdsPercent = 0;
         tdsAmount = 0;
       } else {
@@ -322,8 +324,11 @@ router.get('/billing-tds', async (req, res) => {
         tdsAmount = Math.round((basicFreight * 0.02) * 100) / 100;
       }
 
+      const recordId = String(r._id || r.id || r.invoiceNumber);
+
       return {
-        id: String(e._id || ''),
+        _id: recordId,
+        id: recordId,
         site: targetSite,
         billNo,
         billDate,
@@ -336,7 +341,7 @@ router.get('/billing-tds', async (req, res) => {
       };
     });
 
-    // 3. Search Filter
+    // 4. Search Filter
     if (search && search.trim()) {
       const term = search.toLowerCase().trim();
       rawRecords = rawRecords.filter(r =>
@@ -347,13 +352,13 @@ router.get('/billing-tds', async (req, res) => {
       );
     }
 
-    // 4. Attach sequential SL NO
+    // 5. Attach sequential SL NO (1..N)
     const entries = rawRecords.map((r, idx) => ({
       slNo: idx + 1,
       ...r
     }));
 
-    // 5. Totals
+    // 6. Summary Totals
     let totalBasicFreight = 0;
     let totalTdsAmount = 0;
 

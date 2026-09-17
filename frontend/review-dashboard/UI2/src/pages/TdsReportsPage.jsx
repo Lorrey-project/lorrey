@@ -9,9 +9,11 @@ import PrintIcon from '@mui/icons-material/Print';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 
 const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 
 const MONTH_NAMES = [
   'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
@@ -112,6 +114,36 @@ export default function TdsReportsPage({ onBack }) {
     } else if (mainTab === 'BILLING_TDS') {
       fetchBillingTdsData();
     }
+  }, [mainTab, billingSubTab, selMonth, selYear, searchTerm]);
+
+  // ── Live WebSocket connection to automatically reflect Bill Register updates ──
+  useEffect(() => {
+    let socket;
+    try {
+      socket = io(SOCKET_URL, { autoConnect: true, transports: ['websocket', 'polling'] });
+      const handleLiveUpdate = () => {
+        if (mainTab === 'BILLING_TDS') {
+          fetchBillingTdsData();
+        } else if (mainTab === 'PARTY_TDS') {
+          fetchData();
+        }
+      };
+
+      socket.on('fyDetailsUpdates', handleLiveUpdate);
+      socket.on('cementUpdates', handleLiveUpdate);
+      socket.on('billRegisterUpdated', handleLiveUpdate);
+    } catch (e) {
+      console.error('[TdsReports] Socket connection error:', e);
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('fyDetailsUpdates');
+        socket.off('cementUpdates');
+        socket.off('billRegisterUpdated');
+        socket.disconnect();
+      }
+    };
   }, [mainTab, billingSubTab, selMonth, selYear, searchTerm]);
 
   // Ensure continuous SL NO if filtered locally
@@ -679,7 +711,8 @@ export default function TdsReportsPage({ onBack }) {
 
                     return (
                       <tr
-                        key={index}
+                        key={r.id || r._id || r.billNo || index}
+                        data-record-id={r.id || r._id}
                         style={{
                           backgroundColor: isEven ? '#ffffff' : '#f8fafc',
                           borderBottom: '1px solid #e2e8f0'

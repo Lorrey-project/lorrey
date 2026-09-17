@@ -26,14 +26,19 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import DescriptionIcon from '@mui/icons-material/Description';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PublishIcon from '@mui/icons-material/Publish';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import SearchIcon from '@mui/icons-material/Search';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PersonIcon from '@mui/icons-material/Person';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import CloseIcon from '@mui/icons-material/Close';
 
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 import PartyReportView from './PartyReportView';
+import VehicleWiseTripSummaryTab from '../components/VehicleWiseTripSummaryTab';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -348,11 +353,21 @@ function DailySummaryTab({
   onOpenPartyPayment,
   onOpenPumpPaymentRegister,
   mainTab,
-  setMainTab
+  setMainTab,
+  initialOpenVehicleSummary = false,
+  financialYear: propFY,
+  setFinancialYear: propSetFY,
+  month: propMonth,
+  setMonth: propSetMonth
 }) {
   const initialSelection = useMemo(() => getCurrentFYAndMonth(), []);
-  const [financialYear, setFinancialYear] = useState(initialSelection.fy);
-  const [month, setMonth] = useState(initialSelection.month);
+  const [internalFY, setInternalFY] = useState(initialSelection.fy);
+  const [internalMonth, setInternalMonth] = useState(initialSelection.month);
+
+  const financialYear = propFY || internalFY;
+  const setFinancialYear = propSetFY || setInternalFY;
+  const month = propMonth || internalMonth;
+  const setMonth = propSetMonth || setInternalMonth;
 
   const dateOptions = useMemo(() => getDatesForFYAndMonth(financialYear, month), [financialYear, month]);
 
@@ -371,6 +386,23 @@ function DailySummaryTab({
   const [billTabValue, setBillTabValue] = useState(0);
   const [tabValue, setTabValue] = useState(0);
   const [snack, setSnack] = useState(null);
+
+  // ── Vehicle Wise Trip Summary States ────────────────────────────────────────
+  const [vehSearchTerm, setVehSearchTerm] = useState('');
+  const [vehicleSummaryModalOpen, setVehicleSummaryModalOpen] = useState(initialOpenVehicleSummary);
+  const [selectedVehicleDetail, setSelectedVehicleDetail] = useState(null);
+  const [modalSearchTerm, setModalSearchTerm] = useState('');
+  const [modalTripFilter, setModalTripFilter] = useState('ALL');
+  const [expandedVehicles, setExpandedVehicles] = useState(new Set());
+
+  const toggleExpandVehicle = (vehNo) => {
+    setExpandedVehicles(prev => {
+      const next = new Set(prev);
+      if (next.has(vehNo)) next.delete(vehNo);
+      else next.add(vehNo);
+      return next;
+    });
+  };
 
   const [alertModalOpen, setAlertModalOpen] = useState(false);
   const [alertModalTitle, setAlertModalTitle] = useState('');
@@ -709,6 +741,112 @@ function DailySummaryTab({
     };
   }, [data]);
 
+  // ── VEHICLE WISE TRIP SUMMARY COMPUTATION ────────────────────────────────────
+  const vehicleTripSummary = useMemo(() => {
+    if (!data?.cement || !Array.isArray(data.cement)) return [];
+
+    const map = {};
+    data.cement.forEach(e => {
+      const rawVeh = e["VEHICLE NUMBER"] || e["VEHICLE NO"] || e["VEHICLE NO."] || "";
+      const veh = String(rawVeh).trim().toUpperCase();
+      if (!veh || veh === "-" || veh === "UNKNOWN") return;
+
+      if (!map[veh]) {
+        map[veh] = {
+          vehicleNo: veh,
+          tripCount: 0,
+          totalMT: 0,
+          totalBillingAmt: 0,
+          totalAdvance: 0,
+          totalDieselLtr: 0,
+          totalDieselAmt: 0,
+          parties: new Set(),
+          destinations: new Set(),
+          trips: []
+        };
+      }
+
+      const mt = parseNum(e["MT"]);
+      const billAmt = parseNum(e["Billing Amount"] || e["BILLING AMOUNT"] || e["AMOUNT"]);
+      const adv = parseNum(e["ADVANCE"] || e["LOADING ADVANCE"]);
+      const hsdLtr = parseNum(e["HSD (LTR)"] || e["QTY (LTR)"]);
+      const hsdAmt = parseNum(e["HSD AMOUNT"]);
+      const party = (e["PARTY NAME"] || e["OWNER NAME"] || "").trim();
+      const dest = (e["DESTINATION"] || "").trim();
+
+      map[veh].tripCount += 1;
+      map[veh].totalMT += mt;
+      map[veh].totalBillingAmt += billAmt;
+      map[veh].totalAdvance += adv;
+      map[veh].totalDieselLtr += hsdLtr;
+      map[veh].totalDieselAmt += hsdAmt;
+      if (party) map[veh].parties.add(party);
+      if (dest) map[veh].destinations.add(dest);
+      map[veh].trips.push(e);
+    });
+
+    return Object.values(map)
+      .map(v => ({
+        ...v,
+        totalMT: Math.round(v.totalMT * 100) / 100,
+        totalBillingAmt: Math.round(v.totalBillingAmt * 100) / 100,
+        totalAdvance: Math.round(v.totalAdvance * 100) / 100,
+        totalDieselLtr: Math.round(v.totalDieselLtr * 100) / 100,
+        partiesList: Array.from(v.parties),
+        destinationsList: Array.from(v.destinations)
+      }))
+      .sort((a, b) => b.tripCount - a.tripCount || b.totalMT - a.totalMT);
+  }, [data?.cement]);
+
+  const filteredCardVehicles = useMemo(() => {
+    if (!vehSearchTerm.trim()) return vehicleTripSummary;
+    const term = vehSearchTerm.toLowerCase().trim();
+    return vehicleTripSummary.filter(v => v.vehicleNo.toLowerCase().includes(term));
+  }, [vehicleTripSummary, vehSearchTerm]);
+
+  const filteredModalVehicles = useMemo(() => {
+    let list = vehicleTripSummary;
+    if (modalTripFilter === 'MULTIPLE') {
+      list = list.filter(v => v.tripCount > 1);
+    } else if (modalTripFilter === 'SINGLE') {
+      list = list.filter(v => v.tripCount === 1);
+    }
+    if (modalSearchTerm.trim()) {
+      const term = modalSearchTerm.toLowerCase().trim();
+      list = list.filter(v =>
+        v.vehicleNo.toLowerCase().includes(term) ||
+        v.partiesList.some(p => p.toLowerCase().includes(term)) ||
+        v.destinationsList.some(d => d.toLowerCase().includes(term))
+      );
+    }
+    return list;
+  }, [vehicleTripSummary, modalTripFilter, modalSearchTerm]);
+
+  const handleExportVehicleSummaryExcel = () => {
+    try {
+      const rows = filteredModalVehicles.map((v, idx) => ({
+        'SL NO': idx + 1,
+        'VEHICLE NUMBER': v.vehicleNo,
+        'TOTAL TRIPS': v.tripCount,
+        'TOTAL MT': v.totalMT,
+        'TOTAL BILLING AMOUNT (Rs)': v.totalBillingAmt,
+        'LOADING ADVANCE (Rs)': v.totalAdvance,
+        'DIESEL (LTR)': v.totalDieselLtr,
+        'PARTIES': v.partiesList.join(', ') || '-',
+        'DESTINATIONS': v.destinationsList.join(', ') || '-'
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, "Vehicle Trip Summary");
+      XLSX.writeFile(wb, `Vehicle_Wise_Trip_Summary_${financialYear}_${month}_${date}.xlsx`);
+      setSnack({ severity: 'success', msg: 'Vehicle Wise Trip Summary Excel exported successfully.' });
+    } catch (err) {
+      console.error(err);
+      setSnack({ severity: 'error', msg: 'Failed to export vehicle summary.' });
+    }
+  };
+
   // Bill Breakdown Categories
   const billBreakdown = useMemo(() => {
     const pending = [];
@@ -913,6 +1051,7 @@ function DailySummaryTab({
           >
             <Tab label="DAILY SUMMARY REPORTS" />
             <Tab label="ALL PARTY REPORTS" />
+            <Tab label="VEHICLE WISE TRIP SUMMARY" />
           </Tabs>
         </Box>
         <Box display="flex" alignItems="center" gap={1.5}>
@@ -1111,11 +1250,11 @@ function DailySummaryTab({
             </Card>
           </Box>
 
-          <Grid container spacing={4} mb={4}>
+          <Grid container spacing={2.5} mb={4}>
             {/* ==========================================
                 SECTION 3: FINANCIAL SUMMARY
                ========================================== */}
-            <Grid item xs={12} lg={4}>
+            <Grid item xs={12} sm={6} lg={3}>
               <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                 3. Financial Overview
               </Typography>
@@ -1163,55 +1302,55 @@ function DailySummaryTab({
             {/* ==========================================
                 SECTION 4: ALERTS & PENDING ACTIONS
                ========================================== */}
-            <Grid item xs={12} lg={4}>
+            <Grid item xs={12} sm={6} lg={3}>
               <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                 4. Alerts & Action Items
               </Typography>
               <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)' }}>
-                <CardContent sx={{ p: 3 }}>
+                <CardContent sx={{ p: 2.5 }}>
 
                   <Box
                     onClick={() => handleAlertClick('Pending', challanAlerts.pending)}
-                    display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px"
+                    display="flex" alignItems="center" gap={1.5} p={1.5} mb={1.5} borderRadius="12px"
                     sx={{ cursor: 'pointer', bgcolor: challanAlerts.pending.length > 0 ? '#fffbeb' : '#f8fafc', border: `1px solid ${challanAlerts.pending.length > 0 ? '#fde68a' : '#e2e8f0'}`, transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' } }}
                   >
-                    <WarningAmberIcon sx={{ color: challanAlerts.pending.length > 0 ? '#d97706' : '#94a3b8', fontSize: 32 }} />
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={800} color={challanAlerts.pending.length > 0 ? '#b45309' : '#64748b'}>Challan Status Pending</Typography>
-                      <Typography variant="caption" fontWeight={600} color={challanAlerts.pending.length > 0 ? '#d97706' : '#94a3b8'}>Click to view pending records</Typography>
+                    <WarningAmberIcon sx={{ color: challanAlerts.pending.length > 0 ? '#d97706' : '#94a3b8', fontSize: 26 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={800} color={challanAlerts.pending.length > 0 ? '#b45309' : '#64748b'} noWrap>Challan Status Pending</Typography>
+                      <Typography variant="caption" fontWeight={600} color={challanAlerts.pending.length > 0 ? '#d97706' : '#94a3b8'} noWrap display="block">Click to view pending records</Typography>
                     </Box>
-                    <Typography variant="h5" fontWeight={900} color={challanAlerts.pending.length > 0 ? '#92400e' : '#64748b'}>{challanAlerts.pending.length}</Typography>
+                    <Typography variant="h6" fontWeight={900} color={challanAlerts.pending.length > 0 ? '#92400e' : '#64748b'}>{challanAlerts.pending.length}</Typography>
                   </Box>
 
                   <Box
                     onClick={() => handleAlertClick('STAMP', challanAlerts.stamp)}
-                    display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px"
+                    display="flex" alignItems="center" gap={1.5} p={1.5} mb={1.5} borderRadius="12px"
                     sx={{ cursor: 'pointer', bgcolor: challanAlerts.stamp.length > 0 ? '#f0fdf4' : '#f8fafc', border: `1px solid ${challanAlerts.stamp.length > 0 ? '#bbf7d0' : '#e2e8f0'}`, transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' } }}
                   >
-                    <CheckCircleOutlineIcon sx={{ color: challanAlerts.stamp.length > 0 ? '#16a34a' : '#94a3b8', fontSize: 32 }} />
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={800} color={challanAlerts.stamp.length > 0 ? '#15803d' : '#64748b'}>STAMP Bills</Typography>
-                      <Typography variant="caption" fontWeight={600} color={challanAlerts.stamp.length > 0 ? '#16a34a' : '#94a3b8'}>Click to view STAMP records</Typography>
+                    <CheckCircleOutlineIcon sx={{ color: challanAlerts.stamp.length > 0 ? '#16a34a' : '#94a3b8', fontSize: 26 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={800} color={challanAlerts.stamp.length > 0 ? '#15803d' : '#64748b'} noWrap>STAMP Bills</Typography>
+                      <Typography variant="caption" fontWeight={600} color={challanAlerts.stamp.length > 0 ? '#16a34a' : '#94a3b8'} noWrap display="block">Click to view STAMP records</Typography>
                     </Box>
-                    <Typography variant="h5" fontWeight={900} color={challanAlerts.stamp.length > 0 ? '#14532d' : '#64748b'}>{challanAlerts.stamp.length}</Typography>
+                    <Typography variant="h6" fontWeight={900} color={challanAlerts.stamp.length > 0 ? '#14532d' : '#64748b'}>{challanAlerts.stamp.length}</Typography>
                   </Box>
 
                   <Box
                     onClick={() => handleAlertClick('NON-STAMP', challanAlerts.nonStamp)}
-                    display="flex" alignItems="center" gap={2} p={2} mb={2} borderRadius="12px"
+                    display="flex" alignItems="center" gap={1.5} p={1.5} mb={1.5} borderRadius="12px"
                     sx={{ cursor: 'pointer', bgcolor: challanAlerts.nonStamp.length > 0 ? '#fff1f2' : '#f8fafc', border: `1px solid ${challanAlerts.nonStamp.length > 0 ? '#fecdd3' : '#e2e8f0'}`, transition: 'all 0.2s', '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' } }}
                   >
-                    <ErrorOutlineIcon sx={{ color: challanAlerts.nonStamp.length > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={800} color={challanAlerts.nonStamp.length > 0 ? '#be123c' : '#64748b'}>NON-STAMP Bills</Typography>
-                      <Typography variant="caption" fontWeight={600} color={challanAlerts.nonStamp.length > 0 ? '#e11d48' : '#94a3b8'}>Click to view NON-STAMP records</Typography>
+                    <ErrorOutlineIcon sx={{ color: challanAlerts.nonStamp.length > 0 ? '#e11d48' : '#94a3b8', fontSize: 26 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={800} color={challanAlerts.nonStamp.length > 0 ? '#be123c' : '#64748b'} noWrap>NON-STAMP Bills</Typography>
+                      <Typography variant="caption" fontWeight={600} color={challanAlerts.nonStamp.length > 0 ? '#e11d48' : '#94a3b8'} noWrap display="block">Click to view NON-STAMP records</Typography>
                     </Box>
-                    <Typography variant="h5" fontWeight={900} color={challanAlerts.nonStamp.length > 0 ? '#881337' : '#64748b'}>{challanAlerts.nonStamp.length}</Typography>
+                    <Typography variant="h6" fontWeight={900} color={challanAlerts.nonStamp.length > 0 ? '#881337' : '#64748b'}>{challanAlerts.nonStamp.length}</Typography>
                   </Box>
 
                   <Box
                     onClick={() => handleAlertClick('E-WAY-BILL', eWayAlerts.urgentRecords)}
-                    display="flex" alignItems="center" gap={2} p={2} borderRadius="12px"
+                    display="flex" alignItems="center" gap={1.5} p={1.5} borderRadius="12px"
                     sx={{
                       cursor: 'pointer',
                       bgcolor: eWayAlerts.urgentCount > 0 ? '#fff1f2' : '#f8fafc',
@@ -1225,18 +1364,18 @@ function DailySummaryTab({
                       }
                     }}
                   >
-                    <WarningAmberIcon sx={{ color: eWayAlerts.urgentCount > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={800} color={eWayAlerts.urgentCount > 0 ? '#be123c' : '#64748b'}>E-Way Bill Validity Alert</Typography>
-                      <Typography variant="caption" fontWeight={600} color={eWayAlerts.urgentCount > 0 ? '#e11d48' : '#94a3b8'}>Click to view E-Way Bills requiring attention</Typography>
+                    <WarningAmberIcon sx={{ color: eWayAlerts.urgentCount > 0 ? '#e11d48' : '#94a3b8', fontSize: 26 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={800} color={eWayAlerts.urgentCount > 0 ? '#be123c' : '#64748b'} noWrap>E-Way Bill Validity Alert</Typography>
+                      <Typography variant="caption" fontWeight={600} color={eWayAlerts.urgentCount > 0 ? '#e11d48' : '#94a3b8'} noWrap display="block">Click to view alerts</Typography>
                     </Box>
-                    <Typography variant="h5" fontWeight={900} color={eWayAlerts.urgentCount > 0 ? '#881337' : '#64748b'}>{eWayAlerts.urgentCount}</Typography>
+                    <Typography variant="h6" fontWeight={900} color={eWayAlerts.urgentCount > 0 ? '#881337' : '#64748b'}>{eWayAlerts.urgentCount}</Typography>
                   </Box>
 
                   {/* ── VALIDITY END ALERT ──────────────────────────────────────── */}
                   <Box
                     onClick={() => handleAlertClick('VALIDITY-END', validityAlerts.alerts)}
-                    display="flex" alignItems="center" gap={2} p={2} mt={2} borderRadius="12px"
+                    display="flex" alignItems="center" gap={1.5} p={1.5} mt={1.5} borderRadius="12px"
                     sx={{
                       cursor: 'pointer',
                       bgcolor: validityAlerts.count > 0 ? '#fff1f2' : '#f8fafc',
@@ -1250,12 +1389,12 @@ function DailySummaryTab({
                       }
                     }}
                   >
-                    <WarningAmberIcon sx={{ color: validityAlerts.count > 0 ? '#e11d48' : '#94a3b8', fontSize: 32 }} />
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={800} color={validityAlerts.count > 0 ? '#be123c' : '#64748b'}>VALIDITY END</Typography>
-                      <Typography variant="caption" fontWeight={600} color={validityAlerts.count > 0 ? '#e11d48' : '#94a3b8'}>Click to view vehicle &amp; document validities ending</Typography>
+                    <WarningAmberIcon sx={{ color: validityAlerts.count > 0 ? '#e11d48' : '#94a3b8', fontSize: 26 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={800} color={validityAlerts.count > 0 ? '#be123c' : '#64748b'} noWrap>VALIDITY END</Typography>
+                      <Typography variant="caption" fontWeight={600} color={validityAlerts.count > 0 ? '#e11d48' : '#94a3b8'} noWrap display="block">Vehicle validities ending</Typography>
                     </Box>
-                    <Typography variant="h5" fontWeight={900} color={validityAlerts.count > 0 ? '#881337' : '#64748b'}>{validityAlerts.count}</Typography>
+                    <Typography variant="h6" fontWeight={900} color={validityAlerts.count > 0 ? '#881337' : '#64748b'}>{validityAlerts.count}</Typography>
                   </Box>
 
                 </CardContent>
@@ -1265,18 +1404,18 @@ function DailySummaryTab({
             {/* ==========================================
                 SECTION 5: QUICK ACTIONS
                ========================================== */}
-            <Grid item xs={12} lg={4}>
+            <Grid item xs={12} sm={6} lg={3}>
               <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                 5. Quick Actions
               </Typography>
               <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)', bgcolor: '#0f172a' }}>
-                <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
 
                   <Button
                     fullWidth variant="contained"
                     startIcon={<PublishIcon />}
                     onClick={onUploadNew}
-                    sx={{ py: 1.5, borderRadius: '10px', bgcolor: '#4f46e5', fontWeight: 800, '&:hover': { bgcolor: '#4338ca' } }}
+                    sx={{ py: 1.2, borderRadius: '10px', bgcolor: '#4f46e5', fontWeight: 800, textTransform: 'none', '&:hover': { bgcolor: '#4338ca' } }}
                   >
                     Upload New Invoice
                   </Button>
@@ -1285,7 +1424,7 @@ function DailySummaryTab({
                     fullWidth variant="contained"
                     startIcon={<PlayCircleOutlineIcon />}
                     onClick={() => alert('Batch Billing module not connected yet.')}
-                    sx={{ py: 1.5, borderRadius: '10px', bgcolor: '#059669', fontWeight: 800, '&:hover': { bgcolor: '#047857' } }}
+                    sx={{ py: 1.2, borderRadius: '10px', bgcolor: '#059669', fontWeight: 800, textTransform: 'none', '&:hover': { bgcolor: '#047857' } }}
                   >
                     Run Batch Billing
                   </Button>
@@ -1296,7 +1435,7 @@ function DailySummaryTab({
                     fullWidth variant="outlined"
                     startIcon={<AssessmentIcon />}
                     onClick={onOpenCementRegister}
-                    sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
+                    sx={{ py: 0.8, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, textTransform: 'none', '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
                   >
                     Open Cement Register
                   </Button>
@@ -1305,7 +1444,7 @@ function DailySummaryTab({
                     fullWidth variant="outlined"
                     startIcon={<DescriptionIcon />}
                     onClick={onOpenPartyPayment}
-                    sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
+                    sx={{ py: 0.8, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, textTransform: 'none', '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
                   >
                     Open Bill Register
                   </Button>
@@ -1314,23 +1453,190 @@ function DailySummaryTab({
                     fullWidth variant="outlined"
                     startIcon={<LocalGasStationIcon />}
                     onClick={onOpenPumpPaymentRegister}
-                    sx={{ py: 1, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
+                    sx={{ py: 0.8, borderRadius: '10px', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontWeight: 700, textTransform: 'none', '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
                   >
                     Pump Payment Register
                   </Button>
 
+                  <Button
+                    fullWidth variant="outlined"
+                    startIcon={<LocalShippingIcon />}
+                    onClick={() => {
+                      setSelectedVehicleDetail(null);
+                      setVehicleSummaryModalOpen(true);
+                    }}
+                    sx={{ py: 0.8, borderRadius: '10px', color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)', fontWeight: 700, textTransform: 'none', '&:hover': { borderColor: '#38bdf8', bgcolor: 'rgba(56,189,248,0.1)' } }}
+                  >
+                    Vehicle Trip Summary
+                  </Button>
+
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* ==========================================
+                SECTION 6: VEHICLE WISE TRIP SUMMARY (RIGHT SIDE OF 5. QUICK ACTIONS)
+               ========================================== */}
+            <Grid item xs={12} sm={6} lg={3}>
+              <Typography variant="subtitle2" fontWeight={800} color="text.secondary" mb={1.5} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                6. VEHICLE WISE TRIP SUMMARY
+              </Typography>
+              <Card sx={{
+                borderRadius: '16px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+                border: '1px solid #e2e8f0',
+                height: 'calc(100% - 34px)',
+                bgcolor: '#0f172a',
+                display: 'flex',
+                flexDirection: 'column'
+              }}>
+                <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', flex: 1, gap: 1.5 }}>
+                  {/* Top KPI Metrics Strip */}
+                  <Box sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    p: 1.5,
+                    bgcolor: 'rgba(255,255,255,0.05)',
+                    borderRadius: '10px',
+                    border: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', display: 'block' }}>Vehicles</Typography>
+                      <Typography variant="subtitle1" sx={{ color: '#38bdf8', fontWeight: 900 }}>{vehicleTripSummary.length}</Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'center', borderLeft: '1px solid rgba(255,255,255,0.1)', borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', display: 'block' }}>Trips</Typography>
+                      <Typography variant="subtitle1" sx={{ color: '#4ade80', fontWeight: 900 }}>{metrics.cementTrips}</Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', display: 'block' }}>Total MT</Typography>
+                      <Typography variant="subtitle1" sx={{ color: '#facc15', fontWeight: 900 }}>{metrics.cementMT}</Typography>
+                    </Box>
+                  </Box>
+
+                  {/* Search Input */}
+                  <TextField
+                    size="small"
+                    placeholder="Search vehicle number..."
+                    value={vehSearchTerm}
+                    onChange={(e) => setVehSearchTerm(e.target.value)}
+                    InputProps={{
+                      startAdornment: <SearchIcon sx={{ color: '#94a3b8', mr: 0.5, fontSize: 18 }} />
+                    }}
+                    sx={{
+                      bgcolor: 'rgba(255,255,255,0.06)',
+                      borderRadius: '8px',
+                      input: { color: '#ffffff', fontSize: '12px' },
+                      '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.15)' },
+                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' }
+                    }}
+                  />
+
+                  {/* Scrollable Vehicle List */}
+                  <Box sx={{
+                    flex: 1,
+                    maxHeight: 175,
+                    overflowY: 'auto',
+                    pr: 0.5,
+                    '&::-webkit-scrollbar': { width: '4px' },
+                    '&::-webkit-scrollbar-thumb': { bgcolor: 'rgba(255,255,255,0.2)', borderRadius: '4px' }
+                  }}>
+                    {filteredCardVehicles.length === 0 ? (
+                      <Box sx={{ py: 3, textAlign: 'center', color: '#64748b' }}>
+                        <Typography variant="caption" fontWeight={600}>No vehicles found</Typography>
+                      </Box>
+                    ) : (
+                      filteredCardVehicles.map((v) => (
+                        <Box
+                          key={v.vehicleNo}
+                          onClick={() => {
+                            setSelectedVehicleDetail(v);
+                            setVehicleSummaryModalOpen(true);
+                          }}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            p: 1,
+                            mb: 0.8,
+                            borderRadius: '8px',
+                            bgcolor: 'rgba(255,255,255,0.04)',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s',
+                            '&:hover': {
+                              bgcolor: 'rgba(255,255,255,0.1)',
+                              borderColor: 'rgba(56,189,248,0.5)',
+                              transform: 'translateX(2px)'
+                            }
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <LocalShippingIcon sx={{ fontSize: 18, color: '#38bdf8' }} />
+                            <Box>
+                              <Typography variant="body2" fontWeight={800} color="#f8fafc" sx={{ fontSize: '12px' }}>
+                                {v.vehicleNo}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: '10px' }}>
+                                {v.totalMT} MT • Adv: ₹{v.totalAdvance.toLocaleString()}
+                              </Typography>
+                            </Box>
+                          </Box>
+                          <Chip
+                            label={`${v.tripCount} ${v.tripCount === 1 ? 'Trip' : 'Trips'}`}
+                            size="small"
+                            sx={{
+                              fontWeight: 800,
+                              fontSize: '11px',
+                              height: 22,
+                              bgcolor: v.tripCount > 1 ? '#0369a1' : 'rgba(255,255,255,0.1)',
+                              color: '#ffffff',
+                              border: v.tripCount > 1 ? '1px solid #38bdf8' : 'none'
+                            }}
+                          />
+                        </Box>
+                      ))
+                    )}
+                  </Box>
+
+                  {/* Button to open full Vehicle Wise Summary Dialog */}
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    startIcon={<VisibilityIcon />}
+                    onClick={() => {
+                      if (setMainTab) {
+                        setMainTab(2);
+                      } else {
+                        setSelectedVehicleDetail(null);
+                        setVehicleSummaryModalOpen(true);
+                      }
+                    }}
+                    sx={{
+                      py: 1.2,
+                      borderRadius: '10px',
+                      bgcolor: '#0284c7',
+                      color: '#ffffff',
+                      fontWeight: 800,
+                      textTransform: 'none',
+                      fontSize: '13px',
+                      '&:hover': { bgcolor: '#0369a1' }
+                    }}
+                  >
+                    View Full Trip Summary
+                  </Button>
                 </CardContent>
               </Card>
             </Grid>
           </Grid>
 
           {/* ==========================================
-              SECTION 6: LIVE TRENDS / ANALYTICS
+              SECTION 7: LIVE TRENDS / ANALYTICS
              ========================================== */}
           <Card sx={{ width: '100%', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', mb: 5, bgcolor: 'background.paper', overflow: 'hidden' }}>
             <Box sx={{ bgcolor: 'background.default', px: { xs: 2, md: 4 }, py: 2.5, borderBottom: '1px solid #e2e8f0' }}>
               <Typography variant="subtitle2" fontWeight={800} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                6. Live Trends / Analytics
+                7. Live Trends / Analytics
               </Typography>
             </Box>
 
@@ -2113,6 +2419,37 @@ function DailySummaryTab({
       </Dialog>
 
 
+      {/* ==========================================
+          VEHICLE WISE TRIP SUMMARY MODAL DIALOG
+         ========================================== */}
+      <Dialog
+        open={vehicleSummaryModalOpen}
+        onClose={() => setVehicleSummaryModalOpen(false)}
+        maxWidth="xl"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: '20px',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+            maxHeight: '95vh',
+            bgcolor: '#f8fafc',
+            overflow: 'auto'
+          }
+        }}
+      >
+        <VehicleWiseTripSummaryTab
+          financialYear={financialYear}
+          setFinancialYear={setFinancialYear}
+          month={month}
+          setMonth={setMonth}
+          fyOptions={fyOptions}
+          monthOptions={monthOptions}
+          isModal={true}
+          onCloseModal={() => setVehicleSummaryModalOpen(false)}
+        />
+      </Dialog>
+
+
       {/* --- Snackbar alerts --- */}
       <Snackbar
         open={!!snack}
@@ -2234,6 +2571,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
           >
             <Tab label="DAILY SUMMARY REPORTS" />
             <Tab label="ALL PARTY REPORTS" />
+            <Tab label="VEHICLE WISE TRIP SUMMARY" />
           </Tabs>
         </Box>
 
@@ -2398,10 +2736,37 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
 // ==========================================
 export default function DailySummaryReport(props) {
   const [mainTab, setMainTab] = useState(0);
+  const initialSelection = useMemo(() => getCurrentFYAndMonth(), []);
+  const [financialYear, setFinancialYear] = useState(initialSelection.fy);
+  const [month, setMonth] = useState(initialSelection.month);
 
   if (mainTab === 0) {
-    return <DailySummaryTab {...props} mainTab={mainTab} setMainTab={setMainTab} />;
-  } else {
+    return (
+      <DailySummaryTab
+        {...props}
+        mainTab={mainTab}
+        setMainTab={setMainTab}
+        financialYear={financialYear}
+        setFinancialYear={setFinancialYear}
+        month={month}
+        setMonth={setMonth}
+      />
+    );
+  } else if (mainTab === 1) {
     return <AllPartyReportsTab {...props} mainTab={mainTab} setMainTab={setMainTab} />;
+  } else {
+    return (
+      <VehicleWiseTripSummaryTab
+        {...props}
+        mainTab={mainTab}
+        setMainTab={setMainTab}
+        financialYear={financialYear}
+        setFinancialYear={setFinancialYear}
+        month={month}
+        setMonth={setMonth}
+        fyOptions={fyOptions}
+        monthOptions={monthOptions}
+      />
+    );
   }
 }
