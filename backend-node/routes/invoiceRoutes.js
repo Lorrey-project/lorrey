@@ -392,22 +392,35 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
     } catch (error) {
         console.error(`[Background Task Error] Invoice ${invoiceId}:`, error);
         let details = error.message;
+        const errorStatus = error.response?.status || (error.code === 'ECONNREFUSED' ? 503 : 500);
         if (error.response?.data?.detail) {
             details = error.response.data.detail;
         } else if (error.response?.data?.error) {
             details = error.response.data.error;
         }
 
-        if (details.includes("429") || details.toLowerCase().includes("rate limit")) {
-            details = "AI service is temporarily busy due to high traffic. Click 'Retry' below to extract again.";
+        let userMessage = details;
+        if (details.includes("429") || details.toLowerCase().includes("rate limit") || errorStatus === 429) {
+            userMessage = "AI service is temporarily busy due to high traffic. Click 'Retry' below to extract again.";
         }
 
-        // Update DB to mark as failed
-        await Invoice.findByIdAndUpdate(invoiceId, { status: "failed", error_message: details }).catch(() => {});
+        // Update DB to mark as failed with full details
+        await Invoice.findByIdAndUpdate(invoiceId, { 
+            status: "failed", 
+            error_message: details,
+            error_status: errorStatus,
+            error_details: {
+                message: error.message,
+                status: errorStatus,
+                url: targetProcessUrl,
+                responseData: error.response?.data || null,
+                code: error.code || null
+            }
+        }).catch(() => {});
         
         emitStatus("error", { 
-            message: details,
-            error: details 
+            message: userMessage,
+            error: userMessage 
         });
     }
 }
@@ -574,7 +587,42 @@ router.get("/status/:id", async (req, res) => {
             status: invoice.status,
             ai_data: invoice.ai_data,
             error_message: invoice.error_message,
+            error_status: invoice.error_status,
+            error_details: invoice.error_details,
             file_url: invoice.file_url
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.get("/diagnostic", async (req, res) => {
+    try {
+        const aiWorkerUrl = (process.env.AI_WORKER_URL || "").trim().replace(/\/process\/?$/, "").replace(/\/+$/, "");
+        const targetProcessUrl = `${aiWorkerUrl}/process`;
+        
+        let aiWorkerReachable = false;
+        let aiWorkerStatus = null;
+        let aiWorkerError = null;
+        try {
+            const testRes = await axios.get(aiWorkerUrl || "http://127.0.0.1:8000", { timeout: 8000 });
+            aiWorkerReachable = true;
+            aiWorkerStatus = testRes.status;
+        } catch (e) {
+            aiWorkerStatus = e.response?.status || null;
+            aiWorkerError = e.message;
+        }
+
+        res.json({
+            configuredAiWorkerUrl: process.env.AI_WORKER_URL || null,
+            effectiveAiWorkerUrl: aiWorkerUrl || "http://127.0.0.1:8000 (default)",
+            targetProcessUrl,
+            aiWorkerReachable,
+            aiWorkerStatus,
+            aiWorkerError,
+            nodeEnv: process.env.NODE_ENV,
+            hasAwsKey: !!(process.env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY),
+            s3Bucket: process.env.S3_BUCKET || process.env.AWS_S3_BUCKET
         });
     } catch (err) {
         res.status(500).json({ error: err.message });

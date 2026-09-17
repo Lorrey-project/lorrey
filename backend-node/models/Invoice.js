@@ -36,6 +36,10 @@ const invoiceSchema = new mongoose.Schema({
         default: "pending"
     },
 
+    error_message: String,
+    error_status: Number,
+    error_details: mongoose.Schema.Types.Mixed,
+
     created_at: {
         type: Date,
         default: Date.now
