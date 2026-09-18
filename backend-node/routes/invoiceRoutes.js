@@ -1002,11 +1002,91 @@ router.post("/lorry-hire-slip-softcopy", lorryHireSlipUpload.single("softcopy"),
     let parsedSlipData = {};
     try { parsedSlipData = JSON.parse(slip_data); } catch (_) { /* ignore */ }
 
+    const loadingAdv = Number(parsedSlipData.loading_advance) || 0;
+    const dieselLitres = Number(parsedSlipData.diesel_litres) || 0;
+    const hasAdvance = loadingAdv > 0 || dieselLitres > 0;
+
+    let biometricMeta = null;
+
+    if (hasAdvance) {
+        const authorizationId = req.body.authorization_id || parsedSlipData.authorization_id;
+        const authToken = req.body.authorization_token || parsedSlipData.authorization_token;
+
+        if (!authorizationId) {
+            return res.status(403).json({
+                error: "Biometric authorization required before any advance payment can be issued. Both Driver and Site Member fingerprints must be verified."
+            });
+        }
+
+        const AdvanceBiometricAuthorization = require("../models/AdvanceBiometricAuthorization");
+        const authRecord = await AdvanceBiometricAuthorization.findOne({ transaction_id: authorizationId });
+
+        if (!authRecord) {
+            return res.status(403).json({ error: "Biometric authorization session not found or invalid." });
+        }
+
+        if (authRecord.status === "CONSUMED") {
+            return res.status(403).json({ error: "This biometric authorization has already been used (replay prevented). Please authenticate again." });
+        }
+
+        if (authRecord.status !== "AUTHORIZED") {
+            return res.status(403).json({ error: "Biometric authorization is not completed. Both Driver and Site Member must verify." });
+        }
+
+        if (authRecord.invoice_id.toString() !== invoice_id.toString()) {
+            return res.status(403).json({ error: "Biometric authorization does not match the current invoice/trip." });
+        }
+
+        // Amount change protection
+        if (Math.abs(authRecord.loading_advance - loadingAdv) > 0.01 || Math.abs(authRecord.diesel_litres - dieselLitres) > 0.01) {
+            return res.status(403).json({
+                error: "Advance amount or diesel litres changed after biometric authorization. Re-authentication required for the new amount."
+            });
+        }
+
+        // Mark authorization as consumed
+        authRecord.status = "CONSUMED";
+        authRecord.consumed_at = new Date();
+        authRecord.audit_trail.push({
+            action: "ADVANCE_CONSUMED_AND_SAVED",
+            performed_by: req.user?.name || req.user?.email || "Site Member",
+            role: req.user?.role || "SITE",
+            details: {
+                invoice_id,
+                lorry_slip_no: parsedSlipData.lorry_hire_slip_no,
+                loading_advance: loadingAdv,
+                diesel_litres: dieselLitres,
+                total_advance: Number(parsedSlipData.total_advance) || 0,
+                timestamp: new Date()
+            }
+        });
+        await authRecord.save();
+
+        biometricMeta = {
+            authorization_id: authRecord.transaction_id,
+            advance_type: authRecord.advance_type,
+            loading_advance_amount: authRecord.loading_advance,
+            diesel_litres: authRecord.diesel_litres,
+            diesel_advance: authRecord.diesel_advance,
+            total_advance: authRecord.total_advance,
+            vehicle_number: authRecord.vehicle_number,
+            driver_name: authRecord.driver_name,
+            driver_verified: authRecord.driver_verified,
+            driver_verified_at: authRecord.driver_verified_at,
+            site_member_name: authRecord.site_member_name,
+            site_member_id: authRecord.site_member_id,
+            site_member_verified: authRecord.site_member_verified,
+            site_member_verified_at: authRecord.site_member_verified_at,
+            authorized_at: authRecord.updatedAt,
+            status: "AUTHORIZED"
+        };
+    }
+
     const updatePayload = {
         "lorry_hire_slip_data.lorry_hire_slip_no": parsedSlipData.lorry_hire_slip_no,
         "lorry_hire_slip_data.fuel_slip_no": parsedSlipData.fuel_slip_no,
-        "lorry_hire_slip_data.loading_advance": Number(parsedSlipData.loading_advance) || 0,
-        "lorry_hire_slip_data.diesel_litres": Number(parsedSlipData.diesel_litres) || 0,
+        "lorry_hire_slip_data.loading_advance": loadingAdv,
+        "lorry_hire_slip_data.diesel_litres": dieselLitres,
         "lorry_hire_slip_data.diesel_rate": Number(parsedSlipData.diesel_rate) || 0,
         "lorry_hire_slip_data.diesel_advance": Number(parsedSlipData.diesel_advance) || 0,
         "lorry_hire_slip_data.total_advance": Number(parsedSlipData.total_advance) || 0,
@@ -1016,6 +1096,10 @@ router.post("/lorry-hire-slip-softcopy", lorryHireSlipUpload.single("softcopy"),
         "lorry_hire_slip_data.lorry_hire_slip_url": req.file.location,
         "lorry_hire_slip_data.created_at": new Date(),
     };
+
+    if (biometricMeta) {
+        updatePayload["lorry_hire_slip_data.biometric_authorization"] = biometricMeta;
+    }
 
     if (invoice_id) {
         await Invoice.findByIdAndUpdate(invoice_id, { $set: updatePayload });

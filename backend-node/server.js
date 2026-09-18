@@ -90,6 +90,7 @@ app.use("/others-creditors", require("./routes/othersCreditorRoutes"));
 app.use("/tds-reports", require("./routes/tdsReportRoutes"));
 app.use("/printing-stationary", require("./routes/printingStationaryRoutes"));
 app.use("/road-tax", require("./routes/roadTaxRoutes"));
+app.use("/advance-auth", auth, require("./routes/advanceAuthRoutes"));
 
 
 const activePortals = {

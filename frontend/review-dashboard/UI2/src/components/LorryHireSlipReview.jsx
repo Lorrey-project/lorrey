@@ -17,9 +17,12 @@ import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import DescriptionIcon from '@mui/icons-material/Description';
+import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import axios from 'axios';
 import html2pdf from 'html2pdf.js';
 import LorryHireSlipDocument from './LorryHireSlipDocument';
+import AdvanceBiometricAuthDialog from './AdvanceBiometricAuthDialog';
+import { useAuth } from '../context/AuthContext';
 import { API_URL } from '../config';
 
 const STEPS = ['Review Details', 'Generate Slip'];
@@ -181,6 +184,37 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
     const [dieselLtrs, setDieselLtrs] = useState('');
     const [dieselRate, setDieselRate] = useState('0');
 
+    // Biometric authorization state (Driver + Site Member dual custody)
+    const { user } = useAuth();
+    const [biometricDialogOpen, setBiometricDialogOpen] = useState(false);
+    const [authorizationId, setAuthorizationId] = useState(null);
+    const [authorizationToken, setAuthToken] = useState(null);
+    const [authorizedAmounts, setAuthorizedAmounts] = useState(null);
+
+    // Derived advance requests & validity
+    const isAdvanceRequested = (parseFloat(loadingAdv) || 0) > 0 || (parseFloat(dieselLtrs) || 0) > 0;
+    const isBiometricallyAuthorized = Boolean(
+        authorizationId &&
+        authorizationToken &&
+        authorizedAmounts?.loadingAdv === (parseFloat(loadingAdv) || 0) &&
+        authorizedAmounts?.dieselLtrs === (parseFloat(dieselLtrs) || 0)
+    );
+
+    // Invalidate authorization if amounts change
+    const handleLoadingAdvChange = (val) => {
+        setLoadingAdv(val);
+        setAuthorizationId(null);
+        setAuthToken(null);
+        setAuthorizedAmounts(null);
+    };
+
+    const handleDieselLtrsChange = (val) => {
+        setDieselLtrs(val);
+        setAuthorizationId(null);
+        setAuthToken(null);
+        setAuthorizedAmounts(null);
+    };
+
     // Required fuel (auto-calculated, read-only)
     const [fuelRequirement, setFuelRequirement] = useState(null);  // { required_fuel_litres, distance_km, mileage_kmpl, vehicle_type, wheels }
     const [fuelLoading, setFuelLoading] = useState(false);
@@ -218,6 +252,14 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                     setDieselLtrs(String(inv.lorry_hire_slip_data.diesel_litres ?? ''));
                     if (inv.lorry_hire_slip_data.diesel_rate != null) {
                         setDieselRate(inv.lorry_hire_slip_data.diesel_rate);
+                    }
+                    if (inv.lorry_hire_slip_data.biometric_authorization?.authorization_token) {
+                        setAuthorizationId(inv.lorry_hire_slip_data.biometric_authorization.session_id);
+                        setAuthToken(inv.lorry_hire_slip_data.biometric_authorization.authorization_token);
+                        setAuthorizedAmounts({
+                            loadingAdv: parseFloat(inv.lorry_hire_slip_data.loading_advance) || 0,
+                            dieselLtrs: parseFloat(inv.lorry_hire_slip_data.diesel_litres) || 0,
+                        });
                     }
                 }
 
@@ -314,6 +356,8 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                 diesel_advance: parseFloat(dieselAdv.toFixed(2)),
                 total_advance: parseFloat(totalAdv.toFixed(2)),
                 estimated_required_fuel: fuelRequirement?.required_fuel_litres ?? null,
+                authorization_id: authorizationId || null,
+                authorization_token: authorizationToken || null,
             };
 
             const formData = new FormData();
@@ -341,6 +385,28 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
             handleSaveAndUpload();
         }
     }, [step]);
+
+    const handleProceedToSlip = () => {
+        if (isAdvanceRequested && !isBiometricallyAuthorized) {
+            setBiometricDialogOpen(true);
+            return;
+        }
+        setStep(1);
+    };
+
+    const handleBiometricAuthorized = ({ authorizationId: authId, authorizationToken: token }) => {
+        setAuthorizationId(authId);
+        setAuthToken(token);
+        setAuthorizedAmounts({
+            loadingAdv: parseFloat(loadingAdv) || 0,
+            dieselLtrs: parseFloat(dieselLtrs) || 0,
+        });
+        setSnack({
+            type: 'success',
+            message: '✅ Biometric authorization verified for Driver & Site Member! Generating slip...'
+        });
+        setStep(1);
+    };
 
     const handleDownload = async () => {
         if (!docRef.current) {
@@ -450,7 +516,28 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                 boxShadow: '0 12px 40px rgba(0,0,0,0.04)',
                                 border: '1px solid #f1f5f9',
                             }} elevation={0}>
-                                <Typography variant="h5" fontWeight="900" color="#0f172a" mb={1}>Trip Advance</Typography>
+                                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                                    <Typography variant="h5" fontWeight="900" color="#0f172a">Trip Advance</Typography>
+                                    {isAdvanceRequested && (
+                                        isBiometricallyAuthorized ? (
+                                            <Chip
+                                                icon={<FingerprintIcon />}
+                                                label="Dual Verified"
+                                                color="success"
+                                                size="small"
+                                                sx={{ fontWeight: 700 }}
+                                            />
+                                        ) : (
+                                            <Chip
+                                                icon={<FingerprintIcon />}
+                                                label="Biometrics Required"
+                                                size="small"
+                                                onClick={() => setBiometricDialogOpen(true)}
+                                                sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, cursor: 'pointer' }}
+                                            />
+                                        )
+                                    )}
+                                </Box>
                                 <Typography variant="body2" color="#64748b" mb={4}>Review the AI estimated fuel allowance and input the specific loading advance amounts.</Typography>
 
                                 {/* ── Required Fuel (Read-only, auto-calculated) ── */}
@@ -507,7 +594,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                         type="number" 
                                         fullWidth 
                                         value={loadingAdv} 
-                                        onChange={e => setLoadingAdv(e.target.value)} 
+                                        onChange={e => handleLoadingAdvChange(e.target.value)} 
                                         variant="outlined"
                                         InputLabelProps={{ sx: { fontWeight: 600, color: '#64748b' } }}
                                         InputProps={{ 
@@ -521,7 +608,7 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                         type="number"
                                         fullWidth
                                         value={dieselLtrs}
-                                        onChange={e => setDieselLtrs(e.target.value)}
+                                        onChange={e => handleDieselLtrsChange(e.target.value)}
                                         variant="outlined"
                                         helperText={fuelRequirement ? `* AI suggested constraint is ${fuelRequirement.required_fuel_litres} Litres` : ''}
                                         FormHelperTextProps={{ sx: { fontWeight: 600, color: '#94a3b8', mt: 1 } }}
@@ -537,24 +624,28 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                     variant="contained" 
                                     fullWidth 
                                     size="large" 
-                                    endIcon={<ArrowForwardIcon />} 
-                                    onClick={() => setStep(1)} 
+                                    endIcon={isAdvanceRequested && !isBiometricallyAuthorized ? <FingerprintIcon /> : <ArrowForwardIcon />} 
+                                    onClick={handleProceedToSlip} 
                                     sx={{ 
                                         borderRadius: 3, 
                                         fontWeight: 800, 
                                         py: 1.8, 
                                         fontSize: '1.05rem',
-                                        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', 
+                                        background: isAdvanceRequested && !isBiometricallyAuthorized
+                                            ? 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)'
+                                            : 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', 
                                         boxShadow: '0 8px 20px rgba(15,23,42,0.15)',
                                         transition: 'all 0.2s',
                                         '&:hover': { 
-                                            background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
+                                            background: isAdvanceRequested && !isBiometricallyAuthorized
+                                                ? 'linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%)'
+                                                : 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
                                             transform: 'translateY(-2px)',
                                             boxShadow: '0 12px 25px rgba(15,23,42,0.25)',
                                         } 
                                     }}
                                 >
-                                    Generate Lorry Slip
+                                    {isAdvanceRequested && !isBiometricallyAuthorized ? 'Authenticate Biometrics & Generate Slip' : 'Generate Lorry Slip'}
                                 </Button>
                             </Paper>
                         </Grid>
@@ -565,6 +656,25 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                         {snack?.message}
                     </Alert>
                 </Snackbar>
+
+                {/* Biometric Advance Authorization Dialog */}
+                <AdvanceBiometricAuthDialog
+                    open={biometricDialogOpen}
+                    onClose={() => setBiometricDialogOpen(false)}
+                    invoiceId={invoiceData?._id || invoiceId}
+                    vehicleNumber={gcnData?.truck_no}
+                    driverName={gcnData?.driver_name}
+                    driverLicenseNo={gcnData?.driver_license_no}
+                    advanceDetails={{
+                        loadingAdv: parseFloat(loadingAdv) || 0,
+                        dieselLtrs: parseFloat(dieselLtrs) || 0,
+                        dieselRate: parseFloat(dieselRate) || 0,
+                        dieselAdv: parseFloat(dieselAdv.toFixed(2)),
+                        totalAdv: parseFloat(totalAdv.toFixed(2)),
+                    }}
+                    siteMemberName={user?.name || user?.email || 'Site Member'}
+                    onAuthorized={handleBiometricAuthorized}
+                />
             </Box>
         );
     }

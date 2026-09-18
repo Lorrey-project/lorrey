@@ -28,6 +28,24 @@ const invoiceSchema = new mongoose.Schema({
         station_address: String,
         fuel_slip_url: String,
         advance_fuel_slip_url: String,
+        biometric_authorization: {
+            authorization_id: String,
+            advance_type: String,
+            loading_advance_amount: Number,
+            diesel_litres: Number,
+            diesel_advance: Number,
+            total_advance: Number,
+            vehicle_number: String,
+            driver_name: String,
+            driver_verified: Boolean,
+            driver_verified_at: Date,
+            site_member_name: String,
+            site_member_id: mongoose.Schema.Types.ObjectId,
+            site_member_verified: Boolean,
+            site_member_verified_at: Date,
+            authorized_at: Date,
+            status: String
+        },
         created_at: { type: Date, default: Date.now }
     },
 
