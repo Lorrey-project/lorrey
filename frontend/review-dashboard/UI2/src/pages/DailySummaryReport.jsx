@@ -39,6 +39,7 @@ import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 import PartyReportView from './PartyReportView';
 import VehicleWiseTripSummaryTab from '../components/VehicleWiseTripSummaryTab';
+import DailyRevenueNvlNvclTab from '../components/DailyRevenueNvlNvclTab';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -1052,6 +1053,7 @@ function DailySummaryTab({
             <Tab label="DAILY SUMMARY REPORTS" />
             <Tab label="ALL PARTY REPORTS" />
             <Tab label="VEHICLE WISE TRIP SUMMARY" />
+            <Tab label="DAILY REVENUE NVL & NVCL" />
           </Tabs>
         </Box>
         <Box display="flex" alignItems="center" gap={1.5}>
@@ -2572,6 +2574,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
             <Tab label="DAILY SUMMARY REPORTS" />
             <Tab label="ALL PARTY REPORTS" />
             <Tab label="VEHICLE WISE TRIP SUMMARY" />
+            <Tab label="DAILY REVENUE NVL & NVCL" />
           </Tabs>
         </Box>
 
@@ -2754,7 +2757,7 @@ export default function DailySummaryReport(props) {
     );
   } else if (mainTab === 1) {
     return <AllPartyReportsTab {...props} mainTab={mainTab} setMainTab={setMainTab} />;
-  } else {
+  } else if (mainTab === 2) {
     return (
       <VehicleWiseTripSummaryTab
         {...props}
@@ -2766,6 +2769,18 @@ export default function DailySummaryReport(props) {
         setMonth={setMonth}
         fyOptions={fyOptions}
         monthOptions={monthOptions}
+      />
+    );
+  } else {
+    return (
+      <DailyRevenueNvlNvclTab
+        {...props}
+        mainTab={mainTab}
+        setMainTab={setMainTab}
+        financialYear={financialYear}
+        setFinancialYear={setFinancialYear}
+        month={month}
+        setMonth={setMonth}
       />
     );
   }
