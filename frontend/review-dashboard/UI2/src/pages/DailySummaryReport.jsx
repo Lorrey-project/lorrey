@@ -1010,42 +1010,67 @@ function DailySummaryTab({
       <Box sx={{
         position: 'sticky', top: 0, zIndex: 10,
         bgcolor: 'background.paper', color: '#0f172a',
-        px: { xs: 2, md: 4 }, py: 2,
+        px: { xs: 1.5, md: 2.5 }, py: 1.2,
         boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1)',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+        display: 'flex',
+        flexWrap: { xs: 'wrap', lg: 'nowrap' },
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: { xs: 1, md: 1.5 }
       }}>
-        <Box display="flex" alignItems="center" gap={1.5}>
-          <IconButton onClick={onBack} sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
-            <ArrowBackIcon />
+        {/* Left Title */}
+        <Box display="flex" alignItems="center" gap={1} flexShrink={0}>
+          <IconButton onClick={onBack} size="small" sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
+            <ArrowBackIcon fontSize="small" />
           </IconButton>
           <Box>
-            <Typography variant="h5" fontWeight={900} sx={{ letterSpacing: '-0.5px' }}>
+            <Typography variant="subtitle1" fontWeight={900} sx={{ letterSpacing: '-0.3px', lineHeight: 1.2, fontSize: { xs: '0.95rem', md: '1.05rem', xl: '1.15rem' }, whiteSpace: 'nowrap' }}>
               Daily Operations Dashboard
             </Typography>
-            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+            <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ display: { xs: 'none', '2xl': 'block' }, lineHeight: 1 }}>
               Live operational metrics and invoice processing
             </Typography>
           </Box>
         </Box>
-        <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
+
+        {/* Center Tabs */}
+        <Box sx={{
+          flexShrink: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          order: { xs: 3, lg: 2 },
+          width: { xs: '100%', lg: 'auto' },
+          mx: { xs: 0, lg: 'auto' }
+        }}>
           <Tabs
             value={mainTab}
             onChange={(e, v) => setMainTab(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+            allowScrollButtonsMobile
             sx={{
-              minHeight: 40,
+              minHeight: 34,
+              '& .MuiTabs-scroller': { display: 'flex', alignItems: 'center' },
+              '& .MuiTabs-flexContainer': { gap: { xs: 0.4, md: 0.6 } },
               '& .MuiTab-root': {
-                minHeight: 40,
-                borderRadius: 2,
+                minWidth: 'auto',
+                minHeight: 32,
+                borderRadius: '8px',
                 textTransform: 'none',
                 fontWeight: 800,
-                px: 3,
-                mx: 1,
-                transition: 'all 0.3s ease'
+                fontSize: { xs: '0.7rem', sm: '0.74rem', md: '0.78rem' },
+                px: { xs: 1, sm: 1.3, md: 1.6 },
+                py: 0.4,
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease',
+                color: '#475569',
+                bgcolor: 'rgba(241, 245, 249, 0.8)',
+                '&:hover': { bgcolor: '#e2e8f0', color: '#0f172a' }
               },
               '& .Mui-selected': {
-                bgcolor: '#0f172a',
-                color: '#fff !important',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                bgcolor: '#0f172a !important',
+                color: '#ffffff !important',
+                boxShadow: '0 2px 8px rgba(15,23,42,0.2)'
               }
             }}
             TabIndicatorProps={{ style: { display: 'none' } }}
@@ -1056,14 +1081,16 @@ function DailySummaryTab({
             <Tab label="DAILY REVENUE NVL & NVCL" />
           </Tabs>
         </Box>
-        <Box display="flex" alignItems="center" gap={1.5}>
+
+        {/* Right Controls */}
+        <Box display="flex" alignItems="center" gap={{ xs: 0.8, md: 1 }} flexShrink={0} sx={{ order: { xs: 2, lg: 3 } }}>
           <FormControl size="small">
             <Select
               value={financialYear}
               onChange={(e) => setFinancialYear(e.target.value)}
-              sx={{ bgcolor: 'background.default', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: 120 }}
+              sx={{ bgcolor: 'background.default', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: { xs: 90, md: 105 }, fontSize: '0.8rem', py: 0 }}
             >
-              {fyOptions.map(fy => <MenuItem key={fy} value={fy} sx={{ fontWeight: 600 }}>{fy}</MenuItem>)}
+              {fyOptions.map(fy => <MenuItem key={fy} value={fy} sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{fy}</MenuItem>)}
             </Select>
           </FormControl>
 
@@ -1071,25 +1098,27 @@ function DailySummaryTab({
             <Select
               value={month}
               onChange={(e) => setMonth(e.target.value)}
-              sx={{ bgcolor: 'background.default', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: 120 }}
+              sx={{ bgcolor: 'background.default', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' }, fontWeight: 700, minWidth: { xs: 90, md: 105 }, fontSize: '0.8rem', py: 0 }}
             >
-              {monthOptions.map(m => <MenuItem key={m} value={m} sx={{ fontWeight: 600 }}>{m}</MenuItem>)}
+              {monthOptions.map(m => <MenuItem key={m} value={m} sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{m}</MenuItem>)}
             </Select>
           </FormControl>
 
           <Button
             onClick={handleOpenCalendar}
             variant="outlined"
-            endIcon={<CalendarTodayIcon />}
+            endIcon={<CalendarTodayIcon sx={{ fontSize: '1rem !important' }} />}
             sx={{
               bgcolor: 'background.default',
               borderRadius: '8px',
               borderColor: '#e2e8f0',
               color: '#0f172a',
               fontWeight: 800,
-              minWidth: 130,
+              minWidth: { xs: 75, md: 88 },
+              fontSize: '0.8rem',
               textTransform: 'none',
-              px: 2,
+              px: 1.2,
+              py: 0.6,
               '&:hover': { bgcolor: 'background.default', borderColor: '#cbd5e1' }
             }}
           >
@@ -1162,21 +1191,25 @@ function DailySummaryTab({
             </Grid>
           </Popover>
           <Tooltip title="Refresh Data">
-            <IconButton onClick={() => fetchData(date)} sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
-              <RefreshIcon />
+            <IconButton onClick={() => fetchData(date)} size="small" sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
+              <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           <Button
             variant="contained"
             color="primary"
-            startIcon={<DownloadIcon />}
+            startIcon={<DownloadIcon fontSize="small" />}
             onClick={handleExportExcel}
             disabled={!data}
+            size="small"
             sx={{
-              fontWeight: 800, borderRadius: '10px',
+              fontWeight: 800, borderRadius: '8px',
               background: '#0f172a',
               color: '#fff',
               boxShadow: 'none',
+              fontSize: '0.8rem',
+              py: 0.6,
+              px: 1.5,
               '&:hover': { background: '#1e293b', boxShadow: '0 4px 12px rgba(15,23,42,0.2)' }
             }}
           >
@@ -2530,43 +2563,67 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
       <Box sx={{
         position: 'sticky', top: 0, zIndex: 10,
         bgcolor: 'background.paper', color: '#0f172a',
-        px: { xs: 2, md: 4 }, py: 2,
+        px: { xs: 1.5, md: 2.5 }, py: 1.2,
         boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1)',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+        display: 'flex',
+        flexWrap: { xs: 'wrap', lg: 'nowrap' },
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: { xs: 1, md: 1.5 }
       }}>
-        <Box display="flex" alignItems="center" gap={1.5}>
-          <IconButton onClick={onBack} sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
-            <ArrowBackIcon />
+        {/* Left Title */}
+        <Box display="flex" alignItems="center" gap={1} flexShrink={0}>
+          <IconButton onClick={onBack} size="small" sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
+            <ArrowBackIcon fontSize="small" />
           </IconButton>
           <Box>
-            <Typography variant="h5" fontWeight={900} sx={{ letterSpacing: '-0.5px' }}>
+            <Typography variant="subtitle1" fontWeight={900} sx={{ letterSpacing: '-0.3px', lineHeight: 1.2, fontSize: { xs: '0.95rem', md: '1.05rem', xl: '1.15rem' }, whiteSpace: 'nowrap' }}>
               Daily Operations Dashboard
             </Typography>
-            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+            <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ display: { xs: 'none', '2xl': 'block' }, lineHeight: 1 }}>
               All Party Reports Module
             </Typography>
           </Box>
         </Box>
 
-        <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
+        {/* Center Tabs */}
+        <Box sx={{
+          flexShrink: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          order: { xs: 3, lg: 2 },
+          width: { xs: '100%', lg: 'auto' },
+          mx: { xs: 0, lg: 'auto' }
+        }}>
           <Tabs
             value={mainTab}
             onChange={(e, v) => setMainTab(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+            allowScrollButtonsMobile
             sx={{
-              minHeight: 40,
+              minHeight: 34,
+              '& .MuiTabs-scroller': { display: 'flex', alignItems: 'center' },
+              '& .MuiTabs-flexContainer': { gap: { xs: 0.4, md: 0.6 } },
               '& .MuiTab-root': {
-                minHeight: 40,
-                borderRadius: 2,
+                minWidth: 'auto',
+                minHeight: 32,
+                borderRadius: '8px',
                 textTransform: 'none',
                 fontWeight: 800,
-                px: 3,
-                mx: 1,
-                transition: 'all 0.3s ease'
+                fontSize: { xs: '0.7rem', sm: '0.74rem', md: '0.78rem' },
+                px: { xs: 1, sm: 1.3, md: 1.6 },
+                py: 0.4,
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease',
+                color: '#475569',
+                bgcolor: 'rgba(241, 245, 249, 0.8)',
+                '&:hover': { bgcolor: '#e2e8f0', color: '#0f172a' }
               },
               '& .Mui-selected': {
-                bgcolor: '#0f172a',
-                color: '#fff !important',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                bgcolor: '#0f172a !important',
+                color: '#ffffff !important',
+                boxShadow: '0 2px 8px rgba(15,23,42,0.2)'
               }
             }}
             TabIndicatorProps={{ style: { display: 'none' } }}
@@ -2578,10 +2635,11 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
           </Tabs>
         </Box>
 
-        <Box sx={{ width: 170 }}>
+        {/* Right Controls */}
+        <Box display="flex" alignItems="center" justifyContent="flex-end" sx={{ order: { xs: 2, lg: 3 }, minWidth: { xs: 'auto', lg: 120 } }}>
           <Tooltip title="Refresh Data">
-            <IconButton onClick={fetchParties} sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
-              <RefreshIcon />
+            <IconButton onClick={fetchParties} size="small" sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
+              <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
         </Box>

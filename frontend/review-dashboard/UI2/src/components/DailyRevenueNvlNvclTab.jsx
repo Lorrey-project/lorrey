@@ -251,32 +251,32 @@ export default function DailyRevenueNvlNvclTab({
       <Paper
         elevation={0}
         sx={{
-          p: 2,
+          p: { xs: 1.5, md: 2 },
           mb: 3,
           borderRadius: '16px',
           border: '1px solid #e2e8f0',
           display: 'flex',
-          flexWrap: 'wrap',
+          flexWrap: { xs: 'wrap', lg: 'nowrap' },
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 2,
+          gap: { xs: 1, md: 1.5 },
           bgcolor: '#ffffff'
         }}
       >
-        <Box display="flex" alignItems="center" gap={1.5}>
+        <Box display="flex" alignItems="center" gap={1} flexShrink={0}>
           {onBack && (
-            <IconButton onClick={onBack} sx={{ color: '#0f172a', '&:hover': { bgcolor: '#f1f5f9' } }}>
-              <ArrowBackIcon />
+            <IconButton onClick={onBack} size="small" sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
+              <ArrowBackIcon fontSize="small" />
             </IconButton>
           )}
-          <Box sx={{ p: 1, bgcolor: '#0f172a', borderRadius: '10px', display: 'flex' }}>
-            <AssessmentIcon sx={{ color: '#38bdf8', fontSize: 24 }} />
+          <Box sx={{ p: 0.8, bgcolor: '#0f172a', borderRadius: '8px', display: 'flex' }}>
+            <AssessmentIcon sx={{ color: '#38bdf8', fontSize: 20 }} />
           </Box>
           <Box>
-            <Typography variant="h6" fontWeight={900} sx={{ letterSpacing: '-0.3px', color: '#0f172a' }}>
+            <Typography variant="subtitle1" fontWeight={900} sx={{ letterSpacing: '-0.3px', color: '#0f172a', lineHeight: 1.2, fontSize: { xs: '0.95rem', md: '1.05rem', xl: '1.15rem' }, whiteSpace: 'nowrap' }}>
               Daily Revenue NVL & NVCL
             </Typography>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, display: { xs: 'none', '2xl': 'block' }, lineHeight: 1 }}>
               Live Billed & Unbilled Revenue Statement • {selectedDateDisplay}
             </Typography>
           </Box>
@@ -284,25 +284,43 @@ export default function DailyRevenueNvlNvclTab({
 
         {/* Center Tabs */}
         {setMainTab && (
-          <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+          <Box sx={{
+            flexShrink: 0,
+            display: 'flex',
+            justifyContent: 'center',
+            order: { xs: 3, lg: 2 },
+            width: { xs: '100%', lg: 'auto' },
+            mx: { xs: 0, lg: 'auto' }
+          }}>
             <Tabs
               value={mainTab}
               onChange={(e, v) => setMainTab(v)}
+              variant="scrollable"
+              scrollButtons="auto"
+              allowScrollButtonsMobile
               sx={{
-                minHeight: 40,
+                minHeight: 34,
+                '& .MuiTabs-scroller': { display: 'flex', alignItems: 'center' },
+                '& .MuiTabs-flexContainer': { gap: { xs: 0.4, md: 0.6 } },
                 '& .MuiTab-root': {
-                  minHeight: 40,
-                  borderRadius: 2,
+                  minWidth: 'auto',
+                  minHeight: 32,
+                  borderRadius: '8px',
                   textTransform: 'none',
                   fontWeight: 800,
-                  px: 2.5,
-                  mx: 0.5,
-                  transition: 'all 0.3s ease'
+                  fontSize: { xs: '0.7rem', sm: '0.74rem', md: '0.78rem' },
+                  px: { xs: 1, sm: 1.3, md: 1.6 },
+                  py: 0.4,
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.15s ease',
+                  color: '#475569',
+                  bgcolor: 'rgba(241, 245, 249, 0.8)',
+                  '&:hover': { bgcolor: '#e2e8f0', color: '#0f172a' }
                 },
                 '& .Mui-selected': {
-                  bgcolor: '#0f172a',
-                  color: '#fff !important',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                  bgcolor: '#0f172a !important',
+                  color: '#ffffff !important',
+                  boxShadow: '0 2px 8px rgba(15,23,42,0.2)'
                 }
               }}
               TabIndicatorProps={{ style: { display: 'none' } }}
@@ -316,7 +334,7 @@ export default function DailyRevenueNvlNvclTab({
         )}
 
         {/* Action Controls */}
-        <Box display="flex" alignItems="center" gap={1.5} flexWrap="wrap">
+        <Box display="flex" alignItems="center" gap={{ xs: 0.8, md: 1 }} flexShrink={0} sx={{ order: { xs: 2, lg: 3 } }}>
           {/* Financial Year Selector */}
           <FormControl size="small">
             <Select
@@ -327,11 +345,13 @@ export default function DailyRevenueNvlNvclTab({
                 borderRadius: '8px',
                 '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' },
                 fontWeight: 700,
-                minWidth: 130
+                minWidth: { xs: 90, md: 105 },
+                fontSize: '0.8rem',
+                py: 0
               }}
             >
               {FY_OPTIONS.map(fy => (
-                <MenuItem key={fy} value={fy} sx={{ fontWeight: 600 }}>{fy}</MenuItem>
+                <MenuItem key={fy} value={fy} sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{fy}</MenuItem>
               ))}
             </Select>
           </FormControl>
@@ -349,11 +369,13 @@ export default function DailyRevenueNvlNvclTab({
                 borderRadius: '8px',
                 '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' },
                 fontWeight: 700,
-                minWidth: 130
+                minWidth: { xs: 90, md: 105 },
+                fontSize: '0.8rem',
+                py: 0
               }}
             >
               {MONTH_NAMES.map(m => (
-                <MenuItem key={m} value={m} sx={{ fontWeight: 600 }}>{m}</MenuItem>
+                <MenuItem key={m} value={m} sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{m}</MenuItem>
               ))}
             </Select>
           </FormControl>
@@ -368,15 +390,17 @@ export default function DailyRevenueNvlNvclTab({
                 borderRadius: '8px',
                 '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' },
                 fontWeight: 700,
-                minWidth: 140
+                minWidth: { xs: 95, md: 110 },
+                fontSize: '0.8rem',
+                py: 0
               }}
             >
-              <MenuItem value="ALL" sx={{ fontWeight: 700 }}>Full Month</MenuItem>
+              <MenuItem value="ALL" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Full Month</MenuItem>
               {availableDates.map(d => {
                 const parts = d.split('-');
                 const display = `${parts[2]}-${parts[1]}-${parts[0]}`;
                 return (
-                  <MenuItem key={d} value={d} sx={{ fontWeight: 600 }}>
+                  <MenuItem key={d} value={d} sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
                     {display}
                   </MenuItem>
                 );
