@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Paper, IconButton, CircularProgress,
-  FormControl, Select, MenuItem, Button, Tooltip, Tabs, Tab
+  FormControl, Select, MenuItem, Button, Tooltip, Tabs, Tab,
+  Popover, Grid
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { io } from 'socket.io-client';
@@ -45,9 +48,13 @@ export default function DailyRevenueNvlNvclTab({
   const [reportDays, setReportDays] = useState([]);
   const [monthTotal, setMonthTotal] = useState(null);
   const [selectedDateDisplay, setSelectedDateDisplay] = useState('September 2026');
+  const [calendarAnchorEl, setCalendarAnchorEl] = useState(null);
 
-  // Compute available dates in the selected month & FY
-  const availableDates = useMemo(() => {
+  const handleOpenCalendar = (e) => setCalendarAnchorEl(e.currentTarget);
+  const handleCloseCalendar = () => setCalendarAnchorEl(null);
+
+  // Compute calendar year for selected FY and Month
+  const displayYear = useMemo(() => {
     let startYear = 2026;
     const parts = String(financialYear).replace(/^FY\s*/i, '').split('-');
     if (parts.length > 0) {
@@ -55,25 +62,33 @@ export default function DailyRevenueNvlNvclTab({
       if (sy < 100) sy += 2000;
       if (!isNaN(sy)) startYear = sy;
     }
+    const mIdx = MONTH_NAMES.indexOf(month);
+    return mIdx >= 9 ? startYear + 1 : startYear;
+  }, [financialYear, month]);
 
-    const mIdx = [
+  // Compute available dates dynamically for the selected month & year (handles leap years e.g. Feb 28/29)
+  const dateOptions = useMemo(() => {
+    const jsMonthNames = [
       'January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December'
-    ].indexOf(month);
+    ];
+    const jsMonthIdx = jsMonthNames.indexOf(month);
+    if (jsMonthIdx === -1) return [];
 
-    if (mIdx === -1) return [];
-
-    const yr = mIdx < 3 ? startYear + 1 : startYear;
-    const daysInMonth = new Date(yr, mIdx + 1, 0).getDate();
-
-    const dates = [];
+    const daysInMonth = new Date(displayYear, jsMonthIdx + 1, 0).getDate();
+    const list = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const dStr = String(d).padStart(2, '0');
-      const mStr = String(mIdx + 1).padStart(2, '0');
-      dates.push(`${yr}-${mStr}-${dStr}`);
+      const mStr = String(jsMonthIdx + 1).padStart(2, '0');
+      list.push({
+        day: d,
+        display: `${dStr}-${mStr}-${displayYear}`,
+        value: `${dStr}-${mStr}-${displayYear}`,
+        isoDate: `${displayYear}-${mStr}-${dStr}`
+      });
     }
-    return dates;
-  }, [financialYear, month]);
+    return list;
+  }, [displayYear, month]);
 
   // Fetch report data from backend
   const fetchRevenueReport = useCallback(async () => {
@@ -169,8 +184,8 @@ export default function DailyRevenueNvlNvclTab({
         ]);
       });
 
-      // Add Month Total at the bottom
-      if (monthTotal) {
+      // Add Month Total at the bottom (only in Full Month mode)
+      if (date === 'ALL' && monthTotal) {
         wsData.push(['', '', '', '', '', '', '', '', '', '']); // Spacer row
         wsData.push([
           'MONTH TOTAL',
@@ -227,7 +242,10 @@ export default function DailyRevenueNvlNvclTab({
 
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Daily Revenue');
-      XLSX.writeFile(wb, `Daily_Revenue_NVL_NVCL_${month}_${financialYear.replace(/\s+/g, '_')}.xlsx`);
+      const exportFileName = date === 'ALL'
+        ? `Daily_Revenue_NVL_NVCL_${month}_${financialYear.replace(/\s+/g, '_')}_Full_Month.xlsx`
+        : `Daily_Revenue_NVL_NVCL_${selectedDateDisplay}.xlsx`;
+      XLSX.writeFile(wb, exportFileName);
     } catch (err) {
       console.error('Excel export error:', err);
     }
@@ -352,7 +370,10 @@ export default function DailyRevenueNvlNvclTab({
           <FormControl size="small">
             <Select
               value={financialYear}
-              onChange={(e) => setFinancialYear(e.target.value)}
+              onChange={(e) => {
+                setFinancialYear(e.target.value);
+                setDate('ALL');
+              }}
               sx={{
                 bgcolor: 'background.default',
                 borderRadius: '8px',
@@ -393,33 +414,164 @@ export default function DailyRevenueNvlNvclTab({
             </Select>
           </FormControl>
 
-          {/* Specific Date Selector */}
-          <FormControl size="small">
-            <Select
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
+          {/* Calendar-Style Date Selector Button */}
+          <Button
+            onClick={handleOpenCalendar}
+            variant="outlined"
+            startIcon={<CalendarTodayIcon sx={{ fontSize: '0.95rem !important', color: '#64748b' }} />}
+            endIcon={<KeyboardArrowDownIcon sx={{ fontSize: '1.1rem !important', transition: 'transform 0.2s', transform: calendarAnchorEl ? 'rotate(180deg)' : 'none', color: '#64748b' }} />}
+            sx={{
+              bgcolor: 'background.default',
+              borderRadius: '8px',
+              borderColor: '#e2e8f0',
+              color: '#0f172a',
+              fontWeight: 700,
+              minWidth: { xs: 110, md: 125 },
+              fontSize: '0.8rem',
+              textTransform: 'none',
+              px: 1.4,
+              py: 0.6,
+              boxShadow: 'none',
+              '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' }
+            }}
+          >
+            {date === 'ALL' ? 'Full Month' : date}
+          </Button>
+
+          {/* Calendar Popover */}
+          <Popover
+            open={Boolean(calendarAnchorEl)}
+            anchorEl={calendarAnchorEl}
+            onClose={handleCloseCalendar}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            PaperProps={{
+              sx: {
+                mt: 1,
+                p: 2.5,
+                borderRadius: '16px',
+                boxShadow: '0 10px 40px rgba(0,0,0,0.12)',
+                border: '1px solid #e2e8f0',
+                width: '320px',
+                bgcolor: '#ffffff'
+              }
+            }}
+          >
+            {/* Header: Month & Year Title */}
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography
+                variant="subtitle1"
+                fontWeight={900}
+                color="#0f172a"
+                sx={{
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                  fontSize: '0.95rem',
+                  fontFamily: '"Calibri", "Segoe UI", Arial, sans-serif'
+                }}
+              >
+                {month.toUpperCase()} {displayYear}
+              </Typography>
+            </Box>
+
+            {/* ALL (Full Month) Button */}
+            <Button
+              fullWidth
+              variant={date === 'ALL' ? 'contained' : 'outlined'}
+              onClick={() => {
+                setDate('ALL');
+                handleCloseCalendar();
+              }}
               sx={{
-                bgcolor: 'background.default',
+                bgcolor: date === 'ALL' ? '#0f172a' : 'transparent',
+                color: date === 'ALL' ? '#ffffff' : '#0f172a',
+                borderColor: '#0f172a',
+                fontWeight: 800,
                 borderRadius: '8px',
-                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' },
-                fontWeight: 700,
-                minWidth: { xs: 95, md: 110 },
-                fontSize: '0.8rem',
-                py: 0
+                mb: 2.2,
+                py: 1.1,
+                fontSize: '0.88rem',
+                textTransform: 'none',
+                boxShadow: date === 'ALL' ? '0 4px 12px rgba(15,23,42,0.15)' : 'none',
+                '&:hover': {
+                  bgcolor: date === 'ALL' ? '#1e293b' : '#f8fafc',
+                  borderColor: '#0f172a'
+                }
               }}
             >
-              <MenuItem value="ALL" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Full Month</MenuItem>
-              {availableDates.map(d => {
-                const parts = d.split('-');
-                const display = `${parts[2]}-${parts[1]}-${parts[0]}`;
+              ALL (Full Month)
+            </Button>
+
+            {/* 7-column Calendar Grid */}
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                gap: 0.8,
+                userSelect: 'none'
+              }}
+            >
+              {dateOptions.map(d => {
+                const isSelected = date !== 'ALL' && (date === d.display || date === d.value || date === String(d.day));
+                const now = new Date();
+                const isToday =
+                  now.getFullYear() === displayYear &&
+                  now.getMonth() === [
+                    'January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'
+                  ].indexOf(month) &&
+                  now.getDate() === d.day;
+
                 return (
-                  <MenuItem key={d} value={d} sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
-                    {display}
-                  </MenuItem>
+                  <Box
+                    key={d.value}
+                    onClick={() => {
+                      setDate(d.display);
+                      handleCloseCalendar();
+                    }}
+                    sx={{
+                      cursor: 'pointer',
+                      bgcolor: isSelected ? '#3b82f6' : 'transparent',
+                      color: isSelected ? '#ffffff' : '#1e293b',
+                      borderRadius: '8px',
+                      py: 0.9,
+                      textAlign: 'center',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      '&:hover': {
+                        bgcolor: isSelected ? '#2563eb' : '#f1f5f9'
+                      }
+                    }}
+                  >
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontWeight: isSelected ? 800 : 600,
+                        fontSize: '0.9rem',
+                        lineHeight: 1.2
+                      }}
+                    >
+                      {d.day}
+                    </Typography>
+                    {isToday && (
+                      <Box
+                        sx={{
+                          width: 4,
+                          height: 4,
+                          bgcolor: isSelected ? '#ffffff' : '#3b82f6',
+                          borderRadius: '50%',
+                          mt: 0.5
+                        }}
+                      />
+                    )}
+                  </Box>
                 );
               })}
-            </Select>
-          </FormControl>
+            </Box>
+          </Popover>
 
           {/* Refresh Button */}
           <Tooltip title="Refresh Data">
@@ -743,8 +895,8 @@ export default function DailyRevenueNvlNvclTab({
                     </React.Fragment>
                   ))}
 
-                  {/* ── Month Total Section at the bottom ── */}
-                  {monthTotal && (
+                  {/* ── Month Total Section at the bottom (Full Month mode only) ── */}
+                  {date === 'ALL' && monthTotal && (
                     <>
                       <tr>
                         <td colSpan={10} style={{ backgroundColor: '#0f172a', height: '4px', padding: 0, border: 'none' }} />

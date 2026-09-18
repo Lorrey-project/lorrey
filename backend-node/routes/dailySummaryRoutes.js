@@ -621,10 +621,34 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       });
     });
 
-    // Format selected date display
+    // Format selected date display and handle single date vs full month mode
+    let returnedDays = days;
     let selectedDateDisplay = `${targetMonthName} ${targetYear}`;
+
     if (date && date !== "ALL") {
-      selectedDateDisplay = date;
+      let targetDay = null;
+      const parsed = parseDate(date);
+      if (parsed) {
+        targetDay = parsed.getDate();
+      } else {
+        const dNum = parseInt(date, 10);
+        if (!isNaN(dNum)) targetDay = dNum;
+      }
+
+      if (targetDay !== null) {
+        returnedDays = days.filter(d => d.day === targetDay);
+        if (returnedDays.length > 0) {
+          selectedDateDisplay = returnedDays[0].date;
+        } else {
+          selectedDateDisplay = date;
+        }
+      } else {
+        selectedDateDisplay = date;
+      }
+    } else {
+      const lastDayStr = String(daysInMonth).padStart(2, "0");
+      const mStr = String(mNum).padStart(2, "0");
+      selectedDateDisplay = `${lastDayStr}-${mStr}-${targetYear}`;
     }
 
     return res.json({
@@ -634,9 +658,10 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       year: targetYear,
       daysCount: daysInMonth,
       selectedDate: selectedDateDisplay,
-      days,
+      days: returnedDays,
+      allDays: days,
       monthTotal,
-      data: monthTotal
+      data: returnedDays.length === 1 ? returnedDays[0] : monthTotal
     });
 
   } catch (err) {
