@@ -2477,6 +2477,8 @@ function DailySummaryTab({
           setFinancialYear={setFinancialYear}
           month={month}
           setMonth={setMonth}
+          date={date}
+          setDate={setDate}
           fyOptions={fyOptions}
           monthOptions={monthOptions}
           isModal={true}
@@ -2800,6 +2802,7 @@ export default function DailySummaryReport(props) {
   const initialSelection = useMemo(() => getCurrentFYAndMonth(), []);
   const [financialYear, setFinancialYear] = useState(initialSelection.fy);
   const [month, setMonth] = useState(initialSelection.month);
+  const [date, setDate] = useState('ALL');
 
   if (mainTab === 0) {
     return (
@@ -2811,6 +2814,8 @@ export default function DailySummaryReport(props) {
         setFinancialYear={setFinancialYear}
         month={month}
         setMonth={setMonth}
+        date={date}
+        setDate={setDate}
       />
     );
   } else if (mainTab === 1) {
@@ -2825,6 +2830,8 @@ export default function DailySummaryReport(props) {
         setFinancialYear={setFinancialYear}
         month={month}
         setMonth={setMonth}
+        date={date}
+        setDate={setDate}
         fyOptions={fyOptions}
         monthOptions={monthOptions}
       />
@@ -2839,6 +2846,8 @@ export default function DailySummaryReport(props) {
         setFinancialYear={setFinancialYear}
         month={month}
         setMonth={setMonth}
+        date={date}
+        setDate={setDate}
       />
     );
   }

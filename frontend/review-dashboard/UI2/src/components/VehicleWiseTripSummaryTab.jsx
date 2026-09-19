@@ -3,7 +3,7 @@ import {
   Box, Typography, Button, IconButton, Grid, Card, CircularProgress,
   Tabs, Tab, Select, MenuItem, FormControl, TableContainer, Table, TableHead,
   TableRow, TableCell, TableBody, Paper, TextField, Tooltip, Chip, Dialog,
-  DialogTitle, DialogContent, DialogActions, Divider
+  DialogTitle, DialogContent, DialogActions, Divider, Popover
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -13,6 +13,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import TableChartIcon from '@mui/icons-material/TableChart';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
@@ -52,47 +54,13 @@ export const getDaysCountInMonth = (year, monthName) => {
   return new Date(year, mIdx + 1, 0).getDate();
 };
 
-// Parse a record's loading date and check if it matches the selected year and month
-// Returns day number (1-31) or null
-export const extractDayNumber = (dStr, targetYear, targetMonthIndex) => {
-  if (!dStr) return null;
-  const s = String(dStr).trim();
-  if (!s || s === '-' || s.toLowerCase() === 'null') return null;
-
-  let d = null;
-  let m = null;
-  let y = null;
-
-  // Pattern: DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
-  const parts = s.split(/[\/\-\.]/);
-  if (parts.length === 3) {
-    if (parts[0].length === 4) {
-      // YYYY-MM-DD
-      y = parseInt(parts[0], 10);
-      m = parseInt(parts[1], 10);
-      d = parseInt(parts[2], 10);
-    } else {
-      // DD-MM-YYYY
-      d = parseInt(parts[0], 10);
-      m = parseInt(parts[1], 10);
-      y = parseInt(parts[2], 10);
-      if (y < 100) y += 2000;
-    }
-  }
-
-  if (d && m && y) {
-    if (y === targetYear && m === targetMonthIndex + 1) {
-      return d;
-    }
-  }
-  return null;
-};
-
 export default function VehicleWiseTripSummaryTab({
   financialYear,
   setFinancialYear,
   month,
   setMonth,
+  date: propDate,
+  setDate: propSetDate,
   fyOptions = [],
   monthOptions = [],
   mainTab,
@@ -101,22 +69,56 @@ export default function VehicleWiseTripSummaryTab({
   isModal = false,
   onCloseModal = null
 }) {
+  const [internalDate, setInternalDate] = useState('ALL');
+  const date = propDate !== undefined ? propDate : internalDate;
+  const setDate = propSetDate || setInternalDate;
+
   const [loading, setLoading] = useState(false);
-  const [cementEntries, setCementEntries] = useState([]);
-  const [truckContacts, setTruckContacts] = useState([]);
+  const [serverData, setServerData] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [patternFilter, setPatternFilter] = useState('ALL');
   const [dedicatedFilter, setDedicatedFilter] = useState('ALL');
   const [viewMode, setViewMode] = useState('COMBINED'); // 'COMBINED' | 'SPREADSHEET' | 'REFERENCE_STRIP'
   const [selectedDayTripDetail, setSelectedDayTripDetail] = useState(null); // { vehNo, day, trips }
+  const [selectedVehicleModal, setSelectedVehicleModal] = useState(null); // Full trip inspection for vehicle
+
+  // Calendar popover anchor
+  const [calendarAnchorEl, setCalendarAnchorEl] = useState(null);
+  const handleOpenCalendar = (e) => setCalendarAnchorEl(e.currentTarget);
+  const handleCloseCalendar = () => setCalendarAnchorEl(null);
 
   // Calendar year and day array for selected month
   const calendarYear = useMemo(() => getCalendarYear(financialYear, month), [financialYear, month]);
   const monthIndex = useMemo(() => MONTH_NAMES.indexOf(month), [month]);
   const totalDays = useMemo(() => getDaysCountInMonth(calendarYear, month), [calendarYear, month]);
 
-  // Array of day strings: ['01', '02', ..., totalDays]
-  const daysArray = useMemo(() => {
+  // Calendar display year for popover
+  const displayYear = useMemo(() => {
+    const startYear = parseInt(String(financialYear).substring(3, 7), 10) || new Date().getFullYear();
+    const mIdx = MONTH_NAMES.indexOf(month);
+    return mIdx < 3 ? startYear + 1 : startYear;
+  }, [financialYear, month]);
+
+  // Available dates for the popover calendar grid
+  const dateOptions = useMemo(() => {
+    const mIdx = MONTH_NAMES.indexOf(month);
+    if (mIdx === -1) return [];
+    const daysInMonth = new Date(displayYear, mIdx + 1, 0).getDate();
+    const list = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dStr = String(d).padStart(2, '0');
+      const mStr = String(mIdx + 1).padStart(2, '0');
+      list.push({
+        day: d,
+        display: `${dStr}-${mStr}-${displayYear}`,
+        value: `${dStr}-${mStr}-${displayYear}`
+      });
+    }
+    return list;
+  }, [displayYear, month]);
+
+  // Default day strings array: ['01', '02', ..., totalDays]
+  const defaultDaysArray = useMemo(() => {
     const arr = [];
     for (let i = 1; i <= totalDays; i++) {
       arr.push(String(i).padStart(2, '0'));
@@ -124,43 +126,40 @@ export default function VehicleWiseTripSummaryTab({
     return arr;
   }, [totalDays]);
 
-  // Fetch complete Cement Register data for selected month + truck contacts
+  const daysArray = useMemo(() => {
+    return serverData?.daysArray || defaultDaysArray;
+  }, [serverData, defaultDaysArray]);
+
+  // Fetch complete Cement Register data directly from dedicated single-source-of-truth backend route
   const fetchReportData = useCallback(async () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      const [dailyRes, contactsRes] = await Promise.all([
-        axios.get(`${API_URL}/daily-summary/data`, {
-          params: { date: 'ALL', fy: financialYear, month },
-          headers
-        }).catch(err => ({ data: { success: false, error: err.message } })),
-        axios.get(`${API_URL}/truck-contacts`, { headers })
-          .catch(() => ({ data: { success: false, contacts: [] } }))
-      ]);
+      const res = await axios.get(`${API_URL}/daily-summary/vehicle-trip-summary`, {
+        params: { date, fy: financialYear, month },
+        headers
+      });
 
-      if (dailyRes.data?.success && Array.isArray(dailyRes.data.cement)) {
-        setCementEntries(dailyRes.data.cement);
+      if (res.data?.success) {
+        setServerData(res.data);
       } else {
-        setCementEntries([]);
-      }
-
-      if (contactsRes.data?.contacts && Array.isArray(contactsRes.data.contacts)) {
-        setTruckContacts(contactsRes.data.contacts);
+        setServerData(null);
       }
     } catch (err) {
       console.error('[VehicleWiseTripSummaryTab] Fetch error:', err);
+      setServerData(null);
     } finally {
       setLoading(false);
     }
-  }, [financialYear, month]);
+  }, [date, financialYear, month]);
 
   useEffect(() => {
     fetchReportData();
   }, [fetchReportData]);
 
-  // Real-time synchronization
+  // Real-time synchronization on Cement Register and Cashbook updates
   useEffect(() => {
     const handler = () => fetchReportData();
     socket.on('cementUpdates', handler);
@@ -171,202 +170,14 @@ export default function VehicleWiseTripSummaryTab({
     };
   }, [fetchReportData]);
 
-  // Map of truck contact details for fallback lookups
-  const truckContactMap = useMemo(() => {
-    const map = {};
-    truckContacts.forEach(c => {
-      const rawNo = c['Truck No '] || c['Truck No'] || c.truck_no || '';
-      const key = String(rawNo).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      if (key) {
-        map[key] = {
-          vehType: (c['Type of vehicle '] || c['Type of vehicle'] || c.veh_type || '').trim(),
-          custType: (c['TYPE OF CUSTOMER '] || c.cust_type || '').trim(),
-          owner: (c['Owner Name '] || c['Owner Name'] || c.owner_name || '').trim()
-        };
-      }
-    });
-    return map;
-  }, [truckContacts]);
-
-  // Aggregate trip data per vehicle and day
-  const computedData = useMemo(() => {
-    if (!cementEntries || cementEntries.length === 0) {
-      return { vehicles: [], byPattern: {}, totals: { totalVehicles: 0, totalTrips: 0, totalMT: 0, dayTotals: {} } };
-    }
-
-    const vehMap = {};
-    const seenTripIds = new Set(); // De-duplication check: prevent double counting identical invoice records
-
-    cementEntries.forEach(row => {
-      const rawVeh = row['VEHICLE NUMBER'] || row['VEHICLE NO'] || row['VEHICLE NO.'] || '';
-      const vehClean = String(rawVeh).trim().toUpperCase();
-      if (!vehClean || vehClean === '-' || vehClean === 'UNKNOWN') return;
-
-      const normKey = vehClean.replace(/[^a-zA-Z0-9]/g, '');
-
-      // Exclude pure adjustment / diesel deduction rows that have no MT, no invoice, and 0 billing amount
-      const mtVal = parseNum(row['MT']);
-      const billAmt = parseNum(row['Billing Amount'] || row['BILLING AMOUNT'] || row['AMOUNT']);
-      const invNo = String(row['INVOICE NO'] || row['INVOICE NO.'] || '').trim();
-      const loadDateRaw = row['LOADING DT'] || row['LOADING DATE'] || '';
-
-      if (mtVal === 0 && billAmt === 0 && !invNo) {
-        return;
-      }
-
-      // De-duplicate multiple identical invoice records
-      const tripId = invNo ? `${normKey}_${invNo}` : String(row._id || `${normKey}_${loadDateRaw}_${mtVal}`);
-      if (seenTripIds.has(tripId)) {
-        return; // Skip duplicate
-      }
-      seenTripIds.add(tripId);
-
-      const dayNum = extractDayNumber(loadDateRaw, calendarYear, monthIndex);
-
-      if (!vehMap[normKey]) {
-        // Look up master contact if available
-        const contact = truckContactMap[normKey] || {};
-
-        // Extract wheel from record or contact
-        let rawWheel = String(row['WHEEL'] || contact.vehType || '').trim().toUpperCase();
-        let wheelKey = 'OTHER';
-        if (rawWheel.includes('10')) wheelKey = '10W';
-        else if (rawWheel.includes('12')) wheelKey = '12W';
-        else if (rawWheel.includes('14')) wheelKey = '14W';
-        else if (rawWheel.includes('6')) wheelKey = '6W';
-
-        // Check Dedicated classification
-        const rawDedicated = String(row['DEDICATED'] || '').trim();
-        const billType = String(row['Bill Type'] || row['BILL TYPE'] || '').trim().toUpperCase();
-        const custType = String(contact.custType || '').toUpperCase();
-        const hasDedicatedAmt = rawDedicated && rawDedicated !== '-' && parseNum(rawDedicated) > 0;
-        const isDedicatedType = billType === 'NT' || custType === 'ATOA' || custType === 'ATO' || custType === 'DEDICATED';
-
-        vehMap[normKey] = {
-          vehicleNo: vehClean,
-          normKey,
-          wheel: rawWheel || wheelKey,
-          wheelPattern: wheelKey,
-          isDedicatedInitial: Boolean(hasDedicatedAmt || isDedicatedType),
-          contactOwner: contact.owner || row['OWNER NAME'] || '',
-          distinctMTs: new Set(),
-          dailyTrips: {},      // dayStr -> count
-          dailyTripDocs: {},   // dayStr -> array of records
-          totalTrips: 0,
-          totalMT: 0,
-          allTrips: []
-        };
-      }
-
-      const v = vehMap[normKey];
-      if (mtVal > 0) {
-        v.distinctMTs.add(mtVal);
-        v.totalMT += mtVal;
-      }
-      v.allTrips.push(row);
-
-      if (dayNum !== null && dayNum >= 1 && dayNum <= totalDays) {
-        const dayStr = String(dayNum).padStart(2, '0');
-        v.dailyTrips[dayStr] = (v.dailyTrips[dayStr] || 0) + 1;
-        if (!v.dailyTripDocs[dayStr]) v.dailyTripDocs[dayStr] = [];
-        v.dailyTripDocs[dayStr].push(row);
-        v.totalTrips += 1;
-      } else {
-        // Even if day couldn't be parsed into a calendar day of this month, count towards total if within month
-        v.totalTrips += 1;
-      }
-    });
-
-    // Format loading pattern and finalize dedicated classification (Raftar thresholds)
-    const vehicleList = Object.values(vehMap).map(v => {
-      // Formatted Loading Pattern: e.g. "18MT / 19MT", "25MT", "30MT"
-      const mtArray = Array.from(v.distinctMTs).sort((a, b) => a - b);
-      let loadingPatternStr = '';
-      if (mtArray.length > 0) {
-        loadingPatternStr = mtArray.map(m => `${m}MT`).join(' / ');
-      } else {
-        // Standard default pattern by wheel if MT was not explicit
-        if (v.wheelPattern === '10W') loadingPatternStr = '18MT / 19MT';
-        else if (v.wheelPattern === '12W') loadingPatternStr = '25MT';
-        else if (v.wheelPattern === '14W') loadingPatternStr = '30MT';
-        else if (v.wheelPattern === '6W') loadingPatternStr = '13MT';
-        else loadingPatternStr = '-';
-      }
-
-      // Raftar Dedicated Logic from operational rules:
-      // 10W: >= 8 trips = Raftar Qualified Dedicated (Both Side Toll)
-      // 12W / 14W: >= 6 trips = Raftar Qualified Dedicated (Both Side Toll)
-      const meetsRaftarThreshold = (v.wheelPattern === '10W' && v.totalTrips >= 8) ||
-        ((v.wheelPattern === '12W' || v.wheelPattern === '14W') && v.totalTrips >= 6);
-
-      const isDedicated = v.isDedicatedInitial || meetsRaftarThreshold;
-
-      return {
-        ...v,
-        totalMT: Math.round(v.totalMT * 100) / 100,
-        loadingPattern: loadingPatternStr,
-        isDedicated,
-        meetsRaftarThreshold,
-        classification: isDedicated ? 'DEDICATED (Both Side)' : 'SINGLE SIDE (Non-Dedicated)'
-      };
-    });
-
-    // Sort vehicles stably: By wheel pattern order, then alphabetical vehicle number
-    const patternSortOrder = { '10W': 1, '12W': 2, '14W': 3, '6W': 4, 'OTHER': 5 };
-    vehicleList.sort((a, b) => {
-      const pA = patternSortOrder[a.wheelPattern] || 99;
-      const pB = patternSortOrder[b.wheelPattern] || 99;
-      if (pA !== pB) return pA - pB;
-      return a.vehicleNo.localeCompare(b.vehicleNo);
-    });
-
-    // Group by pattern
-    const byPattern = {
-      '10W': [],
-      '12W': [],
-      '14W': [],
-      '6W': [],
-      'OTHER': []
-    };
-
-    vehicleList.forEach(v => {
-      if (byPattern[v.wheelPattern]) {
-        byPattern[v.wheelPattern].push(v);
-      } else {
-        byPattern['OTHER'].push(v);
-      }
-    });
-
-    // Calculate daily totals across all vehicles
-    const dayTotals = {};
-    daysArray.forEach(d => { dayTotals[d] = 0; });
-
-    let grandTotalTrips = 0;
-    let grandTotalMT = 0;
-
-    vehicleList.forEach(v => {
-      grandTotalTrips += v.totalTrips;
-      grandTotalMT += v.totalMT;
-      daysArray.forEach(d => {
-        dayTotals[d] += (v.dailyTrips[d] || 0);
-      });
-    });
-
-    return {
-      vehicles: vehicleList,
-      byPattern,
-      totals: {
-        totalVehicles: vehicleList.length,
-        totalTrips: grandTotalTrips,
-        totalMT: Math.round(grandTotalMT * 100) / 100,
-        dayTotals
-      }
-    };
-  }, [cementEntries, truckContactMap, calendarYear, monthIndex, totalDays, daysArray]);
+  // Vehicles list from server
+  const rawVehicles = useMemo(() => {
+    return serverData?.vehicles || [];
+  }, [serverData]);
 
   // Filtered vehicles based on search & chips
   const filteredVehicles = useMemo(() => {
-    let list = computedData.vehicles;
+    let list = rawVehicles;
 
     if (patternFilter !== 'ALL') {
       list = list.filter(v => v.wheelPattern === patternFilter);
@@ -382,13 +193,13 @@ export default function VehicleWiseTripSummaryTab({
       const q = searchTerm.toLowerCase().trim();
       list = list.filter(v =>
         v.vehicleNo.toLowerCase().includes(q) ||
-        v.contactOwner.toLowerCase().includes(q) ||
-        v.loadingPattern.toLowerCase().includes(q)
+        (v.contactOwner && v.contactOwner.toLowerCase().includes(q)) ||
+        (v.loadingPattern && v.loadingPattern.toLowerCase().includes(q))
       );
     }
 
     return list;
-  }, [computedData.vehicles, patternFilter, dedicatedFilter, searchTerm]);
+  }, [rawVehicles, patternFilter, dedicatedFilter, searchTerm]);
 
   // Regroup filtered vehicles by pattern
   const filteredByPattern = useMemo(() => {
@@ -399,6 +210,33 @@ export default function VehicleWiseTripSummaryTab({
     });
     return groups;
   }, [filteredVehicles]);
+
+  // Totals computed over the active filtered vehicle set
+  const computedTotals = useMemo(() => {
+    const dayTotals = {};
+    daysArray.forEach(d => { dayTotals[d] = 0; });
+
+    let grandTotalTrips = 0;
+    let grandTotalMT = 0;
+    let grandTotalAdvance = 0;
+
+    filteredVehicles.forEach(v => {
+      grandTotalTrips += v.totalTrips;
+      grandTotalMT += v.totalMT;
+      grandTotalAdvance += (v.totalAdvance || 0);
+      daysArray.forEach(d => {
+        dayTotals[d] += (v.dailyTrips?.[d] || 0);
+      });
+    });
+
+    return {
+      totalVehicles: filteredVehicles.length,
+      totalTrips: grandTotalTrips,
+      totalMT: Math.round(grandTotalMT * 100) / 100,
+      totalAdvance: Math.round(grandTotalAdvance * 100) / 100,
+      dayTotals
+    };
+  }, [filteredVehicles, daysArray]);
 
   // Pattern configuration with exact reference headers
   const patternConfigs = [
@@ -449,102 +287,119 @@ export default function VehicleWiseTripSummaryTab({
     }
   ];
 
-  // Excel Export: Full Month-Wise, Day-Wise Operational Register
+  // Excel Export: Full Month-Wise or Day-Wise Operational Register
   const handleExportExcel = () => {
     try {
       const wb = XLSX.utils.book_new();
-
-      // Header row structure
       const rows = [];
 
-      // Row 1: Main Title Banner
-      rows.push([`MONTH OF ${month.substring(0, 3)}'${String(calendarYear).slice(-2)} VEHICLE- NO OF TRIPS`]);
-      rows.push([`Financial Year: ${financialYear} | Selected Month: ${month} ${calendarYear} | Total Days: ${totalDays} | Total Vehicles: ${computedData.totals.totalVehicles} | Total Trips: ${computedData.totals.totalTrips}`]);
-      rows.push([]); // Empty spacing line
+      if (date === 'ALL') {
+        // Main Title Banner
+        rows.push([`MONTH OF ${month.substring(0, 3)}'${String(calendarYear).slice(-2)} VEHICLE- NO OF TRIPS`]);
+        rows.push([`Financial Year: ${financialYear} | Selected Month: ${month} ${calendarYear} | Total Days: ${totalDays} | Total Vehicles: ${computedTotals.totalVehicles} | Total Trips: ${computedTotals.totalTrips} | Total MT: ${computedTotals.totalMT}`]);
+        rows.push([]);
 
-      // Build table headers
-      const tableHeaders = ['SL NO', 'WHEEL', 'VEHICLE NUMBER', 'LOADING PATTERN', 'CLASSIFICATION'];
-      daysArray.forEach(d => {
-        tableHeaders.push(`${d}-${String(monthIndex + 1).padStart(2, '0')}`);
-      });
-      tableHeaders.push('TOTAL TRIPS', 'TOTAL MT');
+        // Build table headers
+        const tableHeaders = ['SL NO', 'WHEEL', 'VEHICLE NUMBER', 'LOADING PATTERN', 'CLASSIFICATION'];
+        daysArray.forEach(d => {
+          tableHeaders.push(`${d}-${String(monthIndex + 1).padStart(2, '0')}`);
+        });
+        tableHeaders.push('TOTAL TRIPS', 'TOTAL MT', 'TOTAL ADVANCE (₹)');
+        rows.push(tableHeaders);
 
-      rows.push(tableHeaders);
+        // Add vehicles grouped by pattern
+        patternConfigs.forEach(cfg => {
+          const pVehicles = filteredByPattern[cfg.key] || [];
+          if (pVehicles.length === 0) return;
 
-      // Add vehicles grouped by pattern
-      patternConfigs.forEach(cfg => {
-        const pVehicles = filteredByPattern[cfg.key] || [];
-        if (pVehicles.length === 0) return;
+          rows.push([`--- ${cfg.title} --- ${cfg.ruleHeader}`]);
 
-        // Pattern Rule Header Banner in Excel
-        rows.push([`--- ${cfg.title} --- ${cfg.ruleHeader}`]);
+          pVehicles.forEach((v, idx) => {
+            const rowData = [
+              idx + 1,
+              v.wheel || cfg.key,
+              v.vehicleNo,
+              v.loadingPattern,
+              v.classification
+            ];
 
-        pVehicles.forEach((v, idx) => {
-          const rowData = [
-            idx + 1,
-            v.wheel || cfg.key,
-            v.vehicleNo,
-            v.loadingPattern,
-            v.classification
-          ];
+            daysArray.forEach(d => {
+              rowData.push(v.dailyTrips?.[d] || 0);
+            });
 
-          // Daily counts
-          daysArray.forEach(d => {
-            rowData.push(v.dailyTrips[d] || 0);
+            rowData.push(v.totalTrips);
+            rowData.push(v.totalMT);
+            rowData.push(v.totalAdvance || 0);
+            rows.push(rowData);
           });
 
-          rowData.push(v.totalTrips);
-          rowData.push(v.totalMT);
-          rows.push(rowData);
+          // Subtotal row
+          const subtotalRow = ['', `${cfg.key} TOTAL`, `${pVehicles.length} Vehicles`, '', ''];
+          let pTotalTrips = 0;
+          let pTotalMT = 0;
+          let pTotalAdv = 0;
+
+          daysArray.forEach(d => {
+            const daySum = pVehicles.reduce((acc, v) => acc + (v.dailyTrips?.[d] || 0), 0);
+            subtotalRow.push(daySum);
+          });
+
+          pTotalTrips = pVehicles.reduce((acc, v) => acc + v.totalTrips, 0);
+          pTotalMT = pVehicles.reduce((acc, v) => acc + v.totalMT, 0);
+          pTotalAdv = pVehicles.reduce((acc, v) => acc + (v.totalAdvance || 0), 0);
+
+          subtotalRow.push(pTotalTrips);
+          subtotalRow.push(Math.round(pTotalMT * 100) / 100);
+          subtotalRow.push(Math.round(pTotalAdv * 100) / 100);
+          rows.push(subtotalRow);
+          rows.push([]);
         });
 
-        // Pattern subtotal row
-        const subtotalRow = ['', `${cfg.key} TOTAL`, `${pVehicles.length} Vehicles`, '', ''];
-        let pTotalTrips = 0;
-        let pTotalMT = 0;
-
+        // Grand Total Row
+        const grandRow = ['', 'GRAND TOTAL', `${filteredVehicles.length} Vehicles`, '', ''];
         daysArray.forEach(d => {
-          const daySum = pVehicles.reduce((acc, v) => acc + (v.dailyTrips[d] || 0), 0);
-          subtotalRow.push(daySum);
+          const dSum = filteredVehicles.reduce((acc, v) => acc + (v.dailyTrips?.[d] || 0), 0);
+          grandRow.push(dSum);
+        });
+        grandRow.push(computedTotals.totalTrips);
+        grandRow.push(computedTotals.totalMT);
+        grandRow.push(computedTotals.totalAdvance);
+        rows.push(grandRow);
+
+      } else {
+        // Single Date Mode
+        rows.push([`DAILY VEHICLE TRIP SUMMARY - DATE: ${date}`]);
+        rows.push([`Financial Year: ${financialYear} | Month: ${month} | Total Vehicles: ${computedTotals.totalVehicles} | Total Trips: ${computedTotals.totalTrips} | Total MT: ${computedTotals.totalMT}`]);
+        rows.push([]);
+
+        const headers = ['SL NO', 'VEHICLE NUMBER', 'WHEEL', 'LOADING PATTERN', 'CLASSIFICATION', 'TRIPS ON DATE', 'TOTAL MT', 'ADVANCE (₹)', 'OWNER'];
+        rows.push(headers);
+
+        filteredVehicles.forEach((v, idx) => {
+          rows.push([
+            idx + 1,
+            v.vehicleNo,
+            v.wheel || v.wheelPattern,
+            v.loadingPattern,
+            v.classification,
+            v.totalTrips,
+            v.totalMT,
+            v.totalAdvance || 0,
+            v.contactOwner || '-'
+          ]);
         });
 
-        pTotalTrips = pVehicles.reduce((acc, v) => acc + v.totalTrips, 0);
-        pTotalMT = pVehicles.reduce((acc, v) => acc + v.totalMT, 0);
-
-        subtotalRow.push(pTotalTrips);
-        subtotalRow.push(Math.round(pTotalMT * 100) / 100);
-        rows.push(subtotalRow);
-        rows.push([]); // spacing row
-      });
-
-      // Grand Total Row
-      const grandRow = ['', 'GRAND TOTAL', `${filteredVehicles.length} Vehicles`, '', ''];
-      daysArray.forEach(d => {
-        const dSum = filteredVehicles.reduce((acc, v) => acc + (v.dailyTrips[d] || 0), 0);
-        grandRow.push(dSum);
-      });
-      const grandTrips = filteredVehicles.reduce((acc, v) => acc + v.totalTrips, 0);
-      const grandMT = filteredVehicles.reduce((acc, v) => acc + v.totalMT, 0);
-      grandRow.push(grandTrips);
-      grandRow.push(Math.round(grandMT * 100) / 100);
-      rows.push(grandRow);
+        rows.push([]);
+        rows.push(['', 'TOTAL', '', '', '', computedTotals.totalTrips, computedTotals.totalMT, computedTotals.totalAdvance, '']);
+      }
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
-
-      // Set nice column widths
-      ws['!cols'] = [
-        { wch: 7 },   // SL
-        { wch: 10 },  // Wheel
-        { wch: 16 },  // Vehicle No
-        { wch: 16 },  // Loading Pattern
-        { wch: 25 },  // Classification
-        ...daysArray.map(() => ({ wch: 6 })), // Day columns
-        { wch: 12 },  // Total Trips
-        { wch: 12 }   // Total MT
-      ];
+      const filename = date === 'ALL'
+        ? `Vehicle_Wise_Trip_Summary_${financialYear.replace(/\s+/g, '_')}_${month}_Full_Month.xlsx`
+        : `Vehicle_Wise_Trip_Summary_${date}.xlsx`;
 
       XLSX.utils.book_append_sheet(wb, ws, 'Trip Summary');
-      XLSX.writeFile(wb, `Vehicle_Wise_Trip_Summary_${financialYear}_${month}_${calendarYear}.xlsx`);
+      XLSX.writeFile(wb, filename);
     } catch (err) {
       console.error('[VehicleWiseTripSummaryTab] Excel Export Error:', err);
     }
@@ -584,7 +439,7 @@ export default function VehicleWiseTripSummaryTab({
               Vehicle-Wise Trip Summary
             </Typography>
             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, display: { xs: 'none', '2xl': 'block' }, lineHeight: 1 }}>
-              Month-Wise & Day-Wise Pattern Register • {month} {calendarYear}
+              Cement Register Live Data • {date === 'ALL' ? `${month} ${calendarYear}` : date}
             </Typography>
           </Box>
         </Box>
@@ -645,7 +500,10 @@ export default function VehicleWiseTripSummaryTab({
           <FormControl size="small">
             <Select
               value={financialYear}
-              onChange={(e) => setFinancialYear(e.target.value)}
+              onChange={(e) => {
+                setFinancialYear(e.target.value);
+                setDate('ALL');
+              }}
               sx={{
                 bgcolor: 'background.default',
                 borderRadius: '8px',
@@ -663,7 +521,10 @@ export default function VehicleWiseTripSummaryTab({
           <FormControl size="small">
             <Select
               value={month}
-              onChange={(e) => setMonth(e.target.value)}
+              onChange={(e) => {
+                setMonth(e.target.value);
+                setDate('ALL');
+              }}
               sx={{
                 bgcolor: 'background.default',
                 borderRadius: '8px',
@@ -678,7 +539,142 @@ export default function VehicleWiseTripSummaryTab({
             </Select>
           </FormControl>
 
-          <Tooltip title="Refresh Trip Data">
+          {/* Calendar-Style Date Selector Button */}
+          <Button
+            onClick={handleOpenCalendar}
+            variant="outlined"
+            startIcon={<CalendarTodayIcon sx={{ fontSize: '0.95rem !important', color: '#64748b' }} />}
+            endIcon={<KeyboardArrowDownIcon sx={{ fontSize: '1.1rem !important', transition: 'transform 0.2s', transform: calendarAnchorEl ? 'rotate(180deg)' : 'none', color: '#64748b' }} />}
+            sx={{
+              bgcolor: 'background.default',
+              borderRadius: '8px',
+              borderColor: '#e2e8f0',
+              color: '#0f172a',
+              fontWeight: 700,
+              minWidth: { xs: 110, md: 125 },
+              fontSize: '0.8rem',
+              textTransform: 'none',
+              px: 1.4,
+              py: 0.6,
+              boxShadow: 'none',
+              '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' }
+            }}
+          >
+            {date === 'ALL' ? 'Full Month' : date}
+          </Button>
+
+          {/* Calendar Popover */}
+          <Popover
+            open={Boolean(calendarAnchorEl)}
+            anchorEl={calendarAnchorEl}
+            onClose={handleCloseCalendar}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            PaperProps={{
+              sx: {
+                mt: 1,
+                p: 2.5,
+                borderRadius: '16px',
+                boxShadow: '0 10px 40px rgba(0,0,0,0.12)',
+                border: '1px solid #e2e8f0',
+                width: '320px',
+                bgcolor: '#ffffff'
+              }
+            }}
+          >
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography
+                variant="subtitle1"
+                fontWeight={900}
+                color="#0f172a"
+                sx={{
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                  fontSize: '0.95rem'
+                }}
+              >
+                {month.toUpperCase()} {displayYear}
+              </Typography>
+            </Box>
+
+            <Button
+              fullWidth
+              variant={date === 'ALL' ? 'contained' : 'outlined'}
+              onClick={() => {
+                setDate('ALL');
+                handleCloseCalendar();
+              }}
+              sx={{
+                bgcolor: date === 'ALL' ? '#0f172a' : 'transparent',
+                color: date === 'ALL' ? '#ffffff' : '#0f172a',
+                borderColor: '#0f172a',
+                fontWeight: 800,
+                borderRadius: '8px',
+                mb: 2.2,
+                py: 1.1,
+                fontSize: '0.88rem',
+                textTransform: 'none',
+                boxShadow: date === 'ALL' ? '0 4px 12px rgba(15,23,42,0.15)' : 'none',
+                '&:hover': {
+                  bgcolor: date === 'ALL' ? '#1e293b' : '#f8fafc',
+                  borderColor: '#0f172a'
+                }
+              }}
+            >
+              ALL (Full Month)
+            </Button>
+
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                gap: 0.8,
+                userSelect: 'none'
+              }}
+            >
+              {dateOptions.map(d => {
+                const isSelected = date !== 'ALL' && (date === d.display || date === d.value || date === String(d.day));
+                return (
+                  <Box
+                    key={d.value}
+                    onClick={() => {
+                      setDate(d.display);
+                      handleCloseCalendar();
+                    }}
+                    sx={{
+                      cursor: 'pointer',
+                      bgcolor: isSelected ? '#3b82f6' : 'transparent',
+                      color: isSelected ? '#ffffff' : '#1e293b',
+                      borderRadius: '8px',
+                      py: 0.9,
+                      textAlign: 'center',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      '&:hover': {
+                        bgcolor: isSelected ? '#2563eb' : '#f1f5f9'
+                      }
+                    }}
+                  >
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontWeight: isSelected ? 800 : 600,
+                        fontSize: '0.9rem',
+                        lineHeight: 1.2
+                      }}
+                    >
+                      {d.day}
+                    </Typography>
+                  </Box>
+                );
+              })}
+            </Box>
+          </Popover>
+
+          <Tooltip title="Refresh Live Cement Register Data">
             <IconButton
               size="small"
               onClick={fetchReportData}
@@ -722,7 +718,7 @@ export default function VehicleWiseTripSummaryTab({
          ========================================================================= */}
       <Box
         sx={{
-          bgcolor: '#fed7aa', // Peach/apricot background as in reference screenshot
+          bgcolor: '#fed7aa',
           color: '#1e293b',
           border: '2px solid #ea580c',
           borderRadius: '12px',
@@ -742,10 +738,14 @@ export default function VehicleWiseTripSummaryTab({
             color: '#7c2d12'
           }}
         >
-          MONTH OF {month.substring(0, 3)}'{String(calendarYear).slice(-2)} VEHICLE - NO OF TRIPS
+          {date === 'ALL'
+            ? `MONTH OF ${month.substring(0, 3)}'${String(calendarYear).slice(-2)} VEHICLE - NO OF TRIPS`
+            : `DATE: ${date} VEHICLE - NO OF TRIPS`}
         </Typography>
         <Typography variant="caption" sx={{ fontWeight: 800, color: '#9a3412', letterSpacing: '0.5px' }}>
-          COMPLETE DAY-WISE OPERATIONAL REGISTER • 01-{String(monthIndex + 1).padStart(2, '0')}-{calendarYear} TO {totalDays}-{String(monthIndex + 1).padStart(2, '0')}-{calendarYear} ({totalDays} CALENDAR DAYS)
+          {date === 'ALL'
+            ? `COMPLETE DAY-WISE OPERATIONAL REGISTER • 01-${String(monthIndex + 1).padStart(2, '0')}-${calendarYear} TO ${totalDays}-${String(monthIndex + 1).padStart(2, '0')}-${calendarYear} (${totalDays} CALENDAR DAYS) • SOURCE: CEMENT REGISTER`
+            : `DAILY OPERATIONAL REGISTER FOR ${date} • SOURCE: CEMENT REGISTER`}
         </Typography>
       </Box>
 
@@ -759,10 +759,10 @@ export default function VehicleWiseTripSummaryTab({
               Total Vehicles
             </Typography>
             <Typography variant="h5" fontWeight={900} color="#0284c7">
-              {computedData.totals.totalVehicles}
+              {computedTotals.totalVehicles}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Active in {month}
+              Active in {date === 'ALL' ? month : date}
             </Typography>
           </Card>
         </Grid>
@@ -773,10 +773,10 @@ export default function VehicleWiseTripSummaryTab({
               Total Trips
             </Typography>
             <Typography variant="h5" fontWeight={900} color="#059669">
-              {computedData.totals.totalTrips}
+              {computedTotals.totalTrips}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Across {totalDays} days
+              Cement Register count
             </Typography>
           </Card>
         </Grid>
@@ -787,7 +787,7 @@ export default function VehicleWiseTripSummaryTab({
               Total Cement Load
             </Typography>
             <Typography variant="h5" fontWeight={900} color="#d97706">
-              {computedData.totals.totalMT} <span style={{ fontSize: '13px', fontWeight: 700 }}>MT</span>
+              {computedTotals.totalMT} <span style={{ fontSize: '13px', fontWeight: 700 }}>MT</span>
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Recorded in register
@@ -798,14 +798,14 @@ export default function VehicleWiseTripSummaryTab({
         <Grid item xs={6} sm={4} md={2.4}>
           <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.5, bgcolor: '#ffffff' }}>
             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-              Pattern Breakdown
+              Total Advance
             </Typography>
-            <Box display="flex" gap={1} mt={0.5} flexWrap="wrap">
-              <Chip label={`10W: ${computedData.byPattern['10W']?.length || 0}`} size="small" sx={{ height: 20, fontSize: '10px', fontWeight: 800, bgcolor: '#fef3c7', color: '#b45309' }} />
-              <Chip label={`12W: ${computedData.byPattern['12W']?.length || 0}`} size="small" sx={{ height: 20, fontSize: '10px', fontWeight: 800, bgcolor: '#dbeafe', color: '#1d4ed8' }} />
-              <Chip label={`14W: ${computedData.byPattern['14W']?.length || 0}`} size="small" sx={{ height: 20, fontSize: '10px', fontWeight: 800, bgcolor: '#fae8ff', color: '#86198f' }} />
-              <Chip label={`6W: ${computedData.byPattern['6W']?.length || 0}`} size="small" sx={{ height: 20, fontSize: '10px', fontWeight: 800, bgcolor: '#dcfce7', color: '#15803d' }} />
-            </Box>
+            <Typography variant="h5" fontWeight={900} color="#dc2626">
+              ₹{Number(computedTotals.totalAdvance || 0).toLocaleString()}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Trip advance paid
+            </Typography>
           </Card>
         </Grid>
 
@@ -816,12 +816,12 @@ export default function VehicleWiseTripSummaryTab({
             </Typography>
             <Box display="flex" gap={1} mt={0.5}>
               <Chip
-                label={`Dedicated: ${computedData.vehicles.filter(v => v.isDedicated).length}`}
+                label={`Dedicated: ${filteredVehicles.filter(v => v.isDedicated).length}`}
                 size="small"
                 sx={{ height: 20, fontSize: '10px', fontWeight: 800, bgcolor: '#e0e7ff', color: '#3730a3' }}
               />
               <Chip
-                label={`Single: ${computedData.vehicles.filter(v => !v.isDedicated).length}`}
+                label={`Single: ${filteredVehicles.filter(v => !v.isDedicated).length}`}
                 size="small"
                 sx={{ height: 20, fontSize: '10px', fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}
               />
@@ -944,17 +944,17 @@ export default function VehicleWiseTripSummaryTab({
         <Box sx={{ py: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
           <CircularProgress size={40} thickness={4} />
           <Typography variant="body2" fontWeight={700} color="#64748b">
-            Loading Vehicle-Wise Trip Register for {month} {calendarYear}...
+            Loading Vehicle-Wise Trip Register from Cement Register ({date === 'ALL' ? `${month} ${calendarYear}` : date})...
           </Typography>
         </Box>
       ) : filteredVehicles.length === 0 ? (
         <Paper sx={{ p: 6, textAlign: 'center', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
           <LocalShippingIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1.5 }} />
           <Typography variant="h6" fontWeight={800} color="#0f172a">
-            No vehicle trip records found for {month} {calendarYear}
+            No vehicle trip records found in Cement Register for {date === 'ALL' ? `${month} ${calendarYear}` : date}
           </Typography>
           <Typography variant="body2" color="#64748b" mt={0.5}>
-            Try changing the month or financial year, or clear active search filters.
+            Try changing the selected date, month or financial year, or clear active search filters.
           </Typography>
         </Paper>
       ) : (
@@ -971,7 +971,7 @@ export default function VehicleWiseTripSummaryTab({
             const patternTotalMT = Math.round(patternVehicles.reduce((sum, v) => sum + v.totalMT, 0) * 100) / 100;
             const patternDayTotals = {};
             daysArray.forEach(d => {
-              patternDayTotals[d] = patternVehicles.reduce((sum, v) => sum + (v.dailyTrips[d] || 0), 0);
+              patternDayTotals[d] = patternVehicles.reduce((sum, v) => sum + (v.dailyTrips?.[d] || 0), 0);
             });
 
             return (
@@ -1016,7 +1016,9 @@ export default function VehicleWiseTripSummaryTab({
                     </Box>
 
                     <Typography variant="caption" sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      NO OF TRIPS FROM 01.{String(monthIndex + 1).padStart(2, '0')}.{String(calendarYear).slice(-2)} - {totalDays}.{String(monthIndex + 1).padStart(2, '0')}.{String(calendarYear).slice(-2)}
+                      {date === 'ALL'
+                        ? `NO OF TRIPS FROM 01.${String(monthIndex + 1).padStart(2, '0')}.${String(calendarYear).slice(-2)} - ${totalDays}.${String(monthIndex + 1).padStart(2, '0')}.${String(calendarYear).slice(-2)}`
+                        : `NO OF TRIPS ON ${date}`}
                     </Typography>
                   </Box>
                 </Box>
@@ -1024,66 +1026,76 @@ export default function VehicleWiseTripSummaryTab({
                 {/* ── Visual Reference Horizontal Strip Cards (from Screenshot) ── */}
                 {(viewMode === 'COMBINED' || viewMode === 'REFERENCE_STRIP') && (
                   <Box sx={{ p: 2, bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', overflowX: 'auto' }}>
-                    <Typography variant="caption" fontWeight={800} color="#94a3b8" sx={{ textTransform: 'uppercase', letterSpacing: '1px', display: 'block', mb: 1 }}>
-                      OPERATIONAL REFERENCE STRIP ({cfg.key})
-                    </Typography>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                      <Typography variant="caption" fontWeight={800} color="#94a3b8" sx={{ textTransform: 'uppercase', letterSpacing: '1px' }}>
+                        OPERATIONAL REFERENCE STRIP ({cfg.key}) • CLICK CARD TO VIEW FULL TRIP SUMMARY
+                      </Typography>
+                    </Box>
 
                     <Box sx={{ display: 'flex', gap: 1, minWidth: 'max-content', pb: 1 }}>
                       {patternVehicles.map(v => {
-                        // Color styling matching reference image
                         let vehBg = '#ffffff';
                         if (v.wheelPattern === '14W') {
-                          vehBg = '#fef08a'; // Yellow highlight in reference screenshot
+                          vehBg = '#fef08a';
                         } else if (v.wheelPattern === '6W') {
-                          vehBg = '#bae6fd'; // Cyan / Sky blue in screenshot
+                          vehBg = '#bae6fd';
                         } else if (v.isDedicated) {
-                          vehBg = '#fef9c3'; // Soft yellow for dedicated
+                          vehBg = '#fef9c3';
                         } else {
-                          vehBg = '#ffedd5'; // Soft peach/orange
+                          vehBg = '#ffedd5';
                         }
 
                         return (
-                          <Box
-                            key={v.normKey}
-                            sx={{
-                              border: '1.5px solid #334155',
-                              borderRadius: '6px',
-                              minWidth: 100,
-                              maxWidth: 130,
-                              textAlign: 'center',
-                              bgcolor: '#ffffff',
-                              overflow: 'hidden',
-                              boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
-                            }}
-                          >
-                            {/* Row 1: WHEEL */}
-                            <Box sx={{ bgcolor: '#f1f5f9', py: 0.3, px: 0.5, borderBottom: '1px solid #334155' }}>
-                              <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '10px', color: '#475569' }}>
-                                {v.wheel || cfg.key}
-                              </Typography>
-                            </Box>
+                          <Tooltip key={v.normKey} title={`Click to view all Cement Register trips for ${v.vehicleNo}`}>
+                            <Box
+                              onClick={() => setSelectedVehicleModal(v)}
+                              sx={{
+                                border: '1.5px solid #334155',
+                                borderRadius: '6px',
+                                minWidth: 100,
+                                maxWidth: 130,
+                                textAlign: 'center',
+                                bgcolor: '#ffffff',
+                                overflow: 'hidden',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                '&:hover': {
+                                  transform: 'translateY(-2px)',
+                                  boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
+                                  borderColor: '#0284c7'
+                                }
+                              }}
+                            >
+                              {/* Row 1: WHEEL */}
+                              <Box sx={{ bgcolor: '#f1f5f9', py: 0.3, px: 0.5, borderBottom: '1px solid #334155' }}>
+                                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '10px', color: '#475569' }}>
+                                  {v.wheel || cfg.key}
+                                </Typography>
+                              </Box>
 
-                            {/* Row 2: VEHICLE NUMBER (Highlighted) */}
-                            <Box sx={{ bgcolor: vehBg, py: 0.6, px: 0.5, borderBottom: '1px solid #334155' }}>
-                              <Typography variant="body2" sx={{ fontWeight: 900, fontSize: '11px', color: '#0f172a', whiteSpace: 'nowrap' }}>
-                                {v.vehicleNo}
-                              </Typography>
-                            </Box>
+                              {/* Row 2: VEHICLE NUMBER (Highlighted) */}
+                              <Box sx={{ bgcolor: vehBg, py: 0.6, px: 0.5, borderBottom: '1px solid #334155' }}>
+                                <Typography variant="body2" sx={{ fontWeight: 900, fontSize: '11px', color: '#0f172a', whiteSpace: 'nowrap' }}>
+                                  {v.vehicleNo}
+                                </Typography>
+                              </Box>
 
-                            {/* Row 3: NO OF TRIPS (Bold red as in reference screenshot) */}
-                            <Box sx={{ py: 0.4, px: 0.5, borderBottom: '1px solid #334155', bgcolor: '#ffffff' }}>
-                              <Typography variant="body2" sx={{ fontWeight: 900, fontSize: '13px', color: '#dc2626' }}>
-                                {v.totalTrips}
-                              </Typography>
-                            </Box>
+                              {/* Row 3: NO OF TRIPS (Bold red as in reference screenshot) */}
+                              <Box sx={{ py: 0.4, px: 0.5, borderBottom: '1px solid #334155', bgcolor: '#ffffff' }}>
+                                <Typography variant="body2" sx={{ fontWeight: 900, fontSize: '13px', color: '#dc2626' }}>
+                                  {v.totalTrips}
+                                </Typography>
+                              </Box>
 
-                            {/* Row 4: LOADING PATTERN */}
-                            <Box sx={{ py: 0.4, px: 0.5, bgcolor: '#f8fafc' }}>
-                              <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '10px', color: '#334155', display: 'block' }}>
-                                {v.loadingPattern}
-                              </Typography>
+                              {/* Row 4: LOADING PATTERN */}
+                              <Box sx={{ py: 0.4, px: 0.5, bgcolor: '#f8fafc' }}>
+                                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '10px', color: '#334155', display: 'block' }}>
+                                  {v.loadingPattern}
+                                </Typography>
+                              </Box>
                             </Box>
-                          </Box>
+                          </Tooltip>
                         );
                       })}
                     </Box>
@@ -1116,20 +1128,24 @@ export default function VehicleWiseTripSummaryTab({
                           <TableCell sx={{ borderBottom: '2px solid #334155', minWidth: 140 }}>CLASSIFICATION</TableCell>
 
                           {/* Day Columns (01 to 28/29/30/31) */}
-                          {daysArray.map(dayStr => (
-                            <TableCell
-                              key={dayStr}
-                              align="center"
-                              sx={{
-                                borderBottom: '2px solid #334155',
-                                minWidth: 38,
-                                px: 0.5,
-                                bgcolor: '#1e293b'
-                              }}
-                            >
-                              {dayStr}
-                            </TableCell>
-                          ))}
+                          {daysArray.map(dayStr => {
+                            const isSelectedDayCol = date !== 'ALL' && date.startsWith(dayStr);
+                            return (
+                              <TableCell
+                                key={dayStr}
+                                align="center"
+                                sx={{
+                                  borderBottom: '2px solid #334155',
+                                  minWidth: 38,
+                                  px: 0.5,
+                                  bgcolor: isSelectedDayCol ? '#0284c7' : '#1e293b',
+                                  color: '#ffffff'
+                                }}
+                              >
+                                {dayStr}
+                              </TableCell>
+                            );
+                          })}
 
                           {/* Sticky right totals */}
                           <TableCell
@@ -1180,8 +1196,9 @@ export default function VehicleWiseTripSummaryTab({
                                 {index + 1}
                               </TableCell>
 
-                              {/* Sticky Vehicle Number Cell */}
+                              {/* Sticky Vehicle Number Cell (Clickable -> Full Trip Inspection Modal) */}
                               <TableCell
+                                onClick={() => setSelectedVehicleModal(v)}
                                 sx={{
                                   position: 'sticky',
                                   left: 0,
@@ -1189,27 +1206,33 @@ export default function VehicleWiseTripSummaryTab({
                                   bgcolor: isEven ? '#ffffff' : '#f8fafc',
                                   borderRight: '2px solid #38bdf8 !important',
                                   fontWeight: 900,
-                                  color: '#0f172a'
+                                  color: '#0f172a',
+                                  cursor: 'pointer',
+                                  '&:hover': { bgcolor: '#e0f2fe' }
                                 }}
                               >
-                                <Box display="flex" alignItems="center" gap={1}>
-                                  <Box
-                                    sx={{
-                                      width: 6,
-                                      height: 6,
-                                      borderRadius: '50%',
-                                      bgcolor: v.isDedicated ? '#10b981' : '#94a3b8'
-                                    }}
-                                  />
-                                  <Typography variant="body2" fontWeight={900} sx={{ fontSize: '12px', letterSpacing: '-0.2px' }}>
-                                    {v.vehicleNo}
-                                  </Typography>
-                                </Box>
-                                {v.contactOwner && (
-                                  <Typography variant="caption" sx={{ color: '#64748b', fontSize: '10px', display: 'block', pl: 1.7 }}>
-                                    {v.contactOwner}
-                                  </Typography>
-                                )}
+                                <Tooltip title={`Click to view all Cement Register trips for ${v.vehicleNo}`}>
+                                  <Box>
+                                    <Box display="flex" alignItems="center" gap={1}>
+                                      <Box
+                                        sx={{
+                                          width: 6,
+                                          height: 6,
+                                          borderRadius: '50%',
+                                          bgcolor: v.isDedicated ? '#10b981' : '#94a3b8'
+                                        }}
+                                      />
+                                      <Typography variant="body2" fontWeight={900} sx={{ fontSize: '12px', letterSpacing: '-0.2px', textDecoration: 'underline' }}>
+                                        {v.vehicleNo}
+                                      </Typography>
+                                    </Box>
+                                    {v.contactOwner && (
+                                      <Typography variant="caption" sx={{ color: '#64748b', fontSize: '10px', display: 'block', pl: 1.7 }}>
+                                        {v.contactOwner}
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                </Tooltip>
                               </TableCell>
 
                               <TableCell sx={{ fontWeight: 800, color: '#334155' }}>
@@ -1239,8 +1262,8 @@ export default function VehicleWiseTripSummaryTab({
 
                               {/* Days 01 through N */}
                               {daysArray.map(dayStr => {
-                                const tripsOnDay = v.dailyTrips[dayStr] || 0;
-                                const docs = v.dailyTripDocs[dayStr] || [];
+                                const tripsOnDay = v.dailyTrips?.[dayStr] || 0;
+                                const docs = v.dailyTripDocs?.[dayStr] || [];
 
                                 return (
                                   <TableCell
@@ -1263,7 +1286,7 @@ export default function VehicleWiseTripSummaryTab({
                                     }}
                                   >
                                     {tripsOnDay > 0 ? (
-                                      <Tooltip title={`${v.vehicleNo}: ${tripsOnDay} trip(s) on ${dayStr}-${String(monthIndex + 1).padStart(2, '0')}. Click to view details.`}>
+                                      <Tooltip title={`${v.vehicleNo}: ${tripsOnDay} trip(s) on ${dayStr}-${String(monthIndex + 1).padStart(2, '0')}. Click to inspect day trips.`}>
                                         <Box
                                           sx={{
                                             display: 'inline-flex',
@@ -1396,7 +1419,7 @@ export default function VehicleWiseTripSummaryTab({
           })}
 
           {/* =======================================================================
-              MONTH GRAND TOTAL BAR
+              GRAND TOTAL BAR
              ======================================================================= */}
           <Paper
             elevation={0}
@@ -1415,10 +1438,10 @@ export default function VehicleWiseTripSummaryTab({
           >
             <Box>
               <Typography variant="h6" fontWeight={900} sx={{ letterSpacing: '-0.2px', color: '#ffffff' }}>
-                MONTH GRAND TOTAL: {computedData.totals.totalTrips} TRIPS
+                GRAND TOTAL: {computedTotals.totalTrips} TRIPS • {computedTotals.totalMT} MT
               </Typography>
               <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
-                Across {computedData.totals.totalVehicles} Vehicles • Total Cement Volume: {computedData.totals.totalMT} MT
+                Across {computedTotals.totalVehicles} Vehicles • Total Trip Advance: ₹{Number(computedTotals.totalAdvance || 0).toLocaleString()} • Single Source of Truth: Cement Register
               </Typography>
             </Box>
 
@@ -1437,7 +1460,7 @@ export default function VehicleWiseTripSummaryTab({
                   '&:hover': { bgcolor: '#7dd3fc' }
                 }}
               >
-                Export Complete Month Sheet (.xlsx)
+                Export Excel Sheet (.xlsx)
               </Button>
             </Box>
           </Paper>
@@ -1445,7 +1468,158 @@ export default function VehicleWiseTripSummaryTab({
       )}
 
       {/* =========================================================================
-          INSPECTION DIALOG (When user clicks a day's trip count)
+          VIEW FULL TRIP SUMMARY MODAL (When clicking Vehicle Card or Vehicle No)
+         ========================================================================= */}
+      <Dialog
+        open={Boolean(selectedVehicleModal)}
+        onClose={() => setSelectedVehicleModal(null)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: '16px', bgcolor: '#ffffff' } }}
+      >
+        <DialogTitle sx={{ bgcolor: '#0f172a', color: '#ffffff', px: 3, py: 2 }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Box display="flex" alignItems="center" gap={1.5}>
+              <LocalShippingIcon sx={{ color: '#38bdf8', fontSize: 28 }} />
+              <Box>
+                <Typography variant="h6" fontWeight={900} color="#ffffff">
+                  VIEW FULL TRIP SUMMARY: {selectedVehicleModal?.vehicleNo}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                  Single Source of Truth: Cement Register Records ({month} {calendarYear})
+                </Typography>
+              </Box>
+            </Box>
+            <IconButton size="small" onClick={() => setSelectedVehicleModal(null)} sx={{ color: '#94a3b8', '&:hover': { color: '#ffffff' } }}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          {selectedVehicleModal && (
+            <Box display="flex" flexDirection="column" gap={2}>
+              {/* Vehicle Meta Strip */}
+              <Paper sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>VEHICLE & OWNER</Typography>
+                    <Typography variant="body1" fontWeight={900} color="#0f172a">{selectedVehicleModal.vehicleNo}</Typography>
+                    <Typography variant="caption" color="#64748b">{selectedVehicleModal.contactOwner || 'No owner recorded'}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3} md={2}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>WHEEL & PATTERN</Typography>
+                    <Typography variant="body1" fontWeight={800} color="#0284c7">{selectedVehicleModal.wheel || selectedVehicleModal.wheelPattern}</Typography>
+                    <Typography variant="caption" color="#0369a1">{selectedVehicleModal.loadingPattern}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3} md={2}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>CLASSIFICATION</Typography>
+                    <Box mt={0.5}>
+                      <Chip
+                        label={selectedVehicleModal.isDedicated ? 'DEDICATED' : 'SINGLE SIDE'}
+                        size="small"
+                        sx={{
+                          fontWeight: 800,
+                          bgcolor: selectedVehicleModal.isDedicated ? '#dcfce7' : '#f1f5f9',
+                          color: selectedVehicleModal.isDedicated ? '#15803d' : '#475569'
+                        }}
+                      />
+                    </Box>
+                  </Grid>
+                  <Grid item xs={6} sm={3} md={2.5}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>TOTAL VOLUME</Typography>
+                    <Typography variant="body1" fontWeight={900} color="#059669">{selectedVehicleModal.totalTrips} Trips • {selectedVehicleModal.totalMT} MT</Typography>
+                    <Typography variant="caption" color="#64748b">In selected period</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3} md={2.5}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>TOTAL ADVANCE</Typography>
+                    <Typography variant="body1" fontWeight={900} color="#dc2626">₹{Number(selectedVehicleModal.totalAdvance || 0).toLocaleString()}</Typography>
+                    <Typography variant="caption" color="#64748b">Loading advance</Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              {/* Trips Table */}
+              <Typography variant="subtitle2" fontWeight={800} color="#0f172a">
+                All Cement Register Trips ({selectedVehicleModal.trips?.length || 0})
+              </Typography>
+              <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: '10px', maxHeight: 420 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead sx={{ bgcolor: '#f1f5f9' }}>
+                    <TableRow sx={{ '& th': { fontWeight: 800, fontSize: '11px', color: '#334155', bgcolor: '#f1f5f9' } }}>
+                      <TableCell>#</TableCell>
+                      <TableCell>CEMENT REGISTER _ID</TableCell>
+                      <TableCell>LOADING DATE</TableCell>
+                      <TableCell>INVOICE NO</TableCell>
+                      <TableCell>SHIPMENT / GCN</TableCell>
+                      <TableCell>PARTY NAME</TableCell>
+                      <TableCell>DESTINATION</TableCell>
+                      <TableCell align="right">MT</TableCell>
+                      <TableCell align="right">ADVANCE (₹)</TableCell>
+                      <TableCell align="right">HSD (LTR)</TableCell>
+                      <TableCell align="right">BILLING AMT (₹)</TableCell>
+                      <TableCell>STATUS</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {selectedVehicleModal.trips?.map((t, idx) => (
+                      <TableRow key={t._id || idx} hover>
+                        <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>{idx + 1}</TableCell>
+                        <TableCell>
+                          <Typography variant="caption" sx={{ fontFamily: 'monospace', bgcolor: '#f1f5f9', px: 0.8, py: 0.3, borderRadius: '4px', color: '#475569', fontSize: '10px' }}>
+                            {String(t._id)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
+                          {t['LOADING DT'] || t['LOADING DATE'] || '-'}
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#0f172a' }}>
+                          {t['INVOICE NO'] || t['INVOICE NO.'] || '-'}
+                        </TableCell>
+                        <TableCell sx={{ color: '#64748b' }}>
+                          {t['SHIPMENT NO'] || t['GCN NO'] || t['E-WAY BILL NO'] || '-'}
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 600, color: '#334155' }}>
+                          {t['PARTY NAME'] || '-'}
+                        </TableCell>
+                        <TableCell sx={{ color: '#475569' }}>
+                          {t['DESTINATION'] || '-'}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 800, color: '#0284c7' }}>
+                          {t['MT'] || 0}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700, color: '#b91c1c' }}>
+                          ₹{parseNum(t['ADVANCE'] || t['LOADING ADVANCE']).toLocaleString()}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700, color: '#d97706' }}>
+                          {parseNum(t['HSD (LTR)'] || t['QTY (LTR)'])} L
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                          ₹{parseNum(t['Billing Amount'] || t['BILLING AMOUNT'] || t['AMOUNT']).toLocaleString()}
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={t['CHALLAN STATUS'] || 'RECORDED'}
+                            size="small"
+                            sx={{ height: 20, fontSize: '10px', fontWeight: 800 }}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setSelectedVehicleModal(null)} variant="outlined" sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 700 }}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* =========================================================================
+          INSPECTION DIALOG (When user clicks a day's trip count cell)
          ========================================================================= */}
       <Dialog
         open={Boolean(selectedDayTripDetail)}
@@ -1459,7 +1633,7 @@ export default function VehicleWiseTripSummaryTab({
             <Box display="flex" alignItems="center" gap={1}>
               <LocalShippingIcon sx={{ color: '#38bdf8' }} />
               <Typography variant="subtitle1" fontWeight={800} color="#ffffff">
-                Trip Details: {selectedDayTripDetail?.vehNo} on {selectedDayTripDetail?.day}-{String(monthIndex + 1).padStart(2, '0')}-{calendarYear}
+                Day Trips: {selectedDayTripDetail?.vehNo} on {selectedDayTripDetail?.day}-{String(monthIndex + 1).padStart(2, '0')}-{calendarYear}
               </Typography>
             </Box>
             <IconButton size="small" onClick={() => setSelectedDayTripDetail(null)} sx={{ color: '#94a3b8', '&:hover': { color: '#ffffff' } }}>
@@ -1474,7 +1648,7 @@ export default function VehicleWiseTripSummaryTab({
                 <TableHead sx={{ bgcolor: '#f8fafc' }}>
                   <TableRow sx={{ '& th': { fontWeight: 800, fontSize: '11px', color: '#475569' } }}>
                     <TableCell>INVOICE NO</TableCell>
-                    <TableCell>SHIPMENT NO</TableCell>
+                    <TableCell>CEMENT REGISTER _ID</TableCell>
                     <TableCell>PARTY NAME</TableCell>
                     <TableCell>DESTINATION</TableCell>
                     <TableCell align="right">MT</TableCell>
@@ -1489,8 +1663,10 @@ export default function VehicleWiseTripSummaryTab({
                       <TableCell sx={{ fontWeight: 800, color: '#0f172a' }}>
                         {t['INVOICE NO'] || t['INVOICE NO.'] || '-'}
                       </TableCell>
-                      <TableCell sx={{ color: '#64748b' }}>
-                        {t['SHIPMENT NO'] || '-'}
+                      <TableCell>
+                        <Typography variant="caption" sx={{ fontFamily: 'monospace', bgcolor: '#f1f5f9', px: 0.8, py: 0.3, borderRadius: '4px', color: '#475569', fontSize: '10px' }}>
+                          {String(t._id)}
+                        </Typography>
                       </TableCell>
                       <TableCell sx={{ fontWeight: 700, color: '#334155' }}>
                         {t['PARTY NAME'] || '-'}
@@ -1520,7 +1696,7 @@ export default function VehicleWiseTripSummaryTab({
               </Table>
             </TableContainer>
           ) : (
-            <Typography variant="body2" color="#64748b">No trip records found for this date.</Typography>
+            <Typography variant="body2" color="#64748b">No trip records found for this date in Cement Register.</Typography>
           )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>

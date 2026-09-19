@@ -11,26 +11,45 @@ function getCementCol() {
 }
 
 function getDatePatterns(dateStr) {
-  // Input: YYYY-MM-DD
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return [dateStr];
-  const y = parts[0];
-  const m = String(parseInt(parts[1], 10)); // e.g. "6"
-  const mm = parts[1]; // e.g. "06"
-  const d = String(parseInt(parts[2], 10)); // e.g. "9"
-  const dd = parts[2]; // e.g. "09"
+  if (!dateStr) return [];
+  const s = String(dateStr).trim();
+  const parts = s.split(/[\/\-\.]/);
+  if (parts.length !== 3) return [s];
 
+  let y, m, d;
+  if (parts[0].length === 4) {
+    // YYYY-MM-DD
+    y = parts[0];
+    m = parts[1];
+    d = parts[2];
+  } else {
+    // DD-MM-YYYY
+    d = parts[0];
+    m = parts[1];
+    y = parts[2];
+    if (y.length === 2) y = (parseInt(y, 10) >= 70 ? '19' : '20') + y;
+  }
+
+  const mm = String(parseInt(m, 10)).padStart(2, '0');
+  const mSingle = String(parseInt(m, 10));
+  const dd = String(parseInt(d, 10)).padStart(2, '0');
+  const dSample = String(parseInt(d, 10));
   const yShort = y.slice(-2);
 
   const patterns = [
     `${dd}-${mm}-${y}`,
-    `${d}-${m}-${y}`,
+    `${dSample}-${mSingle}-${y}`,
     `${dd}/${mm}/${y}`,
-    `${d}/${m}/${y}`,
+    `${dSample}/${mSingle}/${y}`,
+    `${dd}.${mm}.${y}`,
+    `${dSample}.${mSingle}.${y}`,
     `${dd}-${mm}-${yShort}`,
-    `${d}-${m}-${yShort}`,
+    `${dSample}-${mSingle}-${yShort}`,
     `${dd}/${mm}/${yShort}`,
-    `${d}/${m}/${yShort}`
+    `${dSample}/${mSingle}/${yShort}`,
+    `${dd}.${mm}.${yShort}`,
+    `${dSample}.${mSingle}.${yShort}`,
+    `${y}-${mm}-${dd}`
   ];
   return Array.from(new Set(patterns));
 }
@@ -350,7 +369,287 @@ router.post("/extend-eway-validity", auth, async (req, res) => {
   }
 });
 
-// ── GET /daily-summary/revenue-nvl-nvcl ──────────────────────────────────────────────
+// ── GET /daily-summary/vehicle-trip-summary ──────────────────────────────────────────
+// Single Source of Truth: Cement Register (cement_register.entries)
+router.get("/vehicle-trip-summary", auth, async (req, res) => {
+  try {
+    const { date, fy, month } = req.query;
+
+    // 1. Determine Financial Year bounds
+    let startYear = 2026;
+    if (fy && fy !== "ALL") {
+      const parts = String(fy).replace(/^FY\s*/i, "").split("-");
+      let sy = parseInt(parts[0], 10);
+      if (sy < 100) sy += 2000;
+      if (!isNaN(sy)) startYear = sy;
+    } else if (date && date !== "ALL") {
+      const dParts = String(date).split(/[\/\-\.]/);
+      if (dParts.length === 3) {
+        let yr = parseInt(dParts[0], 10);
+        let mo = parseInt(dParts[1], 10);
+        if (dParts[0].length <= 2 && dParts[2].length >= 4) {
+          yr = parseInt(dParts[2], 10);
+          mo = parseInt(dParts[1], 10);
+        }
+        startYear = mo >= 4 ? yr : yr - 1;
+      }
+    }
+
+    const monthNamesArray = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    let targetMonthName = month && month !== "ALL" ? month : "September";
+    let mIdx = monthNamesArray.findIndex(m => m.toLowerCase() === String(targetMonthName).toLowerCase());
+    if (mIdx === -1) mIdx = 8; // default September
+    const monthInt = mIdx + 1; // 1-12
+    const targetYear = mIdx < 3 ? startYear + 1 : startYear;
+    const daysInMonth = new Date(targetYear, monthInt, 0).getDate();
+
+    // 2. Build filter for Cement Register
+    let cementFilter = {};
+    if (date && date !== "ALL") {
+      const patterns = getDatePatterns(date);
+      if (monthInt && targetYear) {
+        cementFilter = {
+          $and: [
+            {
+              $or: [
+                { "LOADING DT": { $in: patterns } },
+                { "LOADING DATE": { $in: patterns } }
+              ]
+            },
+            {
+              $or: [
+                { month: { $in: [monthInt, String(monthInt)] }, year: { $in: [targetYear, String(targetYear)] } },
+                { month: { $exists: false } },
+                { month: null }
+              ]
+            }
+          ]
+        };
+      } else {
+        cementFilter = {
+          $or: [
+            { "LOADING DT": { $in: patterns } },
+            { "LOADING DATE": { $in: patterns } }
+          ]
+        };
+      }
+    } else {
+      cementFilter = {
+        $or: [
+          { month: monthInt, year: targetYear },
+          { month: String(monthInt), year: String(targetYear) }
+        ]
+      };
+    }
+
+    const col = getCementCol();
+    const rawDocs = await col.find(cementFilter).toArray();
+
+    // 3. Truck Contacts Master lookup for owner/type fallback
+    let truckContactMap = {};
+    try {
+      const contactsCol = mongoose.connection.useDb("lorrey").collection("truck_contacts");
+      const contacts = await contactsCol.find({}).toArray();
+      contacts.forEach(c => {
+        const rawNo = c["Truck No "] || c["Truck No"] || c.truck_no || "";
+        const key = String(rawNo).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+        if (key) {
+          truckContactMap[key] = {
+            vehType: (c["Type of vehicle "] || c["Type of vehicle"] || c.veh_type || "").trim(),
+            custType: (c["TYPE OF CUSTOMER "] || c.cust_type || "").trim(),
+            owner: (c["Owner Name "] || c["Owner Name"] || c.owner_name || "").trim()
+          };
+        }
+      });
+    } catch (e) {
+      console.warn("[dailySummary] truck_contacts lookup error:", e.message);
+    }
+
+    // 4. Process and deduplicate records strictly by unique MongoDB _id
+    const seenTripIds = new Set();
+    const vehMap = {};
+    const daysArray = [];
+    for (let i = 1; i <= daysInMonth; i++) {
+      daysArray.push(String(i).padStart(2, "0"));
+    }
+
+    rawDocs.forEach(row => {
+      const id = String(row._id);
+      if (seenTripIds.has(id)) return;
+      seenTripIds.add(id);
+
+      const rawVeh = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "";
+      const vehClean = String(rawVeh).trim().toUpperCase();
+      const normKey = vehClean.replace(/[^A-Z0-9]/g, "");
+      // Skip empty or dummy rows (e.g. non-vehicle strings < 5 characters)
+      if (!normKey || normKey.length < 5) return;
+
+      const mtVal = parseNum(row["MT"]);
+      const billAmt = parseNum(row["Billing Amount"] || row["BILLING AMOUNT"] || row["AMOUNT"]);
+      const invNo = String(row["INVOICE NO"] || row["INVOICE NO."] || "").trim();
+      const advVal = parseNum(row["ADVANCE"] || row["LOADING ADVANCE"]);
+      const hsdLtr = parseNum(row["HSD (LTR)"] || row["QTY (LTR)"]);
+      const hsdAmt = parseNum(row["HSD AMOUNT"]);
+
+      // Exclude pure adjustment / diesel deduction rows with no MT, no amount, and no invoice
+      if (mtVal === 0 && billAmt === 0 && !invNo) return;
+
+      const loadDateRaw = row["LOADING DT"] || row["LOADING DATE"] || "";
+      let dayNum = null;
+      if (loadDateRaw) {
+        const parts = String(loadDateRaw).trim().split(/[\/\-\.]/);
+        if (parts.length === 3) {
+          if (parts[0].length === 4) {
+            dayNum = parseInt(parts[2], 10);
+          } else {
+            dayNum = parseInt(parts[0], 10);
+          }
+        }
+      }
+
+      if (!vehMap[normKey]) {
+        const contact = truckContactMap[normKey] || {};
+        let rawWheel = String(row["WHEEL"] || contact.vehType || "").trim().toUpperCase();
+        let wheelKey = "OTHER";
+        if (rawWheel.includes("10")) wheelKey = "10W";
+        else if (rawWheel.includes("12")) wheelKey = "12W";
+        else if (rawWheel.includes("14")) wheelKey = "14W";
+        else if (rawWheel.includes("6")) wheelKey = "6W";
+
+        const rawDedicated = String(row["DEDICATED"] || "").trim();
+        const billType = String(row["Bill Type"] || row["BILL TYPE"] || "").trim().toUpperCase();
+        const custType = String(contact.custType || "").toUpperCase();
+        const hasDedicatedAmt = rawDedicated && rawDedicated !== "-" && parseNum(rawDedicated) > 0;
+        const isDedicatedType = billType === "NT" || custType === "ATOA" || custType === "ATO" || custType === "DEDICATED";
+
+        vehMap[normKey] = {
+          vehicleNo: vehClean,
+          normKey,
+          wheel: rawWheel || wheelKey,
+          wheelPattern: wheelKey,
+          isDedicatedInitial: Boolean(hasDedicatedAmt || isDedicatedType),
+          contactOwner: (row["OWNER NAME"] || contact.owner || "").trim(),
+          distinctMTs: new Set(),
+          dailyTrips: {},
+          dailyTripDocs: {},
+          totalTrips: 0,
+          totalMT: 0,
+          totalAdvance: 0,
+          totalBillingAmt: 0,
+          totalDieselLtr: 0,
+          totalDieselAmt: 0,
+          trips: []
+        };
+      }
+
+      const v = vehMap[normKey];
+      if (mtVal > 0) {
+        v.distinctMTs.add(mtVal);
+        v.totalMT += mtVal;
+      }
+      v.totalAdvance += advVal;
+      v.totalBillingAmt += billAmt;
+      v.totalDieselLtr += hsdLtr;
+      v.totalDieselAmt += hsdAmt;
+      v.trips.push(row);
+      v.totalTrips += 1;
+
+      if (dayNum !== null && dayNum >= 1 && dayNum <= daysInMonth) {
+        const dayStr = String(dayNum).padStart(2, "0");
+        v.dailyTrips[dayStr] = (v.dailyTrips[dayStr] || 0) + 1;
+        if (!v.dailyTripDocs[dayStr]) v.dailyTripDocs[dayStr] = [];
+        v.dailyTripDocs[dayStr].push(row);
+      }
+    });
+
+    // 5. Finalize vehicle patterns, dedicated classification (Rafter rules), and totals
+    const vehicleList = Object.values(vehMap).map(v => {
+      const mtArray = Array.from(v.distinctMTs).sort((a, b) => a - b);
+      let loadingPatternStr = "";
+      if (mtArray.length > 0) {
+        loadingPatternStr = mtArray.map(m => `${m}MT`).join(" / ");
+      } else {
+        if (v.wheelPattern === "10W") loadingPatternStr = "18MT / 19MT";
+        else if (v.wheelPattern === "12W") loadingPatternStr = "25MT";
+        else if (v.wheelPattern === "14W") loadingPatternStr = "30MT";
+        else if (v.wheelPattern === "6W") loadingPatternStr = "13MT";
+        else loadingPatternStr = "-";
+      }
+
+      const meetsRaftarThreshold = (v.wheelPattern === "10W" && v.totalTrips >= 8) ||
+        ((v.wheelPattern === "12W" || v.wheelPattern === "14W") && v.totalTrips >= 6);
+      const isDedicated = v.isDedicatedInitial || meetsRaftarThreshold;
+
+      return {
+        ...v,
+        distinctMTs: Array.from(v.distinctMTs),
+        totalMT: Math.round(v.totalMT * 100) / 100,
+        totalAdvance: Math.round(v.totalAdvance * 100) / 100,
+        totalBillingAmt: Math.round(v.totalBillingAmt * 100) / 100,
+        totalDieselLtr: Math.round(v.totalDieselLtr * 100) / 100,
+        totalDieselAmt: Math.round(v.totalDieselAmt * 100) / 100,
+        loadingPattern: loadingPatternStr,
+        isDedicated,
+        meetsRaftarThreshold,
+        classification: isDedicated ? "DEDICATED (Both Side)" : "SINGLE SIDE (Non-Dedicated)"
+      };
+    });
+
+    // Sort stably: 10W -> 12W -> 14W -> 6W -> OTHER, then alphabetical
+    const patternSortOrder = { "10W": 1, "12W": 2, "14W": 3, "6W": 4, "OTHER": 5 };
+    vehicleList.sort((a, b) => {
+      const pA = patternSortOrder[a.wheelPattern] || 99;
+      const pB = patternSortOrder[b.wheelPattern] || 99;
+      if (pA !== pB) return pA - pB;
+      return a.vehicleNo.localeCompare(b.vehicleNo);
+    });
+
+    const byPattern = { "10W": [], "12W": [], "14W": [], "6W": [], "OTHER": [] };
+    vehicleList.forEach(v => {
+      if (byPattern[v.wheelPattern]) byPattern[v.wheelPattern].push(v);
+      else byPattern["OTHER"].push(v);
+    });
+
+    const dayTotals = {};
+    daysArray.forEach(d => { dayTotals[d] = 0; });
+    let grandTotalTrips = 0;
+    let grandTotalMT = 0;
+    let grandTotalAdvance = 0;
+
+    vehicleList.forEach(v => {
+      grandTotalTrips += v.totalTrips;
+      grandTotalMT += v.totalMT;
+      grandTotalAdvance += v.totalAdvance;
+      daysArray.forEach(d => {
+        dayTotals[d] += (v.dailyTrips[d] || 0);
+      });
+    });
+
+    return res.json({
+      success: true,
+      fy: fy || `FY ${startYear}-${String(startYear + 1).slice(-2)}`,
+      month: targetMonthName,
+      year: targetYear,
+      totalDays: daysInMonth,
+      daysArray,
+      selectedDate: date || "ALL",
+      vehicles: vehicleList,
+      byPattern,
+      totals: {
+        totalVehicles: vehicleList.length,
+        totalTrips: grandTotalTrips,
+        totalMT: Math.round(grandTotalMT * 100) / 100,
+        totalAdvance: Math.round(grandTotalAdvance * 100) / 100,
+        dayTotals
+      }
+    });
+
+  } catch (err) {
+    console.error("[DailySummary] /vehicle-trip-summary error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to generate vehicle trip summary" });
+  }
+});
+
 // ── GET /daily-summary/revenue-nvl-nvcl ──────────────────────────────────────────────
 router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
   try {
