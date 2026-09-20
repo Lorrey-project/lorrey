@@ -277,7 +277,15 @@ export default function DailyRevenueNvlNvclTab({
   };
 
   return (
-    <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: '#f8fafc', p: { xs: 1.5, md: 3 } }}>
+    <Box sx={{
+      width: '100%',
+      maxWidth: '100vw',
+      boxSizing: 'border-box',
+      minHeight: '100vh',
+      bgcolor: '#f8fafc',
+      p: { xs: 1.5, md: 3 },
+      overflowX: 'hidden'
+    }}>
       {/* ── Top Header Controls ── */}
       <Paper
         elevation={0}
@@ -287,14 +295,14 @@ export default function DailyRevenueNvlNvclTab({
           borderRadius: '16px',
           border: '1px solid #e2e8f0',
           display: 'flex',
-          flexWrap: { xs: 'wrap', lg: 'nowrap' },
+          flexWrap: { xs: 'wrap', xl: 'nowrap' },
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: { xs: 1, md: 1.5 },
           bgcolor: '#ffffff'
         }}
       >
-        <Box display="flex" alignItems="center" gap={1} flexShrink={0}>
+        <Box display="flex" alignItems="center" gap={1} flexShrink={0} sx={{ order: 1 }}>
           {onBack && (
             <IconButton onClick={onBack} size="small" sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
               <ArrowBackIcon fontSize="small" />
@@ -319,9 +327,10 @@ export default function DailyRevenueNvlNvclTab({
             flexShrink: 0,
             display: 'flex',
             justifyContent: 'center',
-            order: { xs: 3, lg: 2 },
-            width: { xs: '100%', lg: 'auto' },
-            mx: { xs: 0, lg: 'auto' }
+            order: { xs: 3, xl: 2 },
+            width: { xs: '100%', xl: 'auto' },
+            mx: { xs: 0, xl: 'auto' },
+            mt: { xs: 1.5, xl: 0 }
           }}>
             <Tabs
               value={mainTab}
@@ -365,7 +374,17 @@ export default function DailyRevenueNvlNvclTab({
         )}
 
         {/* Action Controls */}
-        <Box display="flex" alignItems="center" gap={{ xs: 0.8, md: 1 }} flexShrink={0} sx={{ order: { xs: 2, lg: 3 } }}>
+        <Box
+          display="flex"
+          alignItems="center"
+          gap={{ xs: 0.8, md: 1 }}
+          flexWrap="wrap"
+          sx={{
+            order: { xs: 2, xl: 3 },
+            justifyContent: { xs: 'flex-start', sm: 'flex-end' },
+            flexShrink: 0
+          }}
+        >
           {/* Financial Year Selector */}
           <FormControl size="small">
             <Select
@@ -582,6 +601,7 @@ export default function DailyRevenueNvlNvclTab({
                 bgcolor: '#f1f5f9',
                 borderRadius: '8px',
                 color: '#0f172a',
+                flexShrink: 0,
                 '&:hover': { bgcolor: '#e2e8f0' }
               }}
             >
@@ -602,6 +622,8 @@ export default function DailyRevenueNvlNvclTab({
               borderRadius: '8px',
               textTransform: 'none',
               px: 2,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               '&:hover': { bgcolor: '#1e293b' }
             }}
           >

@@ -1319,7 +1319,7 @@ export default function CementRegister({ onBack }) {
     };
 
     return (
-      <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
         {/* Top Header */}
         <Box sx={{
           px: { xs: 2, md: 4 }, py: 2,
@@ -1382,10 +1382,7 @@ export default function CementRegister({ onBack }) {
 
         {/* Table Container (EXACT CEMENT REGISTER PATTERN) */}
         <Box ref={tableContainerRef} sx={{
-          overflow: 'auto',
-          flex: 1,
-          minHeight: 0,
-          minWidth: 0,
+          overflowX: 'auto',
           m: { xs: 1, md: 2 },
           borderRadius: '12px',
           border: '1px solid #e2e8f0',
@@ -1645,7 +1642,7 @@ export default function CementRegister({ onBack }) {
 
   if (showPreviousScreen) {
     return (
-      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3, height: '100vh', bgcolor: 'background.default', overflow: 'hidden' }}>
+      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3, minHeight: '100vh', bgcolor: 'background.default' }}>
         {/* Header */}
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
           <Box display="flex" alignItems="center" gap={2}>
@@ -1722,12 +1719,12 @@ export default function CementRegister({ onBack }) {
 
         {/* Table Container */}
         <Box sx={{
-          flex: 1, bgcolor: 'background.paper', borderRadius: '12px', overflow: 'hidden',
+          bgcolor: 'background.paper', borderRadius: '12px',
           display: 'flex', flexDirection: 'column',
           boxShadow: '0 4px 20px rgba(0,0,0,0.03), 0 1px 3px rgba(0,0,0,0.02)',
           border: '1px solid #e2e8f0'
         }}>
-          <Box sx={{ overflowX: 'auto', flex: 1 }}>
+          <Box sx={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1000px' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                 <tr>
@@ -1807,7 +1804,7 @@ export default function CementRegister({ onBack }) {
   }
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
 
       {/* ── Premium Header ───────────────────────────────────────────── */}
       <Box sx={{
@@ -2052,10 +2049,7 @@ export default function CementRegister({ onBack }) {
 
       {/* ── Group header row ─────────────────────────────────────────────── */}
       <Box ref={tableContainerRef} sx={{
-        overflow: 'auto',
-        flex: 1,
-        minHeight: 0, // Fix vertical flex overflow
-        minWidth: 0,  // Fix horizontal flex overflow
+        overflowX: 'auto',
         m: { xs: 1, md: 2 },
         borderRadius: '12px',
         border: '1px solid #e2e8f0',

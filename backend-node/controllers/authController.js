@@ -74,8 +74,9 @@ exports.login = async (req, res) => {
         // Role verification firewall
         if (role && user.role !== role) {
             const isBrindaMatch = (role === 'BRINDA SHYAM' && ['HEAD_OFFICE', 'OFFICE', 'BRINDA SHYAM'].includes(user.role));
+            const isJeetMatch = (role === 'JEET PANJA' && ['HEAD_OFFICE', 'OFFICE', 'JEET PANJA'].includes(user.role));
             const isOfficeMatch = (role === 'OFFICE' && ['HEAD_OFFICE', 'OFFICE'].includes(user.role));
-            if (!isBrindaMatch && !isOfficeMatch) {
+            if (!isBrindaMatch && !isJeetMatch && !isOfficeMatch) {
                 return res.status(403).json({ message: `Unauthorized access: Cannot login to ${role} workspace.` });
             }
         }

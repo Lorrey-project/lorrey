@@ -867,4 +867,72 @@ router.post("/backfill-month-year", auth, async (req, res) => {
   }
 });
 
+// ── Bulk Extend E-Way Bill Validity ──────────────────────────────────────────
+router.all('/bulk-extend-eway', auth, async (req, res) => {
+  try {
+    const { extensions } = req.body;
+    if (!Array.isArray(extensions) || extensions.length === 0) {
+      return res.status(400).json({ success: false, error: 'No extensions provided' });
+    }
+
+    const col = mongoose.connection.useDb('cement_register').collection('entries');
+    let updatedCount = 0;
+
+    for (const item of extensions) {
+      const { id, invoiceNo, ewayBillNo, vehicleNo, extendedValidityDate } = item;
+      if (!extendedValidityDate) continue;
+
+      const trimmedDate = String(extendedValidityDate).trim();
+      if (!trimmedDate) continue;
+
+      let filter = null;
+      if (id) {
+        try {
+          const objId = mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id;
+          filter = { $or: [{ _id: objId }, { _id: String(id) }] };
+        } catch (e) {
+          filter = { _id: id };
+        }
+      }
+      if (!filter) {
+        const conds = {};
+        if (invoiceNo) conds['$or'] = [{ 'INVOICE NO': invoiceNo }, { 'INVOICE NO.': invoiceNo }];
+        if (ewayBillNo) conds['E-WAY BILL NO'] = ewayBillNo;
+        if (vehicleNo) conds['$or'] = [{ 'VEHICLE NUMBER': vehicleNo }, { 'VEHICLE NO': vehicleNo }, { 'VEHICLE NO.': vehicleNo }];
+        filter = conds;
+      }
+
+      if (!filter || Object.keys(filter).length === 0) continue;
+
+      const resUpdate = await col.updateOne(filter, {
+        $set: {
+          'EXTENDED E-WAY BILL VALIDITY': trimmedDate,
+          'extendedValidityDate': trimmedDate,
+          'E-WAY BILL VALIDITY': trimmedDate,
+          'updatedAt': new Date()
+        }
+      });
+
+      if (resUpdate.modifiedCount > 0 || resUpdate.matchedCount > 0) {
+        updatedCount++;
+      }
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('cementUpdates', { action: 'ewayValidityExtended', count: updatedCount });
+    }
+
+    return res.json({
+      success: true,
+      message: `E-Way Bill validity extended successfully for ${updatedCount} record(s).`,
+      count: updatedCount,
+      modifiedCount: updatedCount
+    });
+  } catch (err) {
+    console.error('[CementRegister] bulk-extend-eway error:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Failed to extend E-Way Bill validity' });
+  }
+});
+
 module.exports = router;

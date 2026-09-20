@@ -101,7 +101,9 @@ const VALIDITY_FIELD_CONFIGS = [
 // ── GET /api/road-tax ────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const { month, year, search, upcoming } = req.query;
+    const { month, year, search, upcoming, creditor } = req.query;
+    const creditorName = (creditor || 'BRINDA SHYAM').trim().toUpperCase();
+    const isJeet = creditorName === 'JEET PANJA';
     const now = new Date();
 
     const targetMonth = month && month !== 'ALL' && month !== '7_DAYS' ? parseInt(month, 10) : (now.getMonth() + 1);
@@ -111,7 +113,12 @@ router.get('/', async (req, res) => {
 
     const contacts = await fetchAllContacts();
     const roadTaxCol = getRoadTaxCollection();
-    const savedRecords = await roadTaxCol.find({}).toArray();
+
+    const savedFilter = isJeet
+      ? { creditor: 'JEET PANJA' }
+      : { $or: [{ creditor: 'BRINDA SHYAM' }, { creditor: { $exists: false } }, { creditor: null }] };
+
+    const savedRecords = await roadTaxCol.find(savedFilter).toArray();
 
     // Map saved records by key
     const savedMap = new Map();
@@ -165,20 +172,22 @@ router.get('/', async (req, res) => {
 
         if (qualifies) {
           const typeKey = vConfig.label.replace(/\s+/g, '_');
-          const savedKey1 = `${truckNo.toUpperCase()}_${typeKey}_${valMonth}_${valYear}`;
-          const savedKey2 = `${truckNo.toUpperCase()}_${typeKey}_${targetMonth}_${targetYear}`;
-          const savedKeyAlt = `${truckNo.toUpperCase()}_${typeKey}`;
+          const prefix = isJeet ? `${truckNo.toUpperCase()}_${typeKey}_JEET_PANJA` : `${truckNo.toUpperCase()}_${typeKey}`;
+          const savedKey1 = isJeet ? `${truckNo.toUpperCase()}_${typeKey}_${valMonth}_${valYear}_JEET_PANJA` : `${truckNo.toUpperCase()}_${typeKey}_${valMonth}_${valYear}`;
+          const savedKey2 = isJeet ? `${truckNo.toUpperCase()}_${typeKey}_${targetMonth}_${targetYear}_JEET_PANJA` : `${truckNo.toUpperCase()}_${typeKey}_${targetMonth}_${targetYear}`;
+          const savedKeyAlt = prefix;
           const saved = savedMap.get(savedKey1) || savedMap.get(savedKey2) || savedMap.get(savedKeyAlt) || {};
 
           const expireDateFormatted = formatDateToDDMMYYYY(dObj);
           const renewStatus = saved.renewStatus || 'PENDING';
           const renewDate = saved.renewDate || expireDateFormatted;
+          const newValidityDate = saved.newValidityDate || '';
           const receivableAmount = num(saved.receivableAmount);
           const paidAmount = num(saved.paidAmount);
-          const balance = Math.round((receivableAmount - paidAmount) * 100) / 100;
+          const balance = Math.round(Math.abs(receivableAmount - paidAmount) * 100) / 100;
 
           entries.push({
-            id: `${recordId}_${typeKey}`,
+            id: isJeet ? `${recordId}_${typeKey}_JEET_PANJA` : `${recordId}_${typeKey}`,
             recordId,
             truckNo,
             ownerName,
@@ -188,6 +197,7 @@ router.get('/', async (req, res) => {
             expireDateRaw: valRaw,
             renewStatus,
             renewDate,
+            newValidityDate,
             receivableAmount,
             paidAmount,
             balance,
@@ -224,6 +234,7 @@ router.get('/', async (req, res) => {
 
     res.json({
       success: true,
+      creditor: creditorName,
       month: targetMonth,
       year: targetYear,
       count: formattedEntries.length,
@@ -238,32 +249,41 @@ router.get('/', async (req, res) => {
 // ── POST /api/road-tax/save ──────────────────────────────────────────────────
 router.post('/save', async (req, res) => {
   try {
-    const { recordId, truckNo, validityType, month, year, renewStatus, renewDate, receivableAmount, paidAmount, pdfUrl, pdfName } = req.body;
+    const { recordId, truckNo, validityType, month, year, renewStatus, renewDate, newValidityDate, receivableAmount, paidAmount, pdfUrl, pdfName, creditor } = req.body;
 
     if (!truckNo || !validityType) {
       return res.status(400).json({ success: false, error: 'Truck No and Validity Type are required.' });
     }
+
+    const creditorName = (creditor || 'BRINDA SHYAM').trim().toUpperCase();
+    const isJeet = creditorName === 'JEET PANJA';
 
     const roadTaxCol = getRoadTaxCollection();
     const typeKey = String(validityType).trim().toUpperCase().replace(/\s+/g, '_');
     const m = month ? parseInt(month, 10) : (new Date().getMonth() + 1);
     const y = year ? parseInt(year, 10) : new Date().getFullYear();
 
-    const key = `${String(truckNo).trim().toUpperCase()}_${typeKey}`;
-    const keyMonthYear = `${String(truckNo).trim().toUpperCase()}_${typeKey}_${m}_${y}`;
+    const key = isJeet
+      ? `${String(truckNo).trim().toUpperCase()}_${typeKey}_JEET_PANJA`
+      : `${String(truckNo).trim().toUpperCase()}_${typeKey}`;
+    const keyMonthYear = isJeet
+      ? `${String(truckNo).trim().toUpperCase()}_${typeKey}_${m}_${y}_JEET_PANJA`
+      : `${String(truckNo).trim().toUpperCase()}_${typeKey}_${m}_${y}`;
 
     const recAmt = num(receivableAmount);
     const pAmt = num(paidAmount);
-    const bal = Math.round((recAmt - pAmt) * 100) / 100;
+    const bal = Math.round(Math.abs(recAmt - pAmt) * 100) / 100;
 
     const updateData = {
       truckNo: String(truckNo).trim().toUpperCase(),
       recordId: recordId || '',
       validityType,
+      creditor: isJeet ? 'JEET PANJA' : 'BRINDA SHYAM',
       month: m,
       year: y,
       renewStatus: renewStatus || 'PENDING',
       renewDate: renewDate || '',
+      newValidityDate: newValidityDate || '',
       receivableAmount: recAmt,
       paidAmount: pAmt,
       balance: bal,

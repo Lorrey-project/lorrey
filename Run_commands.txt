@@ -55,6 +55,10 @@ BRINDA SHYAM PANEL
 Email: brindashyam@dac.com
 Password: brinda@713201
 
+JEET PANJA PANEL
+Email: jeetpanja@dac.com
+Password: jeetpanja@713201
+
 =====================================================
 IMPORTANT LOGIN RULE:
 
@@ -66,6 +70,7 @@ site@nuvoco.com      → Site Panel
 sas1@sas.com         → Pump SAS1 Panel
 sas2@sas.com         → Pump SAS2 Panel
 brindashyam@dac.com  → Brinda Shyam Panel
+jeetpanja@dac.com    → Jeet Panja Panel
 
 Any other Email + Password combination will be rejected.
 =====================================================

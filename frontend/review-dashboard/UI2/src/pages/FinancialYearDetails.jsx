@@ -208,7 +208,7 @@ export default function FinancialYearDetails({ onBack }) {
       try {
         const jsDate = XLSX.SSF.parse_date_code(val);
         if (jsDate) dateObj = new Date(jsDate.y, jsDate.m - 1, jsDate.d);
-      } catch (_) {}
+      } catch (_) { }
     } else {
       const str = String(val).trim();
       const ddmmyyyy = str.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
@@ -1750,7 +1750,7 @@ export default function FinancialYearDetails({ onBack }) {
   const paidBills = finalFilteredRows.filter(r => num(r.paymentAmount) >= num(r.receivable) && num(r.receivable) > 0).length;
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', fontFamily: 'Inter, sans-serif' }}>
 
       {/* ── Premium Header ───────────────────────────────────────────── */}
       <Box sx={{
@@ -1944,8 +1944,8 @@ export default function FinancialYearDetails({ onBack }) {
       </Box>
 
       {/* 4. Table Container */}
-      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', p: { xs: 1, md: 2 } }}>
-        <Box sx={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'auto', bgcolor: 'background.paper', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+      <Box sx={{ p: { xs: 1, md: 2 } }}>
+        <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflowX: 'auto', bgcolor: 'background.paper', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
           <table style={{ borderCollapse: 'collapse', whiteSpace: 'normal', fontFamily: 'Inter,sans-serif', fontSize: 13, width: 'max-content', minWidth: '100%' }}>
             <thead>
               <tr>

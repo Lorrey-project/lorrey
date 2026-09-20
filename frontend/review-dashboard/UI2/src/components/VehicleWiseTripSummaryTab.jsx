@@ -406,7 +406,15 @@ export default function VehicleWiseTripSummaryTab({
   };
 
   return (
-    <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: '#f8fafc', p: { xs: 1.5, md: 3 } }}>
+    <Box sx={{
+      width: '100%',
+      maxWidth: '100vw',
+      boxSizing: 'border-box',
+      minHeight: '100vh',
+      bgcolor: '#f8fafc',
+      p: { xs: 1.5, md: 3 },
+      overflowX: 'hidden'
+    }}>
       {/* =========================================================================
           TOP HEADER BAR (Consistent with Daily Operations Dashboard)
          ========================================================================= */}
@@ -418,14 +426,14 @@ export default function VehicleWiseTripSummaryTab({
           borderRadius: '16px',
           border: '1px solid #e2e8f0',
           display: 'flex',
-          flexWrap: { xs: 'wrap', lg: 'nowrap' },
+          flexWrap: { xs: 'wrap', xl: 'nowrap' },
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: { xs: 1, md: 1.5 },
           bgcolor: '#ffffff'
         }}
       >
-        <Box display="flex" alignItems="center" gap={1} flexShrink={0}>
+        <Box display="flex" alignItems="center" gap={1} flexShrink={0} sx={{ order: 1 }}>
           {onBack && !isModal && (
             <IconButton onClick={onBack} size="small" sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
               <ArrowBackIcon fontSize="small" />
@@ -450,9 +458,10 @@ export default function VehicleWiseTripSummaryTab({
             flexShrink: 0,
             display: 'flex',
             justifyContent: 'center',
-            order: { xs: 3, lg: 2 },
-            width: { xs: '100%', lg: 'auto' },
-            mx: { xs: 0, lg: 'auto' }
+            order: { xs: 3, xl: 2 },
+            width: { xs: '100%', xl: 'auto' },
+            mx: { xs: 0, xl: 'auto' },
+            mt: { xs: 1.5, xl: 0 }
           }}>
             <Tabs
               value={mainTab}
@@ -496,7 +505,17 @@ export default function VehicleWiseTripSummaryTab({
         )}
 
         {/* Top Control Selectors */}
-        <Box display="flex" alignItems="center" gap={{ xs: 0.8, md: 1 }} flexShrink={0} sx={{ order: { xs: 2, lg: 3 } }}>
+        <Box
+          display="flex"
+          alignItems="center"
+          gap={{ xs: 0.8, md: 1 }}
+          flexWrap="wrap"
+          sx={{
+            order: { xs: 2, xl: 3 },
+            justifyContent: { xs: 'flex-start', sm: 'flex-end' },
+            flexShrink: 0
+          }}
+        >
           <FormControl size="small">
             <Select
               value={financialYear}
@@ -679,7 +698,7 @@ export default function VehicleWiseTripSummaryTab({
               size="small"
               onClick={fetchReportData}
               disabled={loading}
-              sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}
+              sx={{ color: '#0f172a', bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8, flexShrink: 0 }}
             >
               <RefreshIcon fontSize="small" sx={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             </IconButton>
@@ -699,6 +718,8 @@ export default function VehicleWiseTripSummaryTab({
               fontSize: '0.8rem',
               py: 0.6,
               px: 1.5,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               '&:hover': { bgcolor: '#0369a1' }
             }}
           >

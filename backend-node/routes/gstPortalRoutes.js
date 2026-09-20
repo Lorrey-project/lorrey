@@ -313,6 +313,41 @@ router.post("/gstr1/delete-rows", auth, async (req, res) => {
 });
 
 
+// ── POST /gst-portal/b2b/mark-done ──────────────────────────────────────────
+router.post("/b2b/mark-done", auth, async (req, res) => {
+  try {
+    const col = getCollection();
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: "Provide an array of ids." });
+    }
+
+    const objectIds = ids
+      .filter(id => id && mongoose.Types.ObjectId.isValid(id))
+      .map(id => new ObjectId(id));
+
+    if (objectIds.length === 0) {
+      return res.status(400).json({ success: false, error: "No valid record IDs provided." });
+    }
+
+    const now = new Date();
+    const result = await col.updateMany(
+      { _id: { $in: objectIds } },
+      { $set: { status: 'DONE', doneAt: now } }
+    );
+
+    const io = getIO();
+    if (io) {
+      io.emit("gstPortalUpdates", { action: "b2bMarkDone", ids });
+    }
+
+    res.json({ success: true, modifiedCount: result.modifiedCount });
+  } catch (error) {
+    console.error("[GST Portal B2B Mark Done] Error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.put("/:id", auth, async (req, res) => {
   try {
     const col = getCollection();

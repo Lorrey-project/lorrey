@@ -7,6 +7,9 @@ const othersCreditorSchema = new mongoose.Schema({
   invoiceNo: { type: String, default: '', trim: true },
   invoiceDate: { type: String, default: '' },
   date: { type: String, default: '' },
+  ledgerName: { type: String, default: '', trim: true },
+  names: { type: String, default: '', trim: true },
+  vehicleNo: { type: String, default: '', trim: true },
   credit: { type: Number, default: 0 },
   debit: { type: Number, default: 0 },
   balance: { type: Number, default: 0 },
@@ -18,10 +21,14 @@ const othersCreditorSchema = new mongoose.Schema({
   balanceDue: { type: Number, default: 0 },
   paymentDate: { type: String, default: '' },
   paymentMode: { type: String, default: 'Bank Transfer' },
-  status: { type: String, enum: ['Pending', 'Partial', 'Cleared'], default: 'Pending' },
+  status: { type: String, default: 'Pending' },
+  allocations: { type: Array, default: [] },
   remarks: { type: String, default: '' },
+  pdfUrl: { type: String, default: '' },
+  pdfName: { type: String, default: '' },
   month: { type: Number },
-  year: { type: String }
+  year: { type: String },
+  appliedBankBookTxIds: { type: [String], default: [] }
 }, {
   timestamps: true,
   strict: false

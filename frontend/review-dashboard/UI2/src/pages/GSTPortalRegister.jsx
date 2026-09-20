@@ -4,7 +4,8 @@ import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Select, MenuItem,
   Tabs, Tab, Dialog, DialogTitle, DialogContent, DialogActions,
-  Radio, RadioGroup, FormControlLabel, FormControl, FormLabel
+  Radio, RadioGroup, FormControlLabel, FormControl, FormLabel,
+  TextField, InputAdornment
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -15,6 +16,10 @@ import AddIcon from '@mui/icons-material/Add';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import SyncIcon from '@mui/icons-material/Sync';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
+import CloseIcon from '@mui/icons-material/Close';
+import SearchIcon from '@mui/icons-material/Search';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
@@ -97,9 +102,6 @@ export default function GSTPortalRegister({ onBack }) {
   const tableContainerRef = useRef(null);
   useTableNavigation(tableContainerRef);
 
-  const allSelected = entries.length > 0 && selectedIds.size === entries.length;
-  const someSelected = selectedIds.size > 0 && !allSelected;
-
   const fileInputRef = useRef(null);
   const [targetRowIdForUpload, setTargetRowIdForUpload] = useState(null);
 
@@ -113,15 +115,173 @@ export default function GSTPortalRegister({ onBack }) {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null); // { imported: 0, skipped: 0, failed: 0 }
 
+  const [doneModalOpen, setDoneModalOpen] = useState(false);
+  const [doneSearchTerm, setDoneSearchTerm] = useState('');
+  const [markingDone, setMarkingDone] = useState(false);
+
+  const activeB2BRows = useMemo(() => {
+    return entries.filter(e => (!e.type || e.type === 'b2b') && e.status !== 'DONE');
+  }, [entries]);
+
+  const doneB2BRows = useMemo(() => {
+    return entries.filter(e => (!e.type || e.type === 'b2b') && e.status === 'DONE');
+  }, [entries]);
+
+  const allSelected = useMemo(() => {
+    if (activeTab === 1) {
+      return activeB2BRows.length > 0 && activeB2BRows.every(r => selectedIds.has(r._id));
+    }
+    const currentList = activeTab === 2
+      ? entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))
+      : entries;
+    return currentList.length > 0 && currentList.every(r => selectedIds.has(r._id));
+  }, [activeTab, activeB2BRows, entries, selectedIds, filterMonth, filterYear]);
+
+  const someSelected = useMemo(() => {
+    if (activeTab === 1) {
+      return activeB2BRows.some(r => selectedIds.has(r._id)) && !allSelected;
+    }
+    const currentList = activeTab === 2
+      ? entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))
+      : entries;
+    return currentList.some(r => selectedIds.has(r._id)) && !allSelected;
+  }, [activeTab, activeB2BRows, entries, selectedIds, allSelected, filterMonth, filterYear]);
+
   const toggleSelect = (id) => setSelectedIds(prev => {
     const s = new Set(prev);
     s.has(id) ? s.delete(id) : s.add(id);
     return s;
   });
+
   const toggleSelectAll = () => {
-    if (allSelected || someSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(entries.map(v => v._id)));
+    if (allSelected || someSelected) {
+      if (activeTab === 1) {
+        setSelectedIds(prev => {
+          const s = new Set(prev);
+          activeB2BRows.forEach(r => s.delete(r._id));
+          return s;
+        });
+      } else {
+        setSelectedIds(new Set());
+      }
+    } else {
+      if (activeTab === 1) {
+        setSelectedIds(prev => {
+          const s = new Set(prev);
+          activeB2BRows.forEach(r => s.add(r._id));
+          return s;
+        });
+      } else {
+        setSelectedIds(new Set(entries.map(v => v._id)));
+      }
+    }
   };
+
+  // ── Mark Selected B2B Rows as DONE ─────────────────────────────────────────
+  const handleMarkDone = async () => {
+    const activeIdsToMark = activeB2BRows
+      .filter(r => selectedIds.has(r._id))
+      .map(r => r._id);
+
+    if (activeIdsToMark.length === 0) {
+      setSnack({ severity: 'info', msg: 'Please select one or more B2B rows to mark as Done.' });
+      return;
+    }
+
+    try {
+      setMarkingDone(true);
+      const token = localStorage.getItem('token');
+      const nowIso = new Date().toISOString();
+
+      // Optimistic update: immediately remove from active list
+      setEntries(prev => prev.map(r =>
+        activeIdsToMark.includes(r._id)
+          ? { ...r, status: 'DONE', doneAt: nowIso }
+          : r
+      ));
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        activeIdsToMark.forEach(id => next.delete(id));
+        return next;
+      });
+
+      const res = await axios.post(`${API_URL}/gst-portal/b2b/mark-done`,
+        { ids: activeIdsToMark },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        setSnack({
+          severity: 'success',
+          msg: `Marked ${activeIdsToMark.length} B2B record(s) as DONE and moved to Done Records.`
+        });
+      }
+    } catch (err) {
+      console.error('Mark Done error:', err);
+      fetchData();
+      setSnack({
+        severity: 'error',
+        msg: 'Failed to mark records as Done: ' + (err.response?.data?.error || err.message)
+      });
+    } finally {
+      setMarkingDone(false);
+    }
+  };
+
+  // ── Done Records Filtering & Sorting ──────────────────────────────────────
+  const sortedDoneRows = useMemo(() => {
+    return [...doneB2BRows].sort((a, b) => {
+      const tA = a.doneAt ? new Date(a.doneAt).getTime() : 0;
+      const tB = b.doneAt ? new Date(b.doneAt).getTime() : 0;
+      if (tA && tB && tA !== tB) return tB - tA; // latest DONE first
+      return (Number(a['SL NO']) || 0) - (Number(b['SL NO']) || 0);
+    });
+  }, [doneB2BRows]);
+
+  const filteredDoneRows = useMemo(() => {
+    if (!doneSearchTerm.trim()) return sortedDoneRows;
+    const q = doneSearchTerm.toLowerCase();
+    return sortedDoneRows.filter(r =>
+      String(r['SL NO'] || '').toLowerCase().includes(q) ||
+      String(r['Invoice Number'] || '').toLowerCase().includes(q) ||
+      String(r['GSTIN of Supplier'] || '').toLowerCase().includes(q) ||
+      String(r['Trade / Legal Name'] || '').toLowerCase().includes(q) ||
+      String(r['Invoice Date'] || '').toLowerCase().includes(q) ||
+      String(r['Invoice Value'] || '').toLowerCase().includes(q) ||
+      String(r['Taxable Value'] || '').toLowerCase().includes(q)
+    );
+  }, [sortedDoneRows, doneSearchTerm]);
+
+  const doneTotals = useMemo(() => {
+    let invVal = 0, taxVal = 0, cgst = 0, sgst = 0, igst = 0;
+    filteredDoneRows.forEach(r => {
+      invVal += parseFloat(r['Invoice Value'] || 0) || 0;
+      taxVal += parseFloat(r['Taxable Value'] || 0) || 0;
+      cgst += parseFloat(r['CGST'] || 0) || 0;
+      sgst += parseFloat(r['SGST'] || 0) || 0;
+      igst += parseFloat(r['Integrated Tax'] || 0) || 0;
+    });
+    return { invVal, taxVal, cgst, sgst, igst, totalTax: cgst + sgst + igst };
+  }, [filteredDoneRows]);
+
+  const handleExportDone = () => {
+    if (filteredDoneRows.length === 0) return;
+    const exportCols = COLUMNS.filter(c => c.type !== 'upload');
+    const rows = filteredDoneRows.map(v => {
+      const row = {};
+      exportCols.forEach(c => {
+        const val = v[c.key];
+        row[c.label.replace(/\n/g, ' ')] = val !== null && val !== undefined ? String(val) : '';
+      });
+      row['Status'] = 'DONE';
+      row['Done Date'] = v.doneAt ? new Date(v.doneAt).toLocaleString('en-IN') : '';
+      return row;
+    });
+    import('../utils/exportCsv').then(({ exportToCsv }) =>
+      exportToCsv('gst_portal_done_b2b_records.xls', rows)
+    );
+  };
+
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -836,7 +996,7 @@ export default function GSTPortalRegister({ onBack }) {
       return;
     }
     const exportCols = activeTab === 1 ? COLUMNS.filter(c => c.type !== 'upload') : LIABILITY_COLUMNS;
-    const rows = (activeTab === 1 ? entries.filter(e => !e.type || e.type === 'b2b') : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))).map(v => {
+    const rows = (activeTab === 1 ? activeB2BRows : entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear))).map(v => {
       const row = {};
       exportCols.forEach(c => {
         const val = v[c.key];
@@ -879,7 +1039,7 @@ export default function GSTPortalRegister({ onBack }) {
   } : {};
 
   const filteredEntries = activeTab === 1
-    ? entries.filter(e => !e.type || e.type === 'b2b')
+    ? activeB2BRows
     : activeTab === 2 ? entries.filter(e => e.type === 'liability' && Number(e.filterMonth) === Number(filterMonth) && Number(e.filterYear) === Number(filterYear)) : [];
 
   filteredEntries.forEach(row => {
@@ -999,8 +1159,55 @@ export default function GSTPortalRegister({ onBack }) {
             sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>New Row</Button>
 
           {activeTab === 1 && (
-            <Button size="small" variant="outlined" startIcon={<FileUploadIcon />} onClick={handleTriggerExcelUpload}
-              sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>Upload XLS</Button>
+            <>
+              {/* DONE BUTTON */}
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={markingDone ? <CircularProgress size={13} color="inherit" /> : <CheckCircleIcon sx={{ fontSize: 16 }} />}
+                onClick={handleMarkDone}
+                onDoubleClick={() => setDoneModalOpen(true)}
+                disabled={markingDone}
+                title="Click to mark selected B2B rows as DONE. Double-click to open DONE RECORDS window."
+                sx={{
+                  fontWeight: 800,
+                  borderRadius: 2,
+                  px: 2,
+                  fontSize: '12px',
+                  background: selectedIds.size > 0 ? 'linear-gradient(135deg, #10b981, #059669)' : 'linear-gradient(135deg, #059669, #047857)',
+                  color: '#fff',
+                  boxShadow: selectedIds.size > 0 ? '0 3px 10px rgba(16,185,129,0.4)' : 'none',
+                  textTransform: 'none',
+                  '&:hover': { background: 'linear-gradient(135deg, #059669, #047857)' }
+                }}
+              >
+                DONE {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
+              </Button>
+
+              {/* DONE RECORDS BUTTON */}
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<FactCheckIcon sx={{ fontSize: 16 }} />}
+                onClick={() => setDoneModalOpen(true)}
+                title="Open DONE RECORDS window"
+                sx={{
+                  fontWeight: 700,
+                  borderRadius: 2,
+                  fontSize: '12px',
+                  color: '#065f46',
+                  borderColor: '#a7f3d0',
+                  bgcolor: '#ecfdf5',
+                  textTransform: 'none',
+                  '&:hover': { bgcolor: '#d1fae5', borderColor: '#34d399' }
+                }}
+              >
+                DONE RECORDS {doneB2BRows.length > 0 ? `(${doneB2BRows.length})` : ''}
+              </Button>
+
+              <Button size="small" variant="outlined" startIcon={<FileUploadIcon />} onClick={handleTriggerExcelUpload}
+                sx={{ fontWeight: 700, borderRadius: 2, fontSize: '12px' }}>Upload XLS</Button>
+            </>
           )}
 
           <Tooltip title="Reload">
@@ -1085,16 +1292,16 @@ export default function GSTPortalRegister({ onBack }) {
             </thead>
 
             <tbody>
-              {entries.filter(e => !e.type || e.type === 'b2b').length === 0 && (
+              {activeB2BRows.length === 0 && (
                 <tr>
                   <td colSpan={COLUMNS.length + 1} style={{
                     textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px'
                   }}>
-                    No entries found. Click "New Row" to add one.
+                    No active B2B entries found. Click "New Row" to add one.
                   </td>
                 </tr>
               )}
-              {entries.filter(e => !e.type || e.type === 'b2b').map((row, ri) => {
+              {activeB2BRows.map((row, ri) => {
                 const isSelected = selectedIds.has(row._id);
                 return (
                   <tr key={row._id} style={{
@@ -1541,6 +1748,288 @@ export default function GSTPortalRegister({ onBack }) {
             );
           })()
         )}
+      </Dialog>
+
+      {/* ── DONE RECORDS WINDOW (MODAL) ─────────────────────────────────────── */}
+      <Dialog
+        open={doneModalOpen}
+        onClose={() => setDoneModalOpen(false)}
+        maxWidth="xl"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            maxHeight: '90vh',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+            display: 'flex',
+            flexDirection: 'column'
+          }
+        }}
+      >
+        <DialogTitle sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: 'linear-gradient(135deg, #0f172a, #1e293b)',
+          color: '#fff',
+          borderBottom: '1px solid #334155'
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{
+              width: 36, height: 36, borderRadius: '50%',
+              bgcolor: 'rgba(16,185,129,0.2)', display: 'flex',
+              alignItems: 'center', justifyContent: 'center'
+            }}>
+              <CheckCircleIcon sx={{ color: '#34d399', fontSize: 22 }} />
+            </Box>
+            <Box>
+              <Typography variant="h6" fontWeight={800} sx={{ letterSpacing: '-0.3px', lineHeight: 1.2 }}>
+                DONE B2B RECORDS
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                Completed & Archived B2B Invoices (Historical Data Preserved)
+              </Typography>
+            </Box>
+            <Chip
+              label={`${doneB2BRows.length} Done Records`}
+              size="small"
+              sx={{ fontWeight: 800, bgcolor: 'rgba(16,185,129,0.2)', color: '#34d399', ml: 1 }}
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            {/* Search within Done Records */}
+            <TextField
+              size="small"
+              placeholder="Search Invoice, Supplier, SL NO..."
+              value={doneSearchTerm}
+              onChange={e => setDoneSearchTerm(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: '#94a3b8', fontSize: 18 }} />
+                  </InputAdornment>
+                )
+              }}
+              sx={{
+                width: 260,
+                bgcolor: '#334155',
+                borderRadius: 2,
+                input: { color: '#fff', fontSize: '12px', py: '6px' },
+                '.MuiOutlinedInput-notchedOutline': { borderColor: '#475569' },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#64748b' }
+              }}
+            />
+
+            {filteredDoneRows.length > 0 && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadIcon />}
+                onClick={handleExportDone}
+                sx={{
+                  color: '#e2e8f0',
+                  borderColor: '#475569',
+                  fontWeight: 700,
+                  fontSize: '11px',
+                  borderRadius: 2,
+                  textTransform: 'none',
+                  '&:hover': { bgcolor: '#334155', borderColor: '#64748b' }
+                }}
+              >
+                Export XLS
+              </Button>
+            )}
+
+            <IconButton
+              onClick={() => setDoneModalOpen(false)}
+              size="small"
+              sx={{ color: '#94a3b8', '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.1)' } }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+
+        {/* Summary metric banner */}
+        <Box sx={{
+          px: 3, py: 1, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0',
+          display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap'
+        }}>
+          <Box>
+            <Typography sx={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
+              Showing Records
+            </Typography>
+            <Typography sx={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>
+              {filteredDoneRows.length} of {doneB2BRows.length}
+            </Typography>
+          </Box>
+          <Box sx={{ height: 24, width: 1, bgcolor: '#cbd5e1' }} />
+          <Box>
+            <Typography sx={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
+              Total Invoice Value
+            </Typography>
+            <Typography sx={{ fontSize: '13px', fontWeight: 800, color: '#047857' }}>
+              ₹{doneTotals.invVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Typography>
+          </Box>
+          <Box sx={{ height: 24, width: 1, bgcolor: '#cbd5e1' }} />
+          <Box>
+            <Typography sx={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
+              Total Taxable Value
+            </Typography>
+            <Typography sx={{ fontSize: '13px', fontWeight: 800, color: '#0369a1' }}>
+              ₹{doneTotals.taxVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Typography>
+          </Box>
+          <Box sx={{ height: 24, width: 1, bgcolor: '#cbd5e1' }} />
+          <Box>
+            <Typography sx={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
+              Total Tax (CGST + SGST + IGST)
+            </Typography>
+            <Typography sx={{ fontSize: '13px', fontWeight: 800, color: '#b45309' }}>
+              ₹{doneTotals.totalTax.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Typography>
+          </Box>
+        </Box>
+
+        <DialogContent sx={{ p: 0, flex: 1, overflow: 'auto' }}>
+          <Box sx={{ minWidth: '100%' }}>
+            <table style={{
+              borderCollapse: 'collapse', minWidth: '100%',
+              tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
+            }}>
+              <colgroup>
+                {COLUMNS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
+                <col style={{ width: 90, minWidth: 90 }} />
+                <col style={{ width: 150, minWidth: 150 }} />
+              </colgroup>
+
+              <thead>
+                <tr>
+                  {COLUMNS.map(col => (
+                    <th key={col.key} style={{
+                      position: 'sticky', top: 0, zIndex: 2,
+                      background: 'linear-gradient(135deg,#1e293b,#0f172a)',
+                      color: '#e2e8f0',
+                      padding: '8px 5px', textAlign: 'center',
+                      fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.3px',
+                      whiteSpace: 'pre-line', lineHeight: 1.3,
+                      borderRight: '1px solid rgba(255,255,255,0.12)',
+                      borderBottom: '2px solid rgba(255,255,255,0.2)',
+                    }}>
+                      {col.label}
+                    </th>
+                  ))}
+                  <th style={{
+                    position: 'sticky', top: 0, zIndex: 2,
+                    background: 'linear-gradient(135deg,#065f46,#047857)',
+                    color: '#d1fae5',
+                    padding: '8px 5px', textAlign: 'center',
+                    fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.3px',
+                    borderRight: '1px solid rgba(255,255,255,0.12)',
+                    borderBottom: '2px solid rgba(255,255,255,0.2)',
+                  }}>
+                    STATUS
+                  </th>
+                  <th style={{
+                    position: 'sticky', top: 0, zIndex: 2,
+                    background: 'linear-gradient(135deg,#065f46,#047857)',
+                    color: '#d1fae5',
+                    padding: '8px 5px', textAlign: 'center',
+                    fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.3px',
+                    borderRight: '1px solid rgba(255,255,255,0.12)',
+                    borderBottom: '2px solid rgba(255,255,255,0.2)',
+                  }}>
+                    COMPLETED AT
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {filteredDoneRows.length === 0 && (
+                  <tr>
+                    <td colSpan={COLUMNS.length + 2} style={{
+                      textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px', fontWeight: 600
+                    }}>
+                      {doneB2BRows.length === 0
+                        ? 'No B2B records have been marked as DONE yet.'
+                        : 'No DONE records match your search filter.'}
+                    </td>
+                  </tr>
+                )}
+
+                {filteredDoneRows.map((row, ri) => (
+                  <tr key={row._id} style={{
+                    background: ri % 2 === 0 ? '#fff' : '#f8fafc',
+                    transition: 'background-color 0.15s'
+                  }}>
+                    {COLUMNS.map(col => {
+                      const rawVal = row[col.key];
+                      const display = rawVal !== null && rawVal !== undefined ? String(rawVal) : '';
+                      const cellStyle = {
+                        padding: '5px 6px', border: '1px solid #e2e8f0', fontSize: '11px',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        borderRight: '1px solid #e2e8f0',
+                        width: col.width, maxWidth: col.width,
+                      };
+
+                      if (col.type === 'auto') {
+                        return (
+                          <td key={col.key} style={{ ...cellStyle, textAlign: 'center', fontWeight: 800, background: '#f1f5f9', color: '#334155' }}>
+                            {display}
+                          </td>
+                        );
+                      }
+                      if (col.type === 'upload') {
+                        return (
+                          <td key={col.key} style={{ ...cellStyle, textAlign: 'center' }}>
+                            {rawVal ? (
+                              <a href={rawVal} target="_blank" rel="noopener noreferrer" style={{ padding: '2px 6px', borderRadius: 4, background: '#eff6ff', border: '1px solid #93c5fd', color: '#2563eb', textDecoration: 'none', fontSize: '10px', fontWeight: 700 }}>
+                                📄 View
+                              </a>
+                            ) : '-'}
+                          </td>
+                        );
+                      }
+
+                      return (
+                        <td key={col.key} style={cellStyle} title={display}>
+                          {display}
+                        </td>
+                      );
+                    })}
+
+                    {/* STATUS CHIP */}
+                    <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', padding: '4px' }}>
+                      <Chip
+                        label="DONE"
+                        size="small"
+                        icon={<CheckCircleIcon sx={{ fontSize: '14px !important', color: '#166534 !important' }} />}
+                        sx={{ bgcolor: '#dcfce7', color: '#166534', fontWeight: 800, height: 22, fontSize: '10px' }}
+                      />
+                    </td>
+
+                    {/* DONE AT TIMESTAMP */}
+                    <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', padding: '4px', fontSize: '10.5px', color: '#64748b' }}>
+                      {row.doneAt ? new Date(row.doneAt).toLocaleString('en-IN') : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Box>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0', justifyContent: 'space-between' }}>
+          <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+            Showing {filteredDoneRows.length} archived B2B records. Original database records are safely preserved.
+          </Typography>
+          <Button onClick={() => setDoneModalOpen(false)} variant="contained" sx={{ bgcolor: '#334155', '&:hover': { bgcolor: '#1e293b' }, fontWeight: 700 }}>
+            Close
+          </Button>
+        </DialogActions>
       </Dialog>
 
       {/* ── Snackbar ────────────────────────────────────────────────────────── */}

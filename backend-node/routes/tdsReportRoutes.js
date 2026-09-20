@@ -37,29 +37,209 @@ function parseDate(val) {
   return null;
 }
 
+// Helper to classify cement-register row as NVL or NVCL
+function classifyCementRow(row) {
+  const site = (row['SITE'] || '').toUpperCase().trim();
+  if (site === 'NVL') return 'NVL';
+  if (site === 'NVCL') return 'NVCL';
+  if (row._is_ato === true || row._is_ato === 'true') return 'NVL';
+  if (row._is_ato === false || row._is_ato === 'false') return 'NVCL';
+  const billType = (row['Bill Type'] || '').toUpperCase();
+  if (billType === 'NT') return 'NVL';
+  if (billType === 'STO' || billType === 'SO') return 'NVCL';
+  const type = (row['TYPE'] || '').toUpperCase();
+  if (type === 'ATOA' || type === 'ATO') return 'NVL';
+  if (type === 'MKT') return 'NVCL';
+  return 'NVL';
+}
+
+const MONTH_NAMES_LIST = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
 // ── GET /api/tds-reports/party-tds ──────────────────────────────────────────
 router.get('/party-tds', async (req, res) => {
   try {
-    const { search } = req.query;
+    const { month, year, fy, search } = req.query;
+    const now = new Date();
+
+    let targetMonth = month ? parseInt(month, 10) : (now.getMonth() + 1);
+    if (isNaN(targetMonth) || targetMonth < 1 || targetMonth > 12) {
+      targetMonth = now.getMonth() + 1;
+    }
+
+    let targetYear = year ? parseInt(year, 10) : null;
+    if (!targetYear || isNaN(targetYear)) {
+      if (fy) {
+        const fyStart = parseInt(String(fy).split('-')[0], 10);
+        if (!isNaN(fyStart)) {
+          targetYear = targetMonth >= 4 ? fyStart : fyStart + 1;
+        }
+      }
+      if (!targetYear || isNaN(targetYear)) {
+        targetYear = now.getFullYear();
+      }
+    }
+
+    const monthTitle = MONTH_NAMES_LIST[targetMonth - 1] || 'September';
 
     const db = mongoose.connection.useDb('invoice_system');
     const ownerCol = db.collection('owner details');
-    const ownerDocs = await ownerCol.find({}).toArray();
+    const truckCol = db.collection('Truck Contact Number');
+    const cementCol = mongoose.connection.useDb('cement_register').collection('entries');
 
-    // Group by unique owner name (case-insensitive deduplication)
+    const [ownerDocs, truckDocs] = await Promise.all([
+      ownerCol.find({}).toArray(),
+      truckCol.find({}).toArray()
+    ]);
+
+    // 1. Truck Contacts mapping (vehicleNo -> owner, wheel, contact)
+    const vehToOwner = {};
+    const vehContactMap = {};
+    truckDocs.forEach(c => {
+      const v = normVeh(c.truck_no || c['Truck No '] || c['Truck No'] || c.vehicleNo);
+      const o = (c.owner_name || c['Owner Name '] || c['Owner Name'] || c.ownerName || '').trim();
+      if (v) {
+        vehToOwner[v] = o;
+        vehContactMap[v] = c;
+      }
+    });
+
+    // 2. Unique owners map from owner details collection
     const uniqueOwnersMap = new Map();
     ownerDocs.forEach(d => {
-      const rawName = (d["Owner Name"] || d["Owner Name "] || d.owner_name || "").trim();
+      const rawName = (d['Owner Name'] || d['Owner Name '] || d.owner_name || '').trim();
       if (!rawName) return;
       const key = rawName.toUpperCase();
       if (!uniqueOwnersMap.has(key)) {
+        let rawTds = d['TDS Applicability'] !== undefined && d['TDS Applicability'] !== null && d['TDS Applicability'] !== ''
+          ? num(d['TDS Applicability'])
+          : null;
+        if (rawTds !== null && rawTds > 0 && rawTds < 1) {
+          rawTds = rawTds * 100;
+        }
+
         uniqueOwnersMap.set(key, {
           name: rawName,
-          pan: (d["PAN No."] || d["PAN No. "] || d.pan_no || "-").trim(),
-          aadhar: (d["Aadhar No."] || d["Aadhar No. "] || d.aadhar_no || "-").trim(),
-          panAadharLink: (d["PAN Addahar Link"] || d["PAN Addahar Link "] || d.pan_aadhar_link || "-").trim()
+          pan: (d['PAN No.'] || d['PAN No. '] || d.pan_no || '-').trim(),
+          aadhar: (d['Aadhar No.'] || d['Aadhar No. '] || d.aadhar_no || '-').trim(),
+          panAadharLink: (d['PAN Addahar Link'] || d['PAN Addahar Link '] || d.pan_aadhar_link || '-').trim(),
+          tdsApplicability: rawTds
         });
       }
+    });
+
+    // 3. Fetch cement register entries belonging ONLY to the selected month & year
+    const monthDocs = [];
+    const cementCursor = cementCol.find({});
+    while (await cementCursor.hasNext()) {
+      const doc = await cementCursor.next();
+      const dateVal = doc['LOADING DT'] || doc['LOADING DATE'];
+      const p = parseDate(dateVal);
+      if (p) {
+        const m = p.getMonth() + 1;
+        const y = p.getFullYear();
+        if (m === targetMonth && y === targetYear) {
+          monthDocs.push(doc);
+        }
+      }
+    }
+
+    // 4. Calculate ROW 1: TOTAL FREIGHT AMOUNT (Party Payment Details "Gross Freight (95% Payable)")
+    const ownerFreight = {};
+    const ownerTdsDeducted = {};
+
+    monthDocs.forEach(row => {
+      const v = normVeh(row['VEHICLE NUMBER'] || row['VEHICLE NO']);
+      const o = vehToOwner[v] || (row['OWNER NAME'] || '').trim() || 'Unknown';
+      const oKey = o.toUpperCase();
+
+      let gf = 0;
+      for (const k of ['BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT']) {
+        if (row[k] !== undefined && row[k] !== null && row[k] !== '') {
+          if (typeof row[k] === 'object' && !Array.isArray(row[k])) {
+            gf = Object.values(row[k]).reduce((s, x) => s + num(x), 0);
+          } else {
+            gf = num(row[k]);
+          }
+          break;
+        }
+      }
+      ownerFreight[oKey] = (ownerFreight[oKey] || 0) + gf;
+
+      // Track actual TDS recorded in cement register if available
+      const tdsVal = num(row['TDS@1%']) || num(row['TDS']);
+      ownerTdsDeducted[oKey] = (ownerTdsDeducted[oKey] || 0) + tdsVal;
+    });
+
+    // 5. Calculate ROW 2: TOTAL INCENTIVE AMOUNT (Incentive Entry "Total (Projected)")
+    const byTruck = {};
+    for (const row of monthDocs) {
+      const truck = normVeh(row['VEHICLE NUMBER'] || row['VEHICLE NO']);
+      if (!truck) continue;
+
+      if (!byTruck[truck]) {
+        const contact = vehContactMap[truck];
+        const dbWheel = contact ? (contact['Type of vehicle '] || contact['Type of vehicle'] || contact.type_of_vehicle || '') : '';
+        const owner = contact ? (contact['Owner Name '] || contact['Owner Name'] || contact.owner_name || '') : '';
+        byTruck[truck] = {
+          ownerName: (row['OWNER NAME'] || owner || vehToOwner[truck] || '').trim(),
+          truckNo: truck,
+          wheel: row['WHEEL'] || dbWheel || '',
+          tripsCount: 0,
+          nvl: { amt: 0 },
+          nvcl: { amt: 0 },
+          extra10W: 0,
+          extra6W: 0
+        };
+      }
+
+      const entry = byTruck[truck];
+      const cat = classifyCementRow(row);
+      const mt = num(row['MT']);
+      const billing = num(row['BILLING']);
+      const orgFreight = billing * mt;
+      entry.tripsCount += 1;
+      const baseIncentive = orgFreight * 0.095;
+
+      if (cat === 'NVL') {
+        entry.nvl.amt += baseIncentive;
+      } else {
+        entry.nvcl.amt += baseIncentive;
+      }
+
+      const bType = (row['Bill Type'] || '').toUpperCase();
+      const isSoOrNt = bType === 'SO' || bType === 'NT';
+      const manualW10 = num(row['10W EXTRA 8.5%']);
+      if (manualW10 > 0) {
+        entry.extra10W += manualW10;
+      } else if (isSoOrNt) {
+        const wheelStr = String(entry.wheel).toLowerCase();
+        if (wheelStr.includes('10')) {
+          entry.extra10W += orgFreight * 0.085;
+        }
+      }
+      if (isSoOrNt) {
+        const wheelStr = String(entry.wheel).toLowerCase();
+        if (wheelStr.includes('6')) {
+          entry.extra6W += orgFreight * 0.15;
+        }
+      }
+    }
+
+    // Aggregate Total (Projected) by Owner
+    const ownerIncentives = {};
+    Object.values(byTruck).forEach(t => {
+      const metCriteria = t.tripsCount > 6;
+      if (!metCriteria) {
+        t.extra10W = 0;
+        t.extra6W = 0;
+      }
+      const nvlNvclTotal = Math.round(t.nvl.amt) + Math.round(t.nvcl.amt);
+      const totalFinal = nvlNvclTotal + Math.round(t.extra10W) + Math.round(t.extra6W);
+      const oKey = (t.ownerName || 'Unknown').toUpperCase();
+      ownerIncentives[oKey] = (ownerIncentives[oKey] || 0) + totalFinal;
     });
 
     let uniqueOwners = Array.from(uniqueOwnersMap.values());
@@ -74,32 +254,110 @@ router.get('/party-tds', async (req, res) => {
       );
     }
 
-    // Generate EXACTLY 4 rows per unique owner with continuous SL NO (1..N*4)
+    // 6. Generate EXACTLY 4 rows per unique owner for the selected month
+    // ROW 1 → TOTAL FREIGHT AMOUNT (Party Payment Details: Gross Freight (95% Payable))
+    // ROW 2 → TOTAL INCENTIVE AMOUNT (Incentive Entry: Total (Projected))
+    // ROW 3 → DIFFERENTIAL (TOTAL FREIGHT AMOUNT - TOTAL INCENTIVE AMOUNT)
+    // ROW 4 → Existing TDS/SUMMARY logic
     const entries = [];
     let slNo = 1;
 
     uniqueOwners.forEach(ownerObj => {
-      for (let r = 1; r <= 4; r++) {
-        entries.push({
-          slNo: slNo++,
-          ownerIndexRow: r,
-          name: ownerObj.name,
-          billNo: "-",
-          billDate: "-",
-          billType: "-",
-          basicAmount: 0,
-          tdsPercent: 0,
-          tdsAmount: 0,
-          tdsDeducted: 0,
-          panCardNumber: ownerObj.pan,
-          aadharNo: ownerObj.aadhar,
-          aadhaarPanLinked: (ownerObj.panAadharLink.toUpperCase() === "YES" || (ownerObj.pan !== "-" && ownerObj.aadhar !== "-")) ? "YES" : "NO"
-        });
+      const oKey = ownerObj.name.toUpperCase();
+      const totalFreight = Math.round((ownerFreight[oKey] || 0) * 100) / 100;
+      const totalIncentive = Math.round((ownerIncentives[oKey] || 0) * 100) / 100;
+      const differential = Math.round((totalFreight - totalIncentive) * 100) / 100;
+
+      // TDS % calculation (1% default or owner-specific)
+      let tdsRate = 1;
+      if (ownerObj.tdsApplicability !== null && !isNaN(ownerObj.tdsApplicability)) {
+        tdsRate = ownerObj.tdsApplicability;
       }
+
+      const isLinked = (ownerObj.panAadharLink.toUpperCase() === 'YES' || (ownerObj.pan !== '-' && ownerObj.aadhar !== '-')) ? 'YES' : 'NO';
+      const tdsAmount = Math.round((Math.max(0, differential) * (tdsRate / 100)) * 100) / 100;
+      const actualDeducted = ownerTdsDeducted[oKey] !== undefined && ownerTdsDeducted[oKey] > 0
+        ? Math.round(ownerTdsDeducted[oKey] * 100) / 100
+        : tdsAmount;
+
+      // ROW 1 → TOTAL FREIGHT AMOUNT
+      entries.push({
+        slNo: slNo++,
+        ownerIndexRow: 1,
+        name: ownerObj.name,
+        billNo: '-',
+        billDate: '-',
+        billType: `Total Freight — ${monthTitle} ${targetYear}`,
+        basicAmount: totalFreight,
+        note: '-',
+        tdsPercent: 0,
+        tdsAmount: 0,
+        tdsDeducted: 0,
+        panCardNumber: ownerObj.pan,
+        aadharNo: ownerObj.aadhar,
+        aadhaarPanLinked: isLinked
+      });
+
+      // ROW 2 → TOTAL INCENTIVE AMOUNT
+      entries.push({
+        slNo: slNo++,
+        ownerIndexRow: 2,
+        name: ownerObj.name,
+        billNo: '-',
+        billDate: '-',
+        billType: `Total Incentive — ${monthTitle} ${targetYear}`,
+        basicAmount: totalIncentive,
+        note: '-',
+        tdsPercent: 0,
+        tdsAmount: 0,
+        tdsDeducted: 0,
+        panCardNumber: ownerObj.pan,
+        aadharNo: ownerObj.aadhar,
+        aadhaarPanLinked: isLinked
+      });
+
+      // ROW 3 → DIFFERENTIAL
+      entries.push({
+        slNo: slNo++,
+        ownerIndexRow: 3,
+        name: ownerObj.name,
+        billNo: '-',
+        billDate: '-',
+        billType: `Differential — ${monthTitle} ${targetYear}`,
+        basicAmount: differential,
+        note: '-',
+        tdsPercent: 0,
+        tdsAmount: 0,
+        tdsDeducted: 0,
+        panCardNumber: ownerObj.pan,
+        aadharNo: ownerObj.aadhar,
+        aadhaarPanLinked: isLinked
+      });
+
+      // ROW 4 → Existing TDS/SUMMARY logic
+      entries.push({
+        slNo: slNo++,
+        ownerIndexRow: 4,
+        name: ownerObj.name,
+        billNo: '-',
+        billDate: '-',
+        billType: `TDS / Summary — ${monthTitle} ${targetYear}`,
+        basicAmount: differential,
+        note: '-',
+        tdsPercent: tdsRate,
+        tdsAmount: tdsAmount,
+        tdsDeducted: actualDeducted,
+        panCardNumber: ownerObj.pan,
+        aadharNo: ownerObj.aadhar,
+        aadhaarPanLinked: isLinked
+      });
     });
 
     res.json({
       success: true,
+      month: targetMonth,
+      year: targetYear,
+      monthTitle,
       uniqueOwnerCount: uniqueOwners.length,
       count: entries.length,
       entries

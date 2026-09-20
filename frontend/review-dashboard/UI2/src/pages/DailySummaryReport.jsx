@@ -556,22 +556,32 @@ function DailySummaryTab({
     setSavingExtensions(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.put(`${API_URL}/cement-register/bulk-extend-eway`, {
-        extensions: payload
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      
+      let res;
+      try {
+        res = await axios.post(`${API_URL}/daily-summary/extend-eway-validity`, {
+          extensions: payload
+        }, { headers });
+      } catch (postErr) {
+        // Fallback to cement-register bulk endpoint if needed
+        res = await axios.put(`${API_URL}/cement-register/bulk-extend-eway`, {
+          extensions: payload
+        }, { headers });
+      }
 
-      if (res.data.success) {
-        setSnack({ severity: 'success', msg: `Successfully updated ${res.data.modifiedCount || payload.length} E-Way bill validity dates!` });
+      if (res?.data?.success) {
+        const count = res.data.count || res.data.modifiedCount || payload.length;
+        setSnack({ severity: 'success', msg: `Successfully updated ${count} E-Way bill validity dates!` });
         setExtensionDialogOpen(false);
         fetchData(date);
       } else {
-        setSnack({ severity: 'error', msg: res.data.error || 'Failed to update E-Way bill validities.' });
+        setSnack({ severity: 'error', msg: res?.data?.error || 'Failed to update E-Way bill validities.' });
       }
     } catch (err) {
-      console.error(err);
-      setSnack({ severity: 'error', msg: 'Error updating E-Way bill validities.' });
+      console.error('[DailySummaryReport] Extension error:', err);
+      const errorMsg = err.response?.data?.error || err.response?.data?.message || err.message || 'Error updating E-Way bill validities.';
+      setSnack({ severity: 'error', msg: errorMsg });
     } finally {
       setSavingExtensions(false);
     }
@@ -1013,13 +1023,13 @@ function DailySummaryTab({
         px: { xs: 1.5, md: 2.5 }, py: 1.2,
         boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1)',
         display: 'flex',
-        flexWrap: { xs: 'wrap', lg: 'nowrap' },
+        flexWrap: { xs: 'wrap', xl: 'nowrap' },
         justifyContent: 'space-between',
         alignItems: 'center',
         gap: { xs: 1, md: 1.5 }
       }}>
         {/* Left Title */}
-        <Box display="flex" alignItems="center" gap={1} flexShrink={0}>
+        <Box display="flex" alignItems="center" gap={1} flexShrink={0} sx={{ order: 1 }}>
           <IconButton onClick={onBack} size="small" sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
             <ArrowBackIcon fontSize="small" />
           </IconButton>
@@ -1038,9 +1048,10 @@ function DailySummaryTab({
           flexShrink: 0,
           display: 'flex',
           justifyContent: 'center',
-          order: { xs: 3, lg: 2 },
-          width: { xs: '100%', lg: 'auto' },
-          mx: { xs: 0, lg: 'auto' }
+          order: { xs: 3, xl: 2 },
+          width: { xs: '100%', xl: 'auto' },
+          mx: { xs: 0, xl: 'auto' },
+          mt: { xs: 1.5, xl: 0 }
         }}>
           <Tabs
             value={mainTab}
@@ -1083,7 +1094,17 @@ function DailySummaryTab({
         </Box>
 
         {/* Right Controls */}
-        <Box display="flex" alignItems="center" gap={{ xs: 0.8, md: 1 }} flexShrink={0} sx={{ order: { xs: 2, lg: 3 } }}>
+        <Box
+          display="flex"
+          alignItems="center"
+          gap={{ xs: 0.8, md: 1 }}
+          flexWrap="wrap"
+          sx={{
+            order: { xs: 2, xl: 3 },
+            justifyContent: { xs: 'flex-start', sm: 'flex-end' },
+            flexShrink: 0
+          }}
+        >
           <FormControl size="small">
             <Select
               value={financialYear}
@@ -2568,13 +2589,13 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
         px: { xs: 1.5, md: 2.5 }, py: 1.2,
         boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1)',
         display: 'flex',
-        flexWrap: { xs: 'wrap', lg: 'nowrap' },
+        flexWrap: { xs: 'wrap', xl: 'nowrap' },
         justifyContent: 'space-between',
         alignItems: 'center',
         gap: { xs: 1, md: 1.5 }
       }}>
         {/* Left Title */}
-        <Box display="flex" alignItems="center" gap={1} flexShrink={0}>
+        <Box display="flex" alignItems="center" gap={1} flexShrink={0} sx={{ order: 1 }}>
           <IconButton onClick={onBack} size="small" sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
             <ArrowBackIcon fontSize="small" />
           </IconButton>
@@ -2593,9 +2614,10 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
           flexShrink: 0,
           display: 'flex',
           justifyContent: 'center',
-          order: { xs: 3, lg: 2 },
-          width: { xs: '100%', lg: 'auto' },
-          mx: { xs: 0, lg: 'auto' }
+          order: { xs: 3, xl: 2 },
+          width: { xs: '100%', xl: 'auto' },
+          mx: { xs: 0, xl: 'auto' },
+          mt: { xs: 1.5, xl: 0 }
         }}>
           <Tabs
             value={mainTab}
@@ -2638,7 +2660,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
         </Box>
 
         {/* Right Controls */}
-        <Box display="flex" alignItems="center" justifyContent="flex-end" sx={{ order: { xs: 2, lg: 3 }, minWidth: { xs: 'auto', lg: 120 } }}>
+        <Box display="flex" alignItems="center" justifyContent="flex-end" sx={{ order: { xs: 2, xl: 3 }, minWidth: { xs: 'auto', xl: 120 }, flexShrink: 0 }}>
           <Tooltip title="Refresh Data">
             <IconButton onClick={fetchParties} size="small" sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
               <RefreshIcon fontSize="small" />

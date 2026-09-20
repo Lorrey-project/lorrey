@@ -18,7 +18,9 @@ const accountDetailSchema = new mongoose.Schema({
   selectedYear: { type: String, default: '' },
   vehicle: { type: String, default: '' },
   _source: { type: String, default: 'manual' },
-  _allocations: { type: mongoose.Schema.Types.Mixed, default: [] }
+  _allocations: { type: mongoose.Schema.Types.Mixed, default: [] },
+  _creditorSync: { type: mongoose.Schema.Types.Mixed, default: null },
+  _monojSync: { type: mongoose.Schema.Types.Mixed, default: null }
 }, {
   timestamps: true,
   collection: 'account_details'

@@ -21,6 +21,7 @@ import OfficePortal from './portals/office/OfficePortal';
 import SitePortal from './portals/site/SitePortal';
 import PumpPortal from './portals/pump/PumpPortal';
 import BrindaPortal from './portals/brinda/BrindaPortal';
+import JeetPortal from './portals/jeet/JeetPortal';
 import PumpPaymentDetails from './pages/PumpPaymentDetails';
 import PartyPaymentDetails from './pages/PartyPaymentDetails';
 import FinancialYearDetails from './pages/FinancialYearDetails';
@@ -98,6 +99,7 @@ const getUserPanelKey = (user) => {
   if (email === 'sas1@sas.com' || (user.role === 'PETROL PUMP' && user.pumpName === 'SAS-1')) return 'sas1';
   if (email === 'sas2@sas.com' || (user.role === 'PETROL PUMP' && user.pumpName === 'SAS-2')) return 'sas2';
   if (email === 'brindashyam@dac.com' || user.role === 'BRINDA SHYAM') return 'brinda';
+  if (email === 'jeetpanja@dac.com' || user.role === 'JEET PANJA') return 'jeet';
   return 'office';
 };
 
@@ -108,6 +110,7 @@ const getPanelPath = (panelKey) => {
     case 'sas1': return '/pump-sas1';
     case 'sas2': return '/pump-sas2';
     case 'brinda': return '/brinda-shyam';
+    case 'jeet': return '/jeet-panja';
     default: return '/office';
   }
 };
@@ -319,6 +322,19 @@ function AppContent() {
             onOpenMainCashbook={() => handleViewChange('mainCashbook')}
             onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
             onOpenOthersCreditor={() => { setOthersCreditorInitialTab(1); handleViewChange('othersCreditor'); }}
+            onOpenDashboard={() => handleViewChange('dashboard')}
+          />
+        );
+      }
+
+      if (panelKey === 'jeet') {
+        return (
+          <JeetPortal
+            onLogout={logout}
+            onOpenCementRegister={() => handleViewChange('cementRegister')}
+            onOpenMainCashbook={() => handleViewChange('mainCashbook')}
+            onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
+            onOpenOthersCreditor={() => { setOthersCreditorInitialTab(2); handleViewChange('othersCreditor'); }}
             onOpenDashboard={() => handleViewChange('dashboard')}
           />
         );

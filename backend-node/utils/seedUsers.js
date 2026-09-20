@@ -37,6 +37,13 @@ const SEED_ACCOUNTS = [
     role: 'BRINDA SHYAM',
     name: 'Brinda Shyam Panel',
     status: 'active'
+  },
+  {
+    email: 'jeetpanja@dac.com',
+    password: 'jeetpanja@713201',
+    role: 'JEET PANJA',
+    name: 'Jeet Panja Panel',
+    status: 'active'
   }
 ];
 

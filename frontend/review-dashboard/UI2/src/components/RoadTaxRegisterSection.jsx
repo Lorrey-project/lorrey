@@ -14,10 +14,12 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import PendingActionsIcon from '@mui/icons-material/PendingActions';
 import SaveIcon from '@mui/icons-material/Save';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 import { useTableNavigation } from '../hooks/useTableNavigation';
 
 const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 
 const MONTH_LIST = [
   { value: 1, name: 'January' },
@@ -44,7 +46,25 @@ const formatAmt = (val) => {
   return Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-export default function RoadTaxRegisterSection() {
+const formatDateForInput = (val) => {
+  if (!val || val === '-' || val === 'null' || val === 'undefined') return '';
+  const str = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const m = str.match(/^(\d{1,2})[\.\/\-](\d{1,2})[\.\/\-](\d{2,4})$/);
+  if (m) {
+    const d = m[1].padStart(2, '0');
+    const mo = m[2].padStart(2, '0');
+    let y = m[3];
+    if (y.length === 2) y = '20' + y;
+    return `${y}-${mo}-${d}`;
+  }
+  return '';
+};
+
+export default function RoadTaxRegisterSection({
+  creditorName = 'BRINDA SHYAM',
+  panelTitle = 'BRINDA SHYAM PANEL'
+}) {
   const now = new Date();
   const currentMonthNum = now.getMonth() + 1; // 1-12
   const currentYearNum = now.getFullYear();
@@ -90,7 +110,8 @@ export default function RoadTaxRegisterSection() {
         params: {
           month: selMonth,
           year: selYear,
-          search: searchTerm
+          search: searchTerm,
+          creditor: creditorName
         },
         headers
       });
@@ -108,7 +129,30 @@ export default function RoadTaxRegisterSection() {
 
   useEffect(() => {
     fetchData();
-  }, [selMonth, selYear, searchTerm]);
+  }, [selMonth, selYear, searchTerm, creditorName]);
+
+  // Real-time live synchronization on bank book creditor sync
+  useEffect(() => {
+    let socket;
+    try {
+      socket = io(SOCKET_URL, { transports: ["websocket", "polling"] });
+      socket.on('roadTaxUpdate', () => {
+        fetchData();
+      });
+      socket.on('cementUpdates', () => {
+        fetchData();
+      });
+    } catch (e) {
+      console.warn('Socket connection error in RoadTaxRegisterSection:', e);
+    }
+    return () => {
+      if (socket) {
+        socket.off('roadTaxUpdate');
+        socket.off('cementUpdates');
+        socket.disconnect();
+      }
+    };
+  }, [selMonth, selYear, creditorName]);
 
   // Handle local cell edit and trigger auto-save
   const handleCellChange = (index, field, value) => {
@@ -116,10 +160,10 @@ export default function RoadTaxRegisterSection() {
       const copy = [...prev];
       const updatedRow = { ...copy[index], [field]: value };
 
-      // Recalculate balance automatically
+      // Recalculate balance automatically (never negative)
       const rec = num(updatedRow.receivableAmount);
       const paid = num(updatedRow.paidAmount);
-      updatedRow.balance = Math.round((rec - paid) * 100) / 100;
+      updatedRow.balance = Math.round(Math.abs(rec - paid) * 100) / 100;
 
       copy[index] = updatedRow;
 
@@ -138,10 +182,12 @@ export default function RoadTaxRegisterSection() {
         recordId: row.recordId,
         truckNo: row.truckNo,
         validityType: row.validityType,
+        creditor: creditorName,
         month: selMonth,
         year: selYear,
         renewStatus: row.renewStatus,
         renewDate: row.renewDate,
+        newValidityDate: row.newValidityDate,
         receivableAmount: row.receivableAmount,
         paidAmount: row.paidAmount,
         pdfUrl: row.pdfUrl,
@@ -202,12 +248,14 @@ export default function RoadTaxRegisterSection() {
       'EXPIRE DATE': r.expireDate,
       'RENEW STATUS': r.renewStatus,
       'RENEW DATE': r.renewDate,
+      'NEW VALIDITY DATE': r.newValidityDate || '',
       'RECEIVABLE AMOUNT (Rs)': r.receivableAmount,
       'PAID AMOUNT (Rs)': r.paidAmount,
-      'BALANCE (Rs)': r.balance,
+      'BALANCE (Rs)': Math.abs(num(r.balance)),
       'PDF URL': r.pdfUrl || 'No PDF'
     }));
-    exportToCsv(`VEHICLE_VALIDITY_REGISTER_${selMonth}_${selYear}.csv`, exportData);
+    const sanitizedCreditor = creditorName.replace(/\s+/g, '_').toUpperCase();
+    exportToCsv(`${sanitizedCreditor}_VEHICLE_VALIDITY_REGISTER_${selMonth}_${selYear}.csv`, exportData);
   };
 
   // Bulk Save all rows to MongoDB
@@ -223,10 +271,12 @@ export default function RoadTaxRegisterSection() {
           recordId: row.recordId,
           truckNo: row.truckNo,
           validityType: row.validityType,
+          creditor: creditorName,
           month: selMonth,
           year: selYear,
           renewStatus: row.renewStatus,
           renewDate: row.renewDate,
+          newValidityDate: row.newValidityDate,
           receivableAmount: row.receivableAmount,
           paidAmount: row.paidAmount,
           pdfUrl: row.pdfUrl,
@@ -466,7 +516,7 @@ export default function RoadTaxRegisterSection() {
             </Box>
           )}
 
-          <Table size="small" style={{ width: '100%', minWidth: 1350, borderCollapse: 'collapse', fontFamily: 'Inter, system-ui, sans-serif' }}>
+          <Table size="small" style={{ width: '100%', minWidth: 1520, borderCollapse: 'collapse', fontFamily: 'Inter, system-ui, sans-serif' }}>
             <TableHead>
               <TableRow>
                 <TableCell style={{ ...thStyle, width: '60px' }}>1. SL NO</TableCell>
@@ -477,17 +527,18 @@ export default function RoadTaxRegisterSection() {
                 <TableCell style={{ ...thStyle, minWidth: '130px' }}>6. EXPIRE DATE</TableCell>
                 <TableCell style={{ ...thStyle, minWidth: '140px' }}>7. RENEW STATUS</TableCell>
                 <TableCell style={{ ...thStyle, minWidth: '150px' }}>8. RENEW DATE</TableCell>
-                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '160px' }}>9. RECEIVABLE AMOUNT</TableCell>
-                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '160px' }}>10. PAID AMOUNT</TableCell>
-                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '150px' }}>11. BALANCE</TableCell>
-                <TableCell style={{ ...thStyle, minWidth: '200px' }}>12. PDF UPLOAD</TableCell>
+                <TableCell style={{ ...thStyle, minWidth: '150px' }}>9. NEW VALIDITY DATE</TableCell>
+                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '160px' }}>10. RECEIVABLE AMOUNT</TableCell>
+                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '160px' }}>11. PAID AMOUNT</TableCell>
+                <TableCell style={{ ...thStyle, textAlign: 'right', minWidth: '150px' }}>12. BALANCE</TableCell>
+                <TableCell style={{ ...thStyle, minWidth: '200px' }}>13. PDF UPLOAD</TableCell>
               </TableRow>
             </TableHead>
 
             <TableBody>
               {rows.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={12} align="center" sx={{ py: 6, color: '#64748b', fontWeight: 600 }}>
+                  <TableCell colSpan={13} align="center" sx={{ py: 6, color: '#64748b', fontWeight: 600 }}>
                     No vehicle validities expiring in the next 7 days found for {MONTH_LIST.find(m => m.value === selMonth)?.name || selMonth} {selYear}.
                   </TableCell>
                 </TableRow>
@@ -561,7 +612,7 @@ export default function RoadTaxRegisterSection() {
                       <TextField
                         size="small"
                         type="date"
-                        value={row.renewDate || ''}
+                        value={formatDateForInput(row.renewDate)}
                         onChange={(e) => handleCellChange(index, 'renewDate', e.target.value)}
                         InputLabelProps={{ shrink: true }}
                         sx={{
@@ -572,7 +623,23 @@ export default function RoadTaxRegisterSection() {
                       />
                     </TableCell>
 
-                    {/* 9. RECEIVABLE AMOUNT */}
+                    {/* 9. NEW VALIDITY DATE */}
+                    <TableCell style={{ ...tdStyle, textAlign: 'center' }}>
+                      <TextField
+                        size="small"
+                        type="date"
+                        value={formatDateForInput(row.newValidityDate)}
+                        onChange={(e) => handleCellChange(index, 'newValidityDate', e.target.value)}
+                        InputLabelProps={{ shrink: true }}
+                        sx={{
+                          width: 145,
+                          input: { fontSize: '12px', padding: '5px 8px', fontWeight: 700, color: '#0f172a' },
+                          '.MuiOutlinedInput-notchedOutline': { borderColor: '#cbd5e1' }
+                        }}
+                      />
+                    </TableCell>
+
+                    {/* 10. RECEIVABLE AMOUNT */}
                     <TableCell style={{ ...tdStyle, textAlign: 'right' }}>
                       <TextField
                         size="small"
@@ -591,7 +658,7 @@ export default function RoadTaxRegisterSection() {
                       />
                     </TableCell>
 
-                    {/* 10. PAID AMOUNT */}
+                    {/* 11. PAID AMOUNT */}
                     <TableCell style={{ ...tdStyle, textAlign: 'right' }}>
                       <TextField
                         size="small"
@@ -610,12 +677,12 @@ export default function RoadTaxRegisterSection() {
                       />
                     </TableCell>
 
-                    {/* 11. BALANCE (RECEIVABLE - PAID) */}
+                    {/* 12. BALANCE (RECEIVABLE - PAID) */}
                     <TableCell style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, fontSize: '13px', color: row.balance === 0 ? '#15803d' : '#b91c1c' }}>
-                      ₹{formatAmt(row.balance)}
+                      ₹{formatAmt(Math.abs(row.balance))}
                     </TableCell>
 
-                    {/* 12. PDF UPLOAD */}
+                    {/* 13. PDF UPLOAD */}
                     <TableCell style={{ ...tdStyle, textAlign: 'center' }}>
                       <Box display="flex" alignItems="center" justifyContent="center" gap={1}>
                         <input

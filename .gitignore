@@ -6,6 +6,9 @@ __pycache__/
 *.log
 uploads/
 .DS_Store
+**/.DS_Store
+dist/
+**/dist/
 Invoices/
 Lorrey_Scans/
 frontend/voucher/

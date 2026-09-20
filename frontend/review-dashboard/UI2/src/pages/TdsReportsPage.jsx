@@ -39,6 +39,11 @@ export default function TdsReportsPage({ onBack }) {
   const [billingSubTab, setBillingSubTab] = useState('NVL'); // 'NVL' | 'NVCL'
 
   // ── Controls State ────────────────────────────────────────────────────────
+  // Party TDS Month & FY:
+  const [partyMonth, setPartyMonth] = useState(now.getMonth() + 1); // 1-12 (defaults to current month: September)
+  const [partyFy, setPartyFy] = useState(`${currentFyStart}-${currentFyStart + 1}`); // e.g. 2026-2027
+
+  // Billing TDS Month & FY:
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1); // 1-12 or 'ALL'
   const [selYear, setSelYear] = useState(`${currentFyStart}-${currentFyStart + 1}`);
   const [searchTerm, setSearchTerm] = useState('');
@@ -55,14 +60,46 @@ export default function TdsReportsPage({ onBack }) {
     return list;
   }, [currentFyStart]);
 
-  // Fetch Party TDS Report records from API (4 rows per unique owner, continuous SL NO)
+  // Available months for selected Financial Year (April .. March)
+  const partyMonthOptions = useMemo(() => {
+    const fyStart = parseInt(partyFy.split('-')[0], 10);
+    const monthsOrder = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+    return monthsOrder.map(m => {
+      const calYear = m >= 4 ? fyStart : fyStart + 1;
+      const monthName = MONTH_NAMES[m - 1];
+      const titleMonth = monthName.charAt(0) + monthName.slice(1).toLowerCase();
+      return {
+        value: m,
+        month: m,
+        year: calYear,
+        label: `${titleMonth} ${calYear}`
+      };
+    });
+  }, [partyFy]);
+
+  // Header string for Party TDS (e.g. "SEPTEMBER 2026")
+  const partyMonthHeaderText = useMemo(() => {
+    const fyStart = parseInt(partyFy.split('-')[0], 10);
+    const calYear = partyMonth >= 4 ? fyStart : fyStart + 1;
+    const monthName = MONTH_NAMES[partyMonth - 1] || 'SEPTEMBER';
+    return `${monthName} ${calYear}`;
+  }, [partyMonth, partyFy]);
+
+  // Fetch Party TDS Report records from API (4 rows per unique owner for selected month)
   const fetchData = async () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const fyStart = parseInt(partyFy.split('-')[0], 10);
+      const calYear = partyMonth >= 4 ? fyStart : fyStart + 1;
       const res = await axios.get(`${API_URL}/tds-reports/party-tds`, {
-        params: { search: searchTerm },
+        params: {
+          month: partyMonth,
+          year: calYear,
+          fy: partyFy,
+          search: searchTerm
+        },
         headers
       });
 
@@ -114,7 +151,7 @@ export default function TdsReportsPage({ onBack }) {
     } else if (mainTab === 'BILLING_TDS') {
       fetchBillingTdsData();
     }
-  }, [mainTab, billingSubTab, selMonth, selYear, searchTerm]);
+  }, [mainTab, partyMonth, partyFy, billingSubTab, selMonth, selYear, searchTerm]);
 
   // ── Live WebSocket connection to automatically reflect Bill Register updates ──
   useEffect(() => {
@@ -144,7 +181,7 @@ export default function TdsReportsPage({ onBack }) {
         socket.disconnect();
       }
     };
-  }, [mainTab, billingSubTab, selMonth, selYear, searchTerm]);
+  }, [mainTab, partyMonth, partyFy, billingSubTab, selMonth, selYear, searchTerm]);
 
   // Ensure continuous SL NO if filtered locally
   const filteredRecords = useMemo(() => {
@@ -163,7 +200,7 @@ export default function TdsReportsPage({ onBack }) {
     }));
   }, [records, searchTerm]);
 
-  // Dynamic Month/Year Header text
+  // Dynamic Month/Year Header text for Billing TDS
   const monthHeaderText = useMemo(() => {
     if (selMonth === 'ALL') {
       return `ALL MONTHS (${selYear})`;
@@ -182,6 +219,7 @@ export default function TdsReportsPage({ onBack }) {
       'Bill date': r.billDate,
       'Bill type': r.billType,
       'Basic Amount (Rs)': r.basicAmount,
+      'Note': r.note || '-',
       'TDS (%)': `${r.tdsPercent}%`,
       'TDS Amount (Rs)': r.tdsAmount,
       'TDS Deducted (Rs)': r.tdsDeducted,
@@ -189,7 +227,7 @@ export default function TdsReportsPage({ onBack }) {
       'AADHAR NO': r.aadharNo,
       'AADHAAR - PAN LINKED': r.aadhaarPanLinked || (r.panCardNumber !== '-' && r.aadharNo !== '-' ? 'YES' : 'NO')
     }));
-    exportToCsv(`PARTY_TDS_REPORT_${selYear}.csv`, exportData);
+    exportToCsv(`PARTY_TDS_REPORT_${partyMonthHeaderText.replace(/\s+/g, '_')}.csv`, exportData);
   };
 
   // Export CSV Billing TDS
@@ -349,13 +387,63 @@ export default function TdsReportsPage({ onBack }) {
         <>
           {/* Controls Bar */}
           <Box className="no-print" sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" fontWeight="700" color="#38bdf8">
-                UNIQUE OWNERS: {uniqueOwnerCount}
-              </Typography>
-              <Typography variant="body2" color="#94a3b8" fontWeight="600" sx={{ ml: 1 }}>
-                ({filteredRecords.length} TOTAL PARTY TDS ROWS)
-              </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              {/* Month Selector: [ Month: September 2026 ▼ ] */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="body2" color="#94a3b8" fontWeight="700">Month:</Typography>
+                <Select
+                  size="small"
+                  value={partyMonth}
+                  onChange={(e) => setPartyMonth(Number(e.target.value))}
+                  sx={{
+                    bgcolor: '#1e293b',
+                    color: '#fff',
+                    fontWeight: 700,
+                    borderRadius: 1,
+                    minWidth: 175,
+                    '.MuiOutlinedInput-notchedOutline': { borderColor: '#475569' },
+                    '.MuiSvgIcon-root': { color: '#fff' }
+                  }}
+                >
+                  {partyMonthOptions.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </Box>
+
+              {/* Financial Year Selector */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="body2" color="#94a3b8" fontWeight="700">Financial Year:</Typography>
+                <Select
+                  size="small"
+                  value={partyFy}
+                  onChange={(e) => setPartyFy(e.target.value)}
+                  sx={{
+                    bgcolor: '#1e293b',
+                    color: '#fff',
+                    fontWeight: 700,
+                    borderRadius: 1,
+                    minWidth: 130,
+                    '.MuiOutlinedInput-notchedOutline': { borderColor: '#475569' },
+                    '.MuiSvgIcon-root': { color: '#fff' }
+                  }}
+                >
+                  {yearOptions.map((y) => (
+                    <MenuItem key={y} value={y}>{y}</MenuItem>
+                  ))}
+                </Select>
+              </Box>
+
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: { xs: 0, md: 1 } }}>
+                <Typography variant="body2" fontWeight="700" color="#38bdf8">
+                  UNIQUE OWNERS: {uniqueOwnerCount}
+                </Typography>
+                <Typography variant="body2" color="#94a3b8" fontWeight="600" sx={{ ml: 0.5 }}>
+                  ({filteredRecords.length} TOTAL ROWS)
+                </Typography>
+              </Box>
             </Box>
 
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -369,7 +457,7 @@ export default function TdsReportsPage({ onBack }) {
                   startAdornment: <SearchIcon sx={{ color: '#94a3b8', mr: 0.5, fontSize: 18 }} />
                 }}
                 sx={{
-                  width: 260,
+                  width: 250,
                   bgcolor: '#1e293b',
                   borderRadius: 1,
                   input: { color: '#fff', fontSize: '13px' },
@@ -420,7 +508,7 @@ export default function TdsReportsPage({ onBack }) {
                 DIPALI ASSOCIATES &amp; CO.
               </Typography>
               <Typography variant="h6" fontWeight="800" sx={{ letterSpacing: '0.5px', color: '#334155', mt: 0.5 }}>
-                PARTY TDS REPORT
+                PARTY TDS REPORT — {partyMonthHeaderText}
               </Typography>
               <Typography variant="subtitle1" fontWeight="700" sx={{ color: '#475569', mt: 0.5, fontStyle: 'italic' }}>
                 {uniqueOwnerCount} UNIQUE OWNERS — 4 ROWS PER OWNER ({filteredRecords.length} TOTAL ROWS)
@@ -444,6 +532,7 @@ export default function TdsReportsPage({ onBack }) {
                     <th style={{ ...thStyle, minWidth: '110px' }}>Bill date</th>
                     <th style={{ ...thStyle, minWidth: '100px' }}>Bill type</th>
                     <th style={{ ...thStyle, textAlign: 'right', minWidth: '130px' }}>Basic Amount</th>
+                    <th style={{ ...thStyle, minWidth: '120px' }}>Note</th>
                     <th style={{ ...thStyle, width: '80px' }}>TDS (%)</th>
                     <th style={{ ...thStyle, textAlign: 'right', minWidth: '130px' }}>TDS Amount</th>
                     <th style={{ ...thStyle, textAlign: 'right', minWidth: '130px' }}>TDS Deducted</th>
@@ -455,7 +544,7 @@ export default function TdsReportsPage({ onBack }) {
                 <tbody>
                   {filteredRecords.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={12} style={{ textAlign: 'center', padding: '48px', color: '#64748b', fontWeight: 600 }}>
+                      <td colSpan={13} style={{ textAlign: 'center', padding: '48px', color: '#64748b', fontWeight: 600 }}>
                         No owners found in MongoDB Owner Details database.
                       </td>
                     </tr>
@@ -504,7 +593,12 @@ export default function TdsReportsPage({ onBack }) {
                           ₹{formatAmt(r.basicAmount)}
                         </td>
 
-                        {/* 7. TDS (%) */}
+                        {/* 7. Note */}
+                        <td style={{ ...tdStyle, textAlign: 'center', color: '#475569', fontWeight: 600 }}>
+                          {r.note || '-'}
+                        </td>
+
+                        {/* 8. TDS (%) */}
                         <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>
                           {r.tdsPercent}%
                         </td>

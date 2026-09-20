@@ -5,7 +5,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import { useAuth } from '../../context/AuthContext';
 import RoadTaxRegisterSection from '../../components/RoadTaxRegisterSection';
 
-const BrindaPortal = ({
+const JeetPortal = ({
   onLogout,
   onOpenCementRegister,
   onOpenMainCashbook,
@@ -31,7 +31,7 @@ const BrindaPortal = ({
   if (hideHeader) {
     return (
       <Box sx={{ flex: 1 }}>
-        <RoadTaxRegisterSection creditorName="BRINDA SHYAM" panelTitle="BRINDA SHYAM PANEL" />
+        <RoadTaxRegisterSection creditorName="JEET PANJA" panelTitle="JEET PANJA PANEL" />
       </Box>
     );
   }
@@ -41,15 +41,15 @@ const BrindaPortal = ({
       {/* ── TOP HEADER BAR ────────────────────────────────────────── */}
       <Paper elevation={0} sx={{ p: 2.5, mb: 3, bgcolor: '#1e293b', borderRadius: 3, border: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
         <Box display="flex" alignItems="center" gap={2}>
-          <Box sx={{ width: 46, height: 46, borderRadius: '14px', bgcolor: 'rgba(192, 132, 252, 0.15)', border: '1px solid rgba(192, 132, 252, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c084fc' }}>
+          <Box sx={{ width: 46, height: 46, borderRadius: '14px', bgcolor: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#38bdf8' }}>
             <PersonIcon sx={{ fontSize: 28 }} />
           </Box>
           <Box>
             <Box display="flex" alignItems="center" gap={1.5}>
               <Typography variant="h5" fontWeight={900} sx={{ color: '#f8fafc', letterSpacing: '-0.5px' }}>
-                BRINDA SHYAM PANEL
+                JEET PANJA PANEL
               </Typography>
-              <Chip label="PORT 5177" size="small" sx={{ bgcolor: 'rgba(192, 132, 252, 0.2)', color: '#e9d5ff', fontWeight: 800, fontSize: '0.7rem', border: '1px solid rgba(192, 132, 252, 0.4)' }} />
+              <Chip label="PORT 5178" size="small" sx={{ bgcolor: 'rgba(56, 189, 248, 0.2)', color: '#bae6fd', fontWeight: 800, fontSize: '0.7rem', border: '1px solid rgba(56, 189, 248, 0.4)' }} />
             </Box>
             <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>
               Dipali Associates & Co. &bull; Vehicle Validity Register & Creditor Accounts
@@ -59,8 +59,8 @@ const BrindaPortal = ({
 
         <Box display="flex" alignItems="center" gap={1.5} flexWrap="wrap">
           <Chip
-            avatar={<PersonIcon sx={{ color: '#c084fc !important' }} />}
-            label={user?.email || 'Brinda Shyam Admin'}
+            avatar={<PersonIcon sx={{ color: '#38bdf8 !important' }} />}
+            label={user?.email || 'Jeet Panja Admin'}
             sx={{ bgcolor: 'rgba(255,255,255,0.05)', color: '#f8fafc', fontWeight: 700, border: '1px solid #334155' }}
           />
 
@@ -72,10 +72,10 @@ const BrindaPortal = ({
 
       {/* ── MAIN SECTION CONTENT ─────────────────────────────────────── */}
       <Box sx={{ flex: 1 }}>
-        <RoadTaxRegisterSection creditorName="BRINDA SHYAM" panelTitle="BRINDA SHYAM PANEL" />
+        <RoadTaxRegisterSection creditorName="JEET PANJA" panelTitle="JEET PANJA PANEL" />
       </Box>
     </Box>
   );
 };
 
-export default BrindaPortal;
+export default JeetPortal;

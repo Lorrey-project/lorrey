@@ -308,7 +308,7 @@ router.get("/data", auth, async (req, res) => {
   }
 });
 
-router.post("/extend-eway-validity", auth, async (req, res) => {
+router.all("/extend-eway-validity", auth, async (req, res) => {
   try {
     const { extensions } = req.body;
     if (!Array.isArray(extensions) || extensions.length === 0) {
@@ -326,11 +326,15 @@ router.post("/extend-eway-validity", auth, async (req, res) => {
       if (!trimmedDate) continue;
 
       let filter = null;
-      if (id && mongoose.Types.ObjectId.isValid(id)) {
-        filter = { $or: [{ _id: id }, { _id: new mongoose.Types.ObjectId(id) }] };
-      } else if (id && typeof id === 'string' && id.length > 5 && !id.includes('_')) {
-        filter = { _id: id };
-      } else {
+      if (id) {
+        try {
+          const objId = mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id;
+          filter = { $or: [{ _id: objId }, { _id: String(id) }] };
+        } catch (e) {
+          filter = { _id: id };
+        }
+      }
+      if (!filter) {
         const conds = {};
         if (invoiceNo) conds["$or"] = [{ "INVOICE NO": invoiceNo }, { "INVOICE NO.": invoiceNo }];
         if (ewayBillNo) conds["E-WAY BILL NO"] = ewayBillNo;
@@ -344,6 +348,7 @@ router.post("/extend-eway-validity", auth, async (req, res) => {
         $set: {
           "EXTENDED E-WAY BILL VALIDITY": trimmedDate,
           "extendedValidityDate": trimmedDate,
+          "E-WAY BILL VALIDITY": trimmedDate,
           "updatedAt": new Date()
         }
       });
@@ -361,7 +366,8 @@ router.post("/extend-eway-validity", auth, async (req, res) => {
     return res.json({
       success: true,
       message: `E-Way Bill validity extended successfully for ${updatedCount} record(s).`,
-      count: updatedCount
+      count: updatedCount,
+      modifiedCount: updatedCount
     });
   } catch (err) {
     console.error("[DailySummary] extend-eway-validity error:", err);

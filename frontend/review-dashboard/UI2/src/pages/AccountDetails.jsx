@@ -3,7 +3,7 @@ import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Chip, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
   Autocomplete, TextField, Divider, LinearProgress,
-  TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Checkbox, TablePagination
+  TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Checkbox
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -52,6 +52,18 @@ const getPrintingStationaryMonths = () => {
   return [MONTHS[curIdx], MONTHS[prevIdx]];
 };
 
+const isCreditorLedger = (ledger) => {
+  const norm = String(ledger || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return norm === 'brindashyam' || norm === 'jeetpanja';
+};
+
+const getCreditorAllowedMonths = () => {
+  const now = new Date();
+  const curIdx = now.getMonth();
+  const prevIdx = (curIdx - 1 + 12) % 12;
+  return [MONTHS[curIdx], MONTHS[prevIdx]];
+};
+
 
 // Columns configuration
 const COLUMNS = [
@@ -70,25 +82,25 @@ const COLUMNS = [
   { key: 'Remittance Copy', label: 'REMITTANCE\nCOPY', width: 150 },
 ];
 
-const LEDGER_OPTIONS = [
-  "Bill & Unbilled", "CA charges", "Capital investment", "Capital investment refund", "Challan Sign",
+export const LEDGER_OPTIONS = [
+  "Bill & Unbilled", "BRINDA SHYAM", "CA charges", "Capital investment", "Capital investment refund", "Challan Sign",
   "Employee P Tax", "Endhan Cash Back", "Fasttag payment", "Freight Advance",
   "Freight payment", "Freight Payment Refund", "GST Paid", "interest Paid",
-  "ITR return", "Main cash", "Office Exp", "Partner Interest", "Partner Salary",
+  "ITR return", "JEET PANJA", "Main cash", "MONOJ BANDHAN", "Office Exp", "Partner Interest", "Partner Salary",
   "Payment Received", "Printing&stationary", "Pump payment", "Room rent",
   "Salary Advance", "Staff Salary", "subscription", "TDS on Cash Withdrawl",
   "Tds Payment", "Toll Payment"
 ];
 
-const NAMES_OPTIONS = [
+export const NAMES_OPTIONS = [
   "Abhijit Ghosh", "Animesh Banerjee", "Animesh mukherjee", "Arobindo Roy",
   "Arup Mondol", "Avijit Gorai", "Bablu Bar", "Bhola Yadav", "Biplab Goswami",
   "Bithi Nayak", "Challan Sign", "DAC GST paid", "Dilip Panja", "Dipali Nayak",
   "Dipali Association", "Endhaan Cash Book", "Fasttag Payment", "Gorachand Dutta",
   "Goutam Kumar roy", "Haradhan Mondal", "Indranil Ray", "Interest paid",
   "ITR retund", "Jayanta maji", "Kanika nayak", "Kush Singh", "Main Cash",
-  "Manas Sarkar", "Manoj Modak", "Md Faiyaz Alam", "Mir Ahasan Ali", "NON_GST PURCHASE", "NVCL",
-  "NVL", "Office Exp.", "Pbd Associations", "Prasanta Maji",
+  "Manas Sarkar", "Manoj Modak", "Md Faiyaz Alam", "Mir Ahasan Ali", "MONOJ BANDHAN", "NON_GST PURCHASE", "NVCL",
+  "NVL", "Office Exp.", "OTHERS CREDITOR", "Pbd Associations", "Prasanta Maji",
   "Printing & Stationary", "Ragunath guin", "Room Rent", "Ruhul Sk",
   "Sajal Banerjee", "satyanarayan Ghosh", "Sekh mustafa", "Suvadip Konar",
   "Sonthalia Pump", "Sourav Ghosh", "Subscription", "Suman Ghosh",
@@ -194,12 +206,59 @@ function formatExcelDate(rawDate) {
   return String(rawDate);
 }
 
+const VALIDITY_FIELD_CONFIGS = [
+  { label: 'RC VALIDITY', dbKey: 'RC', primaryKey: 'RC Validity', altKeys: ['rc_validity', 'RC VALIDITY', 'RC'] },
+  { label: 'INSURANCE VALIDITY', dbKey: 'INSURANCE', primaryKey: 'Insurance Validity', altKeys: ['insurance_validity', 'INSURANCE VALIDITY', 'INSURANCE'] },
+  { label: 'FITNESS VALIDITY', dbKey: 'FITNESS', primaryKey: 'Fitness Validity', altKeys: ['fitness_validity', 'FITNESS VALIDITY', 'FITNESS'] },
+  { label: 'ROAD TAX VALIDITY', dbKey: 'ROAD TAX', primaryKey: 'Road Tax Validity', altKeys: ['road_tax_validity', 'ROAD TAX VALIDITY', 'ROAD TAX'] },
+  { label: 'PERMIT', dbKey: 'PERMIT', primaryKey: 'Permit', altKeys: ['permit', 'PERMIT', 'permit_validity', 'Permit Validity'] },
+  { label: 'PUC', dbKey: 'PUC', primaryKey: 'PUC', altKeys: ['puc', 'PUC', 'puc_validity', 'PUC Validity'] },
+  { label: 'NP VALIDITY', dbKey: 'NP', primaryKey: 'NP Validity', altKeys: ['np_validity', 'NP VALIDITY', 'NP'] },
+  { label: 'LICENSE VALIDITY', dbKey: 'LICENSE', primaryKey: 'License Validity', altKeys: ['license_validity', 'LICENSE VALIDITY', 'LICENSE'] },
+  { label: 'DRIVER AUTHORISE VALIDITY', dbKey: 'DRIVER AUTHORISE', primaryKey: 'Driver Authoraization validity', altKeys: ['driver_authorization_validity', 'DRIVER AUTHORIZATION VALIDITY', 'Driver Authorise Validity', 'driver_authorise_validity', 'DRIVER AUTHORISE VALIDITY'] }
+];
 
 export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
   const [entries, setEntries] = useState([]);
   const [vehicleList, setVehicleList] = useState([]);
   const [ownerVehicleMap, setOwnerVehicleMap] = useState({});
+  const [rawContacts, setRawContacts] = useState([]);
   const [localData, setLocalData] = useState({});
+
+  const getVehiclesForOwner = useCallback((ownerName) => {
+    const typed = String(ownerName || '').trim();
+    if (!typed) return [];
+    if (ownerVehicleMap[typed]) return ownerVehicleMap[typed];
+    const typedLower = typed.toLowerCase();
+    return [...new Set(Object.keys(ownerVehicleMap).reduce((acc, k) => {
+      if (k.toLowerCase().includes(typedLower) || typedLower.includes(k.toLowerCase())) {
+        return acc.concat(ownerVehicleMap[k]);
+      }
+      return acc;
+    }, []))];
+  }, [ownerVehicleMap]);
+
+  const getValiditiesForVehicle = useCallback((vehicleNo) => {
+    if (!vehicleNo) return VALIDITY_FIELD_CONFIGS.map(v => v.label);
+    const cleanVeh = String(vehicleNo).trim().toUpperCase();
+    const contact = rawContacts.find(c => {
+      const t = (c['Truck No'] || c['Truck No '] || c.truck_no || '').trim().toUpperCase();
+      return t === cleanVeh;
+    });
+    if (!contact) return VALIDITY_FIELD_CONFIGS.map(v => v.label);
+
+    const available = VALIDITY_FIELD_CONFIGS.filter(cfg => {
+      let val = contact[cfg.primaryKey];
+      if (!val) {
+        for (const alt of cfg.altKeys) {
+          if (contact[alt]) { val = contact[alt]; break; }
+        }
+      }
+      return val && String(val).trim() !== '-' && String(val).trim().toUpperCase() !== 'N/A';
+    }).map(cfg => cfg.label);
+
+    return available.length > 0 ? available : VALIDITY_FIELD_CONFIGS.map(v => v.label);
+  }, [rawContacts]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -214,15 +273,9 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
   const fileInputRef = useRef(null);
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [rowUploading, setRowUploading] = useState(null); // Track per-row upload state
   const [displayMonth, setDisplayMonth] = useState(MONTHS[new Date().getMonth()]);
   const [displayYear, setDisplayYear] = useState(String(new Date().getFullYear()));
-
-  useEffect(() => {
-    setPage(0);
-  }, [displayMonth, displayYear]);
 
   const [showExcelWizard, setShowExcelWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
@@ -380,6 +433,112 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         selectedIds: new Set()
       });
     }
+  };
+
+  // ── Monoj Bandhan: System 2 Debit Payment Allocation Modal ─────────────────
+  const [monojDebitAllocModal, setMonojDebitAllocModal] = useState({
+    open: false,
+    rowId: null,
+    transactionDate: '',
+    month: '',
+    withdrawAmount: 0,
+    loading: false,
+    debitRows: [],
+    selectedIds: new Set(),
+    submitting: false
+  });
+
+  const openMonojDebitAllocModal = async (rowId, passedWithdraw, passedDate, passedMonth) => {
+    const originalEntry = entries.find(e => e._id === rowId) || {};
+    const curEdits = localData[rowId] || {};
+    const merged = { ...originalEntry, ...curEdits };
+
+    const withdrawVal = passedWithdraw !== undefined ? passedWithdraw : (merged['Withdraw'] || merged.withdraw || 0);
+    const txDate = passedDate || merged['Transaction Date'] || merged.transactionDate || '';
+    const m = passedMonth || merged['Month'] || merged.selectedMonth || displayMonth;
+    const withdrawAmt = parseFloat(String(withdrawVal || 0).replace(/,/g, '')) || 0;
+
+    setMonojDebitAllocModal({
+      open: true,
+      rowId,
+      transactionDate: txDate,
+      month: m,
+      withdrawAmount: withdrawAmt,
+      loading: true,
+      debitRows: [],
+      selectedIds: new Set(),
+      submitting: false
+    });
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/others-creditors/monoj-bandhan/debit-rows`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data && res.data.success) {
+        const rows = res.data.debitRows || [];
+        const savedSelected = localData[rowId]?.selectedMonojDebitIds;
+        let initialSelected = new Set();
+        if (savedSelected && Array.isArray(savedSelected) && savedSelected.length > 0) {
+          initialSelected = new Set(savedSelected);
+        } else {
+          initialSelected = new Set(rows.filter(r => r.outstanding > 0).map(r => r._id));
+        }
+
+        setMonojDebitAllocModal(prev => ({
+          ...prev,
+          debitRows: rows,
+          selectedIds: initialSelected,
+          loading: false
+        }));
+      }
+    } catch (err) {
+      console.error('Error fetching Monoj Bandhan debit rows:', err);
+      setSnack({ severity: 'error', msg: 'Failed to fetch Monoj Bandhan debit rows.' });
+      setMonojDebitAllocModal(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const toggleMonojDebitSelection = (debitId) => {
+    setMonojDebitAllocModal(prev => {
+      const next = new Set(prev.selectedIds);
+      if (next.has(debitId)) next.delete(debitId);
+      else next.add(debitId);
+      return { ...prev, selectedIds: next };
+    });
+  };
+
+  const handleConfirmMonojDebitAllocation = () => {
+    const { rowId, selectedIds, debitRows } = monojDebitAllocModal;
+    const selectedArr = Array.from(selectedIds);
+
+    if (selectedArr.length === 0) {
+      setSnack({ severity: 'warning', msg: 'Please select at least one debit row to confirm.' });
+      return;
+    }
+
+    const selectedRows = debitRows.filter(r => selectedIds.has(r._id));
+    const selectedDebitTotal = selectedRows.reduce((sum, r) => sum + (Number(r.outstanding) || 0), 0);
+
+    if (rowId) {
+      setLocalData(prev => ({
+        ...prev,
+        [rowId]: {
+          ...prev[rowId],
+          selectedMonojDebitIds: selectedArr,
+          selectedMonojDebitTotal: selectedDebitTotal,
+          Particulars: prev[rowId]?.Particulars || `Selected ${selectedArr.length} Debit Row(s) (₹${selectedDebitTotal.toLocaleString('en-IN')})`
+        }
+      }));
+    }
+
+    setSnack({
+      severity: 'info',
+      msg: `Confirmed ${selectedArr.length} debit row(s) (₹${selectedDebitTotal.toLocaleString('en-IN')}). Enter Withdraw amount in Bank Book and click Save to apply payment.`
+    });
+
+    setMonojDebitAllocModal(prev => ({ ...prev, open: false }));
   };
 
   const [billTypeModal, setBillTypeModal] = useState({
@@ -774,6 +933,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.data && res.data.contacts) {
+          setRawContacts(res.data.contacts);
           const ownerMap = {};
           res.data.contacts.forEach(c => {
             const owner = c['Owner Name '] || c['Owner Name'] || c.owner_name;
@@ -895,9 +1055,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
     return result;
   }, [computedRows, filterFrom, filterTo, unsavedImportRows, localData]);
 
-  const displayedRows = useMemo(() => {
-    return filteredRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  }, [filteredRows, page, rowsPerPage]);
+  const displayedRows = filteredRows;
 
   const isFiltered = !!(filterFrom || filterTo);
 
@@ -996,6 +1154,34 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
           }
         }
 
+        if (isCreditorLedger(ledger)) {
+          const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
+          const name = String(mergedRow['Names'] || '').trim();
+          const veh = String(mergedRow['Vehicle'] || '').trim();
+          const particulars = String(mergedRow['Particulars'] || '').trim();
+          const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
+          const allowedMonths = getCreditorAllowedMonths();
+
+          if (!m || !name || !veh || !particulars || isNaN(w) || w <= 0) {
+            setSnack({ severity: 'error', msg: `${mergedRow['Ledger Name']} requires Month, Owner Name, Vehicle Number, Particulars (Validity Type), and Withdraw Amount > 0.` });
+            setSaving(false);
+            return;
+          }
+
+          if (!allowedMonths.map(x => x.toLowerCase()).includes(m.toLowerCase())) {
+            setSnack({ severity: 'error', msg: `${mergedRow['Ledger Name']} is allowed ONLY for Current Month (${allowedMonths[0]}) or Previous Month (${allowedMonths[1]}).` });
+            setSaving(false);
+            return;
+          }
+
+          const allowedVehicles = getVehiclesForOwner(name);
+          if (allowedVehicles.length > 0 && !allowedVehicles.includes(veh)) {
+            setSnack({ severity: 'error', msg: `Vehicle ${veh} does not belong to selected Owner ${name}.` });
+            setSaving(false);
+            return;
+          }
+        }
+
         updates.push({
           id: null,
           isNewRow: true,
@@ -1038,6 +1224,34 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
           }
         }
 
+        if (isCreditorLedger(ledger)) {
+          const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
+          const name = String(mergedRow['Names'] || '').trim();
+          const veh = String(mergedRow['Vehicle'] || '').trim();
+          const particulars = String(mergedRow['Particulars'] || '').trim();
+          const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
+          const allowedMonths = getCreditorAllowedMonths();
+
+          if (!m || !name || !veh || !particulars || isNaN(w) || w <= 0) {
+            setSnack({ severity: 'error', msg: `${mergedRow['Ledger Name']} requires Month, Owner Name, Vehicle Number, Particulars (Validity Type), and Withdraw Amount > 0.` });
+            setSaving(false);
+            return;
+          }
+
+          if (!allowedMonths.map(x => x.toLowerCase()).includes(m.toLowerCase())) {
+            setSnack({ severity: 'error', msg: `${mergedRow['Ledger Name']} is allowed ONLY for Current Month (${allowedMonths[0]}) or Previous Month (${allowedMonths[1]}).` });
+            setSaving(false);
+            return;
+          }
+
+          const allowedVehicles = getVehiclesForOwner(name);
+          if (allowedVehicles.length > 0 && !allowedVehicles.includes(veh)) {
+            setSnack({ severity: 'error', msg: `Vehicle ${veh} does not belong to selected Owner ${name}.` });
+            setSaving(false);
+            return;
+          }
+        }
+
         updates.push({
           id: id.startsWith('new_') ? null : id,
           isNewRow: id.startsWith('new_'),
@@ -1045,9 +1259,10 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         });
       }
 
-      await axios.put(`${API_URL}/account-details/bulk-update`, { updates }, {
+      const bulkRes = await axios.put(`${API_URL}/account-details/bulk-update`, { updates }, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      const backendWarnings = (bulkRes.data?.warnings && Array.isArray(bulkRes.data.warnings)) ? bulkRes.data.warnings : [];
 
       const syncErrors = [];
       for (const [rowId, changes] of Object.entries(localData)) {
@@ -1108,11 +1323,61 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         }
       }
 
-      if (syncErrors.length > 0) {
+      if (backendWarnings.length > 0) {
+        setSnack({ severity: 'warning', msg: backendWarnings.join(' | ') });
+      } else if (syncErrors.length > 0) {
         setSnack({ severity: 'warning', msg: `Saved ✓ — Sync notice: ${syncErrors[0]}` });
       } else {
         setSnack({ severity: 'success', msg: 'Saved successfully!' });
       }
+      // System 2: Apply Monoj Bandhan Debit Row Payment Allocation on Bank Book SAVE
+      for (const [savedRowId, changes] of Object.entries(localData)) {
+        const originalEntry = entries.find(e => e._id === savedRowId);
+        const mergedRow = { ...originalEntry, ...changes };
+        const ledger = String(mergedRow['Ledger Name'] || '').trim().toUpperCase();
+        const party = String(mergedRow['Names'] || '').trim().toUpperCase();
+        const withdrawAmt = parseFloat(String(mergedRow['Withdraw'] || 0).replace(/,/g, ''));
+        const selectedDebitIds = changes.selectedMonojDebitIds || localData[savedRowId]?.selectedMonojDebitIds || originalEntry?.selectedMonojDebitIds || [];
+
+        if (ledger === 'MONOJ BANDHAN' && party === 'OTHERS CREDITOR' && withdrawAmt > 0) {
+          if (selectedDebitIds && selectedDebitIds.length > 0) {
+            try {
+              const actualTxId = (savedRowId && !savedRowId.startsWith('new_')) ? savedRowId : null;
+              const tDate = mergedRow['Transaction Date'] || mergedRow.transactionDate || '';
+              const rMonth = mergedRow['Month'] || mergedRow.selectedMonth || displayMonth;
+
+              await axios.post(`${API_URL}/others-creditors/monoj-bandhan/allocate-debits`, {
+                bankBookTxId: actualTxId,
+                bankBookDate: tDate,
+                bankBookMonth: rMonth,
+                withdrawAmount: withdrawAmt,
+                selectedDebitIds: selectedDebitIds
+              }, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+
+              setLocalData(prev => ({
+                ...prev,
+                [savedRowId]: {
+                  ...prev[savedRowId],
+                  isMonojDebitAllocated: true,
+                  selectedMonojDebitIds: []
+                }
+              }));
+            } catch (allocErr) {
+              console.error('System 2 debit allocation on Bank Book SAVE error:', allocErr);
+              syncErrors.push(allocErr.response?.data?.error || `Monoj Bandhan debit allocation error: ${allocErr.message}`);
+            }
+          } else if (!mergedRow.isMonojDebitAllocated && !mergedRow._monojSystem2Allocation) {
+            const tDate = mergedRow['Transaction Date'] || mergedRow.transactionDate || '';
+            const rMonth = mergedRow['Month'] || mergedRow.selectedMonth || displayMonth;
+            setTimeout(() => {
+              openMonojDebitAllocModal(savedRowId, withdrawAmt, tDate, rMonth);
+            }, 600);
+          }
+        }
+      }
+
       fetchData();
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Save failed: ' + (err.response?.data?.error || err.message) });
@@ -1353,7 +1618,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
   }
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
       <style>{`
         .erp-table-row { transition: background-color 0.15s ease; }
         .erp-table-row:hover { background-color: #f1f5f9 !important; }
@@ -1492,7 +1757,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         </Box>
       </Box>
 
-      <Box sx={{ overflow: 'auto', flex: 1 }}>
+      <Box sx={{ overflowX: 'auto' }}>
         <table style={{ borderCollapse: 'collapse', width: 'max-content', tableLayout: 'fixed', fontFamily: 'Inter, sans-serif', fontSize: '12px' }}>
           <colgroup>
             <col style={{ width: 40 }} />
@@ -1579,185 +1844,237 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                             </Button>
                           )}
                         </Box>
-                      ) : col.key === 'Ledger Name' || col.key === 'Names' || col.key === 'Month' || col.key === 'Vehicle' ? (
-                        <Autocomplete
-                          disabled={col.key === 'Vehicle' && !(localData[row._id]?.['Names'] || row['Names'])}
-                          options={
-                            col.key === 'Month'
-                              ? (() => {
-                                const ledger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim();
-                                if (ledger.toLowerCase() === 'freight advance') {
-                                  const curMonthName = MONTHS[new Date().getMonth()];
-                                  return [curMonthName];
-                                }
-                                if (isPrintingAndStationary(ledger)) {
-                                  return getPrintingStationaryMonths();
-                                }
-                                return MONTHS;
-                              })()
-                              : col.key === 'Vehicle'
+                      ) : (() => {
+                        const rowLedger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim();
+                        const isCreditor = isCreditorLedger(rowLedger);
+                        const isParticularsCreditor = col.key === 'Particulars' && isCreditor;
+                        return col.key === 'Ledger Name' || col.key === 'Names' || col.key === 'Month' || col.key === 'Vehicle' || isParticularsCreditor;
+                      })() ? (() => {
+                        const rowLedger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim();
+                        const isCreditor = isCreditorLedger(rowLedger);
+                        const rowMonth = String(localData[row._id]?.['Month'] || row['Month'] || '').trim();
+                        const rowOwner = String(localData[row._id]?.['Names'] || row['Names'] || '').trim();
+                        const rowVehicle = String(localData[row._id]?.['Vehicle'] || row['Vehicle'] || '').trim();
+                        const ownerVehicles = getVehiclesForOwner(rowOwner);
+                        const isMonthValid = getCreditorAllowedMonths().some(m => m.toLowerCase() === rowMonth.toLowerCase());
+                        const isOwnerValid = !!rowOwner && ownerVehicles.length > 0;
+                        const isVehicleValid = !!rowVehicle && ownerVehicles.some(v => v.toUpperCase() === rowVehicle.toUpperCase());
+                        const canSelectValidity = isCreditor && isMonthValid && isOwnerValid && isVehicleValid;
+                        const isParticularsCreditor = col.key === 'Particulars' && isCreditor;
+
+                        return (
+                          <Autocomplete
+                            disabled={
+                              (col.key === 'Vehicle' && !rowOwner) ||
+                              (isParticularsCreditor && !canSelectValidity)
+                            }
+                            options={
+                              col.key === 'Month'
                                 ? (() => {
-                                  const typed = String(localData[row._id]?.['Names'] || row['Names'] || '').trim();
-                                  if (!typed) return [];
-                                  if (ownerVehicleMap[typed]) return ownerVehicleMap[typed];
-                                  const typedLower = typed.toLowerCase();
-                                  return [...new Set(Object.keys(ownerVehicleMap).reduce((acc, k) => {
-                                    if (k.toLowerCase().includes(typedLower) || typedLower.includes(k.toLowerCase())) {
-                                      return acc.concat(ownerVehicleMap[k]);
-                                    }
-                                    return acc;
-                                  }, []))];
+                                  if (rowLedger.toLowerCase() === 'freight advance') {
+                                    const curMonthName = MONTHS[new Date().getMonth()];
+                                    return [curMonthName];
+                                  }
+                                  if (isCreditor) {
+                                    return getCreditorAllowedMonths();
+                                  }
+                                  if (isPrintingAndStationary(rowLedger)) {
+                                    return getPrintingStationaryMonths();
+                                  }
+                                  return MONTHS;
                                 })()
-                                : col.key === 'Ledger Name'
-                                  ? LEDGER_OPTIONS
-                                  : ((localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '')?.toLowerCase().includes('payment')
-                                    && (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '')?.toLowerCase().includes('receiv')
-                                    ? ['NVL', 'NVCL'] : NAMES_OPTIONS)
-                          }
-                          value={val || ''}
-                          freeSolo
-                          onChange={(e, newValue) => {
-                            handleCellEdit(row._id, col.key, newValue);
-                            if (col.key === 'Names') {
-                              if (newValue === 'NVL' || newValue === 'NVCL') {
-                                const ledger = localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '';
-                                const ledgerLower = ledger.toLowerCase();
-                                if (
-                                  (ledgerLower.includes('payment') && ledgerLower.includes('receiv')) ||
-                                  (ledgerLower.includes('freight') && ledgerLower.includes('payment'))
-                                ) {
-                                  openPendingBillsModal(row._id, newValue);
-                                }
-                              }
-                              // Clear vehicle if it doesn't belong to the new owner
-                              const currentVehicle = localData[row._id]?.['Vehicle'] !== undefined ? localData[row._id]['Vehicle'] : (row['Vehicle'] || '');
-                              if (currentVehicle) {
-                                const typedLower = String(newValue || '').trim().toLowerCase();
-                                const allowedVehicles = Object.keys(ownerVehicleMap).reduce((acc, k) => {
-                                  if (k.toLowerCase().includes(typedLower) || typedLower.includes(k.toLowerCase())) {
-                                    return acc.concat(ownerVehicleMap[k]);
-                                  }
-                                  return acc;
-                                }, []);
-                                if (allowedVehicles.length > 0 && !allowedVehicles.includes(currentVehicle)) {
-                                  handleCellEdit(row._id, 'Vehicle', '');
-                                }
-                              }
+                                : col.key === 'Vehicle'
+                                  ? ownerVehicles
+                                  : isParticularsCreditor
+                                    ? getValiditiesForVehicle(rowVehicle)
+                                    : col.key === 'Ledger Name'
+                                      ? LEDGER_OPTIONS
+                                      : ((rowLedger?.toLowerCase().includes('payment') && rowLedger?.toLowerCase().includes('receiv'))
+                                        ? ['NVL', 'NVCL'] : NAMES_OPTIONS)
                             }
-
-                            const curLedger = (col.key === 'Ledger Name' ? newValue : (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || ''));
-                            const curMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
-                            const curParty = (col.key === 'Names' ? newValue : (localData[row._id]?.['Names'] || row['Names'] || ''));
-
-                            if (isPrintingAndStationary(curLedger)) {
-                              const allowedMonths = getPrintingStationaryMonths();
-                              let effectiveMonth = curMonth;
-                              if (curMonth && !allowedMonths.includes(curMonth)) {
-                                effectiveMonth = allowedMonths[0];
-                                handleCellEdit(row._id, 'Month', effectiveMonth);
-                              }
-                              if (effectiveMonth && curParty) {
-                                if (curParty === 'NON_GST PURCHASE') {
-                                  openNonGstPurchaseModal(row._id, effectiveMonth);
-                                } else {
-                                  openBillTypeModal(row._id, effectiveMonth, curParty);
-                                }
-                              }
-                            }
-
-                            if (col.key === 'Ledger Name' || col.key === 'Month') {
-                              const currentLedger = (col.key === 'Ledger Name' ? newValue : (localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || ''));
-                              const currentMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
-                              const currentLedgerLower = String(currentLedger).toLowerCase();
-
-                              if (currentLedgerLower === 'freight advance') {
-                                const curMonthName = MONTHS[new Date().getMonth()];
-                                const curYearStr = String(new Date().getFullYear());
-                                handleCellEdit(row._id, 'Month', curMonthName);
-                                setLocalData(prev => ({
-                                  ...prev,
-                                  [row._id]: {
-                                    ...prev[row._id],
-                                    'Ledger Name': currentLedger,
-                                    'Month': curMonthName,
-                                    selectedMonth: curMonthName,
-                                    selectedYear: curYearStr
-                                  }
-                                }));
-                              }
-
-                              if (currentLedgerLower === 'pump payment' && currentMonth) {
-                                openPumpPaymentModal(row._id, currentMonth);
-                              }
-
-                              if (col.key === 'Ledger Name') {
-                                const currentName = localData[row._id]?.['Names'] || row['Names'] || '';
-                                if (currentName === 'NVL' || currentName === 'NVCL') {
+                            value={val || ''}
+                            freeSolo={!isParticularsCreditor}
+                            onChange={(e, newValue) => {
+                              handleCellEdit(row._id, col.key, newValue);
+                              if (col.key === 'Names') {
+                                if (newValue === 'NVL' || newValue === 'NVCL') {
+                                  const ledgerLower = rowLedger.toLowerCase();
                                   if (
-                                    (currentLedgerLower.includes('payment') && currentLedgerLower.includes('receiv')) ||
-                                    (currentLedgerLower.includes('freight') && currentLedgerLower.includes('payment'))
+                                    (ledgerLower.includes('payment') && ledgerLower.includes('receiv')) ||
+                                    (ledgerLower.includes('freight') && ledgerLower.includes('payment'))
                                   ) {
-                                    openPendingBillsModal(row._id, currentName);
+                                    openPendingBillsModal(row._id, newValue);
+                                  }
+                                }
+                                // Clear vehicle if it doesn't belong to the new owner
+                                const currentVehicle = localData[row._id]?.['Vehicle'] !== undefined ? localData[row._id]['Vehicle'] : (row['Vehicle'] || '');
+                                if (currentVehicle) {
+                                  const allowedVehicles = getVehiclesForOwner(newValue);
+                                  if (allowedVehicles.length > 0 && !allowedVehicles.some(v => v.toUpperCase() === String(currentVehicle).toUpperCase())) {
+                                    handleCellEdit(row._id, 'Vehicle', '');
+                                    if (isCreditor) {
+                                      handleCellEdit(row._id, 'Particulars', '');
+                                    }
                                   }
                                 }
                               }
-                            }
-                          }}
-                          onInputChange={(e, newInputValue) => handleCellEdit(row._id, col.key, newInputValue)}
-                          ListboxProps={{
-                            style: {
-                              background: 'rgba(255, 255, 255, 0.98)',
-                              backdropFilter: 'blur(8px)',
-                              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-                              border: '1px solid #e2e8f0',
-                              borderRadius: '10px',
-                              padding: '4px',
-                              maxHeight: '300px'
-                            }
-                          }}
-                          renderOption={(props, option) => (
-                            <li {...props} style={{
-                              fontSize: '13px',
-                              padding: '8px 12px',
-                              borderRadius: '6px',
-                              color: '#334155',
-                              backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
-                            }}>
-                              {option}
-                            </li>
-                          )}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              variant="standard"
-                              placeholder={col.key === 'Month' ? 'Select Month...' : col.key === 'Ledger Name' ? "Search Ledger..." : col.key === 'Vehicle' ? "Search Vehicle..." : "Search Name..."}
-                              InputProps={{
-                                ...params.InputProps,
-                                disableUnderline: true,
-                                style: {
-                                  fontSize: '12px',
-                                  padding: '8px 10px',
-                                  fontWeight: cellFontWeight,
-                                  color: cellColor
+
+                              if (col.key === 'Vehicle') {
+                                if (isCreditor) {
+                                  const curParticulars = localData[row._id]?.['Particulars'] !== undefined ? localData[row._id]['Particulars'] : (row['Particulars'] || '');
+                                  if (curParticulars && newValue) {
+                                    const validValidities = getValiditiesForVehicle(newValue);
+                                    if (!validValidities.includes(curParticulars)) {
+                                      handleCellEdit(row._id, 'Particulars', '');
+                                    }
+                                  } else if (!newValue) {
+                                    handleCellEdit(row._id, 'Particulars', '');
+                                  }
                                 }
-                              }}
-                            />
-                          )}
-                          sx={{
-                            width: '100%',
-                            height: '100%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            border: '1px solid transparent',
-                            transition: 'border 0.2s, background 0.2s',
-                            '&:hover': { border: '1px solid #cbd5e1' },
-                            '&.Mui-focused': { border: '1px solid #3b82f6', bgcolor: 'background.paper' },
-                            '& .MuiAutocomplete-inputRoot': { padding: 0, width: '100%' },
-                            '& .MuiAutocomplete-input': { padding: '0 !important' },
-                            '& .MuiAutocomplete-endAdornment': { display: 'none' }
-                          }}
-                        />
-                      ) : col.key === 'Remarks' ? (
+                              }
+
+                              const curLedger = (col.key === 'Ledger Name' ? newValue : rowLedger);
+                              const curMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
+                              const curParty = (col.key === 'Names' ? newValue : (localData[row._id]?.['Names'] || row['Names'] || ''));
+
+                              // System 2: Monoj Bandhan Debit Row Allocation trigger
+                              if (
+                                (col.key === 'Names' || col.key === 'Ledger Name') &&
+                                String(curLedger || '').trim().toUpperCase() === 'MONOJ BANDHAN' &&
+                                String(curParty || '').trim().toUpperCase() === 'OTHERS CREDITOR'
+                              ) {
+                                const curW = localData[row._id]?.['Withdraw'] !== undefined ? localData[row._id]['Withdraw'] : (row['Withdraw'] || 0);
+                                const curD = localData[row._id]?.['Transaction Date'] !== undefined ? localData[row._id]['Transaction Date'] : (row['Transaction Date'] || '');
+                                openMonojDebitAllocModal(row._id, curW, curD, curMonth);
+                              }
+
+                              if (isPrintingAndStationary(curLedger)) {
+                                const allowedMonths = getPrintingStationaryMonths();
+                                let effectiveMonth = curMonth;
+                                if (curMonth && !allowedMonths.includes(curMonth)) {
+                                  effectiveMonth = allowedMonths[0];
+                                  handleCellEdit(row._id, 'Month', effectiveMonth);
+                                }
+                                if (effectiveMonth && curParty) {
+                                  if (curParty === 'NON_GST PURCHASE') {
+                                    openNonGstPurchaseModal(row._id, effectiveMonth);
+                                  } else {
+                                    openBillTypeModal(row._id, effectiveMonth, curParty);
+                                  }
+                                }
+                              }
+
+                              if (col.key === 'Ledger Name' || col.key === 'Month') {
+                                const currentLedger = (col.key === 'Ledger Name' ? newValue : rowLedger);
+                                const currentMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
+                                const currentLedgerLower = String(currentLedger).toLowerCase();
+
+                                if (currentLedgerLower === 'freight advance') {
+                                  const curMonthName = MONTHS[new Date().getMonth()];
+                                  const curYearStr = String(new Date().getFullYear());
+                                  handleCellEdit(row._id, 'Month', curMonthName);
+                                  setLocalData(prev => ({
+                                    ...prev,
+                                    [row._id]: {
+                                      ...prev[row._id],
+                                      'Ledger Name': currentLedger,
+                                      'Month': curMonthName,
+                                      selectedMonth: curMonthName,
+                                      selectedYear: curYearStr
+                                    }
+                                  }));
+                                }
+
+                                if (isCreditorLedger(currentLedger)) {
+                                  const allowed = getCreditorAllowedMonths();
+                                  if (currentMonth && !allowed.map(m => m.toLowerCase()).includes(currentMonth.toLowerCase())) {
+                                    handleCellEdit(row._id, 'Month', allowed[0]);
+                                  }
+                                }
+
+                                if (currentLedgerLower === 'pump payment' && currentMonth) {
+                                  openPumpPaymentModal(row._id, currentMonth);
+                                }
+
+                                if (col.key === 'Ledger Name') {
+                                  const currentName = localData[row._id]?.['Names'] || row['Names'] || '';
+                                  if (currentName === 'NVL' || currentName === 'NVCL') {
+                                    if (
+                                      (currentLedgerLower.includes('payment') && currentLedgerLower.includes('receiv')) ||
+                                      (currentLedgerLower.includes('freight') && currentLedgerLower.includes('payment'))
+                                    ) {
+                                      openPendingBillsModal(row._id, currentName);
+                                    }
+                                  }
+                                }
+                              }
+                            }}
+                            onInputChange={(e, newInputValue) => handleCellEdit(row._id, col.key, newInputValue)}
+                            ListboxProps={{
+                              style: {
+                                background: 'rgba(255, 255, 255, 0.98)',
+                                backdropFilter: 'blur(8px)',
+                                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '10px',
+                                padding: '4px',
+                                maxHeight: '300px'
+                              }
+                            }}
+                            renderOption={(props, option) => (
+                              <li {...props} style={{
+                                fontSize: '13px',
+                                padding: '8px 12px',
+                                borderRadius: '6px',
+                                color: '#334155',
+                                backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
+                              }}>
+                                {option}
+                              </li>
+                            )}
+                            renderInput={(params) => (
+                              <TextField
+                                {...params}
+                                variant="standard"
+                                placeholder={
+                                  isParticularsCreditor
+                                    ? (!canSelectValidity ? "Select Month, Owner & Vehicle first..." : "Select Validity Type...")
+                                    : col.key === 'Month'
+                                      ? 'Select Month...'
+                                      : col.key === 'Ledger Name'
+                                        ? "Search Ledger..."
+                                        : col.key === 'Vehicle'
+                                          ? "Search Vehicle..."
+                                          : "Search Name..."
+                                }
+                                InputProps={{
+                                  ...params.InputProps,
+                                  disableUnderline: true,
+                                  style: {
+                                    fontSize: '12px',
+                                    padding: '8px 10px',
+                                    fontWeight: cellFontWeight,
+                                    color: cellColor
+                                  }
+                                }}
+                              />
+                            )}
+                            sx={{
+                              width: '100%',
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              border: '1px solid transparent',
+                              transition: 'border 0.2s, background 0.2s',
+                              '&:hover': { border: '1px solid #cbd5e1' },
+                              '&.Mui-focused': { border: '1px solid #3b82f6', bgcolor: 'background.paper' },
+                              '& .MuiAutocomplete-inputRoot': { padding: 0, width: '100%' },
+                              '& .MuiAutocomplete-input': { padding: '0 !important' },
+                              '& .MuiAutocomplete-endAdornment': isParticularsCreditor ? { right: '4px' } : { display: 'none' }
+                            }}
+                          />
+                        );
+                      })() : col.key === 'Remarks' ? (
                         <textarea
                           className="erp-input"
                           value={val}
@@ -1769,7 +2086,71 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                             whiteSpace: 'pre-wrap', transition: 'all 0.2s', boxSizing: 'border-box'
                           }}
                         />
-                      ) : (
+                      ) : col.key === 'Particulars' ? (() => {
+                        const rowLedger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toUpperCase();
+                        const rowOwner = String(localData[row._id]?.['Names'] || row['Names'] || '').trim().toUpperCase();
+                        const isMonojOthers = rowLedger === 'MONOJ BANDHAN' && rowOwner === 'OTHERS CREDITOR';
+                        const selectedCount = localData[row._id]?.selectedMonojDebitIds?.length || 0;
+                        const hasSelected = selectedCount > 0;
+                        const isAllocated = !!(row.isMonojDebitAllocated || row.monojAllocatedDebits?.length > 0 || localData[row._id]?._monojSystem2Allocation);
+
+                        if (isMonojOthers) {
+                          const curWithdraw = localData[row._id]?.['Withdraw'] !== undefined ? localData[row._id]['Withdraw'] : (row['Withdraw'] || 0);
+                          const curDate = localData[row._id]?.['Transaction Date'] !== undefined ? localData[row._id]['Transaction Date'] : (row['Transaction Date'] || '');
+                          const curMonth = localData[row._id]?.['Month'] || row['Month'] || displayMonth;
+
+                          return (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1, width: '100%' }}>
+                              <input
+                                className="erp-input"
+                                type="text"
+                                value={val}
+                                placeholder="Particulars..."
+                                onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
+                                style={{
+                                  flex: 1, border: '1px solid transparent', padding: '6px 8px',
+                                  background: 'transparent', outline: 'none', fontSize: '12px', color: cellColor, fontWeight: cellFontWeight,
+                                  boxSizing: 'border-box'
+                                }}
+                              />
+                              <Button
+                                size="small"
+                                variant="contained"
+                                onClick={() => openMonojDebitAllocModal(row._id, curWithdraw, curDate, curMonth)}
+                                sx={{
+                                  fontSize: '10px',
+                                  py: '2px',
+                                  px: 1,
+                                  fontWeight: 800,
+                                  borderRadius: '6px',
+                                  bgcolor: isAllocated ? '#16a34a' : (hasSelected ? '#0284c7' : '#7c3aed'),
+                                  color: '#fff',
+                                  whiteSpace: 'nowrap',
+                                  textTransform: 'none',
+                                  boxShadow: 'none',
+                                  '&:hover': { bgcolor: isAllocated ? '#15803d' : (hasSelected ? '#0369a1' : '#6d28d9') }
+                                }}
+                              >
+                                {isAllocated ? '✓ Debits Paid' : (hasSelected ? `✓ ${selectedCount} Rows Selected` : '💳 Select Debits')}
+                              </Button>
+                            </Box>
+                          );
+                        }
+
+                        return (
+                          <input
+                            className="erp-input"
+                            type="text"
+                            value={val}
+                            onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
+                            style={{
+                              width: '100%', height: '100%', border: '1px solid transparent', padding: '10px 10px',
+                              background: 'transparent', outline: 'none', fontSize: '12px', color: cellColor, fontWeight: cellFontWeight,
+                              transition: 'all 0.2s', boxSizing: 'border-box'
+                            }}
+                          />
+                        );
+                      })() : (
                         <input
                           className="erp-input"
                           type={col.isDate ? 'date' : 'text'}
@@ -1791,24 +2172,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         </table>
       </Box>
 
-      <TablePagination
-        component="div"
-        count={filteredRows.length}
-        page={page}
-        onPageChange={(e, newPage) => setPage(newPage)}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={(e) => {
-          setRowsPerPage(parseInt(e.target.value, 10));
-          setPage(0);
-        }}
-        rowsPerPageOptions={[25, 50, 100, 200]}
-        sx={{
-          borderTop: '1px solid #e2e8f0',
-          background: '#f8fafc',
-          borderBottomLeftRadius: '12px',
-          borderBottomRightRadius: '12px'
-        }}
-      />
+
 
       {/* ── Bank Statement Date Range Picker Dialog ── */}
       <Dialog
@@ -2373,6 +2737,160 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
               sx={{ bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' }, fontWeight: 800 }}
             >
               SELECT / DONE
+            </Button>
+          </Box>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── MONOJ BANDHAN: Debit Payment Allocation Dialog (System 2) ── */}
+      <Dialog
+        open={monojDebitAllocModal.open}
+        onClose={() => setMonojDebitAllocModal(prev => ({ ...prev, open: false }))}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: { bgcolor: '#0f172a', color: '#f8fafc', borderRadius: '12px', border: '1px solid #334155' }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 800, borderBottom: '1px solid #334155', color: '#38bdf8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Typography variant="h6" fontWeight={800} sx={{ letterSpacing: '0.3px' }}>
+              MONOJ BANDHAN — DEBIT PAYMENT ALLOCATION
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mt: 0.2 }}>
+              Select debit rows to pay/settle. The payment will be applied when you save the Bank Book transaction.
+            </Typography>
+          </Box>
+          <IconButton onClick={() => setMonojDebitAllocModal(prev => ({ ...prev, open: false }))} sx={{ color: '#94a3b8' }}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 2, bgcolor: '#0b0f19' }}>
+
+          {monojDebitAllocModal.loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+              <CircularProgress size={36} sx={{ color: '#38bdf8' }} />
+            </Box>
+          ) : monojDebitAllocModal.debitRows.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 6, color: '#64748b' }}>
+              <Typography variant="body1" fontWeight={600}>No debit records found for MONOJ BANDHAN.</Typography>
+              <Typography variant="caption" sx={{ mt: 0.5, display: 'block' }}>
+                Debit records entered in OFFICE PANEL &rarr; OTHERS CREDITOR &rarr; MONOJ BANDHAN will appear here.
+              </Typography>
+            </Box>
+          ) : (
+            <Box sx={{ overflowX: 'auto', maxHeight: '420px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', color: '#f8fafc', fontSize: '12px', textAlign: 'left' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 5, backgroundColor: '#1e293b' }}>
+                  <tr style={{ borderBottom: '2px solid #334155' }}>
+                    <th style={{ width: '45px', padding: '10px', textAlign: 'center' }}>
+                      <Checkbox
+                        size="small"
+                        checked={
+                          monojDebitAllocModal.debitRows.length > 0 &&
+                          monojDebitAllocModal.selectedIds.size === monojDebitAllocModal.debitRows.length
+                        }
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setMonojDebitAllocModal(prev => ({
+                              ...prev,
+                              selectedIds: new Set(prev.debitRows.map(r => r._id))
+                            }));
+                          } else {
+                            setMonojDebitAllocModal(prev => ({ ...prev, selectedIds: new Set() }));
+                          }
+                        }}
+                        sx={{ color: '#64748b', '&.Mui-checked': { color: '#38bdf8' }, p: 0 }}
+                      />
+                    </th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>SL NO</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>DATE</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800 }}>LEDGER / NAME</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800, textAlign: 'right' }}>DEBIT</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800, textAlign: 'right' }}>PAID</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800, textAlign: 'right' }}>OUTSTANDING</th>
+                    <th style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 800, textAlign: 'center' }}>STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monojDebitAllocModal.debitRows.map((r, idx) => {
+                    const isSel = monojDebitAllocModal.selectedIds.has(r._id);
+                    const isFullyPaid = r.outstanding === 0;
+
+                    return (
+                      <tr
+                        key={r._id}
+                        style={{
+                          borderBottom: '1px solid #1e293b',
+                          backgroundColor: isSel ? 'rgba(56, 189, 248, 0.12)' : (idx % 2 === 0 ? '#0b0f19' : '#131c2e'),
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => toggleMonojDebitSelection(r._id)}
+                      >
+                        <td style={{ textAlign: 'center', padding: '10px' }} onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            size="small"
+                            checked={isSel}
+                            onChange={() => toggleMonojDebitSelection(r._id)}
+                            sx={{ color: '#64748b', '&.Mui-checked': { color: '#38bdf8' }, p: 0 }}
+                          />
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#38bdf8', fontWeight: 700 }}>{r.slNo || idx + 1}</td>
+                        <td style={{ padding: '10px 12px', color: '#cbd5e1' }}>{r.date || '-'}</td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
+                          {r.ledgerName || r.names || r.remarks || 'Monoj Bandhan Debit'}
+                          {r.vehicleNo ? ` (${r.vehicleNo})` : ''}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#f87171', fontWeight: 800, textAlign: 'right' }}>
+                          ₹{Number(r.debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#4ade80', fontWeight: 700, textAlign: 'right' }}>
+                          ₹{Number(r.paidAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: r.outstanding > 0 ? '#fbbf24' : '#64748b', fontWeight: 800, textAlign: 'right' }}>
+                          ₹{Number(r.outstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                          <Chip
+                            label={isFullyPaid ? 'PAID' : (r.paidAmount > 0 ? 'PARTIAL' : 'UNPAID')}
+                            size="small"
+                            sx={{
+                              height: 20,
+                              fontSize: '9.5px',
+                              fontWeight: 800,
+                              bgcolor: isFullyPaid ? '#065f46' : (r.paidAmount > 0 ? '#78350f' : '#7f1d1d'),
+                              color: isFullyPaid ? '#6ee7b7' : (r.paidAmount > 0 ? '#fde68a' : '#fca5a5')
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Box>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: '#0f172a', borderTop: '1px solid #334155', justifyContent: 'space-between' }}>
+          <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+            {monojDebitAllocModal.selectedIds.size} debit row(s) selected
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <Button
+              onClick={() => setMonojDebitAllocModal(prev => ({ ...prev, open: false }))}
+              sx={{ color: '#94a3b8' }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleConfirmMonojDebitAllocation}
+              disabled={monojDebitAllocModal.selectedIds.size === 0}
+              sx={{ bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' }, fontWeight: 800, px: 3 }}
+            >
+              CONFIRM SELECTION
             </Button>
           </Box>
         </DialogActions>
