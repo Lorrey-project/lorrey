@@ -63,7 +63,7 @@ const VantaTrunkBackground = () => {
                 height: '100vh',
                 zIndex: -1,
                 // pointer-events: none ensures this container NEVER blocks scrolling
-                pointerEvents: 'none' 
+                pointerEvents: 'none'
             }}
         />
     );

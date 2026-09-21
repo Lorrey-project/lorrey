@@ -153,6 +153,185 @@ const parseToDate = (dStr) => {
   return new Date(0);
 };
 
+const parseDateParts = (dStr) => {
+  if (!dStr) {
+    const now = new Date();
+    const d = now.getDate(), m = now.getMonth() + 1, y = now.getFullYear();
+    return {
+      day: d,
+      month: m,
+      year: y,
+      dateStr: `${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`
+    };
+  }
+  const clean = String(dStr).trim();
+  let m = clean.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    const d = parseInt(m[3], 10);
+    return {
+      day: d,
+      month: mo,
+      year: y,
+      dateStr: `${String(d).padStart(2, '0')}-${String(mo).padStart(2, '0')}-${y}`
+    };
+  }
+  m = clean.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{2,4})/);
+  if (m) {
+    const d = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    let y = parseInt(m[3], 10);
+    if (y < 100) y += (y >= 70 ? 1900 : 2000);
+    return {
+      day: d,
+      month: mo,
+      year: y,
+      dateStr: `${String(d).padStart(2, '0')}-${String(mo).padStart(2, '0')}-${y}`
+    };
+  }
+  const dt = new Date(clean);
+  if (!isNaN(dt.getTime())) {
+    const d = dt.getDate(), mo = dt.getMonth() + 1, y = dt.getFullYear();
+    return {
+      day: d,
+      month: mo,
+      year: y,
+      dateStr: `${String(d).padStart(2, '0')}-${String(mo).padStart(2, '0')}-${y}`
+    };
+  }
+  const now = new Date();
+  const d = now.getDate(), mo = now.getMonth() + 1, y = now.getFullYear();
+  return {
+    day: d,
+    month: mo,
+    year: y,
+    dateStr: `${String(d).padStart(2, '0')}-${String(mo).padStart(2, '0')}-${y}`
+  };
+};
+
+// ── Auto-sync Bank Book Main Cash -> Main Cashbook (Cash Receive Bank Book) ────
+const syncMainCashToCashBook = async (affectedDocs) => {
+  if (!Array.isArray(affectedDocs) || affectedDocs.length === 0) return;
+
+  const datesToSync = new Set();
+
+  affectedDocs.forEach(doc => {
+    const ledger = (doc.ledgerName || doc['Ledger Name'] || '').trim().toLowerCase();
+    if (ledger === 'main cash' || doc._id) {
+      const rawDate = doc.transactionDate || doc['Transaction Date'];
+      const dateParts = parseDateParts(rawDate);
+      if (dateParts && dateParts.dateStr) {
+        datesToSync.add(JSON.stringify(dateParts));
+      }
+    }
+  });
+
+  if (datesToSync.size === 0) return;
+
+  const col = mongoose.connection.useDb('main_cashbook').collection('entries');
+
+  for (const dateItemStr of datesToSync) {
+    const { day, month, year, dateStr } = JSON.parse(dateItemStr);
+
+    const dateVariants = [
+      dateStr,
+      `${day}-${month}-${year}`,
+      `${String(day).padStart(2, '0')}-${month}-${year}`,
+      `${day}-${String(month).padStart(2, '0')}-${year}`,
+      `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      `${year}-${month}-${day}`
+    ];
+
+    // Find all 'Main Cash' transactions for this date across account_details
+    const matchingBankDocs = await AccountDetail.find({
+      ledgerName: { $regex: /^main cash$/i },
+      $or: [
+        { transactionDate: { $in: dateVariants } },
+        { transactionDate: { $regex: new RegExp(`^${year}[-\\/]0?${month}[-\\/]0?${day}`) } },
+        { transactionDate: { $regex: new RegExp(`^0?${day}[-\\/]0?${month}[-\\/]${year}`) } }
+      ]
+    });
+
+    let totalWithdraw = 0;
+    const refs = [];
+
+    matchingBankDocs.forEach(d => {
+      const w = parseFloat(String(d.withdraw || '').replace(/,/g, ''));
+      if (!isNaN(w) && w > 0) {
+        totalWithdraw += w;
+        refs.push({
+          id: d._id.toString(),
+          withdraw: w,
+          names: d.names || '',
+          transactionDate: d.transactionDate || ''
+        });
+      }
+    });
+
+    // Match existing cashbook row for this date
+    let cashbookRow = await col.findOne({
+      $or: [
+        { DATE: { $in: dateVariants }, month, year },
+        { DATE: { $in: dateVariants } }
+      ]
+    });
+
+    if (!cashbookRow) {
+      if (totalWithdraw > 0) {
+        // Create new row if missing
+        const highest = await col.find({ month, year }).sort({ "SL NO": -1 }).limit(1).toArray();
+        const nextSl = highest.length > 0 && typeof highest[0]["SL NO"] === 'number'
+          ? highest[0]["SL NO"] + 1 : 1;
+
+        const newEntry = {
+          DATE: dateStr,
+          month,
+          year,
+          "SL NO": nextSl,
+          P_OPENING: 0,
+          P_CASH_RECV_BB: totalWithdraw,
+          _bb_main_cash_refs: refs,
+          P_LOAN_RECV: '',
+          P_LOAN_PAY: '',
+          P_WITHDRAW: 0,
+          P_GIVEN_DAC: 0,
+          P_GIVEN_OFFICE: 0,
+          P_LOAN_REPAY: 0,
+          P_LOAN_BALANCE: 0,
+          P_OTHERS: 0,
+          S_OPENING: 0,
+          S_TRANS_OFFICE: 0,
+          S_TRANS_TO_OFFICE: 0,
+          O_OPENING: 0,
+          _created_at: new Date()
+        };
+
+        const result = await col.insertOne(newEntry);
+        cashbookRow = { _id: result.insertedId, ...newEntry };
+      }
+    } else {
+      await col.updateOne(
+        { _id: cashbookRow._id },
+        {
+          $set: {
+            P_CASH_RECV_BB: totalWithdraw,
+            _bb_main_cash_refs: refs
+          }
+        }
+      );
+    }
+
+    try {
+      const { getIO } = require('../socket');
+      const io = getIO();
+      if (io) io.emit('mainCashbookUpdates', { action: 'sync-main-cash-bank-book', date: dateStr, amount: totalWithdraw });
+    } catch (socketErr) {
+      console.warn('Socket notify failed:', socketErr.message);
+    }
+  }
+};
+
 const makeSpaceAgnosticRegex = (str) => {
   if (!str) return /^$/;
   const stripped = str.replace(/[^a-zA-Z0-9]/g, '');
@@ -1285,6 +1464,12 @@ router.put('/bulk-update', async (req, res) => {
     }
 
     try {
+      await syncMainCashToCashBook(affectedDocsForSync);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] syncMainCashToCashBook error:', syncErr.message);
+    }
+
+    try {
       const io = getIO();
       if (io) io.emit('accountDetailsUpdate', { action: 'bulk-update' });
     } catch (socketErr) {
@@ -1394,7 +1579,7 @@ router.put('/bulk-update', async (req, res) => {
           );
         }
       }
-      
+
       try {
         const io = getIO();
         if (io) io.emit('pumpPaymentRegisterUpdate');
@@ -1468,6 +1653,12 @@ router.delete('/bulk-delete', async (req, res) => {
       await syncMonojBandhanWithdraw(docsToDelete, true);
     } catch (syncErr) {
       console.error('[accountDetailRoutes] syncMonojBandhanWithdraw error on delete:', syncErr.message);
+    }
+
+    try {
+      await syncMainCashToCashBook(docsToDelete);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] syncMainCashToCashBook error on delete:', syncErr.message);
     }
 
     try {
@@ -1595,7 +1786,6 @@ router.post('/upload-remittance/:id', remittanceUpload.single('file'), async (re
 });
 
 // CLEAR MAIN CASH: called when Ledger Name is changed away from "Main Cash"
-// Resets P_WITHDRAW + P_SOURCE in the matching cashbook row
 router.post('/clear-main-cash', async (req, res) => {
   try {
     const { transactionDate } = req.body;
@@ -1603,143 +1793,31 @@ router.post('/clear-main-cash', async (req, res) => {
       return res.status(400).json({ success: false, error: 'transactionDate required' });
     }
 
-    // Normalized date parsing: handles YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY
-    const parts = transactionDate.split(/[-\/]/);
-    let d, m, y;
-    if (parts[0].length === 4) { // YYYY-MM-DD
-      y = parseInt(parts[0], 10); m = parseInt(parts[1], 10); d = parseInt(parts[2], 10);
-    } else { // DD-MM-YYYY or DD/MM/YYYY
-      d = parseInt(parts[0], 10); m = parseInt(parts[1], 10); y = parseInt(parts[2], 10);
-    }
+    const dateParts = parseDateParts(transactionDate);
+    const fakeDoc = { ledgerName: 'Main cash', transactionDate };
+    await syncMainCashToCashBook([fakeDoc]);
 
-    if (isNaN(d) || isNaN(m) || isNaN(y)) {
-      return res.status(400).json({ success: false, error: `Invalid date format: ${transactionDate}` });
-    }
-
-    const dateVariants = [
-      `${d}-${m}-${y}`,
-      `${String(d).padStart(2, '0')}-${m}-${y}`,
-      `${d}-${String(m).padStart(2, '0')}-${y}`,
-      `${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`,
-    ];
-
-    const mongoose = require('mongoose');
-    const col = mongoose.connection.useDb('main_cashbook').collection('entries');
-
-    const cashbookRow = await col.findOne({ DATE: { $in: dateVariants }, month: m, year: y });
-    if (!cashbookRow) {
-      // Row doesn't exist — nothing to clear, treat as success
-      return res.json({ success: true, cleared: false, msg: 'No cashbook row found for this date — nothing to clear.' });
-    }
-
-    await col.updateOne(
-      { _id: cashbookRow._id },
-      { $set: { P_WITHDRAW: 0, P_LOAN_PAY: '' } }
-    );
-
-    try {
-      const io = getIO();
-      if (io) io.emit('mainCashbookUpdates', { action: 'clear-main-cash', date: transactionDate });
-    } catch (socketErr) {
-      console.warn('Socket notify failed:', socketErr.message);
-    }
-
-    console.log(`[ClearMainCash] Cleared cashbook P_WITHDRAW/P_SOURCE for ${transactionDate}`);
-    res.json({ success: true, cleared: true, date: transactionDate });
+    res.json({ success: true, cleared: true, date: dateParts.dateStr });
   } catch (error) {
     console.error('Clear Main Cash Error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-
 // SYNC MAIN CASH: called when Ledger Name = "Main Cash" is saved in Account Details
-// Finds the matching Main Cashbook row by date and patches P_WITHDRAW + P_SOURCE
+// Syncs to Main Cashbook -> Cash Receive Bank Book (P_CASH_RECV_BB)
 router.post('/sync-main-cash', async (req, res) => {
   try {
     const { transactionDate, withdrawAmount } = req.body;
-    if (!transactionDate || withdrawAmount === undefined) {
-      return res.status(400).json({ success: false, error: 'transactionDate and withdrawAmount required' });
+    if (!transactionDate) {
+      return res.status(400).json({ success: false, error: 'transactionDate required' });
     }
 
-    const amount = parseFloat(withdrawAmount);
-    if (isNaN(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, error: 'withdrawAmount must be a positive number' });
-    }
+    const dateParts = parseDateParts(transactionDate);
+    const fakeDoc = { ledgerName: 'Main cash', transactionDate, withdraw: withdrawAmount };
+    await syncMainCashToCashBook([fakeDoc]);
 
-    // Normalized date parsing: handles YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY
-    const parts = transactionDate.split(/[-\/]/);
-    let d, m, y;
-    if (parts[0].length === 4) { // YYYY-MM-DD
-      y = parseInt(parts[0], 10); m = parseInt(parts[1], 10); d = parseInt(parts[2], 10);
-    } else { // DD-MM-YYYY or DD/MM/YYYY
-      d = parseInt(parts[0], 10); m = parseInt(parts[1], 10); y = parseInt(parts[2], 10);
-    }
-
-    if (isNaN(d) || isNaN(m) || isNaN(y)) {
-      return res.status(400).json({ success: false, error: `Invalid date format: ${transactionDate}` });
-    }
-
-    const dateVariants = [
-      `${d}-${m}-${y}`,
-      `${String(d).padStart(2, '0')}-${m}-${y}`,
-      `${d}-${String(m).padStart(2, '0')}-${y}`,
-      `${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`,
-    ];
-
-    const mongoose = require('mongoose');
-    const col = mongoose.connection.useDb('main_cashbook').collection('entries');
-
-    const sourceText = `DAC-RS-${amount}\\-`;
-
-    // Find matching cashbook row
-    let cashbookRow = await col.findOne({ DATE: { $in: dateVariants }, month: m, year: y });
-
-    if (!cashbookRow) {
-      // Create new row if missing
-      const highest = await col.find({ month: m, year: y }).sort({ "SL NO": -1 }).limit(1).toArray();
-      const nextSl = highest.length > 0 && typeof highest[0]["SL NO"] === 'number'
-        ? highest[0]["SL NO"] + 1 : 1;
-
-      const newEntry = {
-        DATE: `${d}-${m}-${y}`,
-        month: m,
-        year: y,
-        "SL NO": nextSl,
-        P_OPENING: 0,
-        P_LOAN_RECV: '',
-        P_LOAN_PAY: sourceText,
-        P_WITHDRAW: amount,
-        P_GIVEN_DAC: 0,
-        P_GIVEN_OFFICE: 0,
-        P_OTHERS: 0,
-        S_OPENING: 0,
-        S_TRANS_OFFICE: 0,
-        S_TRANS_TO_OFFICE: 0,
-        O_OPENING: 0,
-        _created_at: new Date()
-      };
-
-      const result = await col.insertOne(newEntry);
-      cashbookRow = { _id: result.insertedId, ...newEntry };
-      console.log(`[SyncMainCash] Created new cashbook row for ${transactionDate}`);
-    } else {
-      await col.updateOne(
-        { _id: cashbookRow._id },
-        { $set: { P_WITHDRAW: amount, P_LOAN_PAY: sourceText } }
-      );
-      console.log(`[SyncMainCash] Updated existing cashbook row for ${transactionDate}`);
-    }
-
-    try {
-      const io = getIO();
-      if (io) io.emit('mainCashbookUpdates', { action: 'sync-from-account-detail', date: transactionDate });
-    } catch (socketErr) {
-      console.warn('Socket notify failed:', socketErr.message);
-    }
-
-    console.log(`[SyncMainCash] Updated cashbook row for ${transactionDate}: P_WITHDRAW=${amount}, P_SOURCE="${sourceText}"`);
-    res.json({ success: true, updatedDate: transactionDate, amount, sourceText });
+    res.json({ success: true, updatedDate: dateParts.dateStr });
   } catch (error) {
     console.error('Sync Main Cash Error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -1797,6 +1875,7 @@ module.exports.syncPartyPayments = syncPartyPayments;
 module.exports.syncFreightAdvanceToCementRegister = syncFreightAdvanceToCementRegister;
 module.exports.syncCreditorWithdrawToCementAndValidity = syncCreditorWithdrawToCementAndValidity;
 module.exports.syncMonojBandhanWithdraw = syncMonojBandhanWithdraw;
+module.exports.syncMainCashToCashBook = syncMainCashToCashBook;
 module.exports.VALIDITY_FIELD_CONFIGS = VALIDITY_FIELD_CONFIGS;
 module.exports.resolveValidityConfig = resolveValidityConfig;
 

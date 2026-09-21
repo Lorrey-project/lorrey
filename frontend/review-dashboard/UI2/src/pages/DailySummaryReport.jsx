@@ -2539,6 +2539,8 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [ownerMap, setOwnerMap] = useState({});
   const [expandedOwner, setExpandedOwner] = useState(null);
+  // vehicleWheelMap: { "TRUCK_NO": "10W" | "6W" | "12W" | "" }
+  const [vehicleWheelMap, setVehicleWheelMap] = useState({});
 
   useEffect(() => {
     fetchParties();
@@ -2552,6 +2554,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
         setParties(res.data.names || []);
         setOwnerMap(res.data.ownerMap || {});
         setOwnerDetailsMap(res.data.ownerDetails || {});
+        setVehicleWheelMap(res.data.vehicleWheelMap || {});
       }
     } catch (err) {
       console.error(err);
@@ -2562,11 +2565,21 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
   };
 
   if (selectedParty && selectedVehicle) {
+    // Determine which extra incentive columns this owner needs, based on
+    // the full wheel-type portfolio of ALL vehicles registered to that owner.
+    const ownerVehicles = ownerMap[selectedParty] || [];
+    const ownerHas6W = ownerVehicles.some(v => vehicleWheelMap[v] === '6W');
+    const ownerHas10W = ownerVehicles.some(v => vehicleWheelMap[v] === '10W');
+
     return (
       <PartyReportView
         partyName={selectedParty}
         selectedVehicle={selectedVehicle}
         ownerDetails={ownerDetailsMap[selectedParty] || {}}
+        ownerVehicles={ownerVehicles}
+        vehicleWheelMap={vehicleWheelMap}
+        show6WHColumn={ownerHas6W}
+        show10WHColumn={ownerHas10W}
         onBack={() => { setSelectedParty(null); setSelectedVehicle(null); }}
       />
     );
@@ -2756,31 +2769,59 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
                             <Typography variant="body2" color="text.secondary" fontWeight={500}>No vehicles registered to this owner.</Typography>
                           </ListItem>
                         ) : (
-                          vehicles.map((v, i) => (
-                            <React.Fragment key={v}>
-                              <ListItem sx={{ py: 2, px: { xs: 2, md: 4 }, display: 'flex', justifyContent: 'space-between', '&:hover': { bgcolor: 'background.default' }, transition: 'background-color 0.2s' }}>
-                                <Box display="flex" alignItems="center" gap={2}>
-                                  <LocalShippingIcon sx={{ color: '#94a3b8', fontSize: 24 }} />
-                                  <Typography variant="body1" fontWeight={700} color="#1e293b" sx={{ letterSpacing: '0.5px' }}>
-                                    {v}
-                                  </Typography>
-                                </Box>
-                                <Button
-                                  variant="contained"
-                                  size="small"
-                                  onClick={() => { setSelectedParty(party); setSelectedVehicle(v); }}
-                                  sx={{
-                                    borderRadius: '8px', fontWeight: 800, textTransform: 'none', py: 0.5, px: 2,
-                                    bgcolor: 'background.paper', color: '#0f172a', border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                                    '&:hover': { bgcolor: '#0f172a', color: '#fff', borderColor: '#0f172a' }
-                                  }}
-                                >
-                                  VIEW REPORT
-                                </Button>
-                              </ListItem>
-                              {i < vehicles.length - 1 && <Divider sx={{ mx: 4 }} />}
-                            </React.Fragment>
-                          ))
+                        vehicles.map((v, i) => {
+                            // Wheel type badge for this vehicle
+                            const wheelType = vehicleWheelMap[v] || '';
+                            const is6W = wheelType === '6W';
+                            const is10W = wheelType === '10W';
+                            const wheelBadgeColor = is6W
+                              ? { bg: '#dcfce7', color: '#166534', border: '#86efac' }
+                              : is10W
+                              ? { bg: '#dbeafe', color: '#1e40af', border: '#93c5fd' }
+                              : wheelType
+                              ? { bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' }
+                              : null;
+
+                            return (
+                              <React.Fragment key={v}>
+                                <ListItem sx={{ py: 2, px: { xs: 2, md: 4 }, display: 'flex', justifyContent: 'space-between', '&:hover': { bgcolor: 'background.default' }, transition: 'background-color 0.2s' }}>
+                                  <Box display="flex" alignItems="center" gap={2}>
+                                    <LocalShippingIcon sx={{ color: '#94a3b8', fontSize: 24 }} />
+                                    <Typography variant="body1" fontWeight={700} color="#1e293b" sx={{ letterSpacing: '0.5px' }}>
+                                      {v}
+                                    </Typography>
+                                    {wheelBadgeColor && (
+                                      <Box sx={{
+                                        display: 'inline-flex', alignItems: 'center',
+                                        px: 1, py: 0.25,
+                                        borderRadius: '6px',
+                                        bgcolor: wheelBadgeColor.bg,
+                                        border: `1px solid ${wheelBadgeColor.border}`,
+                                        color: wheelBadgeColor.color,
+                                        fontSize: '10px', fontWeight: 800,
+                                        letterSpacing: '0.5px',
+                                      }}>
+                                        {wheelType}
+                                      </Box>
+                                    )}
+                                  </Box>
+                                  <Button
+                                    variant="contained"
+                                    size="small"
+                                    onClick={() => { setSelectedParty(party); setSelectedVehicle(v); }}
+                                    sx={{
+                                      borderRadius: '8px', fontWeight: 800, textTransform: 'none', py: 0.5, px: 2,
+                                      bgcolor: 'background.paper', color: '#0f172a', border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                                      '&:hover': { bgcolor: '#0f172a', color: '#fff', borderColor: '#0f172a' }
+                                    }}
+                                  >
+                                    VIEW REPORT
+                                  </Button>
+                                </ListItem>
+                                {i < vehicles.length - 1 && <Divider sx={{ mx: 4 }} />}
+                              </React.Fragment>
+                            );
+                          })
                         )}
                       </List>
                     </AccordionDetails>

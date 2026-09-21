@@ -18,6 +18,10 @@ const projectedDeductionSettingSchema = new mongoose.Schema(
       type: Number,
       default: 145,
     },
+    advanceBankTF: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

@@ -3,7 +3,7 @@ import MultiSelectSearchable from '../components/MultiSelectSearchable';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box, Typography, Button, IconButton, CircularProgress,
-  Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Chip, Tooltip, MenuItem
+  Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Chip, Tooltip, MenuItem, Checkbox
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LockIcon from '@mui/icons-material/Lock';
@@ -21,6 +21,8 @@ import TableChartIcon from '@mui/icons-material/TableChart';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import B2BEntryDialog from '../components/B2BEntryDialog';
 import * as XLSX from 'xlsx';
 
 import axios from 'axios';
@@ -114,8 +116,19 @@ const DEBIT_REASONS = [
   'Device Installation Charges',
   'RFID Deduction / Charges',
   'Suspense',
-  'TDS Provision'
+  'TDS Provision',
+  'Site office Rent',
+  'Safty violation charges'
 ];
+
+export const isB2BEligibleDebitReason = (reason) => {
+  if (!reason || typeof reason !== 'string') return false;
+  const clean = reason.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (clean.includes('device installation')) return true;
+  if (clean.includes('rfid')) return true;
+  if (clean.includes('site office rent')) return true;
+  return false;
+};
 const SITES = ['NVL', 'NVCL'];
 
 // Shared native input styles — tiny, borderless, matches table feel
@@ -133,18 +146,28 @@ export default function FinancialYearDetails({ onBack }) {
   const [snack, setSnack] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
 
-  // Damage / Shortage Modal States
-  const FY_OPTIONS = ['2024-2025', '2025-2026', '2026-2027', '2027-2028'];
+  // Deduction Allocation States
+  const FY_OPTIONS = ['FY 2024-25', 'FY 2025-26', 'FY 2026-27', 'FY 2027-28', '2024-2025', '2025-2026', '2026-2027', '2027-2028'];
+  const ALL_MONTHS_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const [damageModalOpen, setDamageModalOpen] = useState(false);
   const [damageTarget, setDamageTarget] = useState(null); // { invoiceNumber, groupId }
   const [damageYear, setDamageYear] = useState('');
   const [damageMonth, setDamageMonth] = useState('');
+  const [damageSelectedMonths, setDamageSelectedMonths] = useState([]);
   const [damageVehicles, setDamageVehicles] = useState([]);
   const [damageSelectedVehicles, setDamageSelectedVehicles] = useState([]);
+  const [damageDebitReason, setDamageDebitReason] = useState('');
+  const [damageAllocateAmount, setDamageAllocateAmount] = useState('');
+  const [loadedTrips, setLoadedTrips] = useState([]);
+  const [tripsLoading, setTripsLoading] = useState(false);
+  const [showTripsReference, setShowTripsReference] = useState(false);
+  const [selectedTripIds, setSelectedTripIds] = useState([]);
+  const [tripAllocAmounts, setTripAllocAmounts] = useState({});
   const [damageTrips, setDamageTrips] = useState([]);
   const [damageSelectedTrips, setDamageSelectedTrips] = useState([]);
   const [damageVehicleAmounts, setDamageVehicleAmounts] = useState({});
   const [damageManualRemarks, setDamageManualRemarks] = useState('');
+  const [b2bDialogOpen, setB2bDialogOpen] = useState(false);
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ id: '', paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: '' });
@@ -659,51 +682,298 @@ export default function FinancialYearDetails({ onBack }) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleDamageYearChange = (e) => {
-    setDamageYear(e.target.value);
-    setDamageMonth('');
-    setDamageVehicles([]);
-    setDamageSelectedVehicles([]);
-    setDamageTrips([]);
-    setDamageSelectedTrips([]);
-    setDamageVehicleAmounts({});
-    setDamageManualRemarks('');
+  const getSelectionCondition = (months, vehicles) => {
+    const mCount = months?.length || 0;
+    const vCount = vehicles?.length || 0;
+    if (mCount === 0 || vCount === 0) return null;
+    if (mCount === 1 && vCount === 1) return 'ONE MONTH + ONE VEHICLE';
+    if (mCount > 1 && vCount === 1) return 'MULTIPLE MONTHS + ONE VEHICLE';
+    if (mCount === 1 && vCount > 1) return 'ONE MONTH + MULTIPLE VEHICLES';
+    return 'INVALID';
   };
 
-  const fetchDamageVehicles = async (monthName) => {
-    setDamageMonth(monthName);
-    setDamageSelectedVehicles([]);
-    setDamageTrips([]);
-    setDamageSelectedTrips([]);
-    setDamageVehicleAmounts({});
-    if (!monthName || !damageYear) return setDamageVehicles([]);
+  const fetchTripsForSelection = async (months, vehicles, fy) => {
+    if (!months || months.length === 0 || !vehicles || vehicles.length === 0 || !fy) {
+      setLoadedTrips([]);
+      return;
+    }
+    setTripsLoading(true);
     try {
-      const monthIdx = MONTHS.indexOf(monthName) + 1;
-      const res = await axios.get(`${API_URL}/fy-details/vehicles?month=${monthIdx}&fy=${damageYear}`);
-      setDamageVehicles(res.data || []);
+      const res = await axios.get(`${API_URL}/fy-details/trips`, {
+        params: {
+          months: months.join(','),
+          vehicles: vehicles.join(','),
+          fy
+        }
+      });
+      const trips = res.data || [];
+      setLoadedTrips(trips);
+      const validTripIds = new Set(trips.map(t => String(t._id || t.tripId || `${t.invoiceNo}-${t.loadingDate}`)));
+      setSelectedTripIds(prev => prev.filter(id => validTripIds.has(id)));
+    } catch (err) {
+      console.error('Failed to load trips for selection:', err);
+      setLoadedTrips([]);
+    } finally {
+      setTripsLoading(false);
+    }
+  };
+
+  const toggleTripSelect = (trip) => {
+    const key = String(trip._id || trip.tripId || `${trip.invoiceNo}-${trip.loadingDate}`);
+    setSelectedTripIds(prev => {
+      const exists = prev.includes(key);
+      if (exists) {
+        return prev.filter(k => k !== key);
+      } else {
+        return [...prev, key];
+      }
+    });
+  };
+
+  const handleTripAmountChange = (trip, val) => {
+    const key = String(trip._id || trip.tripId || `${trip.invoiceNo}-${trip.loadingDate}`);
+    setTripAllocAmounts(prev => ({
+      ...prev,
+      [key]: val
+    }));
+    if (val && parseFloat(val) > 0) {
+      setSelectedTripIds(prev => (prev.includes(key) ? prev : [...prev, key]));
+    }
+  };
+
+  const handleDamageYearChange = async (e) => {
+    const newYear = e.target.value;
+    setDamageYear(newYear);
+    if (damageSelectedMonths.length > 0 && newYear) {
+      try {
+        const res = await axios.get(`${API_URL}/fy-details/vehicles?months=${damageSelectedMonths.join(',')}&fy=${newYear}`);
+        const vList = res.data || [];
+        const combined = [...new Set([...vList, ...damageSelectedVehicles])].filter(Boolean).sort();
+        setDamageVehicles(combined);
+        if (damageSelectedVehicles.length > 0) {
+          fetchTripsForSelection(damageSelectedMonths, damageSelectedVehicles, newYear);
+        } else {
+          setLoadedTrips([]);
+        }
+      } catch {
+        setSnack({ severity: 'error', msg: 'Failed to fetch vehicles for selected year' });
+      }
+    } else {
+      setDamageVehicles([]);
+      setDamageSelectedVehicles([]);
+      setLoadedTrips([]);
+    }
+  };
+
+  const handleDamageMonthsChange = async (newMonths) => {
+    const monthsArr = Array.isArray(newMonths) ? newMonths : [newMonths].filter(Boolean);
+    setDamageSelectedMonths(monthsArr);
+    if (monthsArr.length === 1) {
+      setDamageMonth(monthsArr[0]);
+    } else {
+      setDamageMonth('');
+    }
+    if (monthsArr.length === 0 || !damageYear) {
+      setDamageVehicles([]);
+      setDamageSelectedVehicles([]);
+      setLoadedTrips([]);
+      return;
+    }
+    try {
+      const res = await axios.get(`${API_URL}/fy-details/vehicles?months=${monthsArr.join(',')}&fy=${damageYear}`);
+      const vList = res.data || [];
+      const combined = [...new Set([...vList, ...damageSelectedVehicles])].filter(Boolean).sort();
+      setDamageVehicles(combined);
+      if (damageSelectedVehicles.length > 0) {
+        fetchTripsForSelection(monthsArr, damageSelectedVehicles, damageYear);
+      } else {
+        setLoadedTrips([]);
+      }
     } catch {
-      setSnack({ severity: 'error', msg: 'Failed to fetch vehicles' });
+      setSnack({ severity: 'error', msg: 'Failed to fetch vehicles for selected months' });
     }
   };
 
   const handleDamageVehiclesChange = async (updated) => {
-    setDamageSelectedVehicles(updated);
+    const vArr = Array.isArray(updated) ? updated : [updated].filter(Boolean);
+    setDamageSelectedVehicles(vArr);
 
-    if (updated.length === 0) {
-      setDamageTrips([]);
-      setDamageSelectedTrips([]);
-      setDamageVehicleAmounts({});
+    if (vArr.length === 0) {
+      setLoadedTrips([]);
       return;
     }
 
+    if (damageSelectedMonths.length > 0 && damageYear) {
+      fetchTripsForSelection(damageSelectedMonths, vArr, damageYear);
+    }
+  };
+
+  const handleConfirmAllocation = async () => {
+    if (!damageTarget) return;
+    const inv = damageTarget.invoiceNumber;
+    const condition = getSelectionCondition(damageSelectedMonths, damageSelectedVehicles);
+
+    if (!damageYear) {
+      setSnack({ severity: 'warning', msg: 'Please select a Financial Year.' });
+      return;
+    }
+    if (damageSelectedMonths.length === 0) {
+      setSnack({ severity: 'warning', msg: 'Please select at least one Month.' });
+      return;
+    }
+    if (damageSelectedVehicles.length === 0) {
+      setSnack({ severity: 'warning', msg: 'Please select at least one Vehicle.' });
+      return;
+    }
+    if (condition === 'INVALID' || !condition) {
+      setSnack({ severity: 'error', msg: 'Invalid combination. Please select either Multiple Months + 1 Vehicle, 1 Month + Multiple Vehicles, or 1 Month + 1 Vehicle.' });
+      return;
+    }
+    if (!damageDebitReason) {
+      setSnack({ severity: 'warning', msg: 'Please select a Debit Reason.' });
+      return;
+    }
+
+    const targetRow = rows.find(x => x.invoiceNumber === inv);
+    const computedTargetRow = computedRows.find(x => x.invoiceNumber === inv);
+    const groupTotalRecv = computedRows.filter(cr => cr.groupId === damageTarget.groupId).reduce((s, x) => s + x.receivable, 0);
+    const calculatedGroupDiff = Math.max(0, groupTotalRecv - num(computedTargetRow?.groupData?.paymentAmount) - num(computedTargetRow?.groupData?.tdsProvision));
+    const baseOriginalDebit = targetRow?.originalDebitAmount != null ? targetRow.originalDebitAmount : calculatedGroupDiff;
+    const currentAllocations = targetRow?.deductionAllocations || [];
+    const currentTotalAlloc = currentAllocations.reduce((s, a) => s + (parseFloat(a.allocatedAmount) || 0), 0);
+    const currentRemaining = Math.max(0, baseOriginalDebit - currentTotalAlloc);
+
+    if (currentRemaining <= 0) {
+      setSnack({ severity: 'error', msg: 'Remaining Debit is ₹0. This debit is fully allocated and settled.' });
+      return;
+    }
+
+    // Build parsed trip allocations from selected trips
+    const selectedTripsList = loadedTrips.filter(t => {
+      const key = String(t._id || t.tripId || `${t.invoiceNo}-${t.loadingDate}`);
+      return selectedTripIds.includes(key);
+    });
+
+    const parsedTripAllocs = selectedTripsList.map(t => {
+      const key = String(t._id || t.tripId || `${t.invoiceNo}-${t.loadingDate}`);
+      const amt = parseFloat(tripAllocAmounts[key]) || 0;
+      return {
+        tripRecordId: t._id ? String(t._id) : (t.tripId || key),
+        tripId: t.tripId || (t._id ? String(t._id) : key),
+        shipmentNo: t.shipmentNo || '',
+        invoiceNo: t.invoiceNo || '',
+        month: t.month || '',
+        vehicle: t.vehicleNumber || t.vehicle || '',
+        vehicleNumber: t.vehicleNumber || t.vehicle || '',
+        loadingDate: t.loadingDate || t.invoiceDate || '',
+        allocatedAmount: amt
+      };
+    }).filter(t => t.allocatedAmount > 0);
+
+    const totalTripAllocated = parsedTripAllocs.reduce((s, t) => s + t.allocatedAmount, 0);
+    const allocAmt = totalTripAllocated > 0 ? totalTripAllocated : (parseFloat(damageAllocateAmount) || 0);
+
+    if (isNaN(allocAmt) || allocAmt <= 0) {
+      setSnack({ severity: 'warning', msg: 'Please select at least one trip and enter an allocate amount (> ₹0).' });
+      return;
+    }
+
+    if (allocAmt > currentRemaining) {
+      setSnack({
+        severity: 'error',
+        msg: `Only ₹${currentRemaining.toLocaleString('en-IN')} is available for allocation.`
+      });
+      return;
+    }
+
+    setLoading(true);
     try {
-      const monthIdx = MONTHS.indexOf(damageMonth) + 1;
-      const vehicleQuery = updated.join(',');
-      const res = await axios.get(`${API_URL}/fy-details/trips?month=${monthIdx}&vehicle=${vehicleQuery}&fy=${damageYear}`);
-      setDamageTrips(res.data || []);
-      setDamageSelectedTrips(prev => prev.filter(t => updated.includes(t.vehicle)));
-    } catch {
-      setSnack({ severity: 'error', msg: 'Failed to fetch trips' });
+      const payload = {
+        billNo: inv,
+        debitReason: damageDebitReason,
+        financialYear: damageYear,
+        months: damageSelectedMonths,
+        vehicles: damageSelectedVehicles,
+        condition,
+        originalDebitAmount: baseOriginalDebit,
+        allocatedAmount: allocAmt,
+        allocationDate: new Date().toISOString().split('T')[0],
+        tripAllocations: parsedTripAllocs
+      };
+
+      const res = await axios.post(`${API_URL}/fy-details/allocate-deduction`, payload);
+
+      if (res.data?.success) {
+        setRows(prev => prev.map(r => {
+          if (r.invoiceNumber === inv) {
+            return {
+              ...r,
+              originalDebitAmount: res.data.originalDebitAmount,
+              totalAllocatedAmount: res.data.totalAllocatedAmount,
+              remainingDebitAmount: res.data.remainingDebitAmount,
+              deductionAllocations: res.data.row?.deductionAllocations || [...currentAllocations, res.data.allocation],
+              debitReasons: res.data.row?.debitReasons || r.debitReasons
+            };
+          }
+          return r;
+        }));
+
+        setPayments(prev => prev.map(p => {
+          if (p.billNos?.includes(inv)) {
+            return { ...p, debitAmount: res.data.remainingDebitAmount };
+          }
+          return p;
+        }));
+
+        setSelectedTripIds([]);
+        setTripAllocAmounts({});
+        setDamageAllocateAmount('');
+        setSnack({
+          severity: 'success',
+          msg: `Allocated ₹${allocAmt.toLocaleString('en-IN')} to ${damageDebitReason} across ${parsedTripAllocs.length} trip(s) successfully! Bank Book debit updated to ₹${res.data.remainingDebitAmount.toLocaleString('en-IN')}.`
+        });
+      }
+    } catch (err) {
+      console.error('Allocation error:', err);
+      setSnack({ severity: 'error', msg: err.response?.data?.error || 'Failed to save deduction allocation' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAllocation = async (allocationId) => {
+    if (!damageTarget) return;
+    const inv = damageTarget.invoiceNumber;
+    setLoading(true);
+    try {
+      const res = await axios.delete(`${API_URL}/fy-details/allocate-deduction/${inv}/${allocationId}`);
+      if (res.data?.success) {
+        setRows(prev => prev.map(r => {
+          if (r.invoiceNumber === inv) {
+            return {
+              ...r,
+              totalAllocatedAmount: res.data.totalAllocatedAmount,
+              remainingDebitAmount: res.data.remainingDebitAmount,
+              deductionAllocations: res.data.deductionAllocations,
+              debitReasons: res.data.row?.debitReasons || r.debitReasons
+            };
+          }
+          return r;
+        }));
+
+        setPayments(prev => prev.map(p => {
+          if (p.billNos?.includes(inv)) {
+            return { ...p, debitAmount: res.data.remainingDebitAmount };
+          }
+          return p;
+        }));
+
+        setSnack({ severity: 'info', msg: 'Allocation removed. Bank Book debit updated.' });
+      }
+    } catch (err) {
+      setSnack({ severity: 'error', msg: 'Failed to remove allocation' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1151,54 +1421,99 @@ export default function FinancialYearDetails({ onBack }) {
   // Reset page when filter changes
   const handleSiteFilter = useCallback((f) => { setSiteFilter(f); setPage(0); }, []);
 
-  const handleRowEdit = useCallback((invoiceNumber, field, value) => {
-    const WORKFLOW_REASONS = [
-      'Damage / Shortage',
-      'GPS Deviation Charges',
-      'GPS Trip Charges',
-      'Device Installation Charges',
-      'RFID Deduction / Charges',
-      'Suspense'
-    ];
+  const openDeductionModal = useCallback((invNo, specificReason = '') => {
+    const r = rows.find(x => x.invoiceNumber === invNo);
+    const computedR = computedRows.find(x => x.invoiceNumber === invNo);
+    if (!r || !computedR) return;
 
+    const groupTotalRecv = computedRows.filter(cr => cr.groupId === computedR.groupId).reduce((s, x) => s + x.receivable, 0);
+    const groupDiff = Math.max(0, groupTotalRecv - num(computedR.groupData?.paymentAmount) - num(computedR.groupData?.tdsProvision));
+    const origDebit = r.originalDebitAmount != null ? r.originalDebitAmount : groupDiff;
+
+    const existingAllocations = r.deductionAllocations || [];
+    const totalAlloc = existingAllocations.reduce((sum, a) => sum + (parseFloat(a.allocatedAmount) || 0), 0);
+    const remDebit = Math.max(0, origDebit - totalAlloc);
+
+    const reasonsList = r.debitReasons && r.debitReasons.length > 0 ? r.debitReasons : (specificReason ? [specificReason] : ['Damage / Shortage']);
+    const selectedReason = specificReason || (reasonsList.length > 0 ? reasonsList[0] : 'Damage / Shortage');
+
+    setDamageTarget({
+      invoiceNumber: invNo,
+      groupId: computedR.groupId,
+      reasons: reasonsList,
+      difference: origDebit,
+      originalDebitAmount: origDebit,
+      alreadyAllocated: totalAlloc,
+      remainingDebitAmount: remDebit
+    });
+
+    let activeFy = r.damageYear || (selYear ? (selYear.startsWith('FY') ? selYear : `FY ${selYear}`) : 'FY 2026-27');
+    if (activeFy && !activeFy.startsWith('FY') && activeFy.includes('-')) {
+      activeFy = `FY ${activeFy}`;
+    }
+    setDamageYear(activeFy);
+
+    let initMonths = [];
+    if (r.damageMonth) {
+      const matchMonth = ALL_MONTHS_NAMES.find(m => m.toLowerCase().startsWith(String(r.damageMonth).toLowerCase().slice(0, 3))) || r.damageMonth;
+      initMonths = [matchMonth];
+    } else if (r.month) {
+      const matchMonth = ALL_MONTHS_NAMES.find(m => m.toLowerCase().startsWith(String(r.month).toLowerCase().slice(0, 3)));
+      if (matchMonth) initMonths = [matchMonth];
+    }
+    setDamageSelectedMonths(initMonths);
+    setDamageMonth(initMonths.length === 1 ? initMonths[0] : '');
+
+    const initVehicles = r.damageVehicles || [];
+    setDamageSelectedVehicles(initVehicles);
+
+    setDamageDebitReason(selectedReason);
+    setDamageAllocateAmount('');
+    setSelectedTripIds([]);
+    setTripAllocAmounts({});
+
+    if (initMonths.length > 0 && activeFy) {
+      axios.get(`${API_URL}/fy-details/vehicles?months=${initMonths.join(',')}&fy=${activeFy}`)
+        .then(res => {
+          const vList = res.data || [];
+          const combined = [...new Set([...vList, ...initVehicles])].filter(Boolean).sort();
+          setDamageVehicles(combined);
+          if (initVehicles.length > 0) {
+            fetchTripsForSelection(initMonths, initVehicles, activeFy);
+          } else {
+            setLoadedTrips([]);
+          }
+        })
+        .catch(() => {
+          setDamageVehicles(initVehicles);
+          setLoadedTrips([]);
+        });
+    } else {
+      setDamageVehicles(initVehicles);
+      setLoadedTrips([]);
+    }
+
+    setDamageTrips(r.damageTrips || []);
+    setDamageSelectedTrips(r.damageTrips || []);
+    setDamageVehicleAmounts(r.damageVehicleAmounts || {});
+
+    const existingRemarks = computedR.groupData?.remarks || '';
+    const sepIdx = existingRemarks.indexOf('\n---\n');
+    setDamageManualRemarks(sepIdx !== -1 ? existingRemarks.slice(sepIdx + 5) : '');
+
+    setDamageModalOpen(true);
+  }, [rows, computedRows, selYear]);
+
+  const handleRowEdit = useCallback((invoiceNumber, field, value) => {
     if (field === 'debitReasons') {
       const r = rows.find(x => x.invoiceNumber === invoiceNumber);
       const computedR = computedRows.find(x => x.invoiceNumber === invoiceNumber);
       const oldReasons = r?.debitReasons || [];
       const newReasons = value || [];
-      const addedReasons = newReasons.filter(x => !oldReasons.includes(x));
-      const hasWorkflowReason = newReasons.some(v => WORKFLOW_REASONS.includes(v));
+      const addedReasons = newReasons.filter(x => !oldReasons.includes(x) && x !== 'None');
 
-      if (r && computedR && hasWorkflowReason && addedReasons.length > 0) {
-        const groupTotalRecv = computedRows.filter(cr => cr.groupId === computedR.groupId).reduce((s, x) => s + x.receivable, 0);
-        const groupDiff = groupTotalRecv - num(computedR.groupData?.paymentAmount) - num(computedR.groupData?.tdsProvision);
-        setDamageTarget({ invoiceNumber: invoiceNumber, groupId: computedR.groupId, reasons: newReasons, difference: groupDiff });
-
-        // Pre-fill modal state if there are existing deductions
-        setDamageYear(r.damageYear || selYear);
-        setDamageMonth(r.damageMonth || '');
-        setDamageSelectedVehicles(r.damageVehicles || []);
-
-        // If we have an existing month, fetch vehicles for that month
-        if (r.damageMonth && (r.damageYear || selYear)) {
-          const monthIdx = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].findIndex(m => r.damageMonth.startsWith(m)) + 1;
-          axios.get(`${API_URL}/fy-details/vehicles?month=${monthIdx}&fy=${r.damageYear || selYear}`)
-            .then(res => setDamageVehicles(res.data || []))
-            .catch(() => { });
-        } else {
-          setDamageVehicles([]);
-        }
-
-        setDamageTrips(r.damageTrips || []);
-        setDamageSelectedTrips(r.damageTrips || []);
-        setDamageVehicleAmounts(r.damageVehicleAmounts || {});
-
-        setDamageModalOpen(true);
-        // Pre-load any existing manual remarks from the payment record
-        // Strip out the auto-generated trip lines (everything before the '---' separator)
-        const existingRemarks = computedR.groupData?.remarks || '';
-        const sepIdx = existingRemarks.indexOf('\n---\n');
-        setDamageManualRemarks(sepIdx !== -1 ? existingRemarks.slice(sepIdx + 5) : '');
+      if (r && computedR && addedReasons.length > 0) {
+        openDeductionModal(invoiceNumber, addedReasons[0]);
       }
     }
 
@@ -1409,13 +1724,20 @@ export default function FinancialYearDetails({ onBack }) {
 
       const groupDiff = g.id ? groupTotalRecv - num(g.paymentAmount) - num(g.tdsProvision) : 0;
 
-      const groupAlloc = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((total, cr) => {
-        return total + Object.values(cr.damageVehicleAmounts || {}).reduce((tripSum, tripObj) => {
-          return tripSum + Object.values(tripObj || {}).reduce((s, v) => s + num(v), 0);
-        }, 0);
+      const groupDeductionAlloc = g.id ? computedRows.filter(cr => cr.groupId === g.id).reduce((total, cr) => {
+        const list = cr.deductionAllocations || [];
+        return total + list.reduce((s, a) => s + num(a.allocatedAmount), 0);
       }, 0) : 0;
 
-      const calcDebit = g.id ? Math.max(0, groupDiff - groupAlloc) : 0;
+      const calcDebit = g.id
+        ? (r.remainingDebitAmount != null
+            ? Math.max(0, r.remainingDebitAmount)
+            : (groupDeductionAlloc > 0
+                ? Math.max(0, groupDiff - groupDeductionAlloc)
+                : (g.debitAmount !== undefined && g.debitAmount !== '' && g.debitAmount !== null && Number(g.debitAmount) >= 0 && Number(g.debitAmount) !== groupDiff
+                    ? Math.max(0, num(g.debitAmount))
+                    : Math.max(0, groupDiff))))
+        : 0;
 
       return { 'Invoice Date': r.invoiceDate, 'Invoice Number': r.invoiceNumber, 'Shipment Number': r.shipmentNos?.join(', ') || '', 'Month': r.month, 'SITE': r.site, 'BILL': r.billType, 'Amount': r.amount, 'CGST': r.cgst, 'SGST': r.sgst, 'Total Amount': r.totalAmount, 'Tds @2%': r.tds, 'Receivable': r.receivable, 'Payment Amount': g.paymentAmount || 0, 'TDS Provision': g.tdsProvision || 0, 'Difference': groupDiff, 'Payment Date': g.paymentDate || '', 'Reference No': g.referenceNo || '', 'Debit Amount': calcDebit, 'Debit Reasons(Deduction)': (r.debitReasons || []).join(', ') || 'None', 'Remarks': g.remarks || '' };
     }));
@@ -1441,7 +1763,22 @@ export default function FinancialYearDetails({ onBack }) {
       }, 0);
     }, 0) : 0;
 
-    const calcDebit = isGroupStart ? Math.max(0, groupDiff - groupAlloc) : 0;
+    const groupDeductionAlloc = isGroupStart ? computedRows.filter(cr => cr.groupId === gid).reduce((total, cr) => {
+      const list = cr.deductionAllocations || [];
+      return total + list.reduce((s, a) => s + num(a.allocatedAmount), 0);
+    }, 0) : 0;
+
+    const groupRows = computedRows.filter(cr => cr.groupId === gid);
+    const rowWithRemaining = groupRows.find(cr => cr.remainingDebitAmount != null);
+    const calcDebit = isGroupStart
+      ? (rowWithRemaining
+          ? Math.max(0, rowWithRemaining.remainingDebitAmount)
+          : (groupDeductionAlloc > 0
+              ? Math.max(0, groupDiff - groupDeductionAlloc)
+              : (gd.debitAmount !== undefined && gd.debitAmount !== '' && gd.debitAmount !== null && Number(gd.debitAmount) >= 0 && Number(gd.debitAmount) !== groupDiff
+                  ? Math.max(0, num(gd.debitAmount))
+                  : Math.max(0, groupDiff - groupAlloc))))
+      : 0;
 
     // Row styling logic matched perfectly to Cement Register
     const hasDraft = dirtyRows.has(r.invoiceNumber) || (gid && dirtyGroups.has(gid));
@@ -1698,8 +2035,52 @@ export default function FinancialYearDetails({ onBack }) {
           )}
 
           {/* Debit Reasons (per row) */}
-          <td style={td({ background: paymentBg })}>
-            <MultiSelectSearchable variant="standard" value={r.debitReasons || []} onChange={e => handleRowEdit(r.invoiceNumber, 'debitReasons', e.target.value)} options={DEBIT_REASONS} style={{ ...selStyle, minWidth: 200, fontWeight: 600, color: '#334155' }} />
+          <td style={td({ background: paymentBg, minWidth: 220 })}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+              <MultiSelectSearchable
+                variant="standard"
+                value={r.debitReasons || []}
+                onChange={e => handleRowEdit(r.invoiceNumber, 'debitReasons', e.target.value)}
+                options={DEBIT_REASONS}
+                style={{ ...selStyle, minWidth: 190, fontWeight: 600, color: '#334155' }}
+              />
+              {((r.debitReasons && r.debitReasons.length > 0) || (r.deductionAllocations && r.deductionAllocations.length > 0)) && (
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.5 }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openDeductionModal(r.invoiceNumber);
+                    }}
+                    style={{
+                      background: (r.deductionAllocations && r.deductionAllocations.length > 0) ? '#ecfdf5' : '#eef2ff',
+                      color: (r.deductionAllocations && r.deductionAllocations.length > 0) ? '#059669' : '#4f46e5',
+                      border: `1px solid ${(r.deductionAllocations && r.deductionAllocations.length > 0) ? '#a7f3d0' : '#c7d2fe'}`,
+                      borderRadius: 4,
+                      padding: '2px 8px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <span>📊</span>
+                    <span>
+                      {(r.deductionAllocations && r.deductionAllocations.length > 0)
+                        ? `Allocated (₹${(r.totalAllocatedAmount || 0).toLocaleString('en-IN')})`
+                        : 'Allocate Deduction'}
+                    </span>
+                  </button>
+                  {r.remainingDebitAmount === 0 && (r.deductionAllocations && r.deductionAllocations.length > 0) && (
+                    <span style={{ fontSize: 9, fontWeight: 800, color: '#16a34a', background: '#dcfce7', padding: '1px 5px', borderRadius: 4 }}>
+                      SETTLED
+                    </span>
+                  )}
+                </Box>
+              )}
+            </Box>
           </td>
 
           {/* Remarks */}
@@ -1714,11 +2095,14 @@ export default function FinancialYearDetails({ onBack }) {
   };
   const thStyle = (extra = {}) => ({
     position: 'sticky', top: 0, zIndex: 10,
-    background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', color: '#e2e8f0',
+    background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)',
+    backgroundColor: '#0f172a',
+    color: '#e2e8f0',
     padding: '10px 6px', whiteSpace: 'pre-line',
     fontSize: 10, fontWeight: 700, textAlign: 'center', letterSpacing: '0.5px',
     borderRight: '1px solid rgba(255,255,255,0.05)',
-    borderBottom: '1px solid rgba(255,255,255,0.1)',
+    borderBottom: '2px solid rgba(255,255,255,0.15)',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
     ...extra
   });
 
@@ -1750,7 +2134,15 @@ export default function FinancialYearDetails({ onBack }) {
   const paidBills = finalFilteredRows.filter(r => num(r.paymentAmount) >= num(r.receivable) && num(r.receivable) > 0).length;
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', fontFamily: 'Inter, sans-serif' }}>
+    <Box sx={{
+      minHeight: '100vh',
+      maxHeight: { md: '100vh' },
+      display: 'flex',
+      flexDirection: 'column',
+      bgcolor: 'background.default',
+      fontFamily: 'Inter, sans-serif',
+      overflow: { xs: 'auto', md: 'hidden' }
+    }}>
 
       {/* ── Premium Header ───────────────────────────────────────────── */}
       <Box sx={{
@@ -1944,14 +2336,23 @@ export default function FinancialYearDetails({ onBack }) {
       </Box>
 
       {/* 4. Table Container */}
-      <Box sx={{ p: { xs: 1, md: 2 } }}>
-        <Box sx={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflowX: 'auto', bgcolor: 'background.paper', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-          <table style={{ borderCollapse: 'collapse', whiteSpace: 'normal', fontFamily: 'Inter,sans-serif', fontSize: 13, width: 'max-content', minWidth: '100%' }}>
-            <thead>
+      <Box sx={{ p: { xs: 1, md: 2 }, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{
+          border: '1px solid #e2e8f0',
+          borderRadius: '12px',
+          overflow: 'auto',
+          maxHeight: { xs: '72vh', md: 'calc(100vh - 215px)' },
+          minHeight: '400px',
+          bgcolor: 'background.paper',
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
+          position: 'relative'
+        }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0, whiteSpace: 'normal', fontFamily: 'Inter,sans-serif', fontSize: 13, width: 'max-content', minWidth: '100%' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr>
-                <th style={thStyle({ minWidth: 50, position: 'sticky', left: 0, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Sl No</th>
-                <th style={thStyle({ minWidth: 50, position: 'sticky', left: 50, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Select</th>
-                <th style={thStyle({ minWidth: 170, position: 'sticky', left: 100, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Invoice Number</th>
+                <th style={thStyle({ minWidth: 50, position: 'sticky', left: 0, top: 0, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Sl No</th>
+                <th style={thStyle({ minWidth: 50, position: 'sticky', left: 50, top: 0, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Select</th>
+                <th style={thStyle({ minWidth: 170, position: 'sticky', left: 100, top: 0, zIndex: 12, borderRight: '1px solid rgba(255,255,255,0.05)' })}>Invoice Number</th>
                 <th style={thStyle({ minWidth: 120 })}>Invoice Date</th>
                 <th style={thStyle({ minWidth: 150 })}>Shipment Number</th>
                 <th style={thStyle({ minWidth: 220 })}>Month</th>
@@ -2045,9 +2446,6 @@ export default function FinancialYearDetails({ onBack }) {
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button size="small" variant="outlined" onClick={() => window.open(doc.fileUrl, '_blank')}>
-                    View
-                  </Button>
                   <Button size="small" variant="outlined" color="error" onClick={() => handleDocumentDelete(doc._id)}>
                     Delete
                   </Button>
@@ -2061,427 +2459,837 @@ export default function FinancialYearDetails({ onBack }) {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={damageModalOpen} onClose={() => setDamageModalOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 'bold' }}>{damageTarget?.reasons?.join(' & ') || 'Deduction'} Details</DialogTitle>
-        <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <Box>
-            <Typography variant="body2" fontWeight={600} mb={1}>1. Select Financial Year</Typography>
-            <SearchableSelect variant="standard" value={damageYear} onChange={handleDamageYearChange} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
-              <option value="">Select Financial Year</option>
-              {FY_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
-            </SearchableSelect>
-          </Box>
-          <Box>
-            <Typography variant="body2" fontWeight={600} mb={1}>2. Select Month</Typography>
-            <SearchableSelect variant="standard" value={damageMonth} onChange={e => fetchDamageVehicles(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} disabled={!damageYear}>
-              <option value="">Select Month</option>
-              {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-            </SearchableSelect>
-          </Box>
-          <Box>
-            <Typography variant="body2" fontWeight={600} mb={1}>3. Select Vehicle(s)</Typography>
-            <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2, p: 1, bgcolor: damageMonth ? '#fff' : '#f8fafc' }}>
-              {!damageYear ? (
-                <Typography variant="body2" color="text.secondary" textAlign="center">Select a financial year first.</Typography>
-              ) : !damageMonth ? (
-                <Typography variant="body2" color="text.secondary" textAlign="center">Select a month first.</Typography>
-              ) : (
-                <MultiSelectSearchable
-                  options={damageVehicles}
-                  value={damageSelectedVehicles}
-                  onChange={(e) => handleDamageVehiclesChange(e.target.value)}
-                  label="Search and select vehicle(s)..."
-                />
-              )}
-            </Box>
-          </Box>
-          <Box>
-            <Typography variant="body2" fontWeight={600} mb={1}>4. Select Trip(s)</Typography>
-            <Box sx={{ maxHeight: 340, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: '#fafafa' }}>
-              {damageTrips.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
-                  {damageSelectedVehicles.length > 0 ? 'No trips found for selected vehicle(s).' : 'Select at least one vehicle to see trips.'}
-                </Typography>
-              ) : (() => {
-                // ── Build date-sorted grouping ───────────────────────────────
-                const parseDate = (dStr) => {
-                  if (!dStr) return 0;
-                  const p = dStr.split(/[-/.]/);
-                  if (p.length >= 3) { let y = parseInt(p[2]); if (y < 100) y += 2000; return new Date(y, parseInt(p[1]) - 1, parseInt(p[0])).getTime(); }
-                  return 0;
-                };
-                const fmtDate = (dStr) => {
-                  try {
-                    const p = dStr.split(/[-/.]/);
-                    if (p.length === 3) {
-                      const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                      let y = parseInt(p[2]); if (y < 100) y += 2000;
-                      return `${p[0]} ${M[parseInt(p[1]) - 1]} ${y}`;
-                    }
-                  } catch (_) { }
-                  return dStr;
-                };
+      <Dialog
+        open={damageModalOpen}
+        onClose={() => setDamageModalOpen(false)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: '16px',
+            bgcolor: '#ffffff',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            maxHeight: '94vh'
+          }
+        }}
+      >
+        {(() => {
+          const inv = damageTarget?.invoiceNumber;
+          const targetRow = rows.find(x => x.invoiceNumber === inv);
+          const computedTargetRow = computedRows.find(x => x.invoiceNumber === inv);
+          const groupTotalRecv = computedRows.filter(cr => cr.groupId === damageTarget?.groupId).reduce((s, x) => s + x.receivable, 0);
+          const calculatedGroupDiff = Math.max(0, groupTotalRecv - num(computedTargetRow?.groupData?.paymentAmount) - num(computedTargetRow?.groupData?.tdsProvision));
+          const baseOriginalDebit = targetRow?.originalDebitAmount != null ? targetRow.originalDebitAmount : calculatedGroupDiff;
+          const currentAllocations = targetRow?.deductionAllocations || [];
+          const totalAllocatedAmount = currentAllocations.reduce((s, a) => s + (parseFloat(a.allocatedAmount) || 0), 0);
+          const remainingDebitAmount = Math.max(0, baseOriginalDebit - totalAllocatedAmount);
+          const condition = getSelectionCondition(damageSelectedMonths, damageSelectedVehicles);
 
-                // Group by date
-                const tripsByDate = {};
-                [...damageTrips]
-                  .sort((a, b) => parseDate(a.tripDate) - parseDate(b.tripDate))
-                  .forEach(t => {
-                    const k = t.tripDate || 'Unknown';
-                    if (!tripsByDate[k]) tripsByDate[k] = [];
-                    tripsByDate[k].push(t);
-                  });
+          const selectedTripsList = loadedTrips.filter(t => {
+            const key = String(t._id || t.tripId || `${t.invoiceNo}-${t.loadingDate}`);
+            return selectedTripIds.includes(key);
+          });
+          const totalTripAllocated = selectedTripsList.reduce((sum, t) => {
+            const key = String(t._id || t.tripId || `${t.invoiceNo}-${t.loadingDate}`);
+            return sum + (parseFloat(tripAllocAmounts[key]) || 0);
+          }, 0);
 
-                const isSel = (t) => !!damageSelectedTrips.find(s => s.invoiceNo === t.invoiceNo && s.vehicle === t.vehicle);
+          const enteredAllocateAmt = totalTripAllocated > 0 ? totalTripAllocated : (parseFloat(damageAllocateAmount) || 0);
+          const isOverAllocated = totalTripAllocated > remainingDebitAmount;
+          const newRemainingDebitAfterInput = Math.max(0, remainingDebitAmount - totalTripAllocated);
 
-                const toggleGroup = (trips) => {
-                  const allSel = trips.every(t => isSel(t));
-                  if (allSel) {
-                    setDamageSelectedTrips(prev => prev.filter(s => !trips.find(t => t.invoiceNo === s.invoiceNo && t.vehicle === s.vehicle)));
-                  } else {
-                    const missing = trips.filter(t => !isSel(t));
-                    setDamageSelectedTrips(prev => [...prev, ...missing]);
+          const reasonBreakdown = currentAllocations.reduce((acc, a) => {
+            const r = a.debitReason || 'Other';
+            acc[r] = (acc[r] || 0) + (parseFloat(a.allocatedAmount) || 0);
+            return acc;
+          }, {});
+
+          const getTripsForMonth = (m) => loadedTrips.filter(t => (t.month || '').toLowerCase() === (m || '').toLowerCase());
+          const getTripsForVehicle = (v) => loadedTrips.filter(t => (t.vehicleNumber || t.vehicle || '').toLowerCase() === (v || '').toLowerCase());
+
+          const renderTripCard = (trip) => {
+            const tripKey = String(trip._id || trip.tripId || `${trip.invoiceNo}-${trip.loadingDate}`);
+            const isSelected = selectedTripIds.includes(tripKey);
+            const tripAmt = tripAllocAmounts[tripKey] ?? '';
+
+            return (
+              <Box
+                key={tripKey}
+                onClick={(e) => {
+                  if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+                    toggleTripSelect(trip);
                   }
-                };
-
-                const dateEntries = Object.entries(tripsByDate);
-
-                return dateEntries.map(([dateStr, tripsForDate], groupIdx) => {
-                  const allSel = tripsForDate.every(t => isSel(t));
-                  const someSel = tripsForDate.some(t => isSel(t));
-                  // Sequential trip-occasion number (1st date = Trip 1, etc.)
-                  const tripOccasion = groupIdx + 1;
-
-                  return (
-                    <Box key={dateStr} sx={{ borderBottom: groupIdx < dateEntries.length - 1 ? '2px solid #e2e8f0' : 'none' }}>
-                      {/* ── Date + Trip Occasion Header ─── */}
-                      <Box
-                        sx={{
-                          display: 'flex', alignItems: 'center', gap: 1.5,
-                          px: 2, py: 1.25,
-                          bgcolor: allSel ? '#e0e7ff' : someSel ? '#f0f4ff' : '#f1f5f9',
-                          cursor: 'pointer', '&:hover': { bgcolor: '#e4e8fd' },
-                          borderBottom: '1px solid #e2e8f0', userSelect: 'none'
-                        }}
-                        onClick={() => toggleGroup(tripsForDate)}
-                      >
-                        <input
-                          type="checkbox" checked={allSel} readOnly
-                          ref={el => { if (el) el.indeterminate = !allSel && someSel; }}
-                          style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#4f46e5' }}
-                        />
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-                          <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#3730a3' }}>
-                            📅 {fmtDate(dateStr)}
-                          </Typography>
-                          <Box sx={{
-                            px: 1, py: 0.25, borderRadius: '999px',
-                            bgcolor: allSel ? '#4f46e5' : '#6366f140',
-                            color: allSel ? '#fff' : '#4f46e5',
-                            fontSize: 10, fontWeight: 700, lineHeight: 1.6,
-                            letterSpacing: 0.5
-                          }}>
-                            Trip {tripOccasion}
-                          </Box>
-                        </Box>
-                        <Typography sx={{ fontSize: 10, color: '#6b7280', fontWeight: 500 }}>
-                          {tripsForDate.length} vehicle{tripsForDate.length !== 1 ? 's' : ''}
-                          {someSel ? ` · ${tripsForDate.filter(t => isSel(t)).length} selected` : ''}
+                }}
+                sx={{
+                  p: 1.5,
+                  mb: 1.5,
+                  borderRadius: '10px',
+                  border: isSelected ? '2px solid #6366f1' : '1.5px solid #e2e8f0',
+                  bgcolor: isSelected ? '#f5f3ff' : '#ffffff',
+                  boxShadow: isSelected ? '0 4px 12px rgba(99, 102, 241, 0.12)' : '0 1px 3px rgba(0,0,0,0.03)',
+                  transition: 'all 0.2s ease',
+                  cursor: 'pointer',
+                  '&:hover': {
+                    borderColor: isSelected ? '#4f46e5' : '#cbd5e1',
+                    boxShadow: '0 4px 8px rgba(0,0,0,0.06)'
+                  }
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, flex: 1 }}>
+                    <Checkbox
+                      checked={isSelected}
+                      onChange={() => toggleTripSelect(trip)}
+                      onClick={(e) => e.stopPropagation()}
+                      sx={{
+                        p: 0,
+                        mt: 0.25,
+                        color: '#94a3b8',
+                        '&.Mui-checked': { color: '#6366f1' }
+                      }}
+                    />
+                    <Box sx={{ flex: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
+                          Shipment No: <span style={{ color: '#4338ca', fontFamily: 'monospace' }}>{trip.shipmentNo || '—'}</span>
                         </Typography>
+                        <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>
+                          | Invoice: <span style={{ color: '#1e293b', fontFamily: 'monospace' }}>{trip.invoiceNo || '—'}</span>
+                        </Typography>
+                        {trip.month && (
+                          <Chip
+                            size="small"
+                            label={trip.month}
+                            sx={{ height: 18, fontSize: 10, fontWeight: 700, bgcolor: '#e0e7ff', color: '#3730a3' }}
+                          />
+                        )}
                       </Box>
 
-                      {/* ── Vehicle rows table ─── */}
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 0.5, flexWrap: 'wrap', fontSize: '11px', color: '#64748b' }}>
+                        <span>📅 Loading Date: <strong style={{ color: '#334155' }}>{trip.loadingDate || trip.invoiceDate || '—'}</strong></span>
+                        <span>🚛 Vehicle: <strong style={{ color: '#334155' }}>{trip.vehicleNumber || trip.vehicle || '—'}</strong></span>
+                        {(trip.origin || trip.destination) && (
+                          <span>📍 Route: <strong style={{ color: '#334155' }}>{trip.origin || '—'} → {trip.destination || '—'}</strong></span>
+                        )}
+                        {(trip.totalFreight != null || trip.freightAmount != null) && (
+                          <span>💰 Freight: <strong style={{ color: '#0f172a' }}>₹{Number(trip.totalFreight != null ? trip.totalFreight : trip.freightAmount).toLocaleString('en-IN')}</strong></span>
+                        )}
+                      </Box>
+                    </Box>
+                  </Box>
+
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+                    <Typography sx={{ fontSize: 10, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      ALLOCATE AMOUNT
+                    </Typography>
+                    <Box
+                      onClick={(e) => e.stopPropagation()}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        bgcolor: isSelected ? '#ffffff' : '#f8fafc',
+                        border: isSelected ? '1.5px solid #6366f1' : '1px solid #cbd5e1',
+                        borderRadius: '8px',
+                        px: 1,
+                        py: 0.5,
+                        boxShadow: isSelected ? '0 2px 4px rgba(99, 102, 241, 0.15)' : 'none'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px', fontWeight: 800, color: isSelected ? '#4338ca' : '#94a3b8', marginRight: '4px' }}>₹</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        placeholder="0.00"
+                        value={tripAmt}
+                        disabled={!isSelected}
+                        onChange={(e) => handleTripAmountChange(trip, e.target.value)}
+                        style={{
+                          width: '110px',
+                          border: 'none',
+                          outline: 'none',
+                          fontSize: '13px',
+                          fontWeight: 800,
+                          color: isSelected ? '#0f172a' : '#94a3b8',
+                          background: 'transparent',
+                          fontFamily: 'monospace'
+                        }}
+                      />
+                    </Box>
+                  </Box>
+                </Box>
+              </Box>
+            );
+          };
+
+          return (
+            <React.Fragment>
+              <DialogTitle sx={{ p: 2.5, borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8fafc' }}>
+                <Box display="flex" alignItems="center" gap={1.5}>
+                  <span style={{ fontSize: '22px' }}>⚖️</span>
+                  <Box>
+                    <Typography variant="h6" fontWeight={800} color="#0f172a" sx={{ lineHeight: 1.2 }}>
+                      Debit Reasons (Deduction) Allocation
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                      Invoice: <span style={{ color: '#4f46e5', fontFamily: 'monospace' }}>{inv || '—'}</span>
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box display="flex" alignItems="center" gap={1}>
+                  {isB2BEligibleDebitReason(damageDebitReason) && (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => setB2bDialogOpen(true)}
+                      startIcon={<ReceiptLongIcon sx={{ fontSize: 14 }} />}
+                      sx={{
+                        bgcolor: '#0ea5e9', '&:hover': { bgcolor: '#0284c7' },
+                        color: '#fff', fontSize: 11, fontWeight: 800, py: 0.5, px: 1.5,
+                        borderRadius: '6px', textTransform: 'none',
+                        boxShadow: '0 2px 4px rgba(14, 165, 233, 0.25)'
+                      }}
+                    >
+                      B2B
+                    </Button>
+                  )}
+                  <Button size="small" onClick={() => setDamageModalOpen(false)} sx={{ minWidth: 32, p: 0.5, color: '#64748b' }}>✕</Button>
+                </Box>
+              </DialogTitle>
+
+              <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 3, p: 3 }}>
+                {/* 1. FINANCIAL YEAR */}
+                <Box>
+                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#334155', mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    1. Financial Year
+                  </Typography>
+                  <SearchableSelect
+                    variant="standard"
+                    value={damageYear}
+                    onChange={handleDamageYearChange}
+                    style={{
+                      width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid #cbd5e1',
+                      fontSize: '13px', fontWeight: 600, color: '#1e293b', background: '#fff'
+                    }}
+                  >
+                    <option value="">Select Financial Year</option>
+                    {FY_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+                  </SearchableSelect>
+                </Box>
+
+                {/* 2. MONTH SELECTION */}
+                <Box>
+                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#334155', mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    2. Month Selection (Choose 1 or Multiple Months)
+                  </Typography>
+                  <Box sx={{ border: '1.5px solid #cbd5e1', borderRadius: '8px', p: 0.5, bgcolor: '#fff' }}>
+                    <MultiSelectSearchable
+                      options={ALL_MONTHS_NAMES}
+                      value={damageSelectedMonths}
+                      onChange={(e) => handleDamageMonthsChange(e.target.value)}
+                      label="Select Month(s)..."
+                    />
+                  </Box>
+                </Box>
+
+                {/* 3. VEHICLE SELECTION */}
+                <Box>
+                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#334155', mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    3. Vehicle Selection (Choose 1 or Multiple Vehicles)
+                  </Typography>
+                  <Box sx={{ border: '1.5px solid #cbd5e1', borderRadius: '8px', p: 0.5, bgcolor: damageSelectedMonths.length > 0 ? '#fff' : '#f8fafc' }}>
+                    {damageSelectedMonths.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 1.5, px: 1.5, fontSize: 12, textAlign: 'center' }}>
+                        Please select Month(s) first to load available vehicles.
+                      </Typography>
+                    ) : (
+                      <MultiSelectSearchable
+                        options={damageVehicles}
+                        value={damageSelectedVehicles}
+                        onChange={(e) => handleDamageVehiclesChange(e.target.value)}
+                        label="Select Vehicle(s)..."
+                      />
+                    )}
+                  </Box>
+                </Box>
+
+                {/* 4. FINAL SELECTION PREVIEW */}
+                {damageYear && (damageSelectedMonths.length > 0 || damageSelectedVehicles.length > 0) && (
+                  <Box sx={{
+                    border: '1.5px solid #cbd5e1', borderRadius: '12px', bgcolor: '#f8fafc',
+                    p: 2.5, boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+                  }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5, pb: 1, borderBottom: '1.5px solid #e2e8f0' }}>
+                      <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#1e293b', letterSpacing: '0.5px' }}>
+                        FINAL SELECTION PREVIEW
+                      </Typography>
+                      {condition && condition !== 'INVALID' ? (
+                        <Box sx={{
+                          px: 1.5, py: 0.5, borderRadius: '999px',
+                          bgcolor: '#e0e7ff', color: '#4338ca',
+                          fontSize: 11, fontWeight: 800, letterSpacing: '0.5px'
+                        }}>
+                          {condition}
+                        </Box>
+                      ) : condition === 'INVALID' ? (
+                        <Box sx={{
+                          px: 1.5, py: 0.5, borderRadius: '999px',
+                          bgcolor: '#fef2f2', color: '#dc2626',
+                          fontSize: 11, fontWeight: 800
+                        }}>
+                          ⚠️ Unsupported Combination
+                        </Box>
+                      ) : null}
+                    </Box>
+
+                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 2 }}>
+                      <Box>
+                        <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                          FINANCIAL YEAR
+                        </Typography>
+                        <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                          {damageYear || '—'}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                          MONTH{damageSelectedMonths.length > 1 ? 'S' : ''}
+                        </Typography>
+                        <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                          {damageSelectedMonths.length > 0 ? damageSelectedMonths.join(', ') : 'None selected'}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                          VEHICLE{damageSelectedVehicles.length > 1 ? 'S' : ''}
+                        </Typography>
+                        <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                          {damageSelectedVehicles.length > 0 ? damageSelectedVehicles.join(', ') : 'None selected'}
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    {condition === 'INVALID' && (
+                      <Typography sx={{ mt: 1.5, fontSize: 12, color: '#dc2626', fontWeight: 600 }}>
+                        Notice: The system supports <strong>Multiple Months + 1 Vehicle</strong>, <strong>1 Month + Multiple Vehicles</strong>, or <strong>1 Month + 1 Vehicle</strong>. Please select either 1 vehicle or 1 month.
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+
+                {/* 5. ALLOCATION & DEBIT BALANCE */}
+                {damageYear && condition && condition !== 'INVALID' && (
+                  <Box sx={{
+                    border: '1.5px solid #cbd5e1', borderRadius: '12px', bgcolor: '#ffffff',
+                    p: 2.5, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
+                  }}>
+                    <Box sx={{ mb: 2.5, pb: 2, borderBottom: '1.5px solid #f1f5f9' }}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#1e293b', mb: 1.5, letterSpacing: '0.5px' }}>
+                        ALLOCATION & DEBIT BALANCE
+                      </Typography>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 2 }}>
+                        {/* DEBIT REASON */}
+                        <Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                            <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>
+                              DEBIT REASON
+                            </Typography>
+                            {isB2BEligibleDebitReason(damageDebitReason) && (
+                              <Button
+                                size="small"
+                                variant="contained"
+                                onClick={() => setB2bDialogOpen(true)}
+                                startIcon={<ReceiptLongIcon sx={{ fontSize: 13 }} />}
+                                sx={{
+                                  fontSize: 10, fontWeight: 800, py: 0.2, px: 1, minHeight: 22,
+                                  bgcolor: '#0ea5e9', '&:hover': { bgcolor: '#0284c7' },
+                                  borderRadius: '6px', textTransform: 'none',
+                                  boxShadow: '0 2px 4px rgba(14, 165, 233, 0.25)'
+                                }}
+                              >
+                                B2B
+                              </Button>
+                            )}
+                          </Box>
+                          <select
+                            value={damageDebitReason}
+                            onChange={e => setDamageDebitReason(e.target.value)}
+                            style={{
+                              width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid #cbd5e1',
+                              fontSize: '12px', fontWeight: 700, color: '#1e293b', background: '#f8fafc', outline: 'none'
+                            }}
+                          >
+                            {DEBIT_REASONS.filter(r => r !== 'None').map(reason => (
+                              <option key={reason} value={reason}>{reason.toUpperCase()}</option>
+                            ))}
+                          </select>
+                        </Box>
+
+                        {/* ORIGINAL DEBIT AMOUNT */}
+                        <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                            ORIGINAL DEBIT AMOUNT
+                          </Typography>
+                          <Typography sx={{ fontSize: 18, fontWeight: 800, color: '#0f172a', fontFamily: 'monospace' }}>
+                            ₹{baseOriginalDebit.toLocaleString('en-IN')}
+                          </Typography>
+                        </Box>
+
+                        {/* ALREADY ALLOCATED */}
+                        <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                            ALREADY ALLOCATED
+                          </Typography>
+                          <Typography sx={{ fontSize: 18, fontWeight: 800, color: '#d97706', fontFamily: 'monospace' }}>
+                            ₹{totalAllocatedAmount.toLocaleString('en-IN')}
+                          </Typography>
+                          {Object.keys(reasonBreakdown).length > 0 && (
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.75 }}>
+                              {Object.entries(reasonBreakdown).map(([r, amt]) => (
+                                <span
+                                  key={r}
+                                  style={{
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    background: '#fef3c7',
+                                    color: '#92400e',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px'
+                                  }}
+                                >
+                                  {r}: ₹{amt.toLocaleString('en-IN')}
+                                </span>
+                              ))}
+                            </Box>
+                          )}
+                        </Box>
+
+                        {/* REMAINING AMOUNT */}
+                        <Box sx={{
+                          p: 1.5,
+                          bgcolor: remainingDebitAmount === 0 ? '#f0fdf4' : '#f8fafc',
+                          borderRadius: '8px',
+                          border: remainingDebitAmount === 0 ? '1.5px solid #86efac' : '1px solid #e2e8f0'
+                        }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Typography sx={{ fontSize: 10, fontWeight: 700, color: remainingDebitAmount === 0 ? '#15803d' : '#64748b', textTransform: 'uppercase' }}>
+                              REMAINING AMOUNT
+                            </Typography>
+                            {remainingDebitAmount === 0 && (
+                              <span style={{ fontSize: '10px', fontWeight: 800, background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: '4px' }}>
+                                SETTLED
+                              </span>
+                            )}
+                          </Box>
+                          <Typography sx={{ fontSize: 18, fontWeight: 800, color: remainingDebitAmount === 0 ? '#16a34a' : '#2563eb', fontFamily: 'monospace' }}>
+                            ₹{remainingDebitAmount.toLocaleString('en-IN')}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Box>
+
+                    {/* SETTLED NOTICE OR TRIP SELECTION */}
+                    {remainingDebitAmount === 0 ? (
+                      <Box sx={{ p: 2.5, bgcolor: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '10px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5 }}>
+                        <Typography sx={{ fontSize: 14, fontWeight: 800, color: '#15803d' }}>
+                          ✓ Remaining Debit = ₹0. This debit is fully allocated and settled.
+                        </Typography>
+                        <Typography sx={{ fontSize: 12, color: '#166534', fontWeight: 600 }}>
+                          No further allocations can be made against this debit record.
+                        </Typography>
+                        {isB2BEligibleDebitReason(damageDebitReason) && (
+                          <Button
+                            variant="contained"
+                            onClick={() => setB2bDialogOpen(true)}
+                            startIcon={<ReceiptLongIcon sx={{ fontSize: 16 }} />}
+                            sx={{
+                              bgcolor: '#0ea5e9', '&:hover': { bgcolor: '#0284c7' },
+                              px: 2.5, py: 0.75, fontWeight: 800, fontSize: '12px', textTransform: 'none',
+                              borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(14, 165, 233, 0.25)'
+                            }}
+                          >
+                            B2B Entry
+                          </Button>
+                        )}
+                      </Box>
+                    ) : (
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+                        {/* TRIP SELECTION HEADER */}
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1, borderBottom: '1.5px solid #e2e8f0' }}>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <span style={{ fontSize: '18px' }}>🚚</span>
+                            <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#1e293b', letterSpacing: '0.5px' }}>
+                              TRIP SELECTION
+                            </Typography>
+                            <Chip
+                              size="small"
+                              label={tripsLoading ? 'Loading…' : `${loadedTrips.length} trip${loadedTrips.length === 1 ? '' : 's'} available`}
+                              sx={{ height: 20, fontSize: 11, fontWeight: 700, bgcolor: '#f1f5f9', border: '1px solid #cbd5e1' }}
+                            />
+                          </Box>
+                          <Typography sx={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>
+                            Select one or multiple trips and enter the Allocate Amount per trip
+                          </Typography>
+                        </Box>
+
+                        {tripsLoading ? (
+                          <Box sx={{ p: 4, textAlign: 'center', bgcolor: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1' }}>
+                            <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#64748b' }}>
+                              Loading matching trips from Cement Register...
+                            </Typography>
+                          </Box>
+                        ) : loadedTrips.length === 0 ? (
+                          <Box sx={{ p: 3, textAlign: 'center', bgcolor: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1' }}>
+                            <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#64748b' }}>
+                              No trips found matching Financial Year ({damageYear}), Month(s) ({damageSelectedMonths.join(', ')}), and Vehicle(s) ({damageSelectedVehicles.join(', ')}).
+                            </Typography>
+                          </Box>
+                        ) : (
+                          <Box>
+                            {/* CONDITION 1: MULTIPLE MONTHS + ONE VEHICLE (Side-by-side Month Columns) */}
+                            {condition === 'MULTIPLE MONTHS + ONE VEHICLE' && (
+                              <Box sx={{
+                                display: 'grid',
+                                gridTemplateColumns: damageSelectedMonths.length === 2 ? '1fr 1fr' : 'repeat(auto-fit, minmax(320px, 1fr))',
+                                gap: 2.5
+                              }}>
+                                {damageSelectedMonths.map(m => {
+                                  const mTrips = getTripsForMonth(m);
+                                  return (
+                                    <Box
+                                      key={m}
+                                      sx={{
+                                        border: '1.5px solid #cbd5e1',
+                                        borderRadius: '12px',
+                                        bgcolor: '#f8fafc',
+                                        overflow: 'hidden',
+                                        display: 'flex',
+                                        flexDirection: 'column'
+                                      }}
+                                    >
+                                      <Box sx={{
+                                        p: 1.5, bgcolor: '#f1f5f9', borderBottom: '1.5px solid #e2e8f0',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                      }}>
+                                        <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#1e293b', letterSpacing: '0.5px' }}>
+                                          {m.toUpperCase()} — ALL MATCHING TRIPS
+                                        </Typography>
+                                        <Chip
+                                          size="small"
+                                          label={`${mTrips.length} trip${mTrips.length === 1 ? '' : 's'}`}
+                                          sx={{ height: 20, fontSize: 10, fontWeight: 700, bgcolor: '#ffffff', border: '1px solid #cbd5e1' }}
+                                        />
+                                      </Box>
+                                      <Box sx={{ p: 1.5, maxHeight: 420, overflowY: 'auto' }}>
+                                        {mTrips.length === 0 ? (
+                                          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3, fontSize: 12 }}>
+                                            No matching trips found for {m}.
+                                          </Typography>
+                                        ) : (
+                                          mTrips.map(trip => renderTripCard(trip))
+                                        )}
+                                      </Box>
+                                    </Box>
+                                  );
+                                })}
+                              </Box>
+                            )}
+
+                            {/* CONDITION 2: ONE MONTH + MULTIPLE VEHICLES (Organized by Vehicle) */}
+                            {condition === 'ONE MONTH + MULTIPLE VEHICLES' && (
+                              <Box>
+                                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#4338ca', mb: 1.5, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                  {damageSelectedMonths[0]} — TRIPS BY VEHICLE
+                                </Typography>
+                                <Box sx={{
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                                  gap: 2.5
+                                }}>
+                                  {damageSelectedVehicles.map(v => {
+                                    const vTrips = getTripsForVehicle(v);
+                                    return (
+                                      <Box
+                                        key={v}
+                                        sx={{
+                                          border: '1.5px solid #cbd5e1',
+                                          borderRadius: '12px',
+                                          bgcolor: '#f8fafc',
+                                          overflow: 'hidden',
+                                          display: 'flex',
+                                          flexDirection: 'column'
+                                        }}
+                                      >
+                                        <Box sx={{
+                                          p: 1.5, bgcolor: '#f1f5f9', borderBottom: '1.5px solid #e2e8f0',
+                                          display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                        }}>
+                                          <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#1e293b', letterSpacing: '0.5px' }}>
+                                            VEHICLE: {v}
+                                          </Typography>
+                                          <Chip
+                                            size="small"
+                                            label={`${vTrips.length} trip${vTrips.length === 1 ? '' : 's'}`}
+                                            sx={{ height: 20, fontSize: 10, fontWeight: 700, bgcolor: '#ffffff', border: '1px solid #cbd5e1' }}
+                                          />
+                                        </Box>
+                                        <Box sx={{ p: 1.5, maxHeight: 420, overflowY: 'auto' }}>
+                                          {vTrips.length === 0 ? (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3, fontSize: 12 }}>
+                                              No matching trips found for vehicle {v}.
+                                            </Typography>
+                                          ) : (
+                                            vTrips.map(trip => renderTripCard(trip))
+                                          )}
+                                        </Box>
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Box>
+                            )}
+
+                            {/* CONDITION 3: ONE MONTH + ONE VEHICLE */}
+                            {condition === 'ONE MONTH + ONE VEHICLE' && (
+                              <Box sx={{ border: '1.5px solid #cbd5e1', borderRadius: '12px', bgcolor: '#f8fafc', overflow: 'hidden' }}>
+                                <Box sx={{
+                                  p: 1.5, bgcolor: '#f1f5f9', borderBottom: '1.5px solid #e2e8f0',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                }}>
+                                  <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#1e293b', letterSpacing: '0.5px' }}>
+                                    {damageSelectedMonths[0]?.toUpperCase()} — ALL MATCHING TRIPS ({damageSelectedVehicles[0]})
+                                  </Typography>
+                                  <Chip
+                                    size="small"
+                                    label={`${loadedTrips.length} trip${loadedTrips.length === 1 ? '' : 's'}`}
+                                    sx={{ height: 20, fontSize: 10, fontWeight: 700, bgcolor: '#ffffff', border: '1px solid #cbd5e1' }}
+                                  />
+                                </Box>
+                                <Box sx={{ p: 1.5, maxHeight: 450, overflowY: 'auto' }}>
+                                  {loadedTrips.map(trip => renderTripCard(trip))}
+                                </Box>
+                              </Box>
+                            )}
+                          </Box>
+                        )}
+
+                        {/* SUMMARY BAR & CONFIRM ACTION */}
+                        <Box sx={{
+                          p: 2.5, borderRadius: '10px', bgcolor: '#f8fafc', border: '1.5px solid #cbd5e1',
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mt: 1
+                        }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
+                            <Box>
+                              <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                SELECTED TRIPS
+                              </Typography>
+                              <Typography sx={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
+                                {selectedTripIds.length} {selectedTripIds.length === 1 ? 'Trip' : 'Trips'}
+                              </Typography>
+                            </Box>
+                            <Box sx={{ height: 36, width: '1px', bgcolor: '#cbd5e1' }} />
+                            <Box>
+                              <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                TOTAL ALLOCATED AMOUNT
+                              </Typography>
+                              <Typography sx={{ fontSize: 20, fontWeight: 800, color: isOverAllocated ? '#dc2626' : '#4f46e5', fontFamily: 'monospace' }}>
+                                ₹{totalTripAllocated.toLocaleString('en-IN')}
+                              </Typography>
+                            </Box>
+                            <Box sx={{ height: 36, width: '1px', bgcolor: '#cbd5e1' }} />
+                            <Box>
+                              <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                REMAINING DEBIT AFTER ALLOCATION
+                              </Typography>
+                              <Typography sx={{
+                                fontSize: 20, fontWeight: 800,
+                                color: isOverAllocated ? '#dc2626' : (newRemainingDebitAfterInput === 0 ? '#16a34a' : '#2563eb'),
+                                fontFamily: 'monospace'
+                              }}>
+                                ₹{newRemainingDebitAfterInput.toLocaleString('en-IN')} {newRemainingDebitAfterInput === 0 && totalTripAllocated > 0 ? '(SETTLED)' : ''}
+                              </Typography>
+                            </Box>
+                          </Box>
+
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                            {isB2BEligibleDebitReason(damageDebitReason) && (
+                              <Button
+                                variant="contained"
+                                onClick={() => setB2bDialogOpen(true)}
+                                startIcon={<ReceiptLongIcon sx={{ fontSize: 16 }} />}
+                                sx={{
+                                  bgcolor: '#0ea5e9', '&:hover': { bgcolor: '#0284c7' },
+                                  px: 2, py: 1.2, fontWeight: 800, fontSize: '13px', textTransform: 'none',
+                                  borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(14, 165, 233, 0.25)'
+                                }}
+                              >
+                                B2B
+                              </Button>
+                            )}
+                            <Button
+                              variant="contained"
+                              onClick={handleConfirmAllocation}
+                              disabled={
+                                loading ||
+                                selectedTripIds.length === 0 ||
+                                totalTripAllocated <= 0 ||
+                                isOverAllocated ||
+                                condition === 'INVALID' ||
+                                !condition
+                              }
+                              sx={{
+                                bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' },
+                                px: 3, py: 1.25, fontWeight: 800, fontSize: '13px', textTransform: 'none',
+                                borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.2)'
+                              }}
+                            >
+                              {loading ? 'Allocating…' : 'CONFIRM ALLOCATION'}
+                            </Button>
+                          </Box>
+                        </Box>
+
+                        {/* OVER-ALLOCATION ERROR */}
+                        {isOverAllocated && (
+                          <Box sx={{ p: 1.5, bgcolor: '#fef2f2', border: '1.5px solid #fca5a5', borderRadius: '8px' }}>
+                            <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#dc2626' }}>
+                              ⚠️ Only ₹{remainingDebitAmount.toLocaleString('en-IN')} is available for allocation.
+                            </Typography>
+                          </Box>
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                )}
+
+                {/* 7. ALLOCATION HISTORY TABLE (SECTION 13) */}
+                {currentAllocations.length > 0 && (
+                  <Box sx={{ border: '1.5px solid #e2e8f0', borderRadius: '12px', bgcolor: '#ffffff', p: 2.5 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5, pb: 0.75, borderBottom: '1px solid #f1f5f9' }}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#1e293b' }}>
+                        ALLOCATION HISTORY ({currentAllocations.length})
+                      </Typography>
+                      <Typography sx={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+                        All allocations linked to this Bank Book debit record
+                      </Typography>
+                    </Box>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                         <thead>
-                          <tr style={{ background: '#f8fafc' }}>
-                            <th style={{ width: 30, padding: '4px 8px', borderBottom: '1px solid #e2e8f0' }}></th>
-                            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Vehicle No.</th>
-                            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Trip #</th>
-                            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Invoice No.</th>
-                            <th style={{ padding: '4px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Destination</th>
+                          <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #e2e8f0' }}>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Unique ID</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Record ID / Invoice No</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Debit Reason</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#475569' }}>FY</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Month(s)</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Vehicle(s)</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Condition</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: '#475569' }}>Original (₹)</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: '#475569' }}>Allocated (₹)</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: '#475569' }}>Remaining (₹)</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#475569' }}>Date</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700, color: '#475569' }}>Action</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {tripsForDate.map((t, ri) => {
-                            const selected = isSel(t);
+                          {currentAllocations.map((alloc, idx) => {
+                            const allocUid = alloc.allocationId || (alloc._id ? String(alloc._id) : `alloc-${idx}`);
+                            const recordIdDisp = alloc.bankBookRecordId
+                              ? `${String(alloc.bankBookRecordId).slice(-6)} (${alloc.invoiceNumber || inv})`
+                              : (alloc.invoiceNumber || inv);
+
                             return (
-                              <tr
-                                key={`${t.vehicle}-${t.invoiceNo}`}
-                                onClick={() => {
-                                  if (selected) setDamageSelectedTrips(prev => prev.filter(s => !(s.invoiceNo === t.invoiceNo && s.vehicle === t.vehicle)));
-                                  else setDamageSelectedTrips(prev => [...prev, t]);
-                                }}
-                                style={{ background: selected ? '#eef2ff' : ri % 2 === 0 ? '#fff' : '#fafafa', cursor: 'pointer' }}
-                                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#f0f4ff'; }}
-                                onMouseLeave={e => { e.currentTarget.style.background = selected ? '#eef2ff' : ri % 2 === 0 ? '#fff' : '#fafafa'; }}
-                              >
-                                <td style={{ padding: '5px 8px', textAlign: 'center', borderBottom: '1px solid #f1f5f9' }}>
-                                  <input type="checkbox" checked={selected} readOnly style={{ cursor: 'pointer', accentColor: '#4f46e5' }} />
+                              <tr key={allocUid} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                                  {allocUid.length > 12 ? `${allocUid.slice(0, 6)}...${allocUid.slice(-4)}` : allocUid}
                                 </td>
-                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, color: '#1e293b', whiteSpace: 'normal' }}>
-                                  {t.vehicle}
+                                <td style={{ padding: '8px 10px', color: '#334155', fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                  {recordIdDisp}
                                 </td>
-                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', textAlign: 'center' }}>
-                                  <span style={{ background: '#e0e7ff', color: '#3730a3', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>
-                                    #{t.tripNumber}
+                                <td style={{ padding: '8px 10px', fontWeight: 700, color: '#1e293b', whiteSpace: 'nowrap' }}>
+                                  <span style={{ background: '#ede9fe', color: '#5b21b6', padding: '2px 8px', borderRadius: '4px', fontSize: '11px' }}>
+                                    {alloc.debitReason}
                                   </span>
                                 </td>
-                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#4f46e5', fontFamily: 'monospace', fontSize: 10.5, fontWeight: 500 }}>
-                                  {t.invoiceNo}
+                                <td style={{ padding: '8px 10px', color: '#334155', whiteSpace: 'nowrap' }}>
+                                  {alloc.financialYear || '—'}
                                 </td>
-                                <td style={{ padding: '5px 8px', borderBottom: '1px solid #f1f5f9', color: '#334155', fontWeight: 600, maxWidth: 180, whiteSpace: 'normal' }}>
-                                  <span style={{ color: '#94a3b8', fontWeight: 400 }}>{t.plant} </span>
-                                  <span style={{ color: '#cbd5e1' }}>→ </span>
-                                  {t.destination}
+                                <td style={{ padding: '8px 10px', color: '#334155', whiteSpace: 'nowrap' }}>
+                                  {alloc.months?.join(', ') || '—'}
+                                </td>
+                                <td style={{ padding: '8px 10px', fontWeight: 600, color: '#4338ca', whiteSpace: 'nowrap' }}>
+                                  {alloc.vehicles?.join(', ') || '—'}
+                                </td>
+                                <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
+                                  <span style={{ background: '#e0e7ff', color: '#3730a3', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>
+                                    {alloc.condition || '—'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: '#475569', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                  ₹{Number(alloc.originalDebitAmount != null ? alloc.originalDebitAmount : baseOriginalDebit).toLocaleString('en-IN')}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800, color: '#d97706', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                  ₹{Number(alloc.allocatedAmount).toLocaleString('en-IN')}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800, color: Number(alloc.remainingDebitAmount) === 0 ? '#16a34a' : '#2563eb', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                  ₹{Number(alloc.remainingDebitAmount != null ? alloc.remainingDebitAmount : Math.max(0, baseOriginalDebit - Number(alloc.allocatedAmount))).toLocaleString('en-IN')}
+                                </td>
+                                <td style={{ padding: '8px 10px', color: '#64748b', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                  {alloc.allocationDate || (alloc.createdAt && String(alloc.createdAt).slice(0, 10)) || '—'}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteAllocation(alloc.allocationId || alloc._id)}
+                                    style={{
+                                      background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+                                      borderRadius: '4px', padding: '3px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                                    }}
+                                  >
+                                    ✕ Remove
+                                  </button>
                                 </td>
                               </tr>
                             );
                           })}
                         </tbody>
                       </table>
-                    </Box>
-                  );
-                });
-              })()}
-            </Box>
-            {/* Summary bar */}
-            {damageTrips.length > 0 && (
-              <Box sx={{ mt: 0.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="caption" color="text.secondary">
-                  {damageSelectedTrips.length} of {damageTrips.length} trip-rows selected
-                </Typography>
-                {damageSelectedTrips.length > 0 && (
-                  <Typography variant="caption" sx={{ color: '#4f46e5', cursor: 'pointer', fontWeight: 600, '&:hover': { textDecoration: 'underline' } }} onClick={() => setDamageSelectedTrips([])}>
-                    Clear all
-                  </Typography>
+                    </div>
+                  </Box>
                 )}
-              </Box>
-            )}
-          </Box>
-          {damageSelectedTrips.length > 0 && (
-            <Box>
-              <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="body2" fontWeight={600}>
-                  5. Allocate Amount
-                  <Typography component="span" variant="caption" color="text.secondary" fontWeight={400} sx={{ ml: 1 }}>
-                    Total Difference: ₹{Math.max(0, num(damageTarget?.difference || 0))}
-                  </Typography>
-                </Typography>
-                {(() => {
-                  const target = Math.max(0, num(damageTarget?.difference || 0));
+              </DialogContent>
 
-                  // In the modal, we show remaining based on the group's difference and the entire group's allocations
-                  const groupRows = computedRows.filter(cr => cr.groupId === damageTarget?.groupId);
-                  const alloc = groupRows.reduce((total, cr) => {
-                    const rowAmountsObj = cr.invoiceNumber === damageTarget?.invoiceNumber ? damageVehicleAmounts : cr.damageVehicleAmounts;
-                    return total + Object.values(rowAmountsObj || {}).reduce((tripSum, tripObj) => {
-                      return tripSum + Object.values(tripObj || {}).reduce((s, v) => s + num(v), 0);
-                    }, 0);
-                  }, 0);
-
-                  if (target === 0) return null;
-                  const remaining = target - alloc;
-                  return (
-                    <Typography variant="caption" sx={{ fontWeight: 600, color: remaining === 0 ? '#16a34a' : remaining > 0 ? '#d97706' : '#dc2626', fontFamily: 'monospace' }}>
-                      {remaining === 0 ? '✓ Fully allocated' : remaining > 0 ? `₹${remaining} remaining` : `₹${Math.abs(remaining)} over-allocated`}
-                    </Typography>
-                  );
-                })()}
-              </Box>
-
-              {/* Per-trip-row amount table */}
-              <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2, }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ background: '#f8fafc' }}>
-                      <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '25%' }}>Vehicle No.</th>
-                      <th style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0', width: '25%' }}>Trip Details</th>
-                      {(damageTarget?.reasons || []).map(reason => (
-                        <th key={reason} style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#475569', borderBottom: '1px solid #e2e8f0' }}>{reason} (₹)</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...damageSelectedTrips]
-                      .sort((a, b) => a.vehicle.localeCompare(b.vehicle) || a.tripNumber - b.tripNumber)
-                      .map((t, idx) => (
-                        <tr key={`${t.invoiceNo}-${idx}`} style={{ background: idx % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                          <td style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, color: '#1e293b' }}>
-                            {t.vehicle}
-                          </td>
-                          <td style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'center' }}>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.25 }}>
-                              <span style={{ background: '#e0e7ff', color: '#3730a3', borderRadius: 4, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>
-                                Trip #{t.tripNumber}
-                              </span>
-                              <span style={{ fontSize: 9.5, color: '#94a3b8', fontFamily: 'monospace' }}>{t.tripDate}</span>
-                            </Box>
-                          </td>
-                          {(damageTarget?.reasons || []).map(reason => (
-                            <td key={reason} style={{ padding: '7px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right', verticalAlign: 'bottom' }}>
-                              {reason === 'Damage / Shortage' && (
-                                <Box sx={{
-                                  display: 'flex', flexDirection: 'column', alignItems: 'stretch', mb: 1.5,
-                                  border: '1px solid #e2e8f0', borderRadius: 2, p: 1.5,
-                                  bgcolor: 'background.default', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
-                                  minWidth: 260
-                                }}>
-                                  <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#475569', letterSpacing: 0.5, textAlign: 'center', mb: 1.5, borderBottom: '1px solid #e2e8f0', pb: 0.5 }}>
-                                    DAMAGE / SHORTAGE INFORMATION
-                                  </Typography>
-                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
-                                    <Typography sx={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>SHORTAGE (BAG)</Typography>
-                                    <Typography sx={{ fontSize: 11, color: '#1e293b', fontWeight: 700, fontFamily: 'monospace' }}>
-                                      {t.shortageBag || 0} Bags
-                                    </Typography>
-                                  </Box>
-                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
-                                    <Typography sx={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>SHORTAGE (RATE)</Typography>
-                                    <Typography sx={{ fontSize: 11, color: '#1e293b', fontWeight: 700, fontFamily: 'monospace' }}>
-                                      ₹{t.shortageRate || 0} / Bag
-                                    </Typography>
-                                  </Box>
-                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5, pt: 1, borderTop: '1px dashed #cbd5e1', alignItems: 'center' }}>
-                                    <Typography sx={{ fontSize: 12, color: '#0f172a', fontWeight: 800 }}>PROJECTED VALUE</Typography>
-                                    <Typography sx={{ fontSize: 14, color: '#4f46e5', fontWeight: 800, fontFamily: 'monospace' }}>
-                                      ₹{Math.round(num(t.shortageBag) * num(t.shortageRate)).toLocaleString()}
-                                    </Typography>
-                                  </Box>
-                                </Box>
-                              )}
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="0"
-                                value={(damageVehicleAmounts[t.invoiceNo] && damageVehicleAmounts[t.invoiceNo][reason]) || ''}
-                                onChange={e => setDamageVehicleAmounts(prev => ({
-                                  ...prev,
-                                  [t.invoiceNo]: {
-                                    ...(prev[t.invoiceNo] || {}),
-                                    [reason]: e.target.value
-                                  }
-                                }))}
-                                style={{
-                                  width: 100, padding: '4px 8px', fontSize: 12, textAlign: 'right',
-                                  border: '1.5px solid #e2e8f0', borderRadius: 6, outline: 'none',
-                                  fontFamily: 'monospace', fontWeight: 600, color: '#1e293b',
-                                  background: damageVehicleAmounts[t.invoiceNo]?.[reason] ? '#f0f9ff' : '#fff',
-                                }}
-                                onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.15)'; }}
-                                onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; }}
-                              />
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                  </tbody>
-                  {/* Totals row */}
-                  <tfoot>
-                    <tr style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0' }}>
-                      <td colSpan={2} style={{ padding: '6px 10px', fontWeight: 700, color: '#475569', fontSize: 11 }}>Total Allocated</td>
-                      <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 800, fontFamily: 'monospace', fontSize: 13 }}>
-                        {(() => {
-                          const target = Math.abs(num(damageTarget?.debitAmount || 0));
-                          const alloc = damageSelectedTrips.reduce((s, t) => s + num(damageVehicleAmounts[t.invoiceNo] || 0), 0);
-                          return (
-                            <span style={{ color: alloc === target ? '#16a34a' : alloc > target ? '#dc2626' : '#d97706' }}>
-                              ₹{alloc}
-                              {target > 0 && <span style={{ fontSize: 10, fontWeight: 400, color: '#94a3b8', marginLeft: 4 }}>/ ₹{target}</span>}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </Box>
-            </Box>
-          )}
-
-          {/* ── Remarks field – always visible once trips are selected ── */}
-          {damageSelectedTrips.length > 0 && (
-            <Box>
-              <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 0.75 }}>
-                <Typography variant="body2" fontWeight={600}>
-                  6. Remarks <Typography component="span" variant="caption" color="text.secondary" fontWeight={400}>(optional)</Typography>
-                </Typography>
-                <Typography variant="caption" sx={{ color: damageManualRemarks.length > 450 ? '#ef4444' : '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>
-                  {damageManualRemarks.length}/500
-                </Typography>
-              </Box>
-              <Box sx={{ position: 'relative' }}>
-                <textarea
-                  value={damageManualRemarks}
-                  onChange={(e) => {
-                    if (e.target.value.length <= 500) setDamageManualRemarks(e.target.value);
-                  }}
-                  placeholder="Enter any additional notes, observations, or context about this deduction…"
-                  maxLength={500}
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    fontSize: 13,
-                    fontFamily: 'Inter, system-ui, sans-serif',
-                    lineHeight: 1.6,
-                    color: '#1e293b',
-                    background: '#fff',
-                    border: '1.5px solid #e2e8f0',
-                    borderRadius: 8,
-                    outline: 'none',
-                    resize: 'vertical',
-                    minHeight: 80,
-                    maxHeight: 200,
-                    boxSizing: 'border-box',
-                    transition: 'border-color 0.15s, box-shadow 0.15s',
-                    boxShadow: 'none',
-                  }}
-                  onFocus={e => {
-                    e.target.style.borderColor = '#6366f1';
-                    e.target.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.12)';
-                  }}
-                  onBlur={e => {
-                    e.target.style.borderColor = '#e2e8f0';
-                    e.target.style.boxShadow = 'none';
-                  }}
-                />
-                {damageManualRemarks && (
-                  <button
-                    onClick={() => setDamageManualRemarks('')}
-                    style={{
-                      position: 'absolute', top: 8, right: 8,
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      color: '#94a3b8', fontSize: 14, lineHeight: 1, padding: '2px 4px',
-                      borderRadius: 4,
-                    }}
-                    title="Clear remarks"
-                  >
-                    ✕
-                  </button>
-                )}
-              </Box>
-              {damageManualRemarks.trim() && (
-                <Typography variant="caption" sx={{ color: '#6b7280', mt: 0.5, display: 'block' }}>
-                  This note will be appended to the auto-generated remarks when saved.
-                </Typography>
-              )}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDamageModalOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleDamageSubmit}
-            disabled={
-              loading ||
-              damageSelectedTrips.length === 0
-            }
-          >
-            {loading ? 'Saving…' : 'Save Details'}
-          </Button>
-        </DialogActions>
+              <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+                <Button onClick={() => setDamageModalOpen(false)} variant="outlined" sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 700 }}>
+                  Close
+                </Button>
+              </DialogActions>
+            </React.Fragment>
+          );
+        })()}
       </Dialog>
+
+      {/* ── B2B Entry Dialog (Accessible from Debit Reason Allocation) ── */}
+      <B2BEntryDialog
+        open={b2bDialogOpen}
+        onClose={() => setB2bDialogOpen(false)}
+        invoiceNumber={damageTarget?.invoiceNumber}
+        debitReason={damageDebitReason}
+        row={rows.find(x => x.invoiceNumber === damageTarget?.invoiceNumber)}
+        allocationId={damageTarget?.allocationId}
+        onSaved={(res) => {
+          setSnack({
+            severity: 'success',
+            msg: `B2B record ${res.isNew ? 'created' : 'updated'} successfully in GST Portal database!`
+          });
+          if (res.entryId && damageTarget?.invoiceNumber) {
+            setRows(prev => prev.map(r =>
+              r.invoiceNumber === damageTarget.invoiceNumber
+                ? { ...r, b2bEntryId: res.entryId }
+                : r
+            ));
+          }
+        }}
+      />
 
       {/* ── Payment Status Dashboard Modal ── */}
       <Dialog

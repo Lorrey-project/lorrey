@@ -170,9 +170,35 @@ export default function VehicleWiseTripSummaryTab({
     };
   }, [fetchReportData]);
 
-  // Vehicles list from server
+  // Helper to ensure standard MT capacity mapping
+  const getVehicleCapacityMT = (v) => {
+    if (v.capacityMT !== undefined && v.capacityMT > 0) return v.capacityMT;
+    const w = (String(v.wheel || '') + ' ' + String(v.wheelPattern || '')).toUpperCase();
+    if (w.includes('14') || v.wheelPattern === '14W') return 30;
+    if (w.includes('12') || v.wheelPattern === '12W') return 25;
+    if (w.includes('10') || v.wheelPattern === '10W') return 19;
+    if (w.includes('6') || v.wheelPattern === '6W') return 13;
+    return 0;
+  };
+
+  // Vehicles list from server with normalized capacity and Total MT / Trip Count
   const rawVehicles = useMemo(() => {
-    return serverData?.vehicles || [];
+    const list = serverData?.vehicles || [];
+    return list.map(v => {
+      const capMT = getVehicleCapacityMT(v);
+      const totalMT = Math.round(Number(v.totalMT || 0) * 100) / 100;
+      let trips = v.totalTrips;
+      if (trips === undefined || trips === null) {
+        trips = capMT > 0 ? Math.round((totalMT / capMT) * 100) / 100 : 0;
+      }
+      return {
+        ...v,
+        capacityMT: capMT,
+        capacity: capMT > 0 ? `${capMT} MT` : (v.capacity || '-'),
+        totalMT: totalMT,
+        totalTrips: trips
+      };
+    });
   }, [serverData]);
 
   // Filtered vehicles based on search & chips
@@ -194,6 +220,7 @@ export default function VehicleWiseTripSummaryTab({
       list = list.filter(v =>
         v.vehicleNo.toLowerCase().includes(q) ||
         (v.contactOwner && v.contactOwner.toLowerCase().includes(q)) ||
+        (v.wheel && v.wheel.toLowerCase().includes(q)) ||
         (v.loadingPattern && v.loadingPattern.toLowerCase().includes(q))
       );
     }
@@ -221,29 +248,30 @@ export default function VehicleWiseTripSummaryTab({
     let grandTotalAdvance = 0;
 
     filteredVehicles.forEach(v => {
-      grandTotalTrips += v.totalTrips;
-      grandTotalMT += v.totalMT;
+      grandTotalTrips += (v.totalTrips || 0);
+      grandTotalMT += (v.totalMT || 0);
       grandTotalAdvance += (v.totalAdvance || 0);
       daysArray.forEach(d => {
-        dayTotals[d] += (v.dailyTrips?.[d] || 0);
+        dayTotals[d] = Math.round(((dayTotals[d] || 0) + (v.dailyTrips?.[d] || 0)) * 100) / 100;
       });
     });
 
     return {
       totalVehicles: filteredVehicles.length,
-      totalTrips: grandTotalTrips,
+      totalTrips: Math.round(grandTotalTrips * 100) / 100,
       totalMT: Math.round(grandTotalMT * 100) / 100,
       totalAdvance: Math.round(grandTotalAdvance * 100) / 100,
       dayTotals
     };
   }, [filteredVehicles, daysArray]);
 
-  // Pattern configuration with exact reference headers
+  // Pattern configuration with exact reference headers & standard capacities
   const patternConfigs = [
     {
       key: '10W',
-      title: 'PATTERN: 10W (10-WHEELER)',
-      ruleHeader: 'FOR RAFTAR- 10 WHEELER (8TRIPS) & IF "DEDICATED" - BOTH SIDE TOLL APPLICABLE FROM FEB-23, OTHERWISE "SINGLE SIDE" (NON DEDICATED)',
+      title: 'PATTERN: 10W (10-WHEELER) • CAPACITY: 19 MT / TRIP',
+      capacityMT: 19,
+      ruleHeader: '10-WHEEL CAPACITY = 19 MT PER TRIP • TRIP COUNT = TOTAL MT ÷ 19 (FOR RAFTAR: 8 TRIPS)',
       bgColor: '#fffbeb',
       badgeBg: '#fef3c7',
       badgeColor: '#b45309',
@@ -251,8 +279,9 @@ export default function VehicleWiseTripSummaryTab({
     },
     {
       key: '12W',
-      title: 'PATTERN: 12W (12-WHEELER)',
-      ruleHeader: '12W FOR RAFTAR (6 TRIPS) & IF "DEDICATED" = BOTH SIDE TOLL APPLICABLE FROM FEB-23, OTHERWISE "SINGLE SIDE" (NON DEDICATED)',
+      title: 'PATTERN: 12W (12-WHEELER) • CAPACITY: 25 MT / TRIP',
+      capacityMT: 25,
+      ruleHeader: '12-WHEEL CAPACITY = 25 MT PER TRIP • TRIP COUNT = TOTAL MT ÷ 25 (FOR RAFTAR: 6 TRIPS)',
       bgColor: '#eff6ff',
       badgeBg: '#dbeafe',
       badgeColor: '#1d4ed8',
@@ -260,8 +289,9 @@ export default function VehicleWiseTripSummaryTab({
     },
     {
       key: '14W',
-      title: 'PATTERN: 14W (14-WHEELER)',
-      ruleHeader: '14W FOR RAFTAR (6 TRIPS) & IF "DEDICATED" = BOTH SIDE TOLL APPLICABLE, OTHERWISE "SINGLE SIDE"',
+      title: 'PATTERN: 14W (14-WHEELER) • CAPACITY: 30 MT / TRIP',
+      capacityMT: 30,
+      ruleHeader: '14-WHEEL CAPACITY = 30 MT PER TRIP • TRIP COUNT = TOTAL MT ÷ 30 (FOR RAFTAR: 6 TRIPS)',
       bgColor: '#fdf4ff',
       badgeBg: '#fae8ff',
       badgeColor: '#86198f',
@@ -269,8 +299,9 @@ export default function VehicleWiseTripSummaryTab({
     },
     {
       key: '6W',
-      title: 'PATTERN: 6W (6-WHEELER)',
-      ruleHeader: '6-WHEELER OPERATIONAL TRIPS & TOLL ALLOCATION (SINGLE SIDE / BOTH SIDE)',
+      title: 'PATTERN: 6W (6-WHEELER) • CAPACITY: 13 MT / TRIP',
+      capacityMT: 13,
+      ruleHeader: '6-WHEEL CAPACITY = 13 MT PER TRIP • TRIP COUNT = TOTAL MT ÷ 13',
       bgColor: '#f0fdf4',
       badgeBg: '#dcfce7',
       badgeColor: '#15803d',
@@ -279,6 +310,7 @@ export default function VehicleWiseTripSummaryTab({
     {
       key: 'OTHER',
       title: 'PATTERN: OTHER VEHICLES',
+      capacityMT: 0,
       ruleHeader: 'OTHER REGISTERED FLEET OPERATIONAL TRIPS',
       bgColor: '#f8fafc',
       badgeBg: '#f1f5f9',
@@ -295,12 +327,12 @@ export default function VehicleWiseTripSummaryTab({
 
       if (date === 'ALL') {
         // Main Title Banner
-        rows.push([`MONTH OF ${month.substring(0, 3)}'${String(calendarYear).slice(-2)} VEHICLE- NO OF TRIPS`]);
-        rows.push([`Financial Year: ${financialYear} | Selected Month: ${month} ${calendarYear} | Total Days: ${totalDays} | Total Vehicles: ${computedTotals.totalVehicles} | Total Trips: ${computedTotals.totalTrips} | Total MT: ${computedTotals.totalMT}`]);
+        rows.push([`MONTH OF ${month.substring(0, 3)}'${String(calendarYear).slice(-2)} VEHICLE - NO OF TRIPS & MT SUMMARY`]);
+        rows.push([`Financial Year: ${financialYear} | Selected Month: ${month} ${calendarYear} | Total Days: ${totalDays} | Total Vehicles: ${computedTotals.totalVehicles} | Total Trips: ${computedTotals.totalTrips} | Total MT: ${computedTotals.totalMT} MT`]);
         rows.push([]);
 
         // Build table headers
-        const tableHeaders = ['SL NO', 'WHEEL', 'VEHICLE NUMBER', 'LOADING PATTERN', 'CLASSIFICATION'];
+        const tableHeaders = ['SL NO', 'VEHICLE NUMBER', 'VEHICLE TYPE', 'MT CAPACITY', 'LOADING PATTERN', 'CLASSIFICATION'];
         daysArray.forEach(d => {
           tableHeaders.push(`${d}-${String(monthIndex + 1).padStart(2, '0')}`);
         });
@@ -317,8 +349,9 @@ export default function VehicleWiseTripSummaryTab({
           pVehicles.forEach((v, idx) => {
             const rowData = [
               idx + 1,
-              v.wheel || cfg.key,
               v.vehicleNo,
+              v.wheelType || v.wheel || cfg.key,
+              v.capacity || `${v.capacityMT} MT`,
               v.loadingPattern,
               v.classification
             ];
@@ -334,32 +367,32 @@ export default function VehicleWiseTripSummaryTab({
           });
 
           // Subtotal row
-          const subtotalRow = ['', `${cfg.key} TOTAL`, `${pVehicles.length} Vehicles`, '', ''];
+          const subtotalRow = ['', `${cfg.key} TOTAL`, `${pVehicles.length} Vehicles`, `${cfg.capacityMT ? `${cfg.capacityMT} MT/trip` : ''}`, '', ''];
           let pTotalTrips = 0;
           let pTotalMT = 0;
           let pTotalAdv = 0;
 
           daysArray.forEach(d => {
             const daySum = pVehicles.reduce((acc, v) => acc + (v.dailyTrips?.[d] || 0), 0);
-            subtotalRow.push(daySum);
+            subtotalRow.push(Math.round(daySum * 100) / 100);
           });
 
-          pTotalTrips = pVehicles.reduce((acc, v) => acc + v.totalTrips, 0);
-          pTotalMT = pVehicles.reduce((acc, v) => acc + v.totalMT, 0);
-          pTotalAdv = pVehicles.reduce((acc, v) => acc + (v.totalAdvance || 0), 0);
+          pTotalTrips = Math.round(pVehicles.reduce((acc, v) => acc + (v.totalTrips || 0), 0) * 100) / 100;
+          pTotalMT = Math.round(pVehicles.reduce((acc, v) => acc + (v.totalMT || 0), 0) * 100) / 100;
+          pTotalAdv = Math.round(pVehicles.reduce((acc, v) => acc + (v.totalAdvance || 0), 0) * 100) / 100;
 
           subtotalRow.push(pTotalTrips);
-          subtotalRow.push(Math.round(pTotalMT * 100) / 100);
-          subtotalRow.push(Math.round(pTotalAdv * 100) / 100);
+          subtotalRow.push(pTotalMT);
+          subtotalRow.push(pTotalAdv);
           rows.push(subtotalRow);
           rows.push([]);
         });
 
         // Grand Total Row
-        const grandRow = ['', 'GRAND TOTAL', `${filteredVehicles.length} Vehicles`, '', ''];
+        const grandRow = ['', 'GRAND TOTAL', `${filteredVehicles.length} Vehicles`, '', '', ''];
         daysArray.forEach(d => {
           const dSum = filteredVehicles.reduce((acc, v) => acc + (v.dailyTrips?.[d] || 0), 0);
-          grandRow.push(dSum);
+          grandRow.push(Math.round(dSum * 100) / 100);
         });
         grandRow.push(computedTotals.totalTrips);
         grandRow.push(computedTotals.totalMT);
@@ -369,17 +402,18 @@ export default function VehicleWiseTripSummaryTab({
       } else {
         // Single Date Mode
         rows.push([`DAILY VEHICLE TRIP SUMMARY - DATE: ${date}`]);
-        rows.push([`Financial Year: ${financialYear} | Month: ${month} | Total Vehicles: ${computedTotals.totalVehicles} | Total Trips: ${computedTotals.totalTrips} | Total MT: ${computedTotals.totalMT}`]);
+        rows.push([`Financial Year: ${financialYear} | Month: ${month} | Total Vehicles: ${computedTotals.totalVehicles} | Total Trips: ${computedTotals.totalTrips} | Total MT: ${computedTotals.totalMT} MT`]);
         rows.push([]);
 
-        const headers = ['SL NO', 'VEHICLE NUMBER', 'WHEEL', 'LOADING PATTERN', 'CLASSIFICATION', 'TRIPS ON DATE', 'TOTAL MT', 'ADVANCE (₹)', 'OWNER'];
+        const headers = ['SL NO', 'VEHICLE NUMBER', 'VEHICLE TYPE', 'MT CAPACITY', 'LOADING PATTERN', 'CLASSIFICATION', 'TRIPS ON DATE', 'TOTAL MT', 'ADVANCE (₹)', 'OWNER'];
         rows.push(headers);
 
         filteredVehicles.forEach((v, idx) => {
           rows.push([
             idx + 1,
             v.vehicleNo,
-            v.wheel || v.wheelPattern,
+            v.wheelType || v.wheel || v.wheelPattern,
+            v.capacity || `${v.capacityMT} MT`,
             v.loadingPattern,
             v.classification,
             v.totalTrips,
@@ -390,7 +424,7 @@ export default function VehicleWiseTripSummaryTab({
         });
 
         rows.push([]);
-        rows.push(['', 'TOTAL', '', '', '', computedTotals.totalTrips, computedTotals.totalMT, computedTotals.totalAdvance, '']);
+        rows.push(['', 'TOTAL', '', '', '', '', computedTotals.totalTrips, computedTotals.totalMT, computedTotals.totalAdvance, '']);
       }
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1088,10 +1122,10 @@ export default function VehicleWiseTripSummaryTab({
                                 }
                               }}
                             >
-                              {/* Row 1: WHEEL */}
+                              {/* Row 1: WHEEL / VEHICLE TYPE */}
                               <Box sx={{ bgcolor: '#f1f5f9', py: 0.3, px: 0.5, borderBottom: '1px solid #334155' }}>
                                 <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '10px', color: '#475569' }}>
-                                  {v.wheel || cfg.key}
+                                  {v.wheelType || v.wheel || cfg.key}
                                 </Typography>
                               </Box>
 
@@ -1105,14 +1139,17 @@ export default function VehicleWiseTripSummaryTab({
                               {/* Row 3: NO OF TRIPS (Bold red as in reference screenshot) */}
                               <Box sx={{ py: 0.4, px: 0.5, borderBottom: '1px solid #334155', bgcolor: '#ffffff' }}>
                                 <Typography variant="body2" sx={{ fontWeight: 900, fontSize: '13px', color: '#dc2626' }}>
-                                  {v.totalTrips}
+                                  {v.totalTrips} Trips
                                 </Typography>
                               </Box>
 
-                              {/* Row 4: LOADING PATTERN */}
+                              {/* Row 4: TOTAL MT & CAPACITY */}
                               <Box sx={{ py: 0.4, px: 0.5, bgcolor: '#f8fafc' }}>
-                                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '10px', color: '#334155', display: 'block' }}>
-                                  {v.loadingPattern}
+                                <Typography variant="caption" sx={{ fontWeight: 900, fontSize: '11px', color: '#059669', display: 'block' }}>
+                                  {v.totalMT} MT
+                                </Typography>
+                                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '9px', color: '#0369a1', display: 'block' }}>
+                                  Cap: {v.capacity || `${v.capacityMT} MT`}
                                 </Typography>
                               </Box>
                             </Box>
@@ -1126,7 +1163,7 @@ export default function VehicleWiseTripSummaryTab({
                 {/* ── Complete Day-Wise Matrix Table ── */}
                 {(viewMode === 'COMBINED' || viewMode === 'SPREADSHEET') && (
                   <TableContainer sx={{ maxHeight: '600px', overflowX: 'auto', overflowY: 'auto' }}>
-                    <Table size="small" stickyHeader sx={{ minWidth: 1200, borderCollapse: 'separate', borderSpacing: 0 }}>
+                    <Table size="small" stickyHeader sx={{ minWidth: 1280, borderCollapse: 'separate', borderSpacing: 0 }}>
                       <TableHead>
                         <TableRow sx={{ '& th': { bgcolor: '#0f172a', color: '#ffffff', fontWeight: 800, fontSize: '11px', whiteSpace: 'nowrap', borderRight: '1px solid rgba(255,255,255,0.1)' } }}>
                           <TableCell width={36} align="center" sx={{ borderBottom: '2px solid #334155' }}>#</TableCell>
@@ -1144,7 +1181,8 @@ export default function VehicleWiseTripSummaryTab({
                           >
                             VEHICLE NUMBER
                           </TableCell>
-                          <TableCell sx={{ borderBottom: '2px solid #334155', minWidth: 70 }}>WHEEL</TableCell>
+                          <TableCell sx={{ borderBottom: '2px solid #334155', minWidth: 85 }}>VEHICLE TYPE</TableCell>
+                          <TableCell sx={{ borderBottom: '2px solid #334155', minWidth: 85 }}>MT CAPACITY</TableCell>
                           <TableCell sx={{ borderBottom: '2px solid #334155', minWidth: 100 }}>LOADING PATTERN</TableCell>
                           <TableCell sx={{ borderBottom: '2px solid #334155', minWidth: 140 }}>CLASSIFICATION</TableCell>
 
@@ -1173,11 +1211,11 @@ export default function VehicleWiseTripSummaryTab({
                             align="center"
                             sx={{
                               position: 'sticky',
-                              right: 75,
+                              right: 90,
                               zIndex: 10,
                               bgcolor: '#0369a1 !important',
                               borderBottom: '2px solid #334155',
-                              minWidth: 75,
+                              minWidth: 80,
                               fontWeight: 900
                             }}
                           >
@@ -1191,7 +1229,7 @@ export default function VehicleWiseTripSummaryTab({
                               zIndex: 10,
                               bgcolor: '#0f172a !important',
                               borderBottom: '2px solid #334155',
-                              minWidth: 80,
+                              minWidth: 90,
                               fontWeight: 900
                             }}
                           >
@@ -1232,7 +1270,7 @@ export default function VehicleWiseTripSummaryTab({
                                   '&:hover': { bgcolor: '#e0f2fe' }
                                 }}
                               >
-                                <Tooltip title={`Click to view all Cement Register trips for ${v.vehicleNo}`}>
+                                <Tooltip title={`Click to view all Cement Register trips for ${v.vehicleNo} (${v.wheelType || v.wheel}, Capacity: ${v.capacity || `${v.capacityMT} MT`}, Trips: ${v.totalTrips}, Total MT: ${v.totalMT})`}>
                                   <Box>
                                     <Box display="flex" alignItems="center" gap={1}>
                                       <Box
@@ -1256,8 +1294,14 @@ export default function VehicleWiseTripSummaryTab({
                                 </Tooltip>
                               </TableCell>
 
+                              {/* Vehicle Type / Wheel Type */}
                               <TableCell sx={{ fontWeight: 800, color: '#334155' }}>
-                                {v.wheel || cfg.key}
+                                {v.wheelType || v.wheel || cfg.key}
+                              </TableCell>
+
+                              {/* MT Capacity */}
+                              <TableCell sx={{ fontWeight: 900, color: '#0284c7' }}>
+                                {v.capacity || (v.capacityMT > 0 ? `${v.capacityMT} MT` : '-')}
                               </TableCell>
 
                               {/* Loading Pattern */}
@@ -1285,13 +1329,14 @@ export default function VehicleWiseTripSummaryTab({
                               {daysArray.map(dayStr => {
                                 const tripsOnDay = v.dailyTrips?.[dayStr] || 0;
                                 const docs = v.dailyTripDocs?.[dayStr] || [];
+                                const dayMTVal = v.dailyMT?.[dayStr] || 0;
 
                                 return (
                                   <TableCell
                                     key={dayStr}
                                     align="center"
                                     onClick={() => {
-                                      if (tripsOnDay > 0) {
+                                      if (tripsOnDay > 0 || docs.length > 0) {
                                         setSelectedDayTripDetail({
                                           vehNo: v.vehicleNo,
                                           day: dayStr,
@@ -1301,13 +1346,13 @@ export default function VehicleWiseTripSummaryTab({
                                     }}
                                     sx={{
                                       px: 0.5,
-                                      cursor: tripsOnDay > 0 ? 'pointer' : 'default',
+                                      cursor: (tripsOnDay > 0 || docs.length > 0) ? 'pointer' : 'default',
                                       bgcolor: tripsOnDay > 0 ? (tripsOnDay > 1 ? '#e0f2fe' : '#f0fdf4') : 'inherit',
-                                      '&:hover': tripsOnDay > 0 ? { bgcolor: '#bae6fd' } : {}
+                                      '&:hover': (tripsOnDay > 0 || docs.length > 0) ? { bgcolor: '#bae6fd' } : {}
                                     }}
                                   >
                                     {tripsOnDay > 0 ? (
-                                      <Tooltip title={`${v.vehicleNo}: ${tripsOnDay} trip(s) on ${dayStr}-${String(monthIndex + 1).padStart(2, '0')}. Click to inspect day trips.`}>
+                                      <Tooltip title={`${v.vehicleNo}: ${tripsOnDay} trip(s) on ${dayStr}-${String(monthIndex + 1).padStart(2, '0')} (${dayMTVal} MT loaded ÷ ${v.capacityMT || 0} MT capacity). Click to inspect ${docs.length} invoice(s).`}>
                                         <Box
                                           sx={{
                                             display: 'inline-flex',
@@ -1340,7 +1385,7 @@ export default function VehicleWiseTripSummaryTab({
                                 align="center"
                                 sx={{
                                   position: 'sticky',
-                                  right: 75,
+                                  right: 90,
                                   zIndex: 5,
                                   bgcolor: isEven ? '#f0f9ff' : '#e0f2fe',
                                   borderLeft: '1px solid #93c5fd',
@@ -1350,7 +1395,13 @@ export default function VehicleWiseTripSummaryTab({
                                   fontSize: '13px'
                                 }}
                               >
-                                {v.totalTrips}
+                                <Tooltip title={`Total Trips = Total Loaded MT (${v.totalMT} MT) ÷ Capacity (${v.capacityMT} MT) = ${v.totalTrips} Trips`}>
+                                  <Box>
+                                    <Typography variant="body2" fontWeight={900} sx={{ fontSize: '13px', color: '#0369a1' }}>
+                                      {v.totalTrips}
+                                    </Typography>
+                                  </Box>
+                                </Tooltip>
                               </TableCell>
 
                               {/* Sticky Total MT */}
@@ -1365,7 +1416,18 @@ export default function VehicleWiseTripSummaryTab({
                                   color: '#0f172a'
                                 }}
                               >
-                                {v.totalMT}
+                                <Tooltip title={`Total MT Loaded = ${v.totalMT} MT (${v.totalTrips} Trips at ${v.capacityMT} MT/trip)`}>
+                                  <Box>
+                                    <Typography variant="body2" fontWeight={900} sx={{ fontSize: '12px' }}>
+                                      {v.totalMT} <span style={{ fontSize: '10px', fontWeight: 700, color: '#64748b' }}>MT</span>
+                                    </Typography>
+                                    {v.capacityMT > 0 && (
+                                      <Typography variant="caption" sx={{ color: '#64748b', fontSize: '9px', display: 'block', lineHeight: 1 }}>
+                                        {v.totalMT} ÷ {v.capacityMT}MT
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                </Tooltip>
                               </TableCell>
                             </TableRow>
                           );
@@ -1387,6 +1449,7 @@ export default function VehicleWiseTripSummaryTab({
                             {cfg.key} TOTAL ({patternVehicles.length} VEHS)
                           </TableCell>
                           <TableCell sx={{ color: cfg.badgeColor }}>{cfg.key}</TableCell>
+                          <TableCell sx={{ color: cfg.badgeColor, fontWeight: 900 }}>{cfg.capacityMT ? `${cfg.capacityMT} MT` : '-'}</TableCell>
                           <TableCell></TableCell>
                           <TableCell></TableCell>
 
@@ -1405,7 +1468,7 @@ export default function VehicleWiseTripSummaryTab({
                             align="center"
                             sx={{
                               position: 'sticky',
-                              right: 75,
+                              right: 90,
                               zIndex: 6,
                               bgcolor: '#0284c7 !important',
                               color: '#ffffff',
@@ -1428,7 +1491,7 @@ export default function VehicleWiseTripSummaryTab({
                               fontWeight: 900
                             }}
                           >
-                            {patternTotalMT}
+                            {patternTotalMT} MT
                           </TableCell>
                         </TableRow>
                       </TableBody>

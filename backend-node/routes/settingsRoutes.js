@@ -20,7 +20,7 @@ router.get("/projected-deductions", auth, async (req, res) => {
 // PUT /settings/projected-deductions
 router.put("/projected-deductions", auth, async (req, res) => {
   try {
-    const { damage, gpsDeviceInstallation, rfid, gpsTripCharge } = req.body;
+    const { damage, gpsDeviceInstallation, rfid, gpsTripCharge, advanceBankTF } = req.body;
     let settings = await ProjectedDeductionSetting.findOne();
     if (!settings) {
       settings = new ProjectedDeductionSetting();
@@ -30,6 +30,7 @@ router.put("/projected-deductions", auth, async (req, res) => {
     if (gpsDeviceInstallation !== undefined) settings.gpsDeviceInstallation = Number(gpsDeviceInstallation);
     if (rfid !== undefined) settings.rfid = Number(rfid);
     if (gpsTripCharge !== undefined) settings.gpsTripCharge = Number(gpsTripCharge);
+    if (advanceBankTF !== undefined) settings.advanceBankTF = Number(advanceBankTF);
 
     await settings.save();
     res.json({ success: true, data: settings });

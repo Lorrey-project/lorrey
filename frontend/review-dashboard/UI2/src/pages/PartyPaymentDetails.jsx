@@ -123,13 +123,31 @@ export default function PartyPaymentDetails({ onBack }) {
       const trucksData = truckRes.data?.contacts || [];
 
       const truckMap = {}; // normVeh → owner name
+      const truckOwnerIdMap = {}; // normVeh → ownerId / unique key
       trucksData.forEach(t => {
         // The collection stores fields with trailing spaces e.g. "Truck No "
         const raw = t['Truck No '] || t['Truck No'] || t['Vehicle No'] || t['vehicleNo'] || '';
         const owner = (t['Owner Name '] || t['Owner Name'] || t['ownerName'] || '').trim();
+        const ownerId = t.ownerId || t._id || '';
         const key = normVeh(raw);
-        if (key) truckMap[key] = owner;
+        if (key) {
+          truckMap[key] = owner;
+          if (ownerId) truckOwnerIdMap[key] = String(ownerId);
+        }
       });
+
+      // 1b. Fetch GPS Trip Charge amount directly from Deduction Settings
+      let gpsTripChargeSetting = 0;
+      try {
+        const token = localStorage.getItem('token');
+        const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+        const deductionRes = await axios.get(`${API_URL}/settings/projected-deductions`, { headers: authHeaders });
+        if (deductionRes.data?.success && deductionRes.data?.data) {
+          gpsTripChargeSetting = num(deductionRes.data.data.gpsTripCharge);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch projected deductions for GPS trip charge:', e);
+      }
 
       // 2. Cement register entries for this month via our date-aware endpoint
       const cementRes = await axios.get(`${API_URL}/party-payment/cement-data`, {
@@ -167,7 +185,7 @@ export default function PartyPaymentDetails({ onBack }) {
             'DAMAGE RECOVERY': 0,   // = SUM of "SHORTAGE AMOUNT"
             'CASH_BANK_OTHERS': 0,   // = SUM of BANK TF + OTHERS + SITE CASH
             'OTHER DEDUCTION': 0,   // = SUM of "OTHERS DEDUCTION"
-            'GPS TRIP CHARGE': 0,   // = SUM of "GPS MONITORING CHARGE"
+            'GPS TRIP CHARGE': 0,   // Populated once per party per month below
             'GPS DEVICE': 0,   // = SUM of "GPS DEVICE"
             '8.5% NVCL': 0,   // = SUM of "10W EXTRA 8.5%"
             'DEDICATED INCENTIVE': 0,   // = SUM of "DEDICATED"
@@ -226,9 +244,6 @@ export default function PartyPaymentDetails({ onBack }) {
         // ⑩ Other Deduction — check manual entry keys
         a['OTHER DEDUCTION'] += getF('OTHERS DEDUCTION', 'OTHERS  DEDUCTION', 'OTHER DEDUCTION', 'OTHERS', 'Others deduction', 'Other');
 
-        // ⑪ GPS Trip Charge
-        a['GPS TRIP CHARGE'] += getF('GPS Monitoring Charge', 'GPS MONITORING CHARGE', 'GPS MONITORING  CHARGE', 'GPS TRIP CHARGE');
-
         // ⑫ GPS Device
         a['GPS DEVICE'] += getF('GPS DEVICE', 'GPS  DEVICE');
 
@@ -282,6 +297,23 @@ export default function PartyPaymentDetails({ onBack }) {
         a['OWNER NAME'].localeCompare(b['OWNER NAME']) ||
         a['VEHICLE NO'].localeCompare(b['VEHICLE NO'])
       );
+
+      // Apply GPS Trip Charge exactly once per unique party/owner for this month/FY
+      const chargedParties = new Set();
+      finalRows.forEach(row => {
+        const vKey = normVeh(row['VEHICLE NO']);
+        const ownerId = truckOwnerIdMap[vKey] || '';
+        const ownerName = (row['OWNER NAME'] || '').trim().toUpperCase();
+        // Unique party identifier for this month + financial year
+        const partyKey = `${ownerId || ownerName || vKey}_${selYear}_${selMonth}`;
+
+        if (!chargedParties.has(partyKey)) {
+          row['GPS TRIP CHARGE'] = gpsTripChargeSetting;
+          chargedParties.add(partyKey);
+        } else {
+          row['GPS TRIP CHARGE'] = 0;
+        }
+      });
 
       setRows(finalRows);
     } catch (err) {
@@ -533,7 +565,7 @@ export default function PartyPaymentDetails({ onBack }) {
       </Box>
 
       {/* ── Spreadsheet ── */}
-      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, position: 'relative' }}>
         {loading ? (
           <Box display="flex" alignItems="center" justifyContent="center" height="100%" gap={2}>
             <CircularProgress sx={{ color: '#6d28d9' }} />
@@ -542,21 +574,22 @@ export default function PartyPaymentDetails({ onBack }) {
             </Typography>
           </Box>
         ) : (
-          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '12px', minWidth: 'max-content' }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '12px', minWidth: 'max-content' }}>
             <colgroup>
               <col style={{ width: 40, minWidth: 40 }} />
               {COLUMNS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
             </colgroup>
 
             {/* ── Head ── */}
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr>
                 {/* # */}
                 <th style={{
-                  position: 'sticky', top: 0, left: 0, zIndex: 6,
+                  position: 'sticky', top: 0, left: 0, zIndex: 20,
                   background: '#f8fafc', color: '#475569',
                   padding: '10px 4px', textAlign: 'center', fontSize: 11, fontWeight: 800,
-                  border: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1', whiteSpace: 'nowrap'
+                  border: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.08)', whiteSpace: 'nowrap'
                 }}>#</th>
 
                 {COLUMNS.map((col, ci) => {
@@ -568,10 +601,11 @@ export default function PartyPaymentDetails({ onBack }) {
                     <th key={col.key} style={{
                       position: 'sticky', top: 0,
                       left: isSticky ? leftPx : undefined,
-                      zIndex: isSticky ? 7 : 5,
+                      zIndex: isSticky ? 18 : 10,
                       background: bg, color: textColor,
                       padding: '10px 6px', textAlign: 'center',
                       fontSize: 11, fontWeight: 800, border: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
                       whiteSpace: 'pre-line', lineHeight: 1.25,
                     }}>
                       {col.label}

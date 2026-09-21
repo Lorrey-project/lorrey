@@ -51,88 +51,75 @@ const normalizeDate = (dStr) => {
   return String(dStr).trim();
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// COLUMNS — new format matching the reference Excel layout
+// Groups: global | pump | site | office | diff | remarks
+// ─────────────────────────────────────────────────────────────────────────────
 const COLUMNS = [
-  // Global
-  { key: 'DATE', label: 'Date', width: 120, type: 'manual', group: 'global' },
+  // ── Global ──
+  { key: 'DATE', label: 'Date', width: 110, type: 'manual', group: 'global' },
 
-  // Pump Cash Details
-  { key: 'P_OPENING', label: 'Opening Balance', width: 120, type: 'manual', group: 'pump' },
-  { key: 'P_LOAN_RECV', label: 'Loan Recv', width: 420, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
-  { key: 'P_LOAN_PAY', label: 'Loan Pay', width: 420, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
-  { key: 'P_WITHDRAW', label: 'Cash withdraw', width: 120, type: 'manual', group: 'pump' },
+  // ── Pump Cash Details ──
+  { key: 'P_OPENING',       label: 'Opening\nBalance',            width: 110, type: 'manual', group: 'pump' },
+  { key: 'P_CASH_RECV_BB', label: 'Cash Receive\nBank Book',    width: 130, type: 'calc', group: 'pump' },
+  { key: 'P_LOAN_RECV',    label: 'Loan Recv',                  width: 200, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
+  { key: 'P_LOAN_PAY',     label: 'Loan Pay',                   width: 200, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
+  { key: 'P_WITHDRAW',     label: 'Cash with\ndraw',            width: 110, type: 'manual', group: 'pump' },
   {
-    key: 'P_TOTAL', label: 'Total Amount', width: 120, type: 'calc', group: 'pump',
+    key: 'P_TOTAL', label: 'Total\nAmount', width: 110, type: 'calc', group: 'pump',
     formula: r => fmt2(num(r.P_OPENING) + num(r.P_WITHDRAW))
   },
-  { key: 'P_GIVEN_DAC', label: 'Site cash given from DAC', width: 150, type: 'manual', group: 'pump' },
-  { key: 'P_GIVEN_OFFICE', label: 'Cash Given To Office', width: 140, type: 'manual', group: 'pump' },
-  { key: 'P_OTHERS', label: 'Others', width: 120, type: 'manual', group: 'pump' },
+  { key: 'P_GIVEN_DAC',    label: 'Site cash\ngiven from DAC',  width: 130, type: 'manual', group: 'pump' },
+  { key: 'P_GIVEN_OFFICE', label: 'Cash Given\nTo Office',      width: 120, type: 'manual', group: 'pump' },
+  { key: 'P_LOAN_REPAY',   label: 'LOAN\nREPAY',                width: 110, type: 'manual', group: 'pump' },
   {
-    key: 'P_CLOSING', label: 'Closing Balance', width: 120, type: 'calc', group: 'pump',
-    formula: r => fmt2(num(r.P_TOTAL) - num(r.P_GIVEN_DAC) - num(r.P_GIVEN_OFFICE) - num(r.P_OTHERS))
+    key: 'P_CLOSING', label: 'Closing\nBalance', width: 110, type: 'calc', group: 'pump',
+    formula: r => fmt2(num(r.P_TOTAL) - num(r.P_GIVEN_DAC) - num(r.P_GIVEN_OFFICE))
   },
+  { key: 'P_LOAN_BALANCE', label: 'LOAN\nBALANCE',              width: 110, type: 'manual', group: 'pump' },
 
-  // Site Cash
-  { key: 'S_OPENING', label: 'Site opening', width: 120, type: 'manual', group: 'site' },
+  // ── Site Cash ──
+  { key: 'S_OPENING',      label: 'Site\nopening',              width: 110, type: 'manual', group: 'site' },
   {
-    key: 'S_RECV_SANGRAM', label: 'Site cash recv\nfrom sangram', width: 140, type: 'calc', group: 'site',
+    key: 'S_RECV_SANGRAM', label: 'Site cash\nreceive from',   width: 120, type: 'calc', group: 'site',
     formula: r => num(r.P_GIVEN_DAC)
   },
-  { key: 'S_TRANS_OFFICE', label: 'Transferred\nfrom office', width: 120, type: 'manual', group: 'site' },
+  { key: 'S_TRANS_OFFICE', label: 'Transferred\nfrom office cash', width: 130, type: 'manual', group: 'site' },
   {
-    key: 'S_TOTAL', label: 'Total Cash\nSite', width: 120, type: 'calc', group: 'site',
-    formula: r => fmt2(num(r.S_OPENING) + num(r.S_RECV_SANGRAM) + num(r.S_TRANS_OFFICE))
+    key: 'S_TOTAL', label: 'Total Cash\nSite', width: 110, type: 'calc', group: 'site',
+    formula: r => fmt2(num(r.S_OPENING) + num(r.S_RECV_SANGRAM))
   },
   { key: 'S_TRANS_TO_OFFICE', label: 'Transferred\nto office cash', width: 130, type: 'manual', group: 'site' },
   {
-    key: 'S_EXPENSE', label: 'Site Cash\nExp', width: 120, type: 'calc', group: 'site',
+    key: 'S_EXPENSE', label: 'Site Cash\nExp', width: 110, type: 'calc', group: 'site',
     formula: r => fmt2(r.S_EXPENSE || 0)
   },
   {
-    key: 'S_CLOSING', label: 'Site Cash\nClosing', width: 120, type: 'calc', group: 'site',
+    key: 'S_CLOSING', label: 'Site Cash\nClosing', width: 110, type: 'calc', group: 'site',
     formula: r => fmt2(num(r.S_TOTAL) - num(r.S_EXPENSE))
   },
 
-  // Office Cash
-  { key: 'O_OPENING', label: 'Office Cash\nopening', width: 120, type: 'manual', group: 'office' },
+  // ── Office Cash ──
+  { key: 'O_OPENING',      label: 'Office Cash\nopening',       width: 120, type: 'manual', group: 'office' },
+  { key: 'O_RECV_HFS',     label: 'Office Cash\nrecv from hfs', width: 130, type: 'manual', group: 'office' },
+  { key: 'O_RECV_SITE',    label: 'Office Cash\nreceive from site', width: 130, type: 'manual', group: 'office' },
+  { key: 'O_TOTAL',        label: 'Total Office\nCash',         width: 120, type: 'manual', group: 'office' },
+  { key: 'O_EXPENSE',      label: 'Office\nExp',                width: 110, type: 'manual', group: 'office' },
   {
-    key: 'O_RECV_HFS', label: 'Office Cash\nrecv from HFS', width: 140, type: 'calc', group: 'office',
-    formula: r => num(r.P_GIVEN_OFFICE)
-  },
-  {
-    key: 'O_RECV_SITE', label: 'Office Cash\nrecv from site', width: 140, type: 'calc', group: 'office',
-    formula: r => num(r.S_TRANS_TO_OFFICE)
-  },
-  {
-    key: 'O_TOTAL', label: 'Total Office\nCash', width: 120, type: 'calc', group: 'office',
-    formula: r => fmt2(num(r.O_OPENING) + num(r.O_RECV_HFS) + num(r.O_RECV_SITE))
-  },
-  {
-    key: 'O_EXPENSE', label: 'Office Exp', width: 120, type: 'calc', group: 'office',
-    formula: r => fmt2(r.O_EXPENSE || 0)
-  },
-  {
-    key: 'O_CLOSING', label: 'Closing\nBalance', width: 120, type: 'calc', group: 'office',
+    key: 'O_CLOSING', label: 'Closing\nBalance', width: 110, type: 'calc', group: 'office',
     formula: r => fmt2(num(r.O_TOTAL) - num(r.O_EXPENSE))
   },
 
-  // Difference
-  {
-    key: 'DIFFERENCE', label: 'Difference', width: 120, type: 'calc', group: 'diff',
-    formula: r => {
-      const eq1 = num(r.P_TOTAL) + num(r.S_OPENING) + num(r.S_TRANS_OFFICE) + num(r.O_OPENING);
-      const eq2 = num(r.S_EXPENSE) + num(r.O_EXPENSE) + num(r.P_CLOSING) + num(r.S_CLOSING) + num(r.O_CLOSING) + num(r.P_OTHERS);
-      return fmt2(eq1 - eq2);
-    }
-  },
+  // ── Difference ──
+  { key: 'DIFFERENCE',     label: 'Difference',                 width: 110, type: 'manual', group: 'diff' },
 
-  // Remarks
-  {
-    key: 'REMARKS_EXP', label: 'Office exp details', width: 500, type: 'calc', group: 'remarks',
-    formula: r => r.REMARKS_EXP || ''
-  },
-  { key: 'REMARKS', label: 'Remarks', width: 500, type: 'manual', group: 'remarks' },
+  // ── Remarks ──
+  { key: 'REMARKS_EXP',    label: 'Office exp\ndetails',        width: 420, type: 'manual', group: 'remarks' },
+  { key: 'REMARKS',        label: 'Remarks',                    width: 420, type: 'manual', group: 'remarks' },
 ];
+
+// P_OTHERS is still stored on the row but NOT displayed as its own column
+// (it's kept for backward-compat with existing data / P_CLOSING formula)
 
 // Numeric columns for monthly summary totals
 const NUMERIC_COLS = COLUMNS.filter(c => !['DATE', 'P_LOAN_RECV', 'P_LOAN_PAY', 'REMARKS_EXP', 'REMARKS'].includes(c.key));
@@ -148,12 +135,12 @@ function applyCalcs(row) {
 }
 
 const GROUP_COLORS = {
-  global: { bg: '#f8fafc', title: 'Global', titleBg: '#f1f5f9' },
-  pump: { bg: '#faf5ff', title: 'Pump cash details', titleBg: '#f3e8ff' },
-  site: { bg: '#f0fdf4', title: 'Site cash', titleBg: '#dcfce7' },
-  office: { bg: '#eff6ff', title: 'Office Cash', titleBg: '#dbeafe' },
-  diff: { bg: '#fef2f2', title: 'Reconciliation', titleBg: '#fee2e2' },
-  remarks: { bg: '#fef9c3', title: 'Remarks', titleBg: '#fef08a' },
+  global:  { bg: '#f8fafc', title: 'Date',             titleBg: '#f1f5f9' },
+  pump:    { bg: '#faf5ff', title: 'Pump cash details', titleBg: '#f3e8ff' },
+  site:    { bg: '#f0fdf4', title: 'Site cash',         titleBg: '#dcfce7' },
+  office:  { bg: '#eff6ff', title: 'Office Cash',       titleBg: '#dbeafe' },
+  diff:    { bg: '#fef2f2', title: 'Reconciliation',    titleBg: '#fee2e2' },
+  remarks: { bg: '#fef9c3', title: 'Remarks',           titleBg: '#fef08a' },
 };
 
 const OPENING_KEYS = ['P_OPENING', 'S_OPENING', 'O_OPENING'];
@@ -164,13 +151,21 @@ const CASHBOOK_HEADER_MAP = {
   'cash source': 'P_SOURCE', 'cash source ': 'P_SOURCE',
   'loan recv': 'P_LOAN_RECV', 'loan recv ': 'P_LOAN_RECV',
   'loan pay': 'P_LOAN_PAY', 'loan pay ': 'P_LOAN_PAY',
-  'cash withdraw': 'P_WITHDRAW', 'withdraw': 'P_WITHDRAW', 'cash withdraw ': 'P_WITHDRAW', 'cash with draw': 'P_WITHDRAW', 'cash with draw ': 'P_WITHDRAW',
+  'cash withdraw': 'P_WITHDRAW', 'withdraw': 'P_WITHDRAW', 'cash withdraw ': 'P_WITHDRAW',
+  'cash with draw': 'P_WITHDRAW', 'cash with draw ': 'P_WITHDRAW',
   'site cash given from dac': 'P_GIVEN_DAC', 'given dac': 'P_GIVEN_DAC', 'site cash given from dac ': 'P_GIVEN_DAC',
   'cash given to office': 'P_GIVEN_OFFICE', 'given office': 'P_GIVEN_OFFICE', 'cash given to office ': 'P_GIVEN_OFFICE',
+  'loan repay': 'P_LOAN_REPAY', 'loan repay ': 'P_LOAN_REPAY',
+  'loan balance': 'P_LOAN_BALANCE', 'loan balance ': 'P_LOAN_BALANCE',
+  'cash receive bank book': 'P_CASH_RECV_BB', 'cash recv bank book': 'P_CASH_RECV_BB',
+  'cash recive bank book': 'P_CASH_RECV_BB', 'cash received bank book': 'P_CASH_RECV_BB',
   'others': 'P_OTHERS', 'others ': 'P_OTHERS',
   'site opening': 'S_OPENING', 'site opening ': 'S_OPENING',
-  'transferred from office': 'S_TRANS_OFFICE', 'transferred from office ': 'S_TRANS_OFFICE', 'transfered from office': 'S_TRANS_OFFICE', 'transfered from office cash': 'S_TRANS_OFFICE', 'transferred from office cash': 'S_TRANS_OFFICE',
-  'transferred to office cash': 'S_TRANS_TO_OFFICE', 'transferred to office cash ': 'S_TRANS_TO_OFFICE', 'transfered to office cash': 'S_TRANS_TO_OFFICE',
+  'transferred from office': 'S_TRANS_OFFICE', 'transferred from office ': 'S_TRANS_OFFICE',
+  'transfered from office': 'S_TRANS_OFFICE', 'transfered from office cash': 'S_TRANS_OFFICE',
+  'transferred from office cash': 'S_TRANS_OFFICE', 'site cash receive from': 'S_RECV_SANGRAM',
+  'transferred to office cash': 'S_TRANS_TO_OFFICE', 'transferred to office cash ': 'S_TRANS_TO_OFFICE',
+  'transfered to office cash': 'S_TRANS_TO_OFFICE',
   'office cash opening': 'O_OPENING', 'office cash opening ': 'O_OPENING',
   'remarks': 'REMARKS', 'remarks ': 'REMARKS'
 };
@@ -266,19 +261,18 @@ export default function MainCashbook({ onBack }) {
     fetchPrevClosing(selMonth, selYear);
   }, [selMonth, selYear, fetchData, fetchPrevClosing]);
 
-  // Socket: re-fetch silently on cashbook updates (debounced to avoid hammering)
+  // Socket: re-fetch silently on cashbook updates (debounced)
   useEffect(() => {
     let timer = null;
     const handler = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => fetchData(selMonth, selYear, true), 150); // 150 ms debounce
+      timer = setTimeout(() => fetchData(selMonth, selYear, true), 150);
     };
     socket.on('mainCashbookUpdates', handler);
     return () => { socket.off('mainCashbookUpdates', handler); clearTimeout(timer); };
   }, [selMonth, selYear, fetchData]);
 
-  // Socket: instant expense patch — no round-trip needed
-  // Server emits { date, sExpense, oExpense, oDetails } after a voucher changes.
+  // Socket: instant expense patch
   useEffect(() => {
     const handler = ({ date, sExpense, oExpense, oDetails }) => {
       if (!date) return;
@@ -293,7 +287,7 @@ export default function MainCashbook({ onBack }) {
     return () => socket.off('expenseUpdate', handler);
   }, []);
 
-  // Socket: listen for new voucher creation and show a prompt
+  // Socket: new voucher notification
   useEffect(() => {
     const handler = ({ voucher }) => {
       setSnack({
@@ -306,15 +300,11 @@ export default function MainCashbook({ onBack }) {
   }, []);
 
   // Build computed rows: chain opening ← prev closing
-  // NOTE: S_OPENING on the first row is intentionally kept manual (not auto-filled)
-  // P_OPENING and O_OPENING on first row still auto-carry from previous month if not typed.
   const computedRows = useMemo(() => {
-    // 1. Determine actual days in the selected month
     const fyStart = parseInt(String(selYear).split('-')[0], 10);
     const actualYear = selMonth >= 4 ? fyStart : fyStart + 1;
     const daysInMonth = new Date(actualYear, selMonth, 0).getDate();
 
-    // 2. Group imported entries by normalized date arrays (supports multiple rows per date)
     const importMap = {};
     importedEntries.forEach(row => {
       if (row.DATE) {
@@ -324,7 +314,6 @@ export default function MainCashbook({ onBack }) {
       }
     });
 
-    // 3. Group DB entries by normalized date arrays
     const dbMap = {};
     entries.forEach(row => {
       const norm = normalizeDate(row.DATE);
@@ -333,51 +322,41 @@ export default function MainCashbook({ onBack }) {
     });
 
     let rawList = [];
-    
-    // 4. Generate rows exactly for days 1 to daysInMonth for this month
     for (let d = 1; d <= daysInMonth; d++) {
       const dStr = `${String(d).padStart(2, '0')}-${String(selMonth).padStart(2, '0')}-${actualYear}`;
-      
       const dbRows = dbMap[dStr] || [];
       const impRows = importMap[dStr] || [];
-      
-      // Determine how many rows are needed for this day (at least 1)
       const maxRows = Math.max(1, dbRows.length, impRows.length);
-      
+
       for (let i = 0; i < maxRows; i++) {
-        // If there's no DB row, create a virtual one for display
         const dbRow = dbRows[i] || (i === 0 ? { DATE: dStr, _id: `auto-${dStr}` } : null);
         const impRow = impRows[i] || null;
         const locRow = (dbRow && dbRow._id) ? (localData[dbRow._id] || {}) : {};
-        
+
         let merged;
         if (!dbRow && impRow) {
-          merged = { DATE: dStr, ...impRow }; // extra imported row
+          merged = { DATE: dStr, ...impRow };
         } else if (dbRow && impRow) {
-          merged = { ...dbRow, ...impRow, ...locRow }; // matching row
+          merged = { ...dbRow, ...impRow, ...locRow };
         } else if (dbRow && !impRow) {
-          merged = { ...dbRow, ...locRow }; // just db row + edits
+          merged = { ...dbRow, ...locRow };
         }
         rawList.push(merged);
       }
     }
 
-    // 5. Strict Chronological Sort based on the actual date
     rawList.sort((a, b) => {
       const parseMs = (dStr) => {
         if (!dStr) return 0;
         const [d, m, y] = String(dStr).split('-');
         return new Date(`${y}-${m}-${d}`).getTime();
       };
-      
       const timeA = parseMs(a.DATE);
       const timeB = parseMs(b.DATE);
-      
       if (timeA === timeB) {
-         // Preserve SL NO order if same date
-         const slA = num(a['SL NO'], Infinity);
-         const slB = num(b['SL NO'], Infinity);
-         return slA - slB;
+        const slA = num(a['SL NO'], Infinity);
+        const slB = num(b['SL NO'], Infinity);
+        return slA - slB;
       }
       return timeA - timeB;
     });
@@ -386,7 +365,6 @@ export default function MainCashbook({ onBack }) {
     for (let i = 0; i < rawList.length; i++) {
       const r = { ...rawList[i] };
       if (i === 0) {
-        // First row: auto-carry openings from previous month
         if (!rawList[i].P_OPENING && !localData[rawList[i]._id]?.P_OPENING)
           r.P_OPENING = prevClosing.P_CLOSING;
         if (!rawList[i].S_OPENING && !localData[rawList[i]._id]?.S_OPENING)
@@ -408,9 +386,7 @@ export default function MainCashbook({ onBack }) {
   const monthSums = useMemo(() => {
     const s = {};
     if (computedRows.length === 0) return s;
-    const firstRow = computedRows[0];
     const lastRow = computedRows[computedRows.length - 1];
-
     for (const col of NUMERIC_COLS) {
       if (['P_OPENING', 'S_OPENING', 'O_OPENING'].includes(col.key)) {
         s[col.key] = fmt2(lastRow[col.key]);
@@ -423,7 +399,7 @@ export default function MainCashbook({ onBack }) {
     return s;
   }, [computedRows]);
 
-  // ── KPI Metrics ─────────────────────────────────────────────────────────────
+  // ── KPI Metrics ──────────────────────────────────────────────────────────────
   const kpiMetrics = useMemo(() => {
     let openingBalance = 0;
     let totalReceipts = 0;
@@ -448,17 +424,9 @@ export default function MainCashbook({ onBack }) {
         todaysTransactions += 1;
       }
     });
-    
-    totalReceipts = closingBalance - openingBalance + totalPayments;
 
-    return {
-      openingBalance,
-      totalReceipts,
-      totalPayments,
-      closingBalance,
-      todaysTransactions,
-      currentBalance: closingBalance
-    };
+    totalReceipts = closingBalance - openingBalance + totalPayments;
+    return { openingBalance, totalReceipts, totalPayments, closingBalance, todaysTransactions, currentBalance: closingBalance };
   }, [computedRows]);
 
   const handleCellEdit = useCallback((rowId, field, value) => {
@@ -476,10 +444,7 @@ export default function MainCashbook({ onBack }) {
           if (isNaN(currentVal) || currentVal < minVal) {
             setLocalData(prev => ({
               ...prev,
-              [rowId]: {
-                ...(prev[rowId] || {}),
-                [field]: String(minVal)
-              }
+              [rowId]: { ...(prev[rowId] || {}), [field]: String(minVal) }
             }));
             setSnack({ severity: 'warning', msg: `Withdraw amount cannot be less than Bank Book synced amount (${minVal})` });
           }
@@ -515,13 +480,9 @@ export default function MainCashbook({ onBack }) {
         headers.forEach((h, colIdx) => {
           let finalHeader = h;
           if (!finalHeader) {
-            // Fallback: look up in rows above the selected header row to see if a label exists for this column
             for (let rIdx = headerRowIdx - 1; rIdx >= 0; rIdx--) {
               const val = String(aoa[rIdx]?.[colIdx] || '').trim();
-              if (val) {
-                finalHeader = val;
-                break;
-              }
+              if (val) { finalHeader = val; break; }
             }
           }
           if (!finalHeader) return;
@@ -530,7 +491,6 @@ export default function MainCashbook({ onBack }) {
           if (key) headerMapping[colIdx] = key;
         });
 
-        // Auto-detect date format: find Date column index
         let dateColIdx = -1;
         Object.entries(headerMapping).forEach(([colIdxStr, key]) => {
           if (key === 'DATE') dateColIdx = parseInt(colIdxStr, 10);
@@ -548,14 +508,8 @@ export default function MainCashbook({ onBack }) {
                 const p0 = parseInt(parts[0], 10);
                 const p1 = parseInt(parts[1], 10);
                 if (!isNaN(p0) && !isNaN(p1)) {
-                  if (p0 > 12 && p1 <= 12) {
-                    formatDetected = 'DMY';
-                    break;
-                  }
-                  if (p1 > 12 && p0 <= 12) {
-                    formatDetected = 'MDY';
-                    break;
-                  }
+                  if (p0 > 12 && p1 <= 12) { formatDetected = 'DMY'; break; }
+                  if (p1 > 12 && p0 <= 12) { formatDetected = 'MDY'; break; }
                 }
               }
             }
@@ -593,7 +547,6 @@ export default function MainCashbook({ onBack }) {
             let day = null, month = null, year = null;
 
             if (/^\d{4,5}$/.test(dateStr)) {
-              // Serial date
               let serial = parseInt(dateStr, 10);
               let dateObj = new Date(Math.round((serial - 25569) * 86400 * 1000));
               day = dateObj.getUTCDate();
@@ -613,20 +566,13 @@ export default function MainCashbook({ onBack }) {
                   if (isNaN(parseInt(p1)) && monthMap[p1.toLowerCase().substring(0, 3)]) {
                     mVal = monthMap[p1.toLowerCase().substring(0, 3)];
                   }
-
                   let v0 = parseInt(p0, 10);
                   let v1 = mVal !== null ? mVal : parseInt(p1, 10);
                   let y = parseInt(p2, 10);
                   if (y < 100) y += 2000;
                   year = y;
-
-                  if (formatDetected === 'MDY') {
-                    month = v0;
-                    day = v1;
-                  } else { // DMY
-                    month = v1;
-                    day = v0;
-                  }
+                  if (formatDetected === 'MDY') { month = v0; day = v1; }
+                  else { month = v1; day = v0; }
                 }
               }
             }
@@ -638,15 +584,9 @@ export default function MainCashbook({ onBack }) {
                 rowObj.month = Number(month);
                 rowObj.year = Number(year);
                 newEntries.push(rowObj);
-              } else {
-                ignoredCount++;
-              }
-            } else {
-              ignoredCount++; // Invalid date format
-            }
-          } else {
-            ignoredCount++; // Missing date
-          }
+              } else { ignoredCount++; }
+            } else { ignoredCount++; }
+          } else { ignoredCount++; }
         });
         setImportPreview({ entries: newEntries, validCount: newEntries.length, ignoredCount });
       } catch (err) {
@@ -709,7 +649,6 @@ export default function MainCashbook({ onBack }) {
       let savedCount = 0;
       let importedCount = 0;
 
-      // 1. Save imported Excel entries if any
       if (importedEntries.length > 0) {
         const res = await axios.post(`${API_URL}/main-cashbook/bulk-import`, { entries: importedEntries }, {
           headers: { Authorization: `Bearer ${token()}` }
@@ -719,7 +658,6 @@ export default function MainCashbook({ onBack }) {
         }
       }
 
-      // 2. Save row-level changes if any
       if (dirtyCount > 0) {
         const updates = Object.entries(localData).map(([id, changes]) => ({ id, changes }));
         await axios.put(`${API_URL}/main-cashbook/bulk-update`, { updates }, {
@@ -728,7 +666,6 @@ export default function MainCashbook({ onBack }) {
         savedCount = updates.length;
       }
 
-      // 3. Upsert monthly summary (computed from latest computedRows)
       const fyStartYear = parseInt(String(selYear).split('-')[0], 10);
       const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
       const summaryPayload = {
@@ -740,7 +677,6 @@ export default function MainCashbook({ onBack }) {
         headers: { Authorization: `Bearer ${token()}` }
       });
 
-      // Show success message
       let msg = '';
       if (importedCount > 0 && savedCount > 0) {
         msg = `Successfully saved ${importedCount} imported rows and ${savedCount} edited rows!`;
@@ -750,23 +686,16 @@ export default function MainCashbook({ onBack }) {
         msg = `${savedCount} row(s) + monthly summary saved!`;
       }
       setSnack({ severity: 'success', msg });
-
-      // Clear states
       setImportedEntries([]);
       setLocalData({});
       fetchData(selMonth, selYear);
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Save failed: ' + (err.response?.data?.error || err.message) });
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const handleExport = () => {
-    // Build rows + summary row for CSV
-    const summaryRow = {
-      DATE: `${MONTH_NAMES[selMonth - 1].toUpperCase()} ${selYear} TOTAL`,
-    };
+    const summaryRow = { DATE: `${MONTH_NAMES[selMonth - 1].toUpperCase()} ${selYear} TOTAL` };
     for (const col of NUMERIC_COLS) summaryRow[col.key] = monthSums[col.key];
     exportToCsv(`cashbook_${selYear}_${selMonth}.xls`, [...computedRows, summaryRow]);
   };
@@ -774,11 +703,7 @@ export default function MainCashbook({ onBack }) {
   useShortcut('ctrl+s', handleSave);
   useShortcut('ctrl+r', () => fetchData());
   useShortcut('ctrl+e', handleExport);
-  useShortcut('delete', () => {
-    if (selectedIds.size > 0) {
-      setConfirmDel(true);
-    }
-  });
+  useShortcut('delete', () => { if (selectedIds.size > 0) setConfirmDel(true); });
 
   if (loading) return (
     <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
@@ -786,6 +711,53 @@ export default function MainCashbook({ onBack }) {
       <Typography color="text.secondary" fontWeight={600}>Loading Main Cashbook...</Typography>
     </Box>
   );
+
+  // ── Helper: group columns for <thead> rendering ──────────────────────────────
+  const groupOrder = Object.keys(GROUP_COLORS);
+  const groupedCols = groupOrder.map(grp => ({
+    grp, cols: COLUMNS.filter(c => c.group === grp)
+  })).filter(g => g.cols.length > 0);
+
+  // Row 2: sub-groups (Cash Source) + individual cols without subGroup (rowspan=2)
+  // Row 3: leaf cols under sub-groups
+  const buildRow2 = () => {
+    const cells = [];
+    const seen = new Set();
+    for (let i = 0; i < COLUMNS.length; i++) {
+      const col = COLUMNS[i];
+      if (col.group === 'global') continue; // Global group (Date) spans rowSpan=3 in Row 1
+      const gc = GROUP_COLORS[col.group];
+      if (col.subGroup) {
+        if (!seen.has(col.subGroup)) {
+          seen.add(col.subGroup);
+          const subGroupCols = COLUMNS.filter(c => c.subGroup === col.subGroup);
+          cells.push(
+            <th key={`sg-${col.subGroup}`} colSpan={subGroupCols.length} style={{
+              position: 'sticky', top: 30, zIndex: 3,
+              background: gc.bg, color: '#334155', padding: '4px',
+              textAlign: 'center', fontSize: '11px', fontWeight: 800,
+              border: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8'
+            }}>
+              {col.subGroup}
+            </th>
+          );
+        }
+      } else {
+        cells.push(
+          <th key={col.key} rowSpan={2} style={{
+            position: 'sticky', top: 30, zIndex: 3,
+            background: gc.bg, color: '#334155', padding: '8px 4px',
+            textAlign: 'center', fontSize: '11px', fontWeight: 700,
+            border: '1px solid #cbd5e1', whiteSpace: 'pre-line'
+          }}>
+            {col.label}
+          </th>
+        );
+      }
+    }
+    return cells;
+  };
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
 
@@ -803,8 +775,6 @@ export default function MainCashbook({ onBack }) {
               size="small" sx={{ fontWeight: 800, bgcolor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }} />
           </Box>
         </Box>
-
-
       </Box>
 
       {/* ── Toolbar ── */}
@@ -812,26 +782,18 @@ export default function MainCashbook({ onBack }) {
         px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
         bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', flexShrink: 0, zIndex: 9
       }}>
-        {/* Month selector */}
         <Box sx={{ minWidth: 140 }}>
           <SearchableSelect sx={{ minWidth: 140 }} value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}>
             {MONTH_NAMES.map((m, i) => <MenuItem key={i + 1} value={i + 1}>{m}</MenuItem>)}
           </SearchableSelect>
         </Box>
-
-        {/* Year selector */}
         <Box sx={{ minWidth: 140 }}>
           <SearchableSelect sx={{ minWidth: 120 }} value={selYear} label="Financial Year" onChange={e => setSelYear(e.target.value)}>
             {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
           </SearchableSelect>
         </Box>
 
-        <Chip
-          label={`${computedRows.length} entries`}
-          size="small"
-          sx={{ bgcolor: 'background.default', fontWeight: 700, color: '#475569' }}
-        />
-
+        <Chip label={`${computedRows.length} entries`} size="small" sx={{ bgcolor: 'background.default', fontWeight: 700, color: '#475569' }} />
         {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ fontWeight: 700, bgcolor: '#fef08a', color: '#854d0e' }} />}
         {selectedIds.size > 0 && <Chip label={`${selectedIds.size} selected`} size="small" sx={{ fontWeight: 700, bgcolor: '#fee2e2', color: '#b91c1c' }} />}
 
@@ -844,19 +806,10 @@ export default function MainCashbook({ onBack }) {
               Delete ({selectedIds.size})
             </Button>
           )}
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              setImportYear(selYear);
-              setImportMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-              setImportFile(null);
-              setImportPreview(null);
-              setImportModalOpen(true);
-            }}
+          <Button size="small" variant="outlined"
+            onClick={() => { setImportYear(selYear); setImportMonths([1,2,3,4,5,6,7,8,9,10,11,12]); setImportFile(null); setImportPreview(null); setImportModalOpen(true); }}
             startIcon={<UploadIcon sx={{ fontSize: '1.1rem' }} />}
-            sx={{ fontWeight: 700, borderRadius: 2 }}
-          >
+            sx={{ fontWeight: 700, borderRadius: 2 }}>
             Import Excel
           </Button>
           <Button size="small" variant="outlined" onClick={handleAddRow} sx={{ fontWeight: 700, borderRadius: 2 }}>
@@ -874,8 +827,9 @@ export default function MainCashbook({ onBack }) {
             onClick={handleSave}
             disabled={(dirtyCount === 0 && importedEntries.length === 0) || saving}
             sx={{
-              fontWeight: 700, borderRadius: 2, bgcolor: (dirtyCount + importedEntries.length) > 0 ? '#3b82f6' : '#cbd5e1', '&:hover': { bgcolor: '#2563eb' }, px: 3,
-              transition: 'all 0.2s ease-in-out'
+              fontWeight: 700, borderRadius: 2,
+              bgcolor: (dirtyCount + importedEntries.length) > 0 ? '#3b82f6' : '#cbd5e1',
+              '&:hover': { bgcolor: '#2563eb' }, px: 3, transition: 'all 0.2s ease-in-out'
             }}>
             {saving ? 'Saving...' : `Save${(dirtyCount + importedEntries.length) > 0 ? ` (${dirtyCount + importedEntries.length})` : ''}`}
           </Button>
@@ -889,15 +843,13 @@ export default function MainCashbook({ onBack }) {
           fontFamily: 'Inter, system-ui, sans-serif', fontSize: '12px'
         }}>
           <colgroup>
-            {/* checkbox */}
             <col style={{ width: 40, minWidth: 40 }} />
-            {/* SL No */}
             <col style={{ width: 50, minWidth: 50 }} />
             {COLUMNS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
           </colgroup>
 
           <thead>
-            {/* Super-group headers */}
+            {/* Row 1 — Group headers */}
             <tr>
               <th rowSpan={3} style={{ position: 'sticky', top: 0, zIndex: 4, width: 40, background: '#f8fafc', borderRight: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8' }}>
                 <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ accentColor: '#3b82f6' }} />
@@ -908,12 +860,23 @@ export default function MainCashbook({ onBack }) {
               }}>
                 SL No
               </th>
-              {Object.keys(GROUP_COLORS).map(grp => {
-                const colCount = COLUMNS.filter(c => c.group === grp).length;
-                if (!colCount) return null;
+              {groupedCols.map(({ grp, cols }) => {
                 const gc = GROUP_COLORS[grp];
+                // "global" group (Date) spans all 3 header rows → rowSpan=3, colSpan=cols.length
+                if (grp === 'global') {
+                  return (
+                    <th key={grp} rowSpan={3} colSpan={cols.length} style={{
+                      position: 'sticky', top: 0, zIndex: 3,
+                      background: gc.titleBg, color: '#0f172a', padding: '6px',
+                      textAlign: 'center', fontSize: '13px', fontWeight: 800,
+                      border: '1px solid #cbd5e1'
+                    }}>
+                      {gc.title}
+                    </th>
+                  );
+                }
                 return (
-                  <th key={grp} colSpan={colCount} style={{
+                  <th key={grp} colSpan={cols.length} style={{
                     position: 'sticky', top: 0, zIndex: 3,
                     background: gc.titleBg, color: '#0f172a', padding: '6px',
                     textAlign: 'center', fontSize: '12px', fontWeight: 800,
@@ -924,53 +887,19 @@ export default function MainCashbook({ onBack }) {
                 );
               })}
             </tr>
-            {/* Column headers (Row 2) */}
-            <tr>
-              {(() => {
-                const cols = [];
-                const seenSubGroups = new Set();
-                for (let i = 0; i < COLUMNS.length; i++) {
-                  const col = COLUMNS[i];
-                  const gc = GROUP_COLORS[col.group];
 
-                  if (col.subGroup) {
-                    if (!seenSubGroups.has(col.subGroup)) {
-                      seenSubGroups.add(col.subGroup);
-                      const subGroupCols = COLUMNS.filter(c => c.subGroup === col.subGroup);
-                      cols.push(
-                        <th key={`subGroup-${col.subGroup}`} colSpan={subGroupCols.length} style={{
-                          position: 'sticky', top: '30px', zIndex: 3,
-                          background: gc.bg, color: '#334155', padding: '4px',
-                          textAlign: 'center', fontSize: '11px', fontWeight: 800,
-                          border: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8'
-                        }}>
-                          {col.subGroup}
-                        </th>
-                      );
-                    }
-                  } else {
-                    cols.push(
-                      <th key={col.key} rowSpan={2} style={{
-                        position: 'sticky', top: '30px', zIndex: 3,
-                        background: gc.bg, color: '#334155', padding: '8px 4px',
-                        textAlign: 'center', fontSize: '11px', fontWeight: 700,
-                        border: '1px solid #cbd5e1', whiteSpace: 'pre-line'
-                      }}>
-                        {col.label}
-                      </th>
-                    );
-                  }
-                }
-                return cols;
-              })()}
+            {/* Row 2 — Sub-group headers + individual col headers (rowspan=2 for those without subGroup) */}
+            <tr>
+              {buildRow2()}
             </tr>
-            {/* Sub-Column headers (Row 3) */}
+
+            {/* Row 3 — Leaf cols under sub-groups */}
             <tr>
               {COLUMNS.filter(c => c.subGroup).map(col => {
                 const gc = GROUP_COLORS[col.group];
                 return (
                   <th key={col.key} style={{
-                    position: 'sticky', top: '53px', zIndex: 3,
+                    position: 'sticky', top: 53, zIndex: 3,
                     background: gc.bg, color: '#334155', padding: '4px',
                     textAlign: 'center', fontSize: '11px', fontWeight: 700,
                     border: '1px solid #cbd5e1', whiteSpace: 'pre-line'
@@ -994,14 +923,13 @@ export default function MainCashbook({ onBack }) {
             {computedRows.map((row, ri) => {
               const isSelected = selectedIds.has(row._id);
               const othersVal = num(row.P_OTHERS);
-              const sourceYellow = othersVal > 0; // yellow Cash Source when Others > 0
+              const sourceYellow = othersVal > 0;
 
               return (
                 <tr key={row._id} style={{ background: isSelected ? 'rgba(59,130,246,0.08)' : (ri % 2 === 0 ? '#fff' : '#fafafa'), transition: 'background 0.15s ease' }}>
                   <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', background: isSelected ? 'rgba(59,130,246,0.06)' : 'transparent' }}>
                     <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(row._id)} />
                   </td>
-                  {/* SL No */}
                   <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', fontWeight: 700, color: '#475569', background: '#f8fafc' }}>
                     {ri + 1}
                   </td>
@@ -1016,30 +944,31 @@ export default function MainCashbook({ onBack }) {
                     const isOpeningBalance = OPENING_KEYS.includes(col.key);
                     const isCalcLike = col.type === 'calc' || (isOpeningBalance && ri > 0);
 
-                    // Fix #1: DATE cell validation — warn if day exceeds month length
                     let dateError = false;
                     if (col.key === 'DATE' && displayVal) {
                       const parts = displayVal.split(/[-\/]/);
                       if (parts.length >= 2) {
                         const day = parseInt(parts[0]);
-                        // selMonth is 1-based, new Date(y, m, 0) gives last day of prev month = days in month
                         const daysInMonth = new Date(selYear, selMonth, 0).getDate();
                         if (!isNaN(day) && day > daysInMonth) dateError = true;
                       }
                     }
 
-                    // Cell background priority
                     let cellBg;
                     if (dateError) {
-                      cellBg = '#fca5a5'; // red — invalid date
+                      cellBg = '#fca5a5';
                     } else if (col.key === 'DIFFERENCE' && num(displayVal) !== 0) {
-                      cellBg = '#fca5a5'; // red mismatch
+                      cellBg = '#fca5a5';
                     } else if (col.key === 'P_LOAN_PAY' && (sourceYellow || String(displayVal).startsWith('DAC-RS-'))) {
-                      cellBg = '#fef08a'; // yellow when Others > 0 or Bank Book sync
+                      cellBg = '#fef08a';
+                    } else if (col.key === 'P_LOAN_REPAY') {
+                      cellBg = isDirty ? '#fff3cd' : '#fef9c3'; // distinct yellow for loan repay
+                    } else if (col.key === 'P_LOAN_BALANCE') {
+                      cellBg = isDirty ? '#d1fae5' : '#ecfdf5'; // green tint for loan balance
                     } else if (isDirty) {
-                      cellBg = '#fff3cd'; // dirty edits
+                      cellBg = '#fff3cd';
                     } else if (isCalcLike) {
-                      cellBg = 'transparent'; // Let row background show through
+                      cellBg = 'transparent';
                     } else {
                       cellBg = gc.bg;
                     }
@@ -1051,7 +980,7 @@ export default function MainCashbook({ onBack }) {
                       }}>
                         {isCalcLike ? (
                           <div style={{ padding: '6px', textAlign: col.key === 'REMARKS_EXP' ? 'left' : 'center', whiteSpace: col.key === 'REMARKS_EXP' ? 'pre-wrap' : 'normal' }}>{displayVal}</div>
-                        ) : col.key === 'REMARKS' ? (
+                        ) : col.key === 'REMARKS' || col.key === 'REMARKS_EXP' ? (
                           <textarea
                             value={displayVal}
                             onChange={e => handleCellEdit(row._id, col.key, e.target.value)}
@@ -1060,7 +989,7 @@ export default function MainCashbook({ onBack }) {
                               width: '100%', height: '100%', padding: '6px',
                               border: 'none', background: 'transparent', textAlign: 'left',
                               fontSize: '12px', fontWeight: isDirty ? 700 : 400, outline: 'none',
-                              resize: 'vertical', minHeight: '80px', fontFamily: 'inherit',
+                              resize: 'vertical', minHeight: '60px', fontFamily: 'inherit',
                               whiteSpace: 'pre-wrap'
                             }}
                           />
@@ -1087,7 +1016,7 @@ export default function MainCashbook({ onBack }) {
               );
             })}
 
-            {/* ── Monthly Summary Row (green) ── */}
+            {/* ── Monthly Summary Row ── */}
             {computedRows.length > 0 && (
               <tr style={{ background: '#f0fdf4' }}>
                 <td colSpan={2} style={{
@@ -1122,7 +1051,7 @@ export default function MainCashbook({ onBack }) {
           <Box sx={{ width: '100%' }}>
             <SearchableSelect value={importYear} label="Financial Year" onChange={e => {
               setImportYear(e.target.value);
-              setImportPreview(null); // Reset preview on criteria change
+              setImportPreview(null);
               setImportFile(null);
             }}>
               {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
@@ -1134,7 +1063,7 @@ export default function MainCashbook({ onBack }) {
               value={importMonths || []}
               onChange={e => {
                 setImportMonths(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value);
-                setImportPreview(null); // Reset preview
+                setImportPreview(null);
                 setImportFile(null);
               }}
               input={<OutlinedInput label="Select Months" />}
@@ -1163,11 +1092,7 @@ export default function MainCashbook({ onBack }) {
         </DialogContent>
         <DialogActions sx={{ p: 2, borderTop: '1px solid #e2e8f0' }}>
           <Button onClick={() => setImportModalOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleImportSubmit}
-            disabled={!importPreview || importPreview.validCount === 0}
-          >
+          <Button variant="contained" onClick={handleImportSubmit} disabled={!importPreview || importPreview.validCount === 0}>
             Import
           </Button>
         </DialogActions>

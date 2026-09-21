@@ -20,6 +20,7 @@ import axios from 'axios';
 import html2pdf from 'html2pdf.js';
 import { API_URL } from '../config';
 import { toIndianWords } from '../utils/toIndianWords';
+import { useAuth } from '../context/AuthContext';
 
 // ── Company ───────────────────────────────────────────────────────────────────
 const COMPANY = {
@@ -134,7 +135,9 @@ function TabPanel({ value, index, children }) {
 const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  
+  const { user } = useAuth();
+  const isSite = String(user?.role || '').toUpperCase().includes('SITE');
+
   const slipRef = useRef();
   const [tab, setTab] = useState(initialTab);          // 0=New, 1=Previous, 2=Download
   const [contacts, setContacts] = useState({ names: [], vehicles: [], ownerMap: {} });
@@ -243,12 +246,13 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
       const token = localStorage.getItem('token');
       const payload = {
         expenseType: form.expenseType,
-        vehicleNumber: form.expenseType === 'Indirect Expense' ? form.vehicleNumber : undefined,
+        vehicleNumber: form.vehicleNumber ? String(form.vehicleNumber).trim().toUpperCase() : undefined,
         date: new Date().toISOString(),
         amount: parseFloat(form.amount),
-        purpose: form.expenseType === 'Direct Expense' ? form.reasonCategory : 'Others',
-        name: form.expenseType === 'Indirect Expense' ? form.name : 'Dipali Associates & Co.',
+        purpose: form.expenseType === 'Direct Expense' ? (form.reasonCategory || 'Direct Expense') : (form.reasonCategory || 'Others'),
+        name: form.name || (form.expenseType === 'Indirect Expense' ? '' : 'Dipali Associates & Co.'),
         reason: form.reason,
+        panelSource: isSite ? 'SITE' : 'OFFICE',
       };
 
       const createRes = await axios.post(`${API_URL}/voucher`, payload, {
@@ -282,7 +286,15 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
         setSlipUrl(uploadRes.data.slip_url);
         setSavedVoucher(uploadRes.data.voucher);
       }
-      setSnack({ type: 'success', message: '✅ Voucher slip saved to S3!' });
+      
+      if (createRes.data.cementSyncResult?.notFound) {
+        setSnack({ type: 'warning', message: '⚠️ No uploaded Cement Register invoice found for this vehicle. Voucher could not be linked.' });
+      } else if (createRes.data.cementSyncResult?.success && !createRes.data.cementSyncResult?.skipped) {
+        setSnack({ type: 'success', message: `✅ Voucher saved & ₹${form.amount} added to Cement Register (${createRes.data.cementSyncResult.field})!` });
+      } else {
+        setSnack({ type: 'success', message: '✅ Voucher slip saved to S3!' });
+      }
+
       fetchVouchers();
       onVoucherCreated?.();
     } catch (err) {
@@ -511,7 +523,6 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                     </Box>
 
                     {/* Owner Name dropdown */}
-                    {form.expenseType === 'Indirect Expense' && (
                     <Box>
                       <Autocomplete
                         fullWidth
@@ -522,7 +533,7 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                         renderInput={(params) => (
                           <TextField
                             {...params}
-                            label="Truck Owner Name *"
+                            label={`Truck Owner Name ${form.expenseType === 'Indirect Expense' ? '*' : '(Optional)'}`}
                             error={!!errors.name}
                             helperText={errors.name || `${contacts.names.length} owners in DB`}
                             InputProps={{
@@ -550,10 +561,8 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                         )}
                       />
                     </Box>
-                    )}
 
                     {/* Vehicle Number dropdown — filtered by owner */}
-                    {form.expenseType === 'Indirect Expense' && (
                     <Box>
                       <Autocomplete
                         fullWidth
@@ -564,7 +573,7 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                         renderInput={(params) => (
                           <TextField
                             {...params}
-                            label="Vehicle Number *"
+                            label={`Vehicle Number ${form.expenseType === 'Indirect Expense' ? '*' : '(Optional)'}`}
                             error={!!errors.vehicleNumber}
                             helperText={errors.vehicleNumber || (form.name ? `${filteredVehicles.length} vehicle(s) for this owner` : 'All vehicles')}
                             InputProps={{
@@ -587,14 +596,13 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                         )}
                       />
                     </Box>
-                    )}
 
                     {/* Reason Category Dropdown & Reason Input */}
                     <Box display="flex" flexDirection="column" gap={2}>
                       <Autocomplete
                         fullWidth
-                        options={form.expenseType === 'Direct Expense' 
-                          ? ['Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Others'] 
+                        options={form.expenseType === 'Direct Expense'
+                          ? ['Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Others']
                           : ['Service Road Maintanance', 'Service/Maintanance', 'Extra wages', 'Extra(Additional) Toll', 'Others']}
                         value={form.reasonCategory}
                         onChange={(_, val) => {
@@ -610,22 +618,22 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                         )}
                       />
                       <TextField
-                        fullWidth label={form.reasonCategory === 'Others' ? "Specify Custom Reason *" : "Reason"} 
+                        fullWidth label={form.reasonCategory === 'Others' ? "Specify Custom Reason *" : "Reason"}
                         value={form.reason}
-                        onChange={(e) => { 
-                           setForm(p => ({ ...p, reason: e.target.value })); 
-                           if (errors.reason) setErrors(p => ({ ...p, reason: '' })); 
+                        onChange={(e) => {
+                          setForm(p => ({ ...p, reason: e.target.value }));
+                          if (errors.reason) setErrors(p => ({ ...p, reason: '' }));
                         }}
-                        error={!!errors.reason} 
+                        error={!!errors.reason}
                         helperText={errors.reason || (form.reasonCategory === 'Others' ? 'Describe the purpose of this payment' : 'Auto-filled based on category')}
                         multiline rows={2}
                         disabled={form.reasonCategory !== 'Others'}
-                        InputProps={{ 
-                          sx: { 
-                            borderRadius: '14px', 
+                        InputProps={{
+                          sx: {
+                            borderRadius: '14px',
                             bgcolor: form.reasonCategory !== 'Others' ? '#f5f5f5' : 'transparent',
                             color: form.reasonCategory !== 'Others' ? '#777' : 'inherit'
-                          } 
+                          }
                         }}
                       />
                     </Box>

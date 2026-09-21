@@ -528,18 +528,40 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
         const hasDedicatedAmt = rawDedicated && rawDedicated !== "-" && parseNum(rawDedicated) > 0;
         const isDedicatedType = billType === "NT" || custType === "ATOA" || custType === "ATO" || custType === "DEDICATED";
 
+        // Standard MT capacity mapping: 6W -> 13 MT, 10W -> 19 MT, 12W -> 25 MT, 14W -> 30 MT
+        let standardCapMT = 0;
+        let formattedWheelType = rawWheel || "OTHER";
+        if (wheelKey === "6W" || rawWheel.includes("6")) {
+          standardCapMT = 13;
+          formattedWheelType = "6-Wheel";
+        } else if (wheelKey === "10W" || rawWheel.includes("10")) {
+          standardCapMT = 19;
+          formattedWheelType = "10-Wheel";
+        } else if (wheelKey === "12W" || rawWheel.includes("12")) {
+          standardCapMT = 25;
+          formattedWheelType = "12-Wheel";
+        } else if (wheelKey === "14W" || rawWheel.includes("14")) {
+          standardCapMT = 30;
+          formattedWheelType = "14-Wheel";
+        }
+
         vehMap[normKey] = {
           vehicleNo: vehClean,
           normKey,
-          wheel: rawWheel || wheelKey,
+          wheel: formattedWheelType,
+          wheelType: formattedWheelType,
           wheelPattern: wheelKey,
+          capacityMT: standardCapMT,
+          capacity: standardCapMT > 0 ? `${standardCapMT} MT` : "-",
           isDedicatedInitial: Boolean(hasDedicatedAmt || isDedicatedType),
           contactOwner: (row["OWNER NAME"] || contact.owner || "").trim(),
           distinctMTs: new Set(),
+          dailyMT: {},
           dailyTrips: {},
           dailyTripDocs: {},
-          totalTrips: 0,
+          totalRawInvoices: 0,
           totalMT: 0,
+          totalTrips: 0,
           totalAdvance: 0,
           totalBillingAmt: 0,
           totalDieselLtr: 0,
@@ -558,38 +580,73 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
       v.totalDieselLtr += hsdLtr;
       v.totalDieselAmt += hsdAmt;
       v.trips.push(row);
-      v.totalTrips += 1;
+      v.totalRawInvoices += 1;
 
       if (dayNum !== null && dayNum >= 1 && dayNum <= daysInMonth) {
         const dayStr = String(dayNum).padStart(2, "0");
-        v.dailyTrips[dayStr] = (v.dailyTrips[dayStr] || 0) + 1;
+        v.dailyMT[dayStr] = (v.dailyMT[dayStr] || 0) + mtVal;
         if (!v.dailyTripDocs[dayStr]) v.dailyTripDocs[dayStr] = [];
         v.dailyTripDocs[dayStr].push(row);
       }
     });
 
-    // 5. Finalize vehicle patterns, dedicated classification (Rafter rules), and totals
+    // 5. Finalize vehicle patterns, date-wise trip counts (Date MT / Capacity), and totals
     const vehicleList = Object.values(vehMap).map(v => {
       const mtArray = Array.from(v.distinctMTs).sort((a, b) => a - b);
       let loadingPatternStr = "";
       if (mtArray.length > 0) {
         loadingPatternStr = mtArray.map(m => `${m}MT`).join(" / ");
       } else {
-        if (v.wheelPattern === "10W") loadingPatternStr = "18MT / 19MT";
+        if (v.wheelPattern === "10W") loadingPatternStr = "19MT";
         else if (v.wheelPattern === "12W") loadingPatternStr = "25MT";
         else if (v.wheelPattern === "14W") loadingPatternStr = "30MT";
         else if (v.wheelPattern === "6W") loadingPatternStr = "13MT";
         else loadingPatternStr = "-";
       }
 
-      const meetsRaftarThreshold = (v.wheelPattern === "10W" && v.totalTrips >= 8) ||
-        ((v.wheelPattern === "12W" || v.wheelPattern === "14W") && v.totalTrips >= 6);
+      const standardCap = v.capacityMT > 0 ? v.capacityMT : 0;
+      const totalLoadedMT = Math.round(v.totalMT * 100) / 100;
+
+      // Date-Wise Trip Count Calculation: TRIP COUNT = TOTAL MT LOADED ON THAT DATE / VEHICLE MT CAPACITY
+      const computedDailyTrips = {};
+      const computedDailyMT = {};
+      daysArray.forEach(dayStr => {
+        const dayMT = Math.round((v.dailyMT[dayStr] || 0) * 100) / 100;
+        computedDailyMT[dayStr] = dayMT;
+        if (dayMT > 0) {
+          if (standardCap > 0) {
+            const rawTrips = dayMT / standardCap;
+            computedDailyTrips[dayStr] = Math.round(rawTrips * 100) / 100;
+          } else {
+            computedDailyTrips[dayStr] = (v.dailyTripDocs[dayStr] || []).length;
+          }
+        } else {
+          computedDailyTrips[dayStr] = 0;
+        }
+      });
+
+      // Overall Trip Count: Total MT / Capacity
+      let calculatedTotalTrips = 0;
+      if (standardCap > 0) {
+        const rawTotalTrips = totalLoadedMT / standardCap;
+        calculatedTotalTrips = Math.round(rawTotalTrips * 100) / 100;
+      } else {
+        calculatedTotalTrips = v.totalRawInvoices;
+      }
+
+      const meetsRaftarThreshold = (v.wheelPattern === "10W" && calculatedTotalTrips >= 8) ||
+        ((v.wheelPattern === "12W" || v.wheelPattern === "14W") && calculatedTotalTrips >= 6);
       const isDedicated = v.isDedicatedInitial || meetsRaftarThreshold;
 
       return {
         ...v,
+        capacityMT: standardCap,
+        capacity: standardCap > 0 ? `${standardCap} MT` : "-",
         distinctMTs: Array.from(v.distinctMTs),
-        totalMT: Math.round(v.totalMT * 100) / 100,
+        totalMT: totalLoadedMT,
+        totalTrips: calculatedTotalTrips,
+        dailyMT: computedDailyMT,
+        dailyTrips: computedDailyTrips,
         totalAdvance: Math.round(v.totalAdvance * 100) / 100,
         totalBillingAmt: Math.round(v.totalBillingAmt * 100) / 100,
         totalDieselLtr: Math.round(v.totalDieselLtr * 100) / 100,
@@ -617,7 +674,11 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
     });
 
     const dayTotals = {};
-    daysArray.forEach(d => { dayTotals[d] = 0; });
+    const dayMTTotals = {};
+    daysArray.forEach(d => {
+      dayTotals[d] = 0;
+      dayMTTotals[d] = 0;
+    });
     let grandTotalTrips = 0;
     let grandTotalMT = 0;
     let grandTotalAdvance = 0;
@@ -627,7 +688,8 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
       grandTotalMT += v.totalMT;
       grandTotalAdvance += v.totalAdvance;
       daysArray.forEach(d => {
-        dayTotals[d] += (v.dailyTrips[d] || 0);
+        dayTotals[d] = Math.round((dayTotals[d] + (v.dailyTrips[d] || 0)) * 100) / 100;
+        dayMTTotals[d] = Math.round((dayMTTotals[d] + (v.dailyMT[d] || 0)) * 100) / 100;
       });
     });
 
@@ -643,10 +705,11 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
       byPattern,
       totals: {
         totalVehicles: vehicleList.length,
-        totalTrips: grandTotalTrips,
+        totalTrips: Math.round(grandTotalTrips * 100) / 100,
         totalMT: Math.round(grandTotalMT * 100) / 100,
         totalAdvance: Math.round(grandTotalAdvance * 100) / 100,
-        dayTotals
+        dayTotals,
+        dayMTTotals
       }
     });
 

@@ -405,15 +405,15 @@ export default function CreditorVehicleLedgerSection({ creditorName }) {
       </Box>
 
       {/* Main Table Container */}
-      <Box ref={tableContainerRef} sx={{ flex: 1, overflow: 'auto', borderRadius: 2, border: '1px solid #334155', bgcolor: '#fff', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.3)', position: 'relative', minHeight: 380 }}>
+      <Box ref={tableContainerRef} sx={{ flex: 1, overflow: 'auto', maxHeight: { xs: '72vh', md: 'calc(100vh - 270px)' }, borderRadius: 2, border: '1px solid #334155', bgcolor: '#fff', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.3)', position: 'relative', minHeight: 380 }}>
         {loading && (
           <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(255,255,255,0.7)', zIndex: 20 }}>
             <CircularProgress />
           </Box>
         )}
 
-        <table style={{ width: '100%', minWidth: '1250px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-          <thead>
+        <table style={{ width: '100%', minWidth: '1250px', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
             <tr>
               <th style={{ ...thStyle, width: '45px' }}>
                 <Checkbox

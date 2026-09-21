@@ -791,7 +791,9 @@ router.post('/save-row', async (req, res) => {
     const {
       billNo, billType, editedInvoiceDate, editedInvoiceNumber, editedMonth,
       editedSite, editedAmount, debitReason, debitReasons, damageYear, damageMonth,
-      damageVehicles, damageTrips, damageVehicleAmounts, slNo
+      damageVehicles, damageTrips, damageVehicleAmounts, slNo,
+      originalDebitAmount, totalAllocatedAmount, remainingDebitAmount, deductionAllocations,
+      b2bEntryId, b2bEntryIds
     } = req.body;
     let updateObj = {};
     if (billType !== undefined) updateObj.billType = billType;
@@ -821,6 +823,14 @@ router.post('/save-row', async (req, res) => {
     if (damageTrips !== undefined) updateObj.damageTrips = damageTrips;
     if (damageVehicleAmounts !== undefined) updateObj.damageVehicleAmounts = damageVehicleAmounts;
     if (slNo !== undefined) updateObj.slNo = parseFloat(slNo) || 0;
+    if (b2bEntryId !== undefined) updateObj.b2bEntryId = b2bEntryId;
+    if (b2bEntryIds !== undefined) updateObj.b2bEntryIds = b2bEntryIds;
+
+    // Deduction allocations persistence
+    if (originalDebitAmount !== undefined) updateObj.originalDebitAmount = parseFloat(originalDebitAmount);
+    if (totalAllocatedAmount !== undefined) updateObj.totalAllocatedAmount = parseFloat(totalAllocatedAmount);
+    if (remainingDebitAmount !== undefined) updateObj.remainingDebitAmount = parseFloat(remainingDebitAmount);
+    if (deductionAllocations !== undefined) updateObj.deductionAllocations = deductionAllocations;
 
     await FinancialYearRow.findOneAndUpdate(
       { billNo },
@@ -834,7 +844,7 @@ router.post('/save-row', async (req, res) => {
       const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
 
       // 1. Clear any existing overrides in cement register for this bill across all possible reasons to avoid stale data
-      const ALL_REASONS = ['Damage / Shortage', 'GPS Trip Charges', 'GPS Deviation Charges', 'Device Installation Charges', 'RFID Deduction / Charges', 'Suspense'];
+      const ALL_REASONS = ['Damage / Shortage', 'GPS Trip Charges', 'GPS Deviation Charges', 'Device Installation Charges', 'RFID Deduction / Charges', 'Suspense', 'Site office Rent', 'Safty violation charges'];
       for (const reason of ALL_REASONS) {
         const overridePath = `deductionsOverride.${reason}`;
         await cementCol.updateMany(
@@ -1047,38 +1057,78 @@ router.delete('/delete-document/:id', async (req, res) => {
 
 router.get('/vehicles', async (req, res) => {
   try {
-    const { month, fy } = req.query; // Expecting number 1-12
-    if (!month) return res.status(400).json({ error: 'Month is required' });
+    const rawMonths = req.query.months || req.query.month;
+    if (!rawMonths) return res.status(400).json({ error: 'Month is required' });
 
-    let yearRegexPart = '';
+    const monthParts = Array.isArray(rawMonths)
+      ? rawMonths
+      : String(rawMonths).split(',').map(s => s.trim()).filter(Boolean);
+
+    const MONTHS_MAP = {
+      jan: 1, january: 1,
+      feb: 2, february: 2,
+      mar: 3, march: 3,
+      apr: 4, april: 4,
+      may: 5,
+      jun: 6, june: 6,
+      jul: 7, july: 7,
+      aug: 8, august: 8,
+      sep: 9, september: 9,
+      oct: 10, october: 10,
+      nov: 11, november: 11,
+      dec: 12, december: 12
+    };
+
+    const monthIndices = monthParts.map(m => {
+      const parsedNum = parseInt(m, 10);
+      if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) return parsedNum;
+      const lower = String(m).toLowerCase();
+      return MONTHS_MAP[lower] || null;
+    }).filter(Boolean);
+
+    if (monthIndices.length === 0) return res.json([]);
+
+    const { fy } = req.query;
+    let startY = null;
+    let endY = null;
     if (fy) {
-      const parts = fy.split('-');
+      const parts = String(fy).replace(/^FY\s*/i, '').split('-');
       if (parts.length === 2) {
-        let startY = parseInt(parts[0]);
-        let endY = parseInt(parts[1]);
+        startY = parseInt(parts[0], 10);
+        endY = parseInt(parts[1], 10);
         if (startY < 100) startY += 2000;
         if (endY < 100) endY += 2000;
-        const m = parseInt(month);
+      }
+    }
+
+    const dateOrConditions = [];
+    for (const m of monthIndices) {
+      let yearRegexPart = '';
+      if (startY && endY) {
         const calendarYear = (m >= 4) ? startY : endY;
         const yrStr = String(calendarYear);
         const yr2 = yrStr.slice(-2);
         yearRegexPart = `(${yrStr}|${yr2})`;
       }
-    }
-
-    const monthStr = String(month).padStart(2, '0');
-    const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.]${yearRegexPart}`);
-    const match = {
-      $or: [
+      const monthStr = String(m).padStart(2, '0');
+      const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.]${yearRegexPart}`);
+      dateOrConditions.push(
         { "LOADING DT": dateRegex },
         { "LOADING DATE": dateRegex },
         { "BILL DATE": dateRegex }
-      ]
-    };
+      );
+    }
 
+    const match = dateOrConditions.length > 0 ? { $or: dateOrConditions } : {};
     const vehicles = await getCementCol().distinct('VEHICLE NUMBER', match);
     const v2 = await getCementCol().distinct('VEHICLE NO', match);
-    const allV = [...new Set([...vehicles, ...v2])].filter(Boolean);
+    let allV = [...new Set([...vehicles, ...v2])].filter(Boolean);
+    if (allV.length === 0) {
+      const fb1 = await getCementCol().distinct('VEHICLE NUMBER');
+      const fb2 = await getCementCol().distinct('VEHICLE NO');
+      allV = [...new Set([...fb1, ...fb2])].filter(Boolean);
+    }
+    allV.sort((a, b) => String(a).localeCompare(String(b)));
     res.json(allV);
   } catch (err) {
     console.error('[FYDetails] /vehicles error:', err);
@@ -1086,75 +1136,350 @@ router.get('/vehicles', async (req, res) => {
   }
 });
 
-router.get('/trips', async (req, res) => {
+// POST /allocate-deduction
+router.post('/allocate-deduction', async (req, res) => {
   try {
-    const { month, vehicle, fy } = req.query;
-    if (!month || !vehicle) return res.status(400).json({ error: 'Month and vehicle are required' });
+    const {
+      billNo,
+      debitReason,
+      financialYear,
+      months,
+      vehicles,
+      condition,
+      originalDebitAmount,
+      allocatedAmount,
+      allocationDate,
+      tripAllocations
+    } = req.body;
 
-    const vehiclesArray = vehicle.split(',');
+    if (!billNo) return res.status(400).json({ error: 'Bill Number is required' });
+    if (!debitReason) return res.status(400).json({ error: 'Debit Reason is required' });
 
-    let yearRegexPart = '';
-    if (fy) {
-      const parts = fy.split('-');
-      if (parts.length === 2) {
-        let startY = parseInt(parts[0]);
-        let endY = parseInt(parts[1]);
-        if (startY < 100) startY += 2000;
-        if (endY < 100) endY += 2000;
-        const m = parseInt(month);
-        const calendarYear = (m >= 4) ? startY : endY;
-        const yrStr = String(calendarYear);
-        const yr2 = yrStr.slice(-2);
-        yearRegexPart = `(${yrStr}|${yr2})`;
+    // Retrieve existing row in FinancialYearRow
+    const existingRow = await FinancialYearRow.findOne({ billNo });
+
+    // Determine the baseline original debit amount
+    let baseOriginalDebit = 0;
+    if (existingRow && existingRow.originalDebitAmount != null && Number(existingRow.originalDebitAmount) > 0) {
+      baseOriginalDebit = parseFloat(existingRow.originalDebitAmount) || 0;
+    } else if (originalDebitAmount != null && parseFloat(originalDebitAmount) > 0) {
+      baseOriginalDebit = parseFloat(originalDebitAmount) || 0;
+    } else {
+      const payment = await FinancialYearPayment.findOne({ billNos: billNo });
+      if (payment && payment.debitAmount != null) {
+        baseOriginalDebit = parseFloat(payment.debitAmount) || 0;
       }
     }
 
-    const monthStr = String(month).padStart(2, '0');
-    const dateRegex = new RegExp(`^\\d{2}[-/\\.]${monthStr}[-/\\.]${yearRegexPart}`);
+    // Existing allocations
+    const currentAllocations = (existingRow && existingRow.deductionAllocations) || [];
+    const alreadyAllocated = currentAllocations.reduce((sum, a) => sum + (parseFloat(a.allocatedAmount) || 0), 0);
+    const availableToAllocate = Math.max(0, baseOriginalDebit - alreadyAllocated);
+
+    let allocAmt = parseFloat(allocatedAmount);
+    // If tripAllocations are provided, compute or verify total allocated amount from trip allocations
+    let parsedTripAllocations = [];
+    if (Array.isArray(tripAllocations) && tripAllocations.length > 0) {
+      const tripAllocSum = tripAllocations.reduce((sum, t) => sum + (parseFloat(t.allocatedAmount || t.tripAllocateAmount) || 0), 0);
+      if (tripAllocSum > 0) {
+        allocAmt = tripAllocSum;
+      }
+    }
+
+    if (isNaN(allocAmt) || allocAmt <= 0) {
+      return res.status(400).json({ error: 'Allocated amount must be a positive number.' });
+    }
+
+    if (availableToAllocate <= 0) {
+      return res.status(400).json({
+        error: 'Remaining Debit is ₹0. This debit is fully allocated and settled.',
+        availableToAllocate: 0
+      });
+    }
+
+    if (allocAmt > availableToAllocate) {
+      return res.status(400).json({
+        error: `Only ₹${availableToAllocate.toLocaleString('en-IN')} is available for allocation.`,
+        availableToAllocate
+      });
+    }
+
+    const newAllocationId = new mongoose.Types.ObjectId().toString();
+    const newRemainingDebit = Math.max(0, availableToAllocate - allocAmt);
+    const newTotalAllocated = alreadyAllocated + allocAmt;
+
+    if (Array.isArray(tripAllocations) && tripAllocations.length > 0) {
+      parsedTripAllocations = tripAllocations.map(t => {
+        const tripAmt = parseFloat(t.allocatedAmount || t.tripAllocateAmount) || 0;
+        return {
+          tripAllocationId: t.tripAllocationId || new mongoose.Types.ObjectId().toString(),
+          allocationId: newAllocationId,
+          bankBookRecordId: String(existingRow?._id || new mongoose.Types.ObjectId()),
+          invoiceNumber: billNo,
+          shipmentNo: t.shipmentNo || '',
+          invoiceNo: t.invoiceNo || '',
+          tripRecordId: t.tripRecordId || t.tripId || (t._id ? String(t._id) : ''),
+          tripId: t.tripId || (t._id ? String(t._id) : ''),
+          debitReason,
+          financialYear: financialYear || '',
+          month: t.month || '',
+          vehicleNumber: t.vehicleNumber || t.vehicle || '',
+          vehicle: t.vehicle || t.vehicleNumber || '',
+          loadingDate: t.loadingDate || '',
+          originalDebitAmount: baseOriginalDebit,
+          tripAllocateAmount: tripAmt,
+          allocatedAmount: tripAmt,
+          totalAllocatedAmount: newTotalAllocated,
+          remainingDebitAmount: newRemainingDebit,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+      });
+    }
+
+    const allocationRecord = {
+      allocationId: newAllocationId,
+      bankBookRecordId: String(existingRow?._id || new mongoose.Types.ObjectId()),
+      invoiceNumber: billNo,
+      debitReason,
+      financialYear: financialYear || '',
+      months: Array.isArray(months) ? months : [months].filter(Boolean),
+      vehicles: Array.isArray(vehicles) ? vehicles : [vehicles].filter(Boolean),
+      condition: condition || '',
+      originalDebitAmount: baseOriginalDebit,
+      allocatedAmount: allocAmt,
+      remainingDebitAmount: newRemainingDebit,
+      allocationDate: allocationDate || new Date().toISOString().split('T')[0],
+      tripAllocations: parsedTripAllocations,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const existingReasons = existingRow?.debitReasons || [];
+    const updatedReasons = [...new Set([...existingReasons, debitReason])];
+
+    const updatedRow = await FinancialYearRow.findOneAndUpdate(
+      { billNo },
+      {
+        $set: {
+          originalDebitAmount: baseOriginalDebit,
+          totalAllocatedAmount: newTotalAllocated,
+          remainingDebitAmount: newRemainingDebit,
+          debitReason: debitReason,
+          debitReasons: updatedReasons
+        },
+        $push: { deductionAllocations: allocationRecord }
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    // Keep FinancialYearPayment in sync with remainingDebitAmount
+    await FinancialYearPayment.updateMany(
+      { billNos: billNo },
+      { $set: { debitAmount: newRemainingDebit } }
+    );
+
+    // Emit websocket event
+    try {
+      const { getIO } = require('../socket');
+      getIO().emit('fyDetailsUpdates', { action: 'allocate-deduction', billNo, remainingDebit: newRemainingDebit });
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      allocation: allocationRecord,
+      originalDebitAmount: baseOriginalDebit,
+      totalAllocatedAmount: newTotalAllocated,
+      remainingDebitAmount: newRemainingDebit,
+      row: updatedRow
+    });
+  } catch (err) {
+    console.error('[FYDetails] /allocate-deduction error:', err);
+    res.status(500).json({ error: 'Failed to allocate deduction: ' + err.message });
+  }
+});
+
+// DELETE /allocate-deduction/:billNo/:allocationId
+router.delete('/allocate-deduction/:billNo/:allocationId', async (req, res) => {
+  try {
+    const { billNo, allocationId } = req.params;
+    const existingRow = await FinancialYearRow.findOne({ billNo });
+    if (!existingRow) return res.status(404).json({ error: 'Record not found' });
+
+    const currentAllocations = existingRow.deductionAllocations || [];
+    const filteredAllocations = currentAllocations.filter(a => a.allocationId !== allocationId && String(a._id) !== allocationId);
+
+    const baseOriginalDebit = existingRow.originalDebitAmount != null ? existingRow.originalDebitAmount : 0;
+    const newTotalAllocated = filteredAllocations.reduce((sum, a) => sum + (parseFloat(a.allocatedAmount) || 0), 0);
+    const newRemainingDebit = Math.max(0, baseOriginalDebit - newTotalAllocated);
+
+    const remainingReasons = [...new Set(filteredAllocations.map(a => a.debitReason).filter(Boolean))];
+
+    const updatedRow = await FinancialYearRow.findOneAndUpdate(
+      { billNo },
+      {
+        $set: {
+          deductionAllocations: filteredAllocations,
+          totalAllocatedAmount: newTotalAllocated,
+          remainingDebitAmount: newRemainingDebit,
+          debitReasons: remainingReasons.length > 0 ? remainingReasons : existingRow.debitReasons
+        }
+      },
+      { returnDocument: 'after' }
+    );
+
+    await FinancialYearPayment.updateMany(
+      { billNos: billNo },
+      { $set: { debitAmount: newRemainingDebit } }
+    );
+
+    try {
+      const { getIO } = require('../socket');
+      getIO().emit('fyDetailsUpdates', { action: 'allocate-deduction', billNo, remainingDebit: newRemainingDebit });
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      remainingDebitAmount: newRemainingDebit,
+      totalAllocatedAmount: newTotalAllocated,
+      deductionAllocations: filteredAllocations,
+      row: updatedRow
+    });
+  } catch (err) {
+    console.error('[FYDetails] DELETE /allocate-deduction error:', err);
+    res.status(500).json({ error: 'Failed to remove allocation' });
+  }
+});
+
+router.get('/trips', async (req, res) => {
+  try {
+    const { month, months, vehicle, vehicles, fy } = req.query;
+    const monthParam = months || month;
+    const vehicleParam = vehicles || vehicle;
+    if (!monthParam || !vehicleParam) return res.status(400).json({ error: 'Month and vehicle are required' });
+
+    const rawMonths = Array.isArray(monthParam) ? monthParam : String(monthParam).split(',').map(m => m.trim()).filter(Boolean);
+    const vehiclesArray = Array.isArray(vehicleParam) ? vehicleParam : String(vehicleParam).split(',').map(v => v.trim()).filter(Boolean);
+
+    const MONTH_NAMES_FULL = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    let startY = 2026, endY = 2027;
+    if (fy) {
+      const parts = fy.replace(/[^0-9\-]/g, '').split('-');
+      if (parts.length === 2) {
+        startY = parseInt(parts[0], 10);
+        endY = parseInt(parts[1], 10);
+        if (startY < 100) startY += 2000;
+        if (endY < 100) endY += 2000;
+      }
+    }
+
+    const monthConditions = [];
+    for (const mItem of rawMonths) {
+      let mIdx = -1;
+      const asInt = parseInt(mItem, 10);
+      if (!isNaN(asInt) && asInt >= 1 && asInt <= 12) {
+        mIdx = asInt;
+      } else {
+        mIdx = MONTH_NAMES_FULL.findIndex(name => name.toLowerCase().startsWith(mItem.toLowerCase().slice(0, 3))) + 1;
+      }
+      if (mIdx >= 1 && mIdx <= 12) {
+        const calYear = mIdx >= 4 ? startY : endY;
+        const mStr = String(mIdx).padStart(2, '0');
+        const yrStr = String(calYear);
+        const yr2 = yrStr.slice(-2);
+        const dateRegex = new RegExp(`^\\d{2}[-/\\.]${mStr}[-/\\.](?:${yrStr}|${yr2})`);
+
+        monthConditions.push({
+          $or: [
+            { month: mIdx, year: calYear },
+            { Month: mIdx, Year: calYear },
+            { month: String(mIdx), year: String(calYear) },
+            { 'LOADING DT': dateRegex },
+            { 'LOADING DATE': dateRegex },
+            { 'BILL DATE': dateRegex }
+          ]
+        });
+      }
+    }
+
     const match = {
-      $or: [{ 'VEHICLE NUMBER': { $in: vehiclesArray } }, { 'VEHICLE NO': { $in: vehiclesArray } }],
       $and: [
         {
           $or: [
-            { "LOADING DT": dateRegex },
-            { "LOADING DATE": dateRegex },
-            { "BILL DATE": dateRegex }
+            { 'VEHICLE NUMBER': { $in: vehiclesArray } },
+            { 'VEHICLE NO': { $in: vehiclesArray } }
           ]
         }
       ]
     };
 
+    if (monthConditions.length > 0) {
+      match.$and.push({ $or: monthConditions });
+    }
+
     const trips = await getCementCol().find(match).toArray();
 
     const parseCustomDate = (dStr) => {
       if (!dStr) return 0;
-      const parts = dStr.split(/[-/\\.]/);
+      const parts = String(dStr).split(/[-/\\.]/);
       if (parts.length >= 3) {
-        const [day, month, year] = parts;
-        let y = parseInt(year);
-        if (y < 100) y += 2000;
-        return new Date(y, parseInt(month) - 1, parseInt(day)).getTime();
+        let day = parseInt(parts[0], 10);
+        let month = parseInt(parts[1], 10);
+        let year = parseInt(parts[2], 10);
+        if (parts[0].length === 4) {
+          year = parseInt(parts[0], 10);
+          month = parseInt(parts[1], 10);
+          day = parseInt(parts[2], 10);
+        }
+        if (year < 100) year += 2000;
+        return new Date(year, month - 1, day).getTime();
       }
       return 0;
     };
 
-    const formatted = trips.map(t => ({
-      invoiceNo: t['INVOICE NO'] || t['BILL NO'] || 'Unknown',
-      tripDate: t['LOADING DT'] || t['LOADING DATE'] || t['BILL DATE'] || 'Unknown',
-      plant: t['PLANT'] || t['FROM'] || 'Unknown',
-      destination: t['DESTINATION'] || t['TO'] || 'Unknown',
-      vehicle: t['VEHICLE NUMBER'] || t['VEHICLE NO'] || vehicle,
-      shortageBag: t['SHORTAGE (BAG)'],
-      shortageRate: t['SHORTAGE (RATE)']
-    }));
+    const formatted = trips.map(t => {
+      const rawDate = t['LOADING DT'] || t['LOADING DATE'] || t['BILL DATE'] || '';
+      let tripMonthName = '';
+      if (t.month || t.Month) {
+        const mNum = parseInt(t.month || t.Month, 10);
+        if (mNum >= 1 && mNum <= 12) tripMonthName = MONTH_NAMES_FULL[mNum - 1];
+      }
+      if (!tripMonthName && rawDate) {
+        const parts = String(rawDate).split(/[-/\\.]/);
+        if (parts.length >= 3) {
+          let mNum = parseInt(parts[1], 10);
+          if (parts[0].length === 4) mNum = parseInt(parts[1], 10);
+          if (mNum >= 1 && mNum <= 12) tripMonthName = MONTH_NAMES_FULL[mNum - 1];
+        }
+      }
 
-    formatted.sort((a, b) => parseCustomDate(a.tripDate) - parseCustomDate(b.tripDate));
+      return {
+        _id: String(t._id),
+        tripId: String(t._id),
+        shipmentNo: t['SHIPMENT NO'] || t['Shipment No'] || '—',
+        invoiceNo: t['INVOICE NO'] || t['BILL NO'] || t['Invoice No'] || '—',
+        loadingDate: rawDate || '—',
+        tripDate: rawDate || '—',
+        month: tripMonthName,
+        vehicle: t['VEHICLE NUMBER'] || t['VEHICLE NO'] || vehiclesArray[0] || '—',
+        plant: t['PLANT'] || t['FROM'] || '',
+        destination: t['DESTINATION'] || t['TO'] || '',
+        shortageBag: t['SHORTAGE (BAG)'],
+        shortageRate: t['SHORTAGE (RATE)']
+      };
+    });
+
+    formatted.sort((a, b) => parseCustomDate(a.loadingDate) - parseCustomDate(b.loadingDate));
 
     const finalFormatted = formatted.map((t, idx) => ({ ...t, tripNumber: idx + 1 }));
     res.json(finalFormatted);
   } catch (err) {
     console.error('[FYDetails] /trips error:', err);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error: ' + err.message });
   }
 });
 

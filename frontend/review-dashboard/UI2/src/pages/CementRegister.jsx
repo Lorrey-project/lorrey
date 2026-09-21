@@ -1319,7 +1319,7 @@ export default function CementRegister({ onBack }) {
     };
 
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
+      <Box sx={{ minHeight: '100vh', maxHeight: { md: '100vh' }, display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: { xs: 'auto', md: 'hidden' } }}>
         {/* Top Header */}
         <Box sx={{
           px: { xs: 2, md: 4 }, py: 2,
@@ -1382,12 +1382,16 @@ export default function CementRegister({ onBack }) {
 
         {/* Table Container (EXACT CEMENT REGISTER PATTERN) */}
         <Box ref={tableContainerRef} sx={{
-          overflowX: 'auto',
+          overflow: 'auto',
+          flex: 1,
+          minHeight: '400px',
+          maxHeight: { xs: '72vh', md: 'calc(100vh - 215px)' },
           m: { xs: 1, md: 2 },
           borderRadius: '12px',
           border: '1px solid #e2e8f0',
           boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-          bgcolor: 'background.paper'
+          bgcolor: 'background.paper',
+          position: 'relative'
         }}>
           <table style={{
             borderCollapse: 'separate',
@@ -1403,7 +1407,7 @@ export default function CementRegister({ onBack }) {
               {VISIBLE_COLS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
             </colgroup>
 
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               {/* Column headers */}
               <tr>
                 {/* Select-all checkbox */}
@@ -1412,7 +1416,8 @@ export default function CementRegister({ onBack }) {
                   background: '#0f172a',
                   textAlign: 'center', padding: '10px 4px',
                   borderRight: '1px solid rgba(255,255,255,0.1)',
-                  borderBottom: '1px solid rgba(255,255,255,0.2)',
+                  borderBottom: '2px solid rgba(255,255,255,0.2)',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.15)'
                 }}>
                   <input
                     type="checkbox"
@@ -1442,7 +1447,8 @@ export default function CementRegister({ onBack }) {
                         letterSpacing: '0.5px',
                         whiteSpace: 'pre-line', lineHeight: 1.2,
                         borderRight: '1px solid rgba(255,255,255,0.05)',
-                        borderBottom: '1px solid rgba(255,255,255,0.1)',
+                        borderBottom: '2px solid rgba(255,255,255,0.2)',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.15)'
                       }}>
                       {col.label}
                       {col.type === 'auto' && <div style={{ fontSize: '7px', opacity: 0.6, marginTop: 4, letterSpacing: '1px' }}>AUTO</div>}
@@ -1451,7 +1457,6 @@ export default function CementRegister({ onBack }) {
                   );
                 })}
               </tr>
-              <div style={{ height: 2, background: 'linear-gradient(90deg, #0284c7 0%, #059669 100%)' }} />
             </thead>
 
             <tbody>
@@ -1804,7 +1809,7 @@ export default function CementRegister({ onBack }) {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
 
       {/* ── Premium Header ───────────────────────────────────────────── */}
       <Box sx={{
@@ -2049,12 +2054,17 @@ export default function CementRegister({ onBack }) {
 
       {/* ── Group header row ─────────────────────────────────────────────── */}
       <Box ref={tableContainerRef} sx={{
-        overflowX: 'auto',
-        m: { xs: 1, md: 2 },
+        overflow: 'auto',
+        flex: 1,
+        minHeight: 0,
+        mx: { xs: 1, md: 2 },
+        mt: { xs: 1, md: 1.5 },
+        mb: 1,
         borderRadius: '12px',
         border: '1px solid #e2e8f0',
         boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
-        bgcolor: 'background.paper'
+        bgcolor: 'background.paper',
+        position: 'relative'
       }}>
         <table style={{
           borderCollapse: 'separate',
@@ -2070,7 +2080,7 @@ export default function CementRegister({ onBack }) {
             {VISIBLE_COLS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
           </colgroup>
 
-          <thead>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
             {/* Column headers */}
             <tr>
               {/* Select-all checkbox */}
@@ -2079,7 +2089,8 @@ export default function CementRegister({ onBack }) {
                 background: '#0f172a',
                 textAlign: 'center', padding: '10px 4px',
                 borderRight: '1px solid rgba(255,255,255,0.1)',
-                borderBottom: '1px solid rgba(255,255,255,0.2)',
+                borderBottom: '2px solid rgba(255,255,255,0.2)',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.15)'
               }}>
                 <input
                   type="checkbox"
@@ -2110,7 +2121,8 @@ export default function CementRegister({ onBack }) {
                       letterSpacing: '0.5px',
                       whiteSpace: 'pre-line', lineHeight: 1.2,
                       borderRight: '1px solid rgba(255,255,255,0.05)',
-                      borderBottom: '1px solid rgba(255,255,255,0.1)',
+                      borderBottom: '2px solid rgba(255,255,255,0.2)',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.15)'
                     }}>
                     {col.label}
                     {col.type === 'auto' && <div style={{ fontSize: '7px', opacity: 0.6, marginTop: 4, letterSpacing: '1px' }}>AUTO</div>}
@@ -2119,7 +2131,6 @@ export default function CementRegister({ onBack }) {
                 );
               })}
             </tr>
-            <div style={{ height: 2, background: 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)' }} />
           </thead>
 
           <tbody>
@@ -2294,8 +2305,13 @@ export default function CementRegister({ onBack }) {
         rowsPerPageOptions={[50, 100, 250, 500]}
         sx={{
           borderTop: '1px solid #e2e8f0',
-          '.MuiTablePagination-toolbar': { minHeight: 40, py: 0 },
-          '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': { fontSize: '12px', color: '#64748b' }
+          bgcolor: 'background.paper',
+          flexShrink: 0,
+          zIndex: 5,
+          boxShadow: '0 -2px 8px rgba(0,0,0,0.03)',
+          '.MuiTablePagination-toolbar': { minHeight: 48, px: { xs: 1.5, md: 3 } },
+          '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': { fontSize: '13px', color: '#475569', fontWeight: 600 },
+          '.MuiTablePagination-select': { fontSize: '13px', fontWeight: 700 }
         }}
       />
 

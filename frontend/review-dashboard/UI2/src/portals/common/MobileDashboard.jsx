@@ -211,8 +211,8 @@ const MobileDashboard = ({
         if (!window.confirm(`Delete ${selectedInvoices.size} slip${selectedInvoices.size > 1 ? 's' : ''} permanently?`)) return;
         try {
             const token = localStorage.getItem('token');
-            await axios.post(`${API_URL}/invoice/bulk-delete`, 
-                { ids: Array.from(selectedInvoices) }, 
+            await axios.post(`${API_URL}/invoice/bulk-delete`,
+                { ids: Array.from(selectedInvoices) },
                 { headers: { Authorization: `Bearer ${token}` } }
             );
             setSelectedInvoices(new Set());
@@ -257,9 +257,9 @@ const MobileDashboard = ({
     }
 
     invoices.forEach(inv => {
-        let dateStr = inv.human_verified_data?.invoice_details?.invoice_date || 
-                      inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
-                      inv.ai_data?.invoice_details?.invoice_date;
+        let dateStr = inv.human_verified_data?.invoice_details?.invoice_date ||
+            inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
+            inv.ai_data?.invoice_details?.invoice_date;
         let m, y;
         if (dateStr) {
             const parts = dateStr.replace(/[./]/g, '-').split('-');
@@ -289,9 +289,9 @@ const MobileDashboard = ({
     const filteredInvoices = invoices.filter(inv => {
         if (!filterMonth && !filterYear) return true;
 
-        let dateStr = inv.human_verified_data?.invoice_details?.invoice_date || 
-                      inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
-                      inv.ai_data?.invoice_details?.invoice_date;
+        let dateStr = inv.human_verified_data?.invoice_details?.invoice_date ||
+            inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
+            inv.ai_data?.invoice_details?.invoice_date;
 
         let m, y;
 
@@ -324,7 +324,7 @@ const MobileDashboard = ({
         if (!m || !y) return false;
 
         if (filterMonth && m !== parseInt(filterMonth)) return false;
-        
+
         if (filterYear) {
             const invoiceFy = m >= 4 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
             if (invoiceFy !== filterYear) return false;
@@ -727,19 +727,19 @@ const MobileDashboard = ({
                                 </Paper>
                             ) : displayedInvoices.map((inv) => {
                                 const invNum = inv.human_verified_data?.invoice_details?.invoice_number ||
-                                               inv.ai_data?.invoice_data?.invoice_details?.invoice_number ||
-                                               inv.ai_data?.invoice_details?.invoice_number ||
-                                               'INV-TEMP';
+                                    inv.ai_data?.invoice_data?.invoice_details?.invoice_number ||
+                                    inv.ai_data?.invoice_details?.invoice_number ||
+                                    'INV-TEMP';
 
                                 const invDate = inv.human_verified_data?.invoice_details?.invoice_date ||
-                                                inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
-                                                inv.ai_data?.invoice_details?.invoice_date ||
-                                                'N/A';
+                                    inv.ai_data?.invoice_data?.invoice_details?.invoice_date ||
+                                    inv.ai_data?.invoice_details?.invoice_date ||
+                                    'N/A';
 
                                 const truckNo = inv.human_verified_data?.supply_details?.vehicle_number ||
-                                                inv.ai_data?.invoice_data?.supply_details?.vehicle_number ||
-                                                inv.ai_data?.supply_details?.vehicle_number ||
-                                                'UNKNOWN TRUCK';
+                                    inv.ai_data?.invoice_data?.supply_details?.vehicle_number ||
+                                    inv.ai_data?.supply_details?.vehicle_number ||
+                                    'UNKNOWN TRUCK';
 
                                 return (
                                     <Paper
@@ -1013,9 +1013,9 @@ const MobileDashboard = ({
                     <Typography fontWeight={800} fontSize="14px">
                         {selectedInvoices.size} Slips Selected
                     </Typography>
-                    <Button 
-                        variant="contained" 
-                        color="inherit" 
+                    <Button
+                        variant="contained"
+                        color="inherit"
                         onClick={handleBulkDelete}
                         startIcon={<DeleteIcon />}
                         sx={{ color: '#ef4444', bgcolor: '#ffffff', fontWeight: 900, borderRadius: 2.5, '&:hover': { bgcolor: '#f8fafc' } }}

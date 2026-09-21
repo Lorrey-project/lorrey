@@ -157,7 +157,7 @@ export default function OthersCreditor({
   };
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, minHeight: '100vh', bgcolor: '#0f172a', color: '#f8fafc', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, minHeight: '100vh', maxHeight: { md: '100vh' }, bgcolor: '#0f172a', color: '#f8fafc', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', overflow: { xs: 'auto', md: 'hidden' } }}>
 
       {/* Header Bar */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
@@ -1016,15 +1016,15 @@ function MonojBandhanSection() {
       </Box>
 
       {/* Main Ledger Table */}
-      <Box ref={tableContainerRef} sx={{ flex: 1, overflow: 'auto', borderRadius: 2, border: '1px solid #334155', bgcolor: '#fff', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.3)', position: 'relative', minHeight: 380 }}>
+      <Box ref={tableContainerRef} sx={{ flex: 1, overflow: 'auto', maxHeight: { xs: '72vh', md: 'calc(100vh - 270px)' }, borderRadius: 2, border: '1px solid #334155', bgcolor: '#fff', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.3)', position: 'relative', minHeight: 380 }}>
         {loading && (
           <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(255,255,255,0.7)', zIndex: 20 }}>
             <CircularProgress />
           </Box>
         )}
 
-        <table style={{ width: '100%', minWidth: '1600px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-          <thead>
+        <table style={{ width: '100%', minWidth: '1600px', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
             <tr>
               <th style={{ ...thStyle, width: '45px' }}>
                 <Checkbox

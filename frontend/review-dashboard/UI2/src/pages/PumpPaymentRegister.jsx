@@ -591,11 +591,11 @@ export default function PumpPaymentRegister({ onBack }) {
                 overflow: 'hidden',
                 boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
               }}>
-                <TableContainer ref={tableContainerRef} sx={{ maxHeight: '60vh' }}>
-                  <Table stickyHeader sx={{ minWidth: 2000, '& .MuiTableCell-root': { py: 1.5, px: 1, borderBottom: '1px solid #f1f5f9' } }}>
-                    <TableHead>
+                <TableContainer ref={tableContainerRef} sx={{ maxHeight: { xs: '65vh', md: 'calc(100vh - 340px)' }, minHeight: '400px', overflow: 'auto' }}>
+                  <Table stickyHeader sx={{ minWidth: 2000, borderCollapse: 'separate', borderSpacing: 0, '& .MuiTableCell-root': { py: 1.5, px: 1, borderBottom: '1px solid #f1f5f9' } }}>
+                    <TableHead sx={{ position: 'sticky', top: 0, zIndex: 10 }}>
                       <TableRow>
-                        <TableCell padding="checkbox" sx={{ bgcolor: 'background.default', width: 50, borderBottom: '2px solid #e2e8f0' }}>
+                        <TableCell padding="checkbox" sx={{ position: 'sticky', top: 0, zIndex: 12, bgcolor: '#f8fafc', width: 50, borderBottom: '2px solid #cbd5e1', boxShadow: '0 2px 4px rgba(0,0,0,0.06)' }}>
                           <Checkbox
                             indeterminate={selectedIds.size > 0 && selectedIds.size < isSelectableRows.length}
                             checked={isSelectableRows.length > 0 && selectedIds.size === isSelectableRows.length}
@@ -608,6 +608,9 @@ export default function PumpPaymentRegister({ onBack }) {
                             key={c.key}
                             align={c.align || 'left'}
                             sx={{ 
+                              position: 'sticky',
+                              top: 0,
+                              zIndex: 10,
                               width: c.width,
                               minWidth: c.width,
                               bgcolor: c.bg || '#f8fafc',
@@ -615,7 +618,8 @@ export default function PumpPaymentRegister({ onBack }) {
                               color: '#475569',
                               fontSize: '0.75rem',
                               letterSpacing: '0.05em',
-                              borderBottom: '2px solid #e2e8f0'
+                              borderBottom: '2px solid #cbd5e1',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.06)'
                             }}
                             sortDirection={orderBy === c.key ? order : false}
                           >

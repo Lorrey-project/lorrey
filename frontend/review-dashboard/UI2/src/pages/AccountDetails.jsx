@@ -1154,6 +1154,23 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
           }
         }
 
+        if (ledger === 'main cash') {
+          const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
+          const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
+
+          if (isNaN(w) || w <= 0) {
+            setSnack({ severity: 'error', msg: 'Main Cash requires a valid Withdraw Amount > 0.' });
+            setSaving(false);
+            return;
+          }
+
+          if (m && m.toLowerCase() !== currentMonthName.toLowerCase()) {
+            setSnack({ severity: 'error', msg: `Main Cash is allowed ONLY for the current month (${currentMonthName}).` });
+            setSaving(false);
+            return;
+          }
+        }
+
         if (isCreditorLedger(ledger)) {
           const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
           const name = String(mergedRow['Names'] || '').trim();
@@ -1219,6 +1236,23 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
 
           if (m.toLowerCase() !== currentMonthName.toLowerCase()) {
             setSnack({ severity: 'error', msg: `Freight Advance is allowed ONLY for the current month (${currentMonthName}).` });
+            setSaving(false);
+            return;
+          }
+        }
+
+        if (ledger === 'main cash') {
+          const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
+          const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
+
+          if (isNaN(w) || w <= 0) {
+            setSnack({ severity: 'error', msg: 'Main Cash requires a valid Withdraw Amount > 0.' });
+            setSaving(false);
+            return;
+          }
+
+          if (m && m.toLowerCase() !== currentMonthName.toLowerCase()) {
+            setSnack({ severity: 'error', msg: `Main Cash is allowed ONLY for the current month (${currentMonthName}).` });
             setSaving(false);
             return;
           }
@@ -1757,24 +1791,33 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         </Box>
       </Box>
 
-      <Box sx={{ overflowX: 'auto' }}>
-        <table style={{ borderCollapse: 'collapse', width: 'max-content', tableLayout: 'fixed', fontFamily: 'Inter, sans-serif', fontSize: '12px' }}>
+      <Box sx={{
+        border: '1px solid #e2e8f0',
+        borderRadius: '12px',
+        overflow: 'auto',
+        maxHeight: { xs: '72vh', md: 'calc(100vh - 215px)' },
+        minHeight: '400px',
+        bgcolor: 'background.paper',
+        position: 'relative'
+      }}>
+        <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: 'max-content', tableLayout: 'fixed', fontFamily: 'Inter, sans-serif', fontSize: '12px' }}>
           <colgroup>
             <col style={{ width: 40 }} />
             {COLUMNS.map(c => <col key={c.key} style={{ width: c.width }} />)}
           </colgroup>
-          <thead>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
             <tr>
-              <th style={{ position: 'sticky', top: 0, zIndex: 3, background: '#f8fafc', borderRight: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1' }}>
+              <th style={{ position: 'sticky', top: 0, zIndex: 12, background: '#f8fafc', borderRight: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1', boxShadow: '0 2px 4px rgba(0,0,0,0.06)' }}>
                 <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ cursor: 'pointer' }} />
               </th>
               {COLUMNS.map((col) => {
                 return (
                   <th key={col.key} style={{
-                    position: 'sticky', top: 0, zIndex: 2,
+                    position: 'sticky', top: 0, zIndex: 10,
                     background: '#f8fafc',
                     color: '#475569', padding: '12px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 800,
-                    whiteSpace: 'pre-line', borderRight: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1'
+                    whiteSpace: 'pre-line', borderRight: '1px solid #e2e8f0', borderBottom: '2px solid #cbd5e1',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.06)'
                   }}>
                     {col.label}
                   </th>
@@ -1866,12 +1909,13 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                           <Autocomplete
                             disabled={
                               (col.key === 'Vehicle' && !rowOwner) ||
-                              (isParticularsCreditor && !canSelectValidity)
+                              (isParticularsCreditor && !canSelectValidity) ||
+                              (col.key === 'Month' && rowLedger.toLowerCase() === 'main cash')
                             }
                             options={
                               col.key === 'Month'
                                 ? (() => {
-                                  if (rowLedger.toLowerCase() === 'freight advance') {
+                                  if (rowLedger.toLowerCase() === 'freight advance' || rowLedger.toLowerCase() === 'main cash') {
                                     const curMonthName = MONTHS[new Date().getMonth()];
                                     return [curMonthName];
                                   }
@@ -1984,6 +2028,27 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                                     }
                                   }));
                                 }
+
+                                // ── MAIN CASH: lock to current month + today's date ──
+                                if (currentLedgerLower === 'main cash' && col.key === 'Ledger Name') {
+                                  const curMonthName = MONTHS[new Date().getMonth()];
+                                  const curYearStr = String(new Date().getFullYear());
+                                  // today in YYYY-MM-DD (matches handleAddRow format & Transaction Date input)
+                                  const todayISO = new Date().toISOString().split('T')[0];
+                                  setLocalData(prev => ({
+                                    ...prev,
+                                    [row._id]: {
+                                      ...prev[row._id],
+                                      'Ledger Name': currentLedger,
+                                      'Names': prev[row._id]?.['Names'] || row['Names'] || 'Main Cash',
+                                      'Month': curMonthName,
+                                      'Transaction Date': todayISO,
+                                      selectedMonth: curMonthName,
+                                      selectedYear: curYearStr
+                                    }
+                                  }));
+                                }
+                                // ── END MAIN CASH auto-fill ──
 
                                 if (isCreditorLedger(currentLedger)) {
                                   const allowed = getCreditorAllowedMonths();
@@ -2155,11 +2220,23 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                           className="erp-input"
                           type={col.isDate ? 'date' : 'text'}
                           value={val}
+                          readOnly={
+                            col.key === 'Transaction Date' &&
+                            String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toLowerCase() === 'main cash'
+                          }
                           onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
                           style={{
                             width: '100%', height: '100%', border: '1px solid transparent', padding: '10px 10px',
-                            background: 'transparent', outline: 'none', fontSize: '12px', color: cellColor, fontWeight: cellFontWeight,
-                            transition: 'all 0.2s', boxSizing: 'border-box'
+                            background:
+                              col.key === 'Transaction Date' &&
+                              String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toLowerCase() === 'main cash'
+                                ? '#f1f5f9' : 'transparent',
+                            outline: 'none', fontSize: '12px', color: cellColor, fontWeight: cellFontWeight,
+                            transition: 'all 0.2s', boxSizing: 'border-box',
+                            cursor:
+                              col.key === 'Transaction Date' &&
+                              String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toLowerCase() === 'main cash'
+                                ? 'not-allowed' : 'text'
                           }}
                         />
                       )}

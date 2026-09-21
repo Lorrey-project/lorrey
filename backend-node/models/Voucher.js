@@ -55,6 +55,26 @@ const voucherSchema = new mongoose.Schema(
       type: String,
       default: "OFFICE",
     },
+    appliedToCementId: {
+      type: String,
+      default: null,
+    },
+    appliedField: {
+      type: String,
+      default: null,
+    },
+    appliedAmount: {
+      type: Number,
+      default: 0,
+    },
+    appliedPanel: {
+      type: String,
+      default: null,
+    },
+    appliedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

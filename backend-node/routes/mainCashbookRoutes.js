@@ -7,6 +7,8 @@ const adminOnly = require("../middleware/adminOnly");
 
 const router = express.Router();
 
+const AccountDetail = require("../models/AccountDetail");
+
 // One-time migration flag — reset on server restart only
 let _migrationDone = false;
 
@@ -30,7 +32,7 @@ async function migrateMonthYear(col) {
     const parts = (entry.DATE || '').split('-');
     if (parts.length === 3) {
       const month = parseInt(parts[1], 10); // DD-MM-YYYY
-      const year  = parseInt(parts[2], 10);
+      const year = parseInt(parts[2], 10);
       if (month >= 1 && month <= 12 && year > 2000) {
         ops.push({ updateOne: { filter: { _id: entry._id }, update: { $set: { month, year } } } });
       }
@@ -41,7 +43,7 @@ async function migrateMonthYear(col) {
 }
 
 
-  // ── GET /main-cashbook ───────────────────────────────────────────────────
+// ── GET /main-cashbook ───────────────────────────────────────────────────
 // Optional query params: ?month=4&year=2025
 router.get("/", auth, async (req, res) => {
   try {
@@ -49,32 +51,22 @@ router.get("/", auth, async (req, res) => {
     await migrateMonthYear(col); // instant no-op once _migrationDone = true
     const filter = {};
     if (req.query.month) filter.month = parseInt(req.query.month);
-    if (req.query.year)  filter.year  = parseInt(req.query.year);
+    if (req.query.year) filter.year = parseInt(req.query.year);
 
-    // Auto-create daily rows up to today
+    // Auto-create daily rows for all days of the selected month
     if (filter.month && filter.year) {
-      const today = new Date();
-      // month is 1-based
-      const isCurrentMonth = filter.month === (today.getMonth() + 1) && filter.year === today.getFullYear();
-      const isPastMonth = filter.year < today.getFullYear() || (filter.year === today.getFullYear() && filter.month < (today.getMonth() + 1));
-      
-      let targetDays = 0;
-      if (isCurrentMonth) {
-        targetDays = today.getDate();
-      } else if (isPastMonth) {
-        targetDays = new Date(filter.year, filter.month, 0).getDate();
-      }
-      
-      if (targetDays > 0) {
+      const daysInMonth = new Date(filter.year, filter.month, 0).getDate();
+
+      if (daysInMonth > 0) {
         const existingEntries = await col.find(filter).project({ DATE: 1 }).toArray();
         const existingDates = new Set(existingEntries.map(e => {
           const parts = (e.DATE || '').split('-');
           if (parts.length === 3) return `${String(parseInt(parts[0])).padStart(2, '0')}-${String(parseInt(parts[1])).padStart(2, '0')}-${parseInt(parts[2])}`;
           return String(e.DATE).trim();
         }));
-        
+
         const newDocs = [];
-        for (let day = 1; day <= targetDays; day++) {
+        for (let day = 1; day <= daysInMonth; day++) {
           const dateStr = `${String(day).padStart(2, '0')}-${String(filter.month).padStart(2, '0')}-${filter.year}`;
           if (!existingDates.has(dateStr)) {
             newDocs.push({
@@ -85,15 +77,15 @@ router.get("/", auth, async (req, res) => {
             });
           }
         }
-        
+
         if (newDocs.length > 0) {
           let highest = await col.find(filter).sort({ "SL NO": -1 }).limit(1).toArray();
           let nextSlNo = highest.length > 0 && typeof highest[0]["SL NO"] === 'number' ? highest[0]["SL NO"] + 1 : 1;
-          
+
           newDocs.forEach(d => {
             d["SL NO"] = nextSlNo++;
           });
-          
+
           await col.insertMany(newDocs, { ordered: false });
         }
       }
@@ -101,44 +93,47 @@ router.get("/", auth, async (req, res) => {
     const entries = await col.find(filter).sort({ "SL NO": 1, "_created_at": 1 }).toArray();
 
     const voucherCol = mongoose.connection.collection("vouchers");
-    const cementCol  = mongoose.connection.useDb("cement_register").collection("entries");
+    const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
 
-    // ── Run all 3 aggregations IN PARALLEL (3 serial → 1 parallel round-trip) ──
-    const [voucherAdvances, directVouchers, cementAdvances] = await Promise.all([
+    // ── Run all aggregations IN PARALLEL ──
+    const [voucherAdvances, directVouchers, cementDocs, bankBookMainCash] = await Promise.all([
 
       // 1a. Indirect Vouchers (Site Cash) — strictly NOT "Direct Expense"
       voucherCol.aggregate([
         { $match: { expenseType: { $ne: "Direct Expense" } } },
-        { $group: {
+        {
+          $group: {
             _id: { $dateToString: { format: "%d-%m-%Y", date: "$date" } },
             total: { $sum: "$amount" }
-        }}
+          }
+        }
       ]).toArray(),
 
       // 1b. Direct Vouchers (Office Exp) — strictly "Direct Expense"
       voucherCol.aggregate([
         { $match: { expenseType: "Direct Expense" } },
-        { $group: {
+        {
+          $group: {
             _id: { $dateToString: { format: "%d-%m-%Y", date: "$date" } },
             total: { $sum: "$amount" },
             details: { $push: { purpose: "$purpose", amount: "$amount" } }
-        }}
+          }
+        }
       ]).toArray(),
 
-      // 2. Cement Register loading advances (Site Cash)
-      cementCol.aggregate([
-        { $group: {
-            _id: "$LOADING DT",
-            totalAdvance: {
-              $sum: { $convert: { input: "$ADVANCE", to: "double", onError: 0, onNull: 0 } }
-            }
-        }}
-      ]).toArray(),
+      // 2. Cement Register all entries for advance aggregation
+      cementCol.find({}).toArray(),
+
+      // 3. Bank Book Main Cash withdrawals (Cash Receive Bank Book)
+      AccountDetail.find({
+        ledgerName: { $regex: /^main cash$/i }
+      }).lean(),
     ]);
 
     const advanceMap = {};
     const officeExpMap = {};
     const officeDetailsMap = {};
+    const bankBookCashRecvMap = {};
 
     voucherAdvances.forEach(a => {
       if (a._id) advanceMap[a._id] = (advanceMap[a._id] || 0) + a.total;
@@ -151,17 +146,60 @@ router.get("/", auth, async (req, res) => {
       }
     });
 
-    cementAdvances.forEach(a => {
-      if (a._id) {
-        let dStr = String(a._id).trim();
-        let parts = dStr.split(/[-\/]/);
-        if (parts.length === 3) {
-          let [d, m, y] = parts;
-          const normDate = `${d.padStart(2, '0')}-${m.padStart(2, '0')}-${y}`;
-          advanceMap[normDate] = (advanceMap[normDate] || 0) + a.totalAdvance;
+    // Cement Register daily advances: Loading Advance + Site Cash Advance + Office Cash Advance
+    cementDocs.forEach(entry => {
+      const dateVal = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"];
+      if (!dateVal) return;
+      const parts = String(dateVal).trim().split(/[-\/\.]/);
+      let normDate = '';
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          normDate = `${String(parseInt(parts[2], 10)).padStart(2, '0')}-${String(parseInt(parts[1], 10)).padStart(2, '0')}-${parseInt(parts[0], 10)}`;
         } else {
-          advanceMap[a._id] = (advanceMap[a._id] || 0) + a.totalAdvance;
+          let yr = parseInt(parts[2], 10);
+          if (yr < 100) yr += 2000;
+          normDate = `${String(parseInt(parts[0], 10)).padStart(2, '0')}-${String(parseInt(parts[1], 10)).padStart(2, '0')}-${yr}`;
         }
+      }
+      if (!normDate) return;
+
+      const getNum = (...keys) => {
+        for (const k of keys) {
+          const v = entry[k];
+          if (v !== undefined && v !== null && v !== '') {
+            const n = parseFloat(String(v).replace(/,/g, ''));
+            if (!isNaN(n)) return n;
+          }
+        }
+        return 0;
+      };
+
+      const loadingAdv = getNum('ADVANCE', 'LOADING ADVANCE', 'Loading Advance');
+      const siteCashAdv = getNum('SITE CASH', 'Site Cash', 'SITE_CASH', 'SITE CASH ADVANCE', 'Site Cash Advance');
+      const officeCashAdv = getNum('OFFICE CASH', 'Office Cash', 'OFFICE_CASH', 'OFFICE CASH ADVANCE', 'Office Cash Advance');
+
+      const dailyTotal = loadingAdv + siteCashAdv + officeCashAdv;
+      if (dailyTotal > 0) {
+        advanceMap[normDate] = (advanceMap[normDate] || 0) + dailyTotal;
+      }
+    });
+
+    bankBookMainCash.forEach(doc => {
+      const rawDate = doc.transactionDate || doc['Transaction Date'];
+      const parts = String(rawDate || '').trim().split(/[-\/\.]/);
+      let normDate = '';
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          normDate = `${String(parseInt(parts[2], 10)).padStart(2, '0')}-${String(parseInt(parts[1], 10)).padStart(2, '0')}-${parseInt(parts[0], 10)}`;
+        } else {
+          let yr = parseInt(parts[2], 10);
+          if (yr < 100) yr += 2000;
+          normDate = `${String(parseInt(parts[0], 10)).padStart(2, '0')}-${String(parseInt(parts[1], 10)).padStart(2, '0')}-${yr}`;
+        }
+      }
+      const w = parseFloat(String(doc.withdraw || '').replace(/,/g, ''));
+      if (normDate && !isNaN(w) && w > 0) {
+        bankBookCashRecvMap[normDate] = (bankBookCashRecvMap[normDate] || 0) + w;
       }
     });
 
@@ -174,13 +212,19 @@ router.get("/", auth, async (req, res) => {
           let [d, m, y] = parts;
           normDate = `${d.padStart(2, '0')}-${m.padStart(2, '0')}-${y}`;
         }
-        entry.S_EXPENSE  = advanceMap[normDate]      || advanceMap[entry.DATE]      || 0;
-        entry.O_EXPENSE  = officeExpMap[normDate]    || officeExpMap[entry.DATE]    || 0;
-        entry.REMARKS_EXP= officeDetailsMap[normDate]|| officeDetailsMap[entry.DATE]|| "";
+        entry.S_EXPENSE = advanceMap[normDate] || advanceMap[entry.DATE] || 0;
+        // Office expenses remain user-editable/manual on entry unless empty
+        if (entry.O_EXPENSE === undefined || entry.O_EXPENSE === null) {
+          entry.O_EXPENSE = officeExpMap[normDate] || officeExpMap[entry.DATE] || 0;
+        }
+        if (!entry.REMARKS_EXP) {
+          entry.REMARKS_EXP = officeDetailsMap[normDate] || officeDetailsMap[entry.DATE] || "";
+        }
+        entry.P_CASH_RECV_BB = bankBookCashRecvMap[normDate] !== undefined
+          ? bankBookCashRecvMap[normDate]
+          : (entry.P_CASH_RECV_BB || 0);
       } else {
         entry.S_EXPENSE = 0;
-        entry.O_EXPENSE = 0;
-        entry.REMARKS_EXP = "";
       }
     });
 
@@ -197,7 +241,7 @@ router.get("/month-end", auth, async (req, res) => {
   try {
     const col = getCollection();
     const month = parseInt(req.query.month);
-    const year  = parseInt(req.query.year);
+    const year = parseInt(req.query.year);
     if (!month || !year) return res.status(400).json({ success: false, error: "month and year required" });
     const lastRow = await col.find({ month, year }).sort({ "SL NO": -1, "_created_at": -1 }).limit(1).toArray();
     if (!lastRow.length) return res.json({ success: true, data: null });
@@ -219,21 +263,21 @@ router.get("/month-end", auth, async (req, res) => {
 router.post("/", auth, async (req, res) => {
   try {
     const col = getCollection();
-    
+
     // Add SL NO per-month (each month starts from 1)
     if (!req.body["SL NO"]) {
       const mth = req.body.month || (new Date().getMonth() + 1);
-      const yr  = req.body.year  || new Date().getFullYear();
+      const yr = req.body.year || new Date().getFullYear();
       const highest = await col.find({ month: mth, year: yr }).sort({ "SL NO": -1 }).limit(1).toArray();
       req.body["SL NO"] = highest.length > 0 && typeof highest[0]["SL NO"] === 'number'
         ? highest[0]["SL NO"] + 1 : 1;
     }
-    
+
     req.body._created_at = new Date();
     const result = await col.insertOne(req.body);
 
     res.status(201).json({ success: true, entry: { _id: result.insertedId, ...req.body } });
-    
+
     const io = getIO();
     io.emit('mainCashbookUpdates', { action: 'create', entry: { _id: result.insertedId, ...req.body } });
   } catch (error) {
@@ -268,13 +312,13 @@ router.post("/bulk", auth, adminOnly, async (req, res) => {
     if (!Array.isArray(docs) || docs.length === 0) {
       return res.status(400).json({ success: false, error: "Provide an array of entries." });
     }
-    
+
     // Set created at date
     docs.forEach(d => { d._created_at = new Date(); });
 
     const result = await col.insertMany(docs, { ordered: false });
     res.status(201).json({ success: true, insertedCount: result.insertedCount });
-    
+
     const io = getIO();
     io.emit('mainCashbookUpdates', { action: 'bulkCreate', count: result.insertedCount });
   } catch (error) {
@@ -353,7 +397,7 @@ router.put("/bulk-update", auth, async (req, res) => {
       }
     }));
     if (bulkOps.length > 0) {
-        await col.bulkWrite(bulkOps);
+      await col.bulkWrite(bulkOps);
     }
 
     res.json({ success: true, updatedCount: updates.length });

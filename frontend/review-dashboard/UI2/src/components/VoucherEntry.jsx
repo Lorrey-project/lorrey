@@ -258,16 +258,18 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
       const token = localStorage.getItem('token');
 
       // 1. Create voucher in MongoDB
+      const isSite = String(user?.role || '').toUpperCase().includes('SITE');
       const payload = {
         voucherNumber: form.voucherNumber.trim(),
         expenseType: form.expenseType,
-        vehicleNumber: form.expenseType === 'Indirect Expense' ? form.vehicleNumber.trim().toUpperCase() : '',
+        vehicleNumber: form.vehicleNumber ? form.vehicleNumber.trim().toUpperCase() : '',
         date: form.date,
         amount: parseFloat(form.amount),
         purpose: form.purpose,
         remarks: form.remarks,
         invoiceId: invoiceId || null,
         createdByRole: user?.role || 'OFFICE',
+        panelSource: isSite ? 'SITE' : 'OFFICE',
       };
       const createRes = await axios.post(`${API_URL}/voucher`, payload, {
         headers: { Authorization: `Bearer ${token}` },
@@ -306,6 +308,13 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
       if (uploadRes.data.success) {
         setSlipSavedUrl(uploadRes.data.slip_url);
         setSavedVoucher(uploadRes.data.voucher);
+      }
+
+      if (createRes.data.cementSyncResult?.notFound) {
+        setSnack({ type: 'warning', message: '⚠️ No uploaded Cement Register invoice found for this vehicle. Voucher could not be linked.' });
+      } else if (createRes.data.cementSyncResult?.success && !createRes.data.cementSyncResult?.skipped) {
+        setSnack({ type: 'success', message: `✅ Voucher slip saved to S3 & ₹${form.amount} added to Cement Register (${createRes.data.cementSyncResult.field})!` });
+      } else {
         setSnack({ type: 'success', message: '✅ Voucher slip saved to S3 successfully!' });
       }
     } catch (err) {
@@ -419,7 +428,7 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
                 error={!!errors.purpose} helperText={errors.purpose}
                 InputProps={{ sx: { borderRadius: '14px' } }}
               >
-                {form.expenseType === 'Direct Expense' 
+                {form.expenseType === 'Direct Expense'
                   ? DIRECT_PURPOSES.map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)
                   : INDIRECT_PURPOSES.map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
               </TextField>

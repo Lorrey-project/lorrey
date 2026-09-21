@@ -983,7 +983,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     rowsPerPage={rowsPerPage}
                                     onRowsPerPageChange={handleChangeRowsPerPage}
                                     rowsPerPageOptions={[10, 20, 50, 100]}
-                                    sx={{ borderBottom: 'none', '.MuiTablePagination-toolbar': { minHeight: 40, p: 0 } }}
+                                    sx={{ borderBottom: 'none', '.MuiTablePagination-toolbar': { minHeight: 48, px: 1 } }}
                                 />
                             </>
                         )}
