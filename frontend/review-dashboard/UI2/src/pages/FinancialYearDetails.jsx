@@ -75,36 +75,45 @@ const MONTHS_LIST = [
 
 const getMonthIndexFromDate = (dateStr) => {
   if (!dateStr) return 99;
-  const str = String(dateStr).trim();
-  // Match DD-MM-YYYY or DD/MM/YYYY
-  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  const str = String(dateStr).split('T')[0].split(' ')[0].trim();
+  // Match DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
   if (ddmmyyyy) {
     const m = parseInt(ddmmyyyy[2], 10);
     if (m >= 1 && m <= 12) return m;
   }
-  // Match YYYY-MM-DD or YYYY/MM/DD
-  const yyyymmdd = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  // Match YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+  const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
   if (yyyymmdd) {
     const m = parseInt(yyyymmdd[2], 10);
     if (m >= 1 && m <= 12) return m;
   }
-  try {
-    const d = new Date(str);
-    if (!isNaN(d.getTime())) return d.getMonth() + 1;
-  } catch (_) { }
   return 99;
 };
 
 const formatDateForInput = (dateStr) => {
   if (!dateStr) return '';
-  if (String(dateStr).includes('T')) return String(dateStr).split('T')[0];
-
-  const normalizedStr = String(dateStr).replace(/\//g, '-');
-  const parts = normalizedStr.split('-');
-
-  if (parts.length === 3) {
-    if (parts[2].length >= 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-    if (parts[0].length >= 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+  if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
+    const y = dateStr.getFullYear();
+    const m = String(dateStr.getMonth() + 1).padStart(2, '0');
+    const d = String(dateStr.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(dateStr).split('T')[0].split(' ')[0].trim();
+  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (ddmmyyyy) {
+    let d = ddmmyyyy[1].padStart(2, '0');
+    let m = ddmmyyyy[2].padStart(2, '0');
+    let y = ddmmyyyy[3];
+    if (y.length === 2 || parseInt(y, 10) < 100) y = String(2000 + parseInt(y, 10));
+    return `${y}-${m}-${d}`;
+  }
+  const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  if (yyyymmdd) {
+    let y = yyyymmdd[1];
+    let m = yyyymmdd[2].padStart(2, '0');
+    let d = yyyymmdd[3].padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
   return '';
 };
@@ -224,43 +233,81 @@ export default function FinancialYearDetails({ onBack }) {
   const parseExcelDate = (val) => {
     if (val === null || val === undefined || val === '') return '';
 
-    let dateObj = null;
+    // If already a JS Date object (e.g. from SheetJS UTC parsing)
     if (val instanceof Date) {
-      dateObj = val;
-    } else if (typeof val === 'number') {
-      try {
-        const jsDate = XLSX.SSF.parse_date_code(val);
-        if (jsDate) dateObj = new Date(jsDate.y, jsDate.m - 1, jsDate.d);
-      } catch (_) { }
-    } else {
-      const str = String(val).trim();
-      const ddmmyyyy = str.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
-      if (ddmmyyyy) {
-        let day = ddmmyyyy[1].padStart(2, '0');
-        let month = ddmmyyyy[2].padStart(2, '0');
-        let year = ddmmyyyy[3];
-        if (year.length === 2) year = '20' + year;
-        return `${day}/${month}/${year}`;
-      }
-      const yyyymmdd = str.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
-      if (yyyymmdd) {
-        let year = yyyymmdd[1];
-        let month = yyyymmdd[2].padStart(2, '0');
-        let day = yyyymmdd[3].padStart(2, '0');
-        return `${day}/${month}/${year}`;
-      }
-      const parsed = new Date(str);
-      if (!isNaN(parsed.getTime())) dateObj = parsed;
-      else return str;
+      if (isNaN(val.getTime())) return '';
+      // Extract UTC calendar date because SheetJS constructs dates via Date.UTC(...)
+      const d = String(val.getUTCDate()).padStart(2, '0');
+      const m = String(val.getUTCMonth() + 1).padStart(2, '0');
+      const y = val.getUTCFullYear();
+      return `${d}/${m}/${y}`;
     }
 
-    if (dateObj && !isNaN(dateObj.getTime())) {
-      const day = String(dateObj.getDate()).padStart(2, '0');
-      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-      const year = dateObj.getFullYear();
+    // If Excel serial number (numeric)
+    if (typeof val === 'number') {
+      try {
+        const jsDate = XLSX.SSF.parse_date_code(val);
+        if (jsDate && jsDate.y && jsDate.m && jsDate.d) {
+          const d = String(jsDate.d).padStart(2, '0');
+          const m = String(jsDate.m).padStart(2, '0');
+          const y = jsDate.y;
+          return `${d}/${m}/${y}`;
+        }
+      } catch (_) { }
+    }
+
+    const rawStr = String(val).trim();
+    if (!rawStr) return '';
+    const str = rawStr.replace(/\s+\d{1,2}:\d{2}(:\d{2})?.*$/, '').replace(/T\d{2}:\d{2}.*$/, '').trim();
+
+    // Check if numeric serial number as string (e.g. "46286")
+    if (/^\d{5}(\.\d+)?$/.test(str)) {
+      try {
+        const numVal = parseFloat(str);
+        const jsDate = XLSX.SSF.parse_date_code(numVal);
+        if (jsDate && jsDate.y && jsDate.m && jsDate.d) {
+          const d = String(jsDate.d).padStart(2, '0');
+          const m = String(jsDate.m).padStart(2, '0');
+          const y = jsDate.y;
+          return `${d}/${m}/${y}`;
+        }
+      } catch (_) { }
+    }
+
+    // Match DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY, DD-MM-YY, DD/MM/YY, DD.MM.YY
+    const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if (ddmmyyyy) {
+      let day = ddmmyyyy[1].padStart(2, '0');
+      let month = ddmmyyyy[2].padStart(2, '0');
+      let year = ddmmyyyy[3];
+      if (year.length === 2 || parseInt(year, 10) < 100) year = String(2000 + parseInt(year, 10));
       return `${day}/${month}/${year}`;
     }
-    return String(val).trim();
+
+    // Match YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+    const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+    if (yyyymmdd) {
+      let year = yyyymmdd[1];
+      let month = yyyymmdd[2].padStart(2, '0');
+      let day = yyyymmdd[3].padStart(2, '0');
+      return `${day}/${month}/${year}`;
+    }
+
+    // Match named month: DD-MMM-YYYY, DD MMM YYYY, DD-MMMM-YYYY
+    const ddmmmyyyy = str.match(/^(\d{1,2})[\/\-\.\s]([A-Za-z]+)[\/\-\.\s](\d{2,4})$/);
+    if (ddmmmyyyy) {
+      const day = ddmmmyyyy[1].padStart(2, '0');
+      const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+      const mIdx = monthNames.indexOf(ddmmmyyyy[2].toLowerCase().slice(0, 3));
+      let year = ddmmmyyyy[3];
+      if (year.length === 2 || parseInt(year, 10) < 100) year = String(2000 + parseInt(year, 10));
+      if (mIdx >= 0) {
+        const month = String(mIdx + 1).padStart(2, '0');
+        return `${day}/${month}/${year}`;
+      }
+    }
+
+    return rawStr;
   };
 
   const handleClearBillRegister = async () => {
@@ -436,8 +483,27 @@ export default function FinancialYearDetails({ onBack }) {
 
           const getVal = (colIdx) => (colIdx !== undefined && colIdx < rowArr.length) ? rowArr[colIdx] : '';
 
-          let invNo = parseExcelString(getVal(map.invoiceNumber));
-          let invDate = parseExcelDate(getVal(map.invoiceDate));
+          const isValidParsedDate = (dStr) => {
+            if (!dStr) return true; // Optional if missing
+            const parts = dStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (!parts) return false;
+            const d = parseInt(parts[1], 10);
+            const m = parseInt(parts[2], 10);
+            const y = parseInt(parts[3], 10);
+            if (m < 1 || m > 12 || d < 1 || d > 31 || y < 1990 || y > 2099) return false;
+            const daysInMonth = new Date(y, m, 0).getDate();
+            return d <= daysInMonth;
+          };
+
+          const rawDateVal = getVal(map.invoiceDate);
+          let invDate = parseExcelDate(rawDateVal);
+          const isDateValid = !rawDateVal || isValidParsedDate(invDate);
+
+          if (!isDateValid) {
+            failedCount++;
+            failedErrors.push({ row: rIdx + 1, error: `Invalid / Unparseable Bill Date: "${rawDateVal}"` });
+          }
+
           let shipNo = parseExcelString(getVal(map.shipmentNumber));
           let monthStr = parseExcelString(getVal(map.month));
 
@@ -472,15 +538,14 @@ export default function FinancialYearDetails({ onBack }) {
           let remarksVal = parseExcelString(getVal(map.remarks));
           let sl = parseExcelNumber(getVal(map.slNo));
 
-          if (!invNo) {
-            failedCount++;
-            failedErrors.push({ row: rIdx + 1, error: 'Missing Invoice / Bill Number' });
-            continue;
-          }
-
           const isExisting = existingKeys.has(invNo.toUpperCase());
-          if (isExisting) existingCount++;
-          else validCount++;
+          if (!isDateValid) {
+            // Already flagged
+          } else if (isExisting) {
+            existingCount++;
+          } else {
+            validCount++;
+          }
 
           parsed.push({
             slNo: sl || (parsed.length + 1),
@@ -504,7 +569,9 @@ export default function FinancialYearDetails({ onBack }) {
             debitAmount: debitAmtVal,
             debitReasons: debitReasonsVal ? [debitReasonsVal] : [],
             remarks: remarksVal,
-            isExisting
+            isExisting,
+            needsReview: !isDateValid,
+            reviewReason: !isDateValid ? `Invalid Date (${rawDateVal})` : ''
           });
         }
 

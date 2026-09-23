@@ -58,15 +58,60 @@ const MONTH_NAMES_LIST = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
+function formatWheel(val) {
+  if (!val) return '-';
+  const str = String(val).trim();
+  const match = str.match(/^(\d{1,2})\s*[-_ ]*\s*(?:wheel|wh|w)?$/i);
+  if (match) {
+    return `${match[1]}W`;
+  }
+  const lower = str.toLowerCase();
+  if (lower.includes('16')) return '16W';
+  if (lower.includes('14')) return '14W';
+  if (lower.includes('12')) return '12W';
+  if (lower.includes('10')) return '10W';
+  if (lower.includes('6')) return '6W';
+  if (lower.includes('4')) return '4W';
+  return str.toUpperCase();
+}
+
+function parseTdsField(doc) {
+  if (!doc || typeof doc !== 'object') return null;
+  const candidates = [
+    'TDS Applicability', 'TDS', 'TDS %', 'TDS Rate', 'TDSApplicability',
+    'tds_applicability', 'tds', 'tds_rate', 'Tds', 'TDS_APPLICABILITY',
+    'tdsApplicability', 'TDSApplicable', 'TDS (%)'
+  ];
+  for (const k of candidates) {
+    if (doc[k] !== undefined && doc[k] !== null && doc[k] !== '') {
+      let v = doc[k];
+      if (typeof v === 'string') {
+        v = v.replace('%', '').trim();
+      }
+      const parsed = parseFloat(v);
+      if (!isNaN(parsed)) {
+        if (parsed > 0 && parsed < 1) {
+          return Math.round(parsed * 100 * 100) / 100;
+        }
+        return parsed;
+      }
+    }
+  }
+  return null;
+}
+
 // ── GET /api/tds-reports/party-tds ──────────────────────────────────────────
 router.get('/party-tds', async (req, res) => {
   try {
     const { month, year, fy, search } = req.query;
     const now = new Date();
+    const currentCalDay = now.getDate();
+    const currentCalMonth = now.getMonth() + 1; // 1-12
+    const currentCalYear = now.getFullYear();
 
-    let targetMonth = month ? parseInt(month, 10) : (now.getMonth() + 1);
+    let targetMonth = month ? parseInt(month, 10) : currentCalMonth;
     if (isNaN(targetMonth) || targetMonth < 1 || targetMonth > 12) {
-      targetMonth = now.getMonth() + 1;
+      targetMonth = currentCalMonth;
     }
 
     let targetYear = year ? parseInt(year, 10) : null;
@@ -78,21 +123,37 @@ router.get('/party-tds', async (req, res) => {
         }
       }
       if (!targetYear || isNaN(targetYear)) {
-        targetYear = now.getFullYear();
+        targetYear = targetMonth >= 4 ? (now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1) : (now.getMonth() >= 3 ? now.getFullYear() + 1 : now.getFullYear());
       }
     }
 
     const monthTitle = MONTH_NAMES_LIST[targetMonth - 1] || 'September';
 
+    // Strictly MONTH-WISE: Selected month is the exact source month
+    const sourceMonth = targetMonth;
+    const sourceYear = targetYear;
+
+    const isCurrentOngoingMonth = (sourceMonth === currentCalMonth && sourceYear === currentCalYear);
+
     const db = mongoose.connection.useDb('invoice_system');
     const ownerCol = db.collection('owner details');
     const truckCol = db.collection('Truck Contact Number');
     const cementCol = mongoose.connection.useDb('cement_register').collection('entries');
+    const incStateCol = mongoose.connection.useDb('cement_register').collection('incentive_states');
 
-    const [ownerDocs, truckDocs] = await Promise.all([
+    const [ownerDocs, truckDocs, incState] = await Promise.all([
       ownerCol.find({}).toArray(),
-      truckCol.find({}).toArray()
+      truckCol.find({}).toArray(),
+      incStateCol.findOne({
+        year: sourceYear,
+        $or: [
+          { month: sourceMonth - 1 },
+          { month: sourceMonth }
+        ]
+      })
     ]);
+
+    const actualsMap = (incState && incState.actuals) ? incState.actuals : {};
 
     // 1. Truck Contacts mapping (vehicleNo -> owner, wheel, contact)
     const vehToOwner = {};
@@ -106,20 +167,24 @@ router.get('/party-tds', async (req, res) => {
       }
     });
 
-    // 2. Unique owners map from owner details collection
+    // 2. Unique owners map & TDS maps from Owner Details collection + Truck Contacts
     const uniqueOwnersMap = new Map();
+    const ownerVehiclesMap = new Map();
+    const ownerVehicleTdsMap = {};
+    const vehicleTdsMap = {};
+    const ownerTdsMap = {};
+
     ownerDocs.forEach(d => {
       const rawName = (d['Owner Name'] || d['Owner Name '] || d.owner_name || '').trim();
       if (!rawName) return;
       const key = rawName.toUpperCase();
-      if (!uniqueOwnersMap.has(key)) {
-        let rawTds = d['TDS Applicability'] !== undefined && d['TDS Applicability'] !== null && d['TDS Applicability'] !== ''
-          ? num(d['TDS Applicability'])
-          : null;
-        if (rawTds !== null && rawTds > 0 && rawTds < 1) {
-          rawTds = rawTds * 100;
-        }
+      const rawTds = parseTdsField(d);
 
+      if (rawTds !== null) {
+        ownerTdsMap[key] = rawTds;
+      }
+
+      if (!uniqueOwnersMap.has(key)) {
         uniqueOwnersMap.set(key, {
           name: rawName,
           pan: (d['PAN No.'] || d['PAN No. '] || d.pan_no || '-').trim(),
@@ -127,10 +192,71 @@ router.get('/party-tds', async (req, res) => {
           panAadharLink: (d['PAN Addahar Link'] || d['PAN Addahar Link '] || d.pan_aadhar_link || '-').trim(),
           tdsApplicability: rawTds
         });
+      } else if (rawTds !== null && uniqueOwnersMap.get(key).tdsApplicability === null) {
+        uniqueOwnersMap.get(key).tdsApplicability = rawTds;
+      }
+
+      const v = normVeh(d['Truck No'] || d['Truck No '] || d.truck_no || d.vehicleNo || d['Vehicle No'] || d['Vehicle Number']);
+      const w = formatWheel(d['Type of vehicle'] || d['Type of vehicle '] || d.type_of_vehicle || d.wheel || d.Wheel || d['WHEEL'] || d.type || '');
+      if (!ownerVehiclesMap.has(key)) {
+        ownerVehiclesMap.set(key, []);
+      }
+      if (v) {
+        if (rawTds !== null) {
+          vehicleTdsMap[v] = rawTds;
+          ownerVehicleTdsMap[`${key}_${v}`] = rawTds;
+        }
+        const list = ownerVehiclesMap.get(key);
+        if (!list.some(item => item.vehicleNo === v)) {
+          list.push({ vehicleNo: v, wheel: w });
+        }
       }
     });
 
-    // 3. Fetch cement register entries belonging ONLY to the selected month & year
+    truckDocs.forEach(c => {
+      const rawName = (c.owner_name || c['Owner Name '] || c['Owner Name'] || c.ownerName || '').trim();
+      const v = normVeh(c.truck_no || c['Truck No '] || c['Truck No'] || c.vehicleNo);
+      const rawTds = parseTdsField(c);
+
+      if (v && rawTds !== null) {
+        vehicleTdsMap[v] = rawTds;
+      }
+
+      if (!rawName) return;
+      const key = rawName.toUpperCase();
+      if (rawTds !== null) {
+        if (ownerTdsMap[key] === undefined) ownerTdsMap[key] = rawTds;
+        if (v) ownerVehicleTdsMap[`${key}_${v}`] = rawTds;
+      }
+
+      if (!uniqueOwnersMap.has(key)) {
+        uniqueOwnersMap.set(key, {
+          name: rawName,
+          pan: (c.pan_no || c['Pan No '] || c['PAN No'] || '-').trim(),
+          aadhar: (c.aadhar_no || c['Aadhar No '] || c['Aadhar No'] || '-').trim(),
+          panAadharLink: (c.pan_aadhar_link || '-').trim(),
+          tdsApplicability: rawTds
+        });
+      } else if (rawTds !== null && uniqueOwnersMap.get(key).tdsApplicability === null) {
+        uniqueOwnersMap.get(key).tdsApplicability = rawTds;
+      }
+
+      const w = formatWheel(c['Type of vehicle '] || c['Type of vehicle'] || c.type_of_vehicle || c.wheel || c.wheel_type || c.type || '');
+      if (!ownerVehiclesMap.has(key)) {
+        ownerVehiclesMap.set(key, []);
+      }
+      if (v) {
+        const list = ownerVehiclesMap.get(key);
+        const existing = list.find(item => item.vehicleNo === v);
+        if (!existing) {
+          list.push({ vehicleNo: v, wheel: w });
+        } else if ((!existing.wheel || existing.wheel === '-') && w && w !== '-') {
+          existing.wheel = w;
+        }
+      }
+    });
+
+    // 3. Fetch cement register entries belonging to the source operational month & year
     const monthDocs = [];
     const cementCursor = cementCol.find({});
     while (await cementCursor.hasNext()) {
@@ -140,20 +266,44 @@ router.get('/party-tds', async (req, res) => {
       if (p) {
         const m = p.getMonth() + 1;
         const y = p.getFullYear();
-        if (m === targetMonth && y === targetYear) {
-          monthDocs.push(doc);
+        if (m === sourceMonth && y === sourceYear) {
+          if (isCurrentOngoingMonth) {
+            // Ongoing current month: include trips up to today's date
+            if (p.getDate() <= currentCalDay) {
+              monthDocs.push(doc);
+            }
+          } else {
+            // Previous completed months: include all trips
+            monthDocs.push(doc);
+          }
         }
       }
     }
 
-    // 4. Calculate ROW 1: TOTAL FREIGHT AMOUNT (Party Payment Details "Gross Freight (95% Payable)")
+    // 4. Calculate ROW 1: FREIGHT / GROSS FREIGHT (Party Payment Details "Gross Freight (95% Payable)")
     const ownerFreight = {};
+    const vehicleFreight = {};
     const ownerTdsDeducted = {};
+    const vehicleTdsDeducted = {};
 
     monthDocs.forEach(row => {
       const v = normVeh(row['VEHICLE NUMBER'] || row['VEHICLE NO']);
       const o = vehToOwner[v] || (row['OWNER NAME'] || '').trim() || 'Unknown';
       const oKey = o.toUpperCase();
+      const w = formatWheel(row['WHEEL'] || (vehContactMap[v] && (vehContactMap[v]['Type of vehicle '] || vehContactMap[v]['Type of vehicle'])) || '');
+
+      if (v && oKey !== 'UNKNOWN') {
+        if (!ownerVehiclesMap.has(oKey)) {
+          ownerVehiclesMap.set(oKey, []);
+        }
+        const list = ownerVehiclesMap.get(oKey);
+        const existing = list.find(item => item.vehicleNo === v);
+        if (!existing) {
+          list.push({ vehicleNo: v, wheel: w });
+        } else if ((!existing.wheel || existing.wheel === '-') && w && w !== '-') {
+          existing.wheel = w;
+        }
+      }
 
       let gf = 0;
       for (const k of ['BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT']) {
@@ -167,13 +317,19 @@ router.get('/party-tds', async (req, res) => {
         }
       }
       ownerFreight[oKey] = (ownerFreight[oKey] || 0) + gf;
+      if (v) {
+        vehicleFreight[v] = (vehicleFreight[v] || 0) + gf;
+      }
 
       // Track actual TDS recorded in cement register if available
       const tdsVal = num(row['TDS@1%']) || num(row['TDS']);
       ownerTdsDeducted[oKey] = (ownerTdsDeducted[oKey] || 0) + tdsVal;
+      if (v) {
+        vehicleTdsDeducted[v] = (vehicleTdsDeducted[v] || 0) + tdsVal;
+      }
     });
 
-    // 5. Calculate ROW 2: TOTAL INCENTIVE AMOUNT (Incentive Entry "Total (Projected)")
+    // 5. Calculate ROW 2: TOTAL INCENTIVE (Incentive Entry "Total (Projected)")
     const byTruck = {};
     for (const row of monthDocs) {
       const truck = normVeh(row['VEHICLE NUMBER'] || row['VEHICLE NO']);
@@ -228,7 +384,8 @@ router.get('/party-tds', async (req, res) => {
       }
     }
 
-    // Aggregate Total (Projected) by Owner
+    // Vehicle-wise and Owner-wise Total (Projected) Incentive
+    const vehicleIncentives = {};
     const ownerIncentives = {};
     Object.values(byTruck).forEach(t => {
       const metCriteria = t.tripsCount > 6;
@@ -238,118 +395,217 @@ router.get('/party-tds', async (req, res) => {
       }
       const nvlNvclTotal = Math.round(t.nvl.amt) + Math.round(t.nvcl.amt);
       const totalFinal = nvlNvclTotal + Math.round(t.extra10W) + Math.round(t.extra6W);
+      const tNo = normVeh(t.truckNo);
+      if (tNo) {
+        vehicleIncentives[tNo] = (vehicleIncentives[tNo] || 0) + totalFinal;
+      }
       const oKey = (t.ownerName || 'Unknown').toUpperCase();
       ownerIncentives[oKey] = (ownerIncentives[oKey] || 0) + totalFinal;
     });
 
     let uniqueOwners = Array.from(uniqueOwnersMap.values());
 
-    // Optional Search Filter by Owner Name, PAN, or Aadhaar
+    // Optional Search Filter by Owner Name, PAN, Aadhaar, or Vehicle Number
     if (search && search.trim()) {
       const term = search.toLowerCase().trim();
-      uniqueOwners = uniqueOwners.filter(o =>
-        o.name.toLowerCase().includes(term) ||
-        o.pan.toLowerCase().includes(term) ||
-        o.aadhar.toLowerCase().includes(term)
-      );
+      uniqueOwners = uniqueOwners.filter(o => {
+        const oKey = o.name.toUpperCase();
+        const vList = ownerVehiclesMap.get(oKey) || [];
+        return (
+          o.name.toLowerCase().includes(term) ||
+          o.pan.toLowerCase().includes(term) ||
+          o.aadhar.toLowerCase().includes(term) ||
+          vList.some(v => v.vehicleNo.toLowerCase().includes(term) || v.wheel.toLowerCase().includes(term))
+        );
+      });
     }
 
-    // 6. Generate EXACTLY 4 rows per unique owner for the selected month
-    // ROW 1 → TOTAL FREIGHT AMOUNT (Party Payment Details: Gross Freight (95% Payable))
-    // ROW 2 → TOTAL INCENTIVE AMOUNT (Incentive Entry: Total (Projected))
-    // ROW 3 → DIFFERENTIAL (TOTAL FREIGHT AMOUNT - TOTAL INCENTIVE AMOUNT)
-    // ROW 4 → Existing TDS/SUMMARY logic
+    // 6. Generate rows per vehicle (OWNER -> VEHICLE -> WHEEL -> BILL TYPE)
+    // For EVERY registered vehicle under an owner, generate exactly 3 rows:
+    // ROW 1 → FREIGHT / GROSS FREIGHT
+    // ROW 2 → TOTAL INCENTIVE
+    // ROW 3 → DIFFERENTIAL
     const entries = [];
     let slNo = 1;
+    let totalVehiclesCount = 0;
 
     uniqueOwners.forEach(ownerObj => {
       const oKey = ownerObj.name.toUpperCase();
-      const totalFreight = Math.round((ownerFreight[oKey] || 0) * 100) / 100;
-      const totalIncentive = Math.round((ownerIncentives[oKey] || 0) * 100) / 100;
-      const differential = Math.round((totalFreight - totalIncentive) * 100) / 100;
-
-      // TDS % calculation (1% default or owner-specific)
-      let tdsRate = 1;
-      if (ownerObj.tdsApplicability !== null && !isNaN(ownerObj.tdsApplicability)) {
-        tdsRate = ownerObj.tdsApplicability;
+      let vehicles = ownerVehiclesMap.get(oKey) || [];
+      if (vehicles.length === 0) {
+        vehicles = [{ vehicleNo: '-', wheel: '-' }];
       }
 
+      totalVehiclesCount += vehicles.length;
+
       const isLinked = (ownerObj.panAadharLink.toUpperCase() === 'YES' || (ownerObj.pan !== '-' && ownerObj.aadhar !== '-')) ? 'YES' : 'NO';
-      const tdsAmount = Math.round((Math.max(0, differential) * (tdsRate / 100)) * 100) / 100;
-      const actualDeducted = ownerTdsDeducted[oKey] !== undefined && ownerTdsDeducted[oKey] > 0
-        ? Math.round(ownerTdsDeducted[oKey] * 100) / 100
-        : tdsAmount;
 
-      // ROW 1 → TOTAL FREIGHT AMOUNT
-      entries.push({
-        slNo: slNo++,
-        ownerIndexRow: 1,
-        name: ownerObj.name,
-        billNo: '-',
-        billDate: '-',
-        billType: `Total Freight — ${monthTitle} ${targetYear}`,
-        basicAmount: totalFreight,
-        note: '-',
-        tdsPercent: 0,
-        tdsAmount: 0,
-        tdsDeducted: 0,
-        panCardNumber: ownerObj.pan,
-        aadharNo: ownerObj.aadhar,
-        aadhaarPanLinked: isLinked
-      });
+      vehicles.forEach((veh, vIdx) => {
+        const vKey = normVeh(veh.vehicleNo);
+        let vFreight = vKey ? (vehicleFreight[vKey] || 0) : 0;
+        let vIncentive = vKey ? (vehicleIncentives[vKey] || 0) : 0;
 
-      // ROW 2 → TOTAL INCENTIVE AMOUNT
-      entries.push({
-        slNo: slNo++,
-        ownerIndexRow: 2,
-        name: ownerObj.name,
-        billNo: '-',
-        billDate: '-',
-        billType: `Total Incentive — ${monthTitle} ${targetYear}`,
-        basicAmount: totalIncentive,
-        note: '-',
-        tdsPercent: 0,
-        tdsAmount: 0,
-        tdsDeducted: 0,
-        panCardNumber: ownerObj.pan,
-        aadharNo: ownerObj.aadhar,
-        aadhaarPanLinked: isLinked
-      });
+        // Fallback for single-vehicle owners if vehicle-level keying had slight variation
+        if (vehicles.length === 1) {
+          if (vFreight === 0 && ownerFreight[oKey]) vFreight = ownerFreight[oKey];
+          if (vIncentive === 0 && ownerIncentives[oKey]) vIncentive = ownerIncentives[oKey];
+        }
 
-      // ROW 3 → DIFFERENTIAL
-      entries.push({
-        slNo: slNo++,
-        ownerIndexRow: 3,
-        name: ownerObj.name,
-        billNo: '-',
-        billDate: '-',
-        billType: `Differential — ${monthTitle} ${targetYear}`,
-        basicAmount: differential,
-        note: '-',
-        tdsPercent: 0,
-        tdsAmount: 0,
-        tdsDeducted: 0,
-        panCardNumber: ownerObj.pan,
-        aadharNo: ownerObj.aadhar,
-        aadhaarPanLinked: isLinked
-      });
+        vFreight = Math.round(vFreight * 100) / 100;
+        vIncentive = Math.round(vIncentive * 100) / 100;
 
-      // ROW 4 → Existing TDS/SUMMARY logic
-      entries.push({
-        slNo: slNo++,
-        ownerIndexRow: 4,
-        name: ownerObj.name,
-        billNo: '-',
-        billDate: '-',
-        billType: `TDS / Summary — ${monthTitle} ${targetYear}`,
-        basicAmount: differential,
-        note: '-',
-        tdsPercent: tdsRate,
-        tdsAmount: tdsAmount,
-        tdsDeducted: actualDeducted,
-        panCardNumber: ownerObj.pan,
-        aadharNo: ownerObj.aadhar,
-        aadhaarPanLinked: isLinked
+        // Authoritative TDS rate from Owner Details MongoDB for this Owner + Vehicle
+        let applicableTds = 0;
+        const ovKey = `${oKey}_${vKey}`;
+        if (ownerVehicleTdsMap[ovKey] !== undefined && ownerVehicleTdsMap[ovKey] !== null) {
+          applicableTds = ownerVehicleTdsMap[ovKey];
+        } else if (vKey && vehicleTdsMap[vKey] !== undefined && vehicleTdsMap[vKey] !== null) {
+          applicableTds = vehicleTdsMap[vKey];
+        } else if (ownerObj.tdsApplicability !== null && !isNaN(ownerObj.tdsApplicability)) {
+          applicableTds = ownerObj.tdsApplicability;
+        } else if (ownerTdsMap[oKey] !== undefined && ownerTdsMap[oKey] !== null) {
+          applicableTds = ownerTdsMap[oKey];
+        } else {
+          applicableTds = 0;
+        }
+
+        // Calculation on Basic Amount:
+        // Formula: TDS AMOUNT = BASIC AMOUNT × TDS%
+        // TDS DEDUCTED = TDS AMOUNT
+        const calcTds = (amt) => {
+          if (!amt || amt <= 0 || !applicableTds || applicableTds <= 0) return 0;
+          return Math.round((amt * (applicableTds / 100)) * 100) / 100;
+        };
+
+        const freightTds = calcTds(vFreight);
+        const incentiveTds = calcTds(vIncentive);
+
+        // Check authoritative SETTLED AMOUNT from Incentive Calculation Sheet (matching FY, Month, Owner, Vehicle)
+        let rawAct = undefined;
+        if (actualsMap) {
+          const candidates = [vKey, veh.vehicleNo, String(veh.vehicleNo || '').trim().toUpperCase()];
+          for (const k of candidates) {
+            if (k && actualsMap[k] !== undefined) {
+              rawAct = actualsMap[k];
+              break;
+            }
+          }
+          if (rawAct === undefined) {
+            for (const [k, v] of Object.entries(actualsMap)) {
+              if (normVeh(k) === vKey) {
+                rawAct = v;
+                break;
+              }
+            }
+          }
+        }
+
+        let act = 0;
+        if (rawAct !== null && rawAct !== undefined && rawAct !== '') {
+          if (typeof rawAct === 'object' && rawAct !== null) {
+            if (rawAct.settled !== undefined) {
+              act = num(rawAct.settled);
+            } else if (rawAct.actual !== undefined) {
+              act = num(rawAct.actual);
+            } else {
+              act = (num(rawAct.nvl) || 0) + (num(rawAct.nvcl) || 0) + (num(rawAct.w10) || 0) + (num(rawAct.w6) || 0);
+            }
+          } else {
+            act = num(rawAct);
+          }
+        }
+
+        // Settled Amount in Incentive Calculation Sheet:
+        // When actual is entered (act > 0): Settled Amount = act > vIncentive ? vIncentive : act
+        // When actual is 0 or not entered: Settled Amount = 0
+        let settledAmount = 0;
+        if (act > 0) {
+          settledAmount = (vIncentive > 0 && act > vIncentive) ? vIncentive : act;
+        } else {
+          settledAmount = 0;
+        }
+
+        // DIFFERENTIAL comes DIRECTLY from Incentive Calculation Sheet Settled Amount
+        const vDifferential = Math.round(settledAmount * 100) / 100;
+        const diffTds = calcTds(vDifferential);
+
+        // ROW 1 → FREIGHT / GROSS FREIGHT
+        entries.push({
+          slNo: slNo++,
+          vehicleIndexRow: 1,
+          isFirstOfVehicle: true,
+          isLastOfVehicle: false,
+          isFirstVehicleOfOwner: vIdx === 0,
+          isLastVehicleOfOwner: vIdx === vehicles.length - 1,
+          name: ownerObj.name,
+          vehicleNo: veh.vehicleNo || '-',
+          wheel: veh.wheel || '-',
+          billNo: '-',
+          billDate: '-',
+          billType: 'FREIGHT / GROSS FREIGHT',
+          basicAmount: vFreight,
+          note: 'AUTO UPDATED',
+          autoStatus: 'AUTO UPDATED',
+          sourceModule: 'Party Payment Details',
+          tdsPercent: applicableTds,
+          tdsAmount: freightTds,
+          tdsDeducted: freightTds,
+          panCardNumber: ownerObj.pan,
+          aadharNo: ownerObj.aadhar,
+          aadhaarPanLinked: isLinked
+        });
+
+        // ROW 2 → TOTAL INCENTIVE
+        entries.push({
+          slNo: slNo++,
+          vehicleIndexRow: 2,
+          isFirstOfVehicle: false,
+          isLastOfVehicle: false,
+          isFirstVehicleOfOwner: vIdx === 0,
+          isLastVehicleOfOwner: vIdx === vehicles.length - 1,
+          name: ownerObj.name,
+          vehicleNo: veh.vehicleNo || '-',
+          wheel: veh.wheel || '-',
+          billNo: '-',
+          billDate: '-',
+          billType: 'TOTAL INCENTIVE',
+          basicAmount: vIncentive,
+          note: 'AUTO UPDATED',
+          autoStatus: 'AUTO UPDATED',
+          sourceModule: 'Incentive Calculation Sheet',
+          tdsPercent: applicableTds,
+          tdsAmount: incentiveTds,
+          tdsDeducted: incentiveTds,
+          panCardNumber: ownerObj.pan,
+          aadharNo: ownerObj.aadhar,
+          aadhaarPanLinked: isLinked
+        });
+
+        // ROW 3 → DIFFERENTIAL (from Incentive Calculation Sheet Settled Amount)
+        entries.push({
+          slNo: slNo++,
+          vehicleIndexRow: 3,
+          isFirstOfVehicle: false,
+          isLastOfVehicle: true,
+          isFirstVehicleOfOwner: vIdx === 0,
+          isLastVehicleOfOwner: vIdx === vehicles.length - 1,
+          name: ownerObj.name,
+          vehicleNo: veh.vehicleNo || '-',
+          wheel: veh.wheel || '-',
+          billNo: '-',
+          billDate: '-',
+          billType: 'DIFFERENTIAL',
+          basicAmount: vDifferential,
+          note: 'AUTO UPDATED',
+          autoStatus: 'AUTO UPDATED',
+          sourceModule: 'Incentive Calculation Sheet (Settled Amount)',
+          tdsPercent: applicableTds,
+          tdsAmount: diffTds,
+          tdsDeducted: diffTds,
+          panCardNumber: ownerObj.pan,
+          aadharNo: ownerObj.aadhar,
+          aadhaarPanLinked: isLinked
+        });
       });
     });
 
@@ -357,8 +613,13 @@ router.get('/party-tds', async (req, res) => {
       success: true,
       month: targetMonth,
       year: targetYear,
+      reportMonth: targetMonth,
+      reportYear: targetYear,
+      sourceMonth,
+      sourceYear,
       monthTitle,
       uniqueOwnerCount: uniqueOwners.length,
+      totalVehicles: totalVehiclesCount,
       count: entries.length,
       entries
     });

@@ -127,6 +127,16 @@ export default function GSTPortalRegister({ onBack }) {
     return entries.filter(e => (!e.type || e.type === 'b2b') && e.status === 'DONE');
   }, [entries]);
 
+  const totalB2BDoneInputted = useMemo(() => {
+    let cgst = 0, sgst = 0, cess = 0;
+    doneB2BRows.forEach(r => {
+      cgst += parseFloat(String(r['CGST'] || 0).replace(/,/g, '')) || 0;
+      sgst += parseFloat(String(r['SGST'] || 0).replace(/,/g, '')) || 0;
+      cess += parseFloat(String(r['Cess'] ?? r['CESS'] ?? r.Cess ?? r.cess ?? 0).replace(/,/g, '')) || 0;
+    });
+    return cgst + sgst + cess;
+  }, [doneB2BRows]);
+
   const allSelected = useMemo(() => {
     if (activeTab === 1) {
       return activeB2BRows.length > 0 && activeB2BRows.every(r => selectedIds.has(r._id));
@@ -253,15 +263,18 @@ export default function GSTPortalRegister({ onBack }) {
   }, [sortedDoneRows, doneSearchTerm]);
 
   const doneTotals = useMemo(() => {
-    let invVal = 0, taxVal = 0, cgst = 0, sgst = 0, igst = 0;
+    let invVal = 0, taxVal = 0, cgst = 0, sgst = 0, igst = 0, cess = 0;
     filteredDoneRows.forEach(r => {
-      invVal += parseFloat(r['Invoice Value'] || 0) || 0;
-      taxVal += parseFloat(r['Taxable Value'] || 0) || 0;
-      cgst += parseFloat(r['CGST'] || 0) || 0;
-      sgst += parseFloat(r['SGST'] || 0) || 0;
-      igst += parseFloat(r['Integrated Tax'] || 0) || 0;
+      invVal += parseFloat(String(r['Invoice Value'] || 0).replace(/,/g, '')) || 0;
+      taxVal += parseFloat(String(r['Taxable Value'] || 0).replace(/,/g, '')) || 0;
+      cgst += parseFloat(String(r['CGST'] || 0).replace(/,/g, '')) || 0;
+      sgst += parseFloat(String(r['SGST'] || 0).replace(/,/g, '')) || 0;
+      igst += parseFloat(String(r['Integrated Tax'] || 0).replace(/,/g, '')) || 0;
+      cess += parseFloat(String(r['Cess'] ?? r['CESS'] ?? r.Cess ?? r.cess ?? 0).replace(/,/g, '')) || 0;
     });
-    return { invVal, taxVal, cgst, sgst, igst, totalTax: cgst + sgst + igst };
+    const totalTax = cgst + sgst + igst;
+    const inputted = cgst + sgst + cess;
+    return { invVal, taxVal, cgst, sgst, igst, cess, totalTax, inputted };
   }, [filteredDoneRows]);
 
   const handleExportDone = () => {
@@ -1056,9 +1069,7 @@ export default function GSTPortalRegister({ onBack }) {
     }
   });
 
-  const typedInputVal = parseFloat(tempInputReceived);
-  const safeInputReceived = (isNaN(typedInputVal) || typedInputVal < 0) ? 0 : typedInputVal;
-  const gstLiabilitiesPayable = Math.max(0, (totals['GST(18%)'] || 0) - safeInputReceived);
+  const gstLiabilitiesPayable = Math.max(0, (totals['GST(18%)'] || 0) - totalB2BDoneInputted);
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
@@ -1462,38 +1473,12 @@ export default function GSTPortalRegister({ onBack }) {
                   INPUT RECEIVED
                 </td>
                 <td style={{
-                  padding: '6px 10px', textAlign: 'left',
+                  padding: '10px 10px', textAlign: 'left',
                   borderTop: '2px solid #e2e8f0', background: '#fff',
-                  borderRight: '1px solid #e2e8f0'
+                  borderRight: '1px solid #e2e8f0',
+                  fontSize: '13px', fontWeight: 800, color: '#4f46e5'
                 }}>
-                  <input
-                    type="number"
-                    value={tempInputReceived}
-                    onChange={e => {
-                      const val = e.target.value;
-                      if (val === '') {
-                        setTempInputReceived('');
-                        return;
-                      }
-                      const parsed = parseFloat(val);
-                      if (isNaN(parsed)) return;
-                      if (parsed < 0) {
-                        setTempInputReceived('0');
-                        return;
-                      }
-                      setTempInputReceived(val);
-                    }}
-                    placeholder="Enter value"
-                    style={{
-                      width: '100%', border: '1px solid #cbd5e1', padding: '6px 10px',
-                      outline: 'none', background: '#fff', fontWeight: 800,
-                      textAlign: 'left', fontSize: '13px', borderRadius: '6px',
-                      color: parseFloat(tempInputReceived) < 0 ? '#dc2626' : '#0f172a',
-                      transition: 'border-color 0.2s',
-                    }}
-                    onFocus={e => e.target.style.borderColor = '#0ea5e9'}
-                    onBlur={e => e.target.style.borderColor = '#cbd5e1'}
-                  />
+                  ₹ {totalB2BDoneInputted.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 <td style={{ borderTop: '2px solid #e2e8f0' }}></td>
               </tr>
@@ -1511,7 +1496,7 @@ export default function GSTPortalRegister({ onBack }) {
                   borderRight: '1px solid #e2e8f0', fontSize: '15px',
                   fontWeight: 900, textShadow: '0 1px 2px rgba(0,0,0,0.05)'
                 }}>
-                  ₹ {gstLiabilitiesPayable.toLocaleString('en-IN')}
+                  ₹ {gstLiabilitiesPayable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 <td style={{ borderTop: '1px solid #bae6fd' }}></td>
               </tr>
@@ -1890,6 +1875,15 @@ export default function GSTPortalRegister({ onBack }) {
             </Typography>
             <Typography sx={{ fontSize: '13px', fontWeight: 800, color: '#b45309' }}>
               ₹{doneTotals.totalTax.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Typography>
+          </Box>
+          <Box sx={{ height: 24, width: 1, bgcolor: '#cbd5e1' }} />
+          <Box>
+            <Typography sx={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
+              INPUTTED
+            </Typography>
+            <Typography sx={{ fontSize: '13px', fontWeight: 800, color: '#4f46e5' }}>
+              ₹{doneTotals.inputted.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </Typography>
           </Box>
         </Box>

@@ -2,37 +2,86 @@ const mongoose = require('mongoose');
 const FinancialYearRow = require('../models/FinancialYearRow');
 const FinancialYearPayment = require('../models/FinancialYearPayment');
 
-function parseDate(val) {
-  if (!val) return null;
-  if (val instanceof Date) return isNaN(val) ? null : val;
+function parseCalendarDate(val) {
+  if (!val && val !== 0) return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    return {
+      year: val.getUTCFullYear(),
+      month: val.getUTCMonth() + 1,
+      day: val.getUTCDate()
+    };
+  }
 
   const rawStr = String(val).trim();
-  const str = rawStr.split('T')[0].split(' ')[0].trim();
+  if (!rawStr) return null;
+  const str = rawStr.replace(/\s+\d{1,2}:\d{2}(:\d{2})?.*$/, '').replace(/T\d{2}:\d{2}.*$/, '').trim();
 
-  // ── Detect DD-MM-YYYY or DD/MM/YYYY (Indian format) — MUST check first ──
+  // Excel serial number (numeric or string)
+  if (/^\d{5}(\.\d+)?$/.test(str) || (typeof val === 'number' && val >= 1000 && val <= 100000)) {
+    const excelDays = typeof val === 'number' ? val : parseFloat(str);
+    const msPerDay = 86400 * 1000;
+    const epochMs = Date.UTC(1899, 11, 30);
+    const date = new Date(epochMs + Math.round(excelDays * msPerDay));
+    return {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate()
+    };
+  }
+
+  // Detect DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY, DD-MM-YY, DD/MM/YY, DD.MM.YY (Indian format)
   const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
   if (ddmmyyyy) {
     let d = parseInt(ddmmyyyy[1], 10), m = parseInt(ddmmyyyy[2], 10), y = parseInt(ddmmyyyy[3], 10);
     if (y < 100) y += 2000;
     if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
-      return new Date(y, m - 1, d);
+      return { year: y, month: m, day: d };
     }
   }
 
-  // ── Detect YYYY-MM-DD or YYYY/MM/DD (ISO format) ──
+  // Detect YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD (ISO format)
   const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
   if (yyyymmdd) {
     let y = parseInt(yyyymmdd[1], 10), m = parseInt(yyyymmdd[2], 10), d = parseInt(yyyymmdd[3], 10);
     if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
-      return new Date(y, m - 1, d);
+      return { year: y, month: m, day: d };
     }
   }
 
-  // ── Try ISO / standard JS parsing ──
-  const iso = new Date(rawStr);
-  if (!isNaN(iso.getTime())) return iso;
+  // Detect DD-MMM-YYYY or DD MMM YYYY (e.g., 21-Sep-2026, 21-Sep-26)
+  const ddmmmyyyy = str.match(/^(\d{1,2})[\/\-\.\s]([A-Za-z]+)[\/\-\.\s](\d{2,4})$/);
+  if (ddmmmyyyy) {
+    const d = parseInt(ddmmmyyyy[1], 10);
+    const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const mIdx = monthNames.indexOf(ddmmmyyyy[2].toLowerCase().slice(0, 3));
+    let y = parseInt(ddmmmyyyy[3], 10);
+    if (y < 100) y += 2000;
+    if (mIdx >= 0 && d >= 1 && d <= 31) {
+      return { year: y, month: mIdx + 1, day: d };
+    }
+  }
 
   return null;
+}
+
+function parseDate(val) {
+  const cal = parseCalendarDate(val);
+  if (cal) {
+    return new Date(cal.year, cal.month - 1, cal.day);
+  }
+  return null;
+}
+
+function formatCalendarDate(val, format = 'DD/MM/YYYY') {
+  const cal = parseCalendarDate(val);
+  if (!cal) return String(val || '').trim();
+  const d = String(cal.day).padStart(2, '0');
+  const m = String(cal.month).padStart(2, '0');
+  const y = String(cal.year);
+  if (format === 'YYYY-MM-DD') return `${y}-${m}-${d}`;
+  if (format === 'DD-MM-YYYY') return `${d}-${m}-${y}`;
+  return `${d}/${m}/${y}`;
 }
 
 const MONTH_NAMES = [
@@ -329,6 +378,8 @@ async function getBillRegisterData({ fy } = {}) {
 module.exports = {
   getBillRegisterData,
   parseDate,
+  parseCalendarDate,
+  formatCalendarDate,
   normalizeSite,
   MONTH_NAMES
 };

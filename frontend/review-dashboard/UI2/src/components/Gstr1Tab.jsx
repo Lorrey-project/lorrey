@@ -38,18 +38,35 @@ const getBillSubmissionFromType = (billType) => {
 
 const parseInvoiceDate = (dateStr) => {
   if (!dateStr) return null;
-  // Check format: YYYY-MM-DD
-  let parts = String(dateStr).split('-');
-  if (parts.length === 3 && parts[0].length === 4) {
-    return new Date(parts[0], parts[1] - 1, parts[2]);
-  }
-  // Check format: DD.MM.YYYY or DD-MM-YYYY
-  parts = String(dateStr).split(/[.-]/);
-  if (parts.length === 3 && parts[2].length === 4) {
-    return new Date(parts[2], parts[1] - 1, parts[0]);
+  if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? null : dateStr;
+
+  const rawStr = String(dateStr).trim();
+  const str = rawStr.replace(/\s+\d{1,2}:\d{2}(:\d{2})?.*$/, '').replace(/T\d{2}:\d{2}.*$/, '').trim();
+
+  // Check format: DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY, DD-MM-YY, DD/MM/YY, DD.MM.YY
+  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (ddmmyyyy) {
+    let d = parseInt(ddmmyyyy[1], 10);
+    let m = parseInt(ddmmyyyy[2], 10);
+    let y = parseInt(ddmmyyyy[3], 10);
+    if (y < 100) y += 2000;
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d);
+    }
   }
 
-  const d = new Date(dateStr);
+  // Check format: YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+  const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  if (yyyymmdd) {
+    let y = parseInt(yyyymmdd[1], 10);
+    let m = parseInt(yyyymmdd[2], 10);
+    let d = parseInt(yyyymmdd[3], 10);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d);
+    }
+  }
+
+  const d = new Date(str);
   return isNaN(d.getTime()) ? null : d;
 };
 

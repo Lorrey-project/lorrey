@@ -11,44 +11,11 @@ const billPdfUpload = require('../middleware/billPdfUpload');
 const multer = require('multer');
 const memoryPdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const { parsePdfBillRegister } = require('../utils/pdfBillRegisterParser');
-const { getBillRegisterData } = require('../utils/billRegisterHelper');
+const { getBillRegisterData, parseDate, parseCalendarDate, formatCalendarDate } = require('../utils/billRegisterHelper');
 
 function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
 }
-function parseDate(val) {
-  if (!val) return null;
-  if (val instanceof Date) return isNaN(val) ? null : val;
-
-  const rawStr = String(val).trim();
-  const str = rawStr.split('T')[0].split(' ')[0].trim();
-
-  // ── Detect DD-MM-YYYY or DD/MM/YYYY (Indian format) — MUST check first ──
-  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
-  if (ddmmyyyy) {
-    let d = parseInt(ddmmyyyy[1], 10), m = parseInt(ddmmyyyy[2], 10), y = parseInt(ddmmyyyy[3], 10);
-    if (y < 100) y += 2000;
-    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
-      return new Date(y, m - 1, d);
-    }
-  }
-
-  // ── Detect YYYY-MM-DD or YYYY/MM/DD (ISO format) ──
-  const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
-  if (yyyymmdd) {
-    let y = parseInt(yyyymmdd[1], 10), m = parseInt(yyyymmdd[2], 10), d = parseInt(yyyymmdd[3], 10);
-    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
-      return new Date(y, m - 1, d);
-    }
-  }
-
-  // ── Try ISO / standard JS parsing ──
-  const iso = new Date(rawStr);
-  if (!isNaN(iso.getTime())) return iso;
-
-  return null;
-}
-
 
 function getMonthIndexFromDate(dateStr) {
   const d = parseDate(dateStr);
@@ -114,22 +81,12 @@ router.post('/validate-deduction', async (req, res) => {
 
       const dbTrips = await cementCol.find(tripsQuery).toArray();
 
-      const parseCustomDate = (dStr) => {
-        if (!dStr) return 0;
-        const parts = String(dStr).split(/[-/\\.]/);
-        if (parts.length >= 3) {
-          const [day, m, y] = parts;
-          let yr = parseInt(y);
-          if (yr < 100) yr += 2000;
-          return new Date(yr, parseInt(m) - 1, parseInt(day)).getTime();
-        }
-        return 0;
-      };
-
       dbTrips.sort((a, b) => {
-        const dateA = parseCustomDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || 'Unknown');
-        const dateB = parseCustomDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || 'Unknown');
-        return dateA - dateB;
+        const dA = parseDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || '');
+        const dB = parseDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || '');
+        const tA = dA ? dA.getTime() : 0;
+        const tB = dB ? dB.getTime() : 0;
+        return tA - tB;
       });
 
       let dbTrip = null;
@@ -465,22 +422,12 @@ router.post('/save-group', async (req, res) => {
 
               const dbTrips = await cementCol.find(tripsQuery).toArray();
 
-              const parseCustomDate = (dStr) => {
-                if (!dStr) return 0;
-                const parts = String(dStr).split(/[-/\\.]/);
-                if (parts.length >= 3) {
-                  const [day, m, year] = parts;
-                  let y = parseInt(year);
-                  if (y < 100) y += 2000;
-                  return new Date(y, parseInt(m) - 1, parseInt(day)).getTime();
-                }
-                return 0;
-              };
-
               dbTrips.sort((a, b) => {
-                const dateA = parseCustomDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || 'Unknown');
-                const dateB = parseCustomDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || 'Unknown');
-                return dateA - dateB;
+                const dA = parseDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || '');
+                const dB = parseDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || '');
+                const tA = dA ? dA.getTime() : 0;
+                const tB = dB ? dB.getTime() : 0;
+                return tA - tB;
               });
 
               let dbTrip = null;
@@ -665,11 +612,12 @@ router.post('/import-excel', async (req, res) => {
       }
 
       const upperKey = invNo.toUpperCase();
+      const normalizedInvDate = r.invoiceDate ? formatCalendarDate(r.invoiceDate, 'DD/MM/YYYY') : '';
 
       const updateDoc = {
         billNo: invNo,
         billType: (r.billType || 'FREIGHT').toUpperCase(),
-        editedInvoiceDate: r.invoiceDate || '',
+        editedInvoiceDate: normalizedInvDate,
         editedInvoiceNumber: r.displayInvoiceNumber || invNo,
         editedMonth: r.month || '',
         editedSite: r.site || 'NVCL',
@@ -894,22 +842,12 @@ router.post('/save-row', async (req, res) => {
 
           const dbTrips = await cementCol.find(tripsQuery).toArray();
 
-          const parseCustomDate = (dStr) => {
-            if (!dStr) return 0;
-            const parts = String(dStr).split(/[-/\\.]/);
-            if (parts.length >= 3) {
-              const [day, m, year] = parts;
-              let y = parseInt(year);
-              if (y < 100) y += 2000;
-              return new Date(y, parseInt(m) - 1, parseInt(day)).getTime();
-            }
-            return 0;
-          };
-
           dbTrips.sort((a, b) => {
-            const dateA = parseCustomDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || 'Unknown');
-            const dateB = parseCustomDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || 'Unknown');
-            return dateA - dateB;
+            const dA = parseDate(a['LOADING DT'] || a['LOADING DATE'] || a['BILL DATE'] || '');
+            const dB = parseDate(b['LOADING DT'] || b['LOADING DATE'] || b['BILL DATE'] || '');
+            const tA = dA ? dA.getTime() : 0;
+            const tB = dB ? dB.getTime() : 0;
+            return tA - tB;
           });
 
           let dbTrip = null;
@@ -1423,24 +1361,6 @@ router.get('/trips', async (req, res) => {
 
     const trips = await getCementCol().find(match).toArray();
 
-    const parseCustomDate = (dStr) => {
-      if (!dStr) return 0;
-      const parts = String(dStr).split(/[-/\\.]/);
-      if (parts.length >= 3) {
-        let day = parseInt(parts[0], 10);
-        let month = parseInt(parts[1], 10);
-        let year = parseInt(parts[2], 10);
-        if (parts[0].length === 4) {
-          year = parseInt(parts[0], 10);
-          month = parseInt(parts[1], 10);
-          day = parseInt(parts[2], 10);
-        }
-        if (year < 100) year += 2000;
-        return new Date(year, month - 1, day).getTime();
-      }
-      return 0;
-    };
-
     const formatted = trips.map(t => {
       const rawDate = t['LOADING DT'] || t['LOADING DATE'] || t['BILL DATE'] || '';
       let tripMonthName = '';
@@ -1449,10 +1369,9 @@ router.get('/trips', async (req, res) => {
         if (mNum >= 1 && mNum <= 12) tripMonthName = MONTH_NAMES_FULL[mNum - 1];
       }
       if (!tripMonthName && rawDate) {
-        const parts = String(rawDate).split(/[-/\\.]/);
-        if (parts.length >= 3) {
-          let mNum = parseInt(parts[1], 10);
-          if (parts[0].length === 4) mNum = parseInt(parts[1], 10);
+        const d = parseDate(rawDate);
+        if (d) {
+          const mNum = d.getMonth() + 1;
           if (mNum >= 1 && mNum <= 12) tripMonthName = MONTH_NAMES_FULL[mNum - 1];
         }
       }
@@ -1473,7 +1392,13 @@ router.get('/trips', async (req, res) => {
       };
     });
 
-    formatted.sort((a, b) => parseCustomDate(a.loadingDate) - parseCustomDate(b.loadingDate));
+    formatted.sort((a, b) => {
+      const dA = parseDate(a.loadingDate);
+      const dB = parseDate(b.loadingDate);
+      const tA = dA ? dA.getTime() : 0;
+      const tB = dB ? dB.getTime() : 0;
+      return tA - tB;
+    });
 
     const finalFormatted = formatted.map((t, idx) => ({ ...t, tripNumber: idx + 1 }));
     res.json(finalFormatted);

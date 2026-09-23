@@ -377,6 +377,17 @@ router.post("/incentive-state", auth, async (req, res) => {
       }
     };
     await col.updateOne(query, update, { upsert: true });
+
+    try {
+      const io = getIO();
+      if (io) {
+        io.emit("incentiveStateUpdates", { year: parseInt(year), month: parseInt(month) });
+        io.emit("cementUpdates");
+      }
+    } catch (socketErr) {
+      console.warn("Socket broadcast error in incentive-state:", socketErr.message);
+    }
+
     res.json({ success: true, message: "Incentive state saved successfully." });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -409,6 +420,17 @@ router.delete("/incentive-state", auth, async (req, res) => {
     const db = mongoose.connection.useDb("cement_register");
     const col = db.collection("incentive_states");
     await col.deleteOne({ year, month });
+
+    try {
+      const io = getIO();
+      if (io) {
+        io.emit("incentiveStateUpdates", { year, month });
+        io.emit("cementUpdates");
+      }
+    } catch (socketErr) {
+      console.warn("Socket broadcast error in delete incentive-state:", socketErr.message);
+    }
+
     res.json({ success: true, message: "Incentive state deleted successfully." });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

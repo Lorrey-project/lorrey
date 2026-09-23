@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box, Typography, Button, IconButton, Select, MenuItem, TextField,
-  CircularProgress, Paper, Tabs, Tab
+  CircularProgress, Paper, Tabs, Tab, Chip
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -39,9 +39,9 @@ export default function TdsReportsPage({ onBack }) {
   const [billingSubTab, setBillingSubTab] = useState('NVL'); // 'NVL' | 'NVCL'
 
   // ── Controls State ────────────────────────────────────────────────────────
-  // Party TDS Month & FY:
-  const [partyMonth, setPartyMonth] = useState(now.getMonth() + 1); // 1-12 (defaults to current month: September)
-  const [partyFy, setPartyFy] = useState(`${currentFyStart}-${currentFyStart + 1}`); // e.g. 2026-2027
+  // Party TDS Month & FY (Strictly Month-Wise, Defaults to current calendar month & FY):
+  const [partyMonth, setPartyMonth] = useState(now.getMonth() + 1);
+  const [partyFy, setPartyFy] = useState(`${currentFyStart}-${currentFyStart + 1}`);
 
   // Billing TDS Month & FY:
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1); // 1-12 or 'ALL'
@@ -50,6 +50,7 @@ export default function TdsReportsPage({ onBack }) {
 
   const [records, setRecords] = useState([]);
   const [uniqueOwnerCount, setUniqueOwnerCount] = useState(0);
+  const [totalVehicles, setTotalVehicles] = useState(0);
   const [loading, setLoading] = useState(false);
 
   const yearOptions = useMemo(() => {
@@ -85,7 +86,7 @@ export default function TdsReportsPage({ onBack }) {
     return `${monthName} ${calYear}`;
   }, [partyMonth, partyFy]);
 
-  // Fetch Party TDS Report records from API (4 rows per unique owner for selected month)
+  // Fetch Party TDS Report records from API (3 rows per registered vehicle)
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -106,6 +107,7 @@ export default function TdsReportsPage({ onBack }) {
       if (res.data?.success) {
         setRecords(res.data.entries || []);
         setUniqueOwnerCount(res.data.uniqueOwnerCount || 0);
+        setTotalVehicles(res.data.totalVehicles || 0);
       }
     } catch (err) {
       console.error('[TdsReports] Fetch error:', err);
@@ -153,7 +155,7 @@ export default function TdsReportsPage({ onBack }) {
     }
   }, [mainTab, partyMonth, partyFy, billingSubTab, selMonth, selYear, searchTerm]);
 
-  // ── Live WebSocket connection to automatically reflect Bill Register updates ──
+  // ── Live WebSocket connection to automatically reflect updates ──
   useEffect(() => {
     let socket;
     try {
@@ -168,6 +170,9 @@ export default function TdsReportsPage({ onBack }) {
 
       socket.on('fyDetailsUpdates', handleLiveUpdate);
       socket.on('cementUpdates', handleLiveUpdate);
+      socket.on('partyPaymentUpdates', handleLiveUpdate);
+      socket.on('truckContactsUpdates', handleLiveUpdate);
+      socket.on('incentiveStateUpdates', handleLiveUpdate);
       socket.on('billRegisterUpdated', handleLiveUpdate);
     } catch (e) {
       console.error('[TdsReports] Socket connection error:', e);
@@ -177,6 +182,9 @@ export default function TdsReportsPage({ onBack }) {
       if (socket) {
         socket.off('fyDetailsUpdates');
         socket.off('cementUpdates');
+        socket.off('partyPaymentUpdates');
+        socket.off('truckContactsUpdates');
+        socket.off('incentiveStateUpdates');
         socket.off('billRegisterUpdated');
         socket.disconnect();
       }
@@ -190,6 +198,8 @@ export default function TdsReportsPage({ onBack }) {
       const term = searchTerm.toLowerCase().trim();
       result = result.filter(r =>
         (r.name || '').toLowerCase().includes(term) ||
+        (r.vehicleNo || '').toLowerCase().includes(term) ||
+        (r.wheel || '').toLowerCase().includes(term) ||
         (r.panCardNumber || '').toLowerCase().includes(term) ||
         (r.aadharNo || '').toLowerCase().includes(term)
       );
@@ -215,6 +225,8 @@ export default function TdsReportsPage({ onBack }) {
     const exportData = filteredRecords.map(r => ({
       'SL NO': r.slNo,
       'Name': r.name,
+      'Vehicle Number': r.vehicleNo || '-',
+      'Wheel': r.wheel || '-',
       'Bill No.': r.billNo,
       'Bill date': r.billDate,
       'Bill type': r.billType,
@@ -511,7 +523,7 @@ export default function TdsReportsPage({ onBack }) {
                 PARTY TDS REPORT — {partyMonthHeaderText}
               </Typography>
               <Typography variant="subtitle1" fontWeight="700" sx={{ color: '#475569', mt: 0.5, fontStyle: 'italic' }}>
-                {uniqueOwnerCount} UNIQUE OWNERS — 4 ROWS PER OWNER ({filteredRecords.length} TOTAL ROWS)
+                {uniqueOwnerCount} UNIQUE OWNERS — {totalVehicles || Math.round(filteredRecords.length / 3)} VEHICLES ({filteredRecords.length} TOTAL ROWS)
               </Typography>
             </Box>
 
@@ -527,109 +539,159 @@ export default function TdsReportsPage({ onBack }) {
                 <thead>
                   <tr>
                     <th style={{ ...thStyle, width: '55px' }}>SL NO</th>
-                    <th style={{ ...thStyle, textAlign: 'left', minWidth: '180px' }}>Name</th>
-                    <th style={{ ...thStyle, textAlign: 'left', minWidth: '140px' }}>Bill No.</th>
-                    <th style={{ ...thStyle, minWidth: '110px' }}>Bill date</th>
-                    <th style={{ ...thStyle, minWidth: '100px' }}>Bill type</th>
-                    <th style={{ ...thStyle, textAlign: 'right', minWidth: '130px' }}>Basic Amount</th>
-                    <th style={{ ...thStyle, minWidth: '120px' }}>Note</th>
-                    <th style={{ ...thStyle, width: '80px' }}>TDS (%)</th>
-                    <th style={{ ...thStyle, textAlign: 'right', minWidth: '130px' }}>TDS Amount</th>
-                    <th style={{ ...thStyle, textAlign: 'right', minWidth: '130px' }}>TDS Deducted</th>
-                    <th style={{ ...thStyle, minWidth: '150px' }}>PAN CARD NUMBER</th>
-                    <th style={{ ...thStyle, minWidth: '150px' }}>AADHAR NO</th>
-                    <th style={{ ...thStyle, minWidth: '170px' }}>AADHAAR - PAN LINKED</th>
+                    <th style={{ ...thStyle, textAlign: 'left', minWidth: '160px' }}>Name</th>
+                    <th style={{ ...thStyle, minWidth: '130px' }}>Vehicle Number</th>
+                    <th style={{ ...thStyle, minWidth: '75px' }}>Wheel</th>
+                    <th style={{ ...thStyle, textAlign: 'left', minWidth: '110px' }}>Bill No.</th>
+                    <th style={{ ...thStyle, minWidth: '100px' }}>Bill date</th>
+                    <th style={{ ...thStyle, minWidth: '140px' }}>Bill type</th>
+                    <th style={{ ...thStyle, textAlign: 'right', minWidth: '120px' }}>Basic Amount</th>
+                    <th style={{ ...thStyle, minWidth: '90px' }}>Note</th>
+                    <th style={{ ...thStyle, width: '75px' }}>TDS (%)</th>
+                    <th style={{ ...thStyle, textAlign: 'right', minWidth: '120px' }}>TDS Amount</th>
+                    <th style={{ ...thStyle, textAlign: 'right', minWidth: '120px' }}>TDS Deducted</th>
+                    <th style={{ ...thStyle, minWidth: '140px' }}>PAN CARD NUMBER</th>
+                    <th style={{ ...thStyle, minWidth: '140px' }}>AADHAR NO</th>
+                    <th style={{ ...thStyle, minWidth: '150px' }}>AADHAAR - PAN LINKED</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRecords.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={13} style={{ textAlign: 'center', padding: '48px', color: '#64748b', fontWeight: 600 }}>
+                      <td colSpan={15} style={{ textAlign: 'center', padding: '48px', color: '#64748b', fontWeight: 600 }}>
                         No owners found in MongoDB Owner Details database.
                       </td>
                     </tr>
                   )}
 
-                  {filteredRecords.map((r, index) => {
-                    const ownerGroupIndex = Math.floor(index / 4);
-                    const isGroupEnd = (index + 1) % 4 === 0;
-                    const rowBg = ownerGroupIndex % 2 === 0 ? '#ffffff' : '#f8fafc';
+                  {(() => {
+                    let vehicleGroupIdx = 0;
+                    return filteredRecords.map((r, index) => {
+                      const isFirstInVeh = r.vehicleIndexRow === 1;
+                      if (isFirstInVeh) {
+                        vehicleGroupIdx++;
+                      }
+                      const rowBg = vehicleGroupIdx % 2 === 1 ? '#ffffff' : '#f8fafc';
+                      const isGroupEnd = r.isLastOfVehicle || false;
 
-                    return (
-                      <tr
-                        key={index}
-                        style={{
-                          backgroundColor: rowBg,
-                          borderBottom: isGroupEnd ? '2px solid #94a3b8' : '1px solid #e2e8f0'
-                        }}
-                      >
-                        {/* 1. SL NO (Continuous 1..N*4) */}
-                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, color: '#475569' }}>
-                          {r.slNo}
-                        </td>
+                      return (
+                        <tr
+                          key={index}
+                          style={{
+                            backgroundColor: rowBg,
+                            borderBottom: isGroupEnd ? '2px solid #94a3b8' : '1px solid #e2e8f0'
+                          }}
+                        >
+                          {/* 1. SL NO */}
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, color: '#475569' }}>
+                            {r.slNo}
+                          </td>
 
-                        {/* 2. Name (Owner Name) */}
-                        <td style={{ ...tdStyle, fontWeight: 700, color: '#0f172a' }}>
-                          {r.name}
-                        </td>
+                          {/* 2. Name (Owner Name) */}
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#0f172a' }}>
+                            {isFirstInVeh ? r.name : ''}
+                          </td>
 
-                        {/* 3. Bill No. */}
-                        <td style={{ ...tdStyle, fontWeight: 600, color: '#334155' }}>
-                          {r.billNo}
-                        </td>
+                          {/* 3. Vehicle Number */}
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#1e293b', letterSpacing: '0.5px' }}>
+                            {isFirstInVeh ? (r.vehicleNo || '-') : ''}
+                          </td>
 
-                        {/* 4. Bill date */}
-                        <td style={{ ...tdStyle, textAlign: 'center', color: '#334155' }}>
-                          {r.billDate}
-                        </td>
+                          {/* 4. Wheel */}
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#0369a1' }}>
+                            {isFirstInVeh ? (r.wheel || '-') : ''}
+                          </td>
 
-                        {/* 5. Bill type */}
-                        <td style={{ ...tdStyle, textAlign: 'center', color: '#475569', fontWeight: 600 }}>
-                          {r.billType}
-                        </td>
+                          {/* 5. Bill No. */}
+                          <td style={{ ...tdStyle, fontWeight: 600, color: '#334155' }}>
+                            {r.billNo}
+                          </td>
 
-                        {/* 6. Basic Amount */}
-                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
-                          ₹{formatAmt(r.basicAmount)}
-                        </td>
+                          {/* 6. Bill date */}
+                          <td style={{ ...tdStyle, textAlign: 'center', color: '#334155' }}>
+                            {r.billDate}
+                          </td>
 
-                        {/* 7. Note */}
-                        <td style={{ ...tdStyle, textAlign: 'center', color: '#475569', fontWeight: 600 }}>
-                          {r.note || '-'}
-                        </td>
+                          {/* 7. Bill type */}
+                          <td style={{ ...tdStyle, textAlign: 'center', color: '#475569', fontWeight: 600 }}>
+                            {r.billType}
+                          </td>
 
-                        {/* 8. TDS (%) */}
-                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>
-                          {r.tdsPercent}%
-                        </td>
+                          {/* 8. Basic Amount */}
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                            ₹{formatAmt(r.basicAmount)}
+                          </td>
 
-                        {/* 8. TDS Amount */}
-                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
-                          ₹{formatAmt(r.tdsAmount)}
-                        </td>
+                          {/* 9. Note / AUTO UPDATED Indicator */}
+                          <td style={{ ...tdStyle, textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            {r.autoStatus === 'AUTO UPDATED' || r.note === 'AUTO UPDATED' ? (
+                              <Chip
+                                label="AUTO UPDATED"
+                                size="small"
+                                sx={{
+                                  height: 20,
+                                  fontSize: '10px',
+                                  fontWeight: 800,
+                                  bgcolor: '#dcfce7',
+                                  color: '#15803d',
+                                  border: '1px solid #86efac',
+                                  letterSpacing: '0.3px'
+                                }}
+                              />
+                            ) : (r.autoStatus === 'AUTO CALCULATED' || r.note === 'AUTO CALCULATED' || r.billType === 'DIFFERENTIAL') ? (
+                              <Chip
+                                label="AUTO"
+                                size="small"
+                                sx={{
+                                  height: 20,
+                                  fontSize: '10px',
+                                  fontWeight: 800,
+                                  bgcolor: '#e0f2fe',
+                                  color: '#0369a1',
+                                  border: '1px solid #7dd3fc',
+                                  letterSpacing: '0.3px'
+                                }}
+                              />
+                            ) : (
+                              <Typography variant="body2" sx={{ fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                                {r.note || '-'}
+                              </Typography>
+                            )}
+                          </td>
 
-                        {/* 9. TDS Deducted */}
-                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: '#047857' }}>
-                          ₹{formatAmt(r.tdsDeducted)}
-                        </td>
+                          {/* 10. TDS (%) */}
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>
+                            {r.tdsPercent}%
+                          </td>
 
-                        {/* 10. PAN CARD NUMBER */}
-                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, letterSpacing: '0.5px', color: '#1e293b' }}>
-                          {r.panCardNumber}
-                        </td>
+                          {/* 11. TDS Amount */}
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
+                            ₹{formatAmt(r.tdsAmount)}
+                          </td>
 
-                        {/* 11. AADHAR NO */}
-                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#475569' }}>
-                          {r.aadharNo}
-                        </td>
+                          {/* 12. TDS Deducted */}
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: '#047857' }}>
+                            ₹{formatAmt(r.tdsDeducted)}
+                          </td>
 
-                        {/* 12. AADHAAR - PAN LINKED */}
-                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, color: (r.aadhaarPanLinked === 'YES' || r.aadhaarPanLinked === 'Yes') ? '#15803d' : '#b91c1c' }}>
-                          {r.aadhaarPanLinked}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          {/* 13. PAN CARD NUMBER */}
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, letterSpacing: '0.5px', color: '#1e293b' }}>
+                            {isFirstInVeh ? r.panCardNumber : ''}
+                          </td>
+
+                          {/* 14. AADHAR NO */}
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#475569' }}>
+                            {isFirstInVeh ? r.aadharNo : ''}
+                          </td>
+
+                          {/* 15. AADHAAR - PAN LINKED */}
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, color: (r.aadhaarPanLinked === 'YES' || r.aadhaarPanLinked === 'Yes') ? '#15803d' : '#b91c1c' }}>
+                            {isFirstInVeh ? r.aadhaarPanLinked : ''}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
                 </tbody>
               </table>
             </Box>
