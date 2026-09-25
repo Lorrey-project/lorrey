@@ -88,6 +88,272 @@ const parseDateToMs = (dStr) => {
   return isNaN(d.getTime()) ? 0 : d.getTime();
 };
 
+function parseDateToCalendar(dVal) {
+  if (!dVal) return null;
+  if (dVal instanceof Date) {
+    if (isNaN(dVal.getTime())) return null;
+    return {
+      year: dVal.getFullYear(),
+      month: dVal.getMonth() + 1,
+      day: dVal.getDate(),
+      timeMs: new Date(dVal.getFullYear(), dVal.getMonth(), dVal.getDate()).getTime()
+    };
+  }
+  const s = String(dVal).trim();
+  if (!s || s === '-' || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined') return null;
+
+  if (/^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}/.test(s)) {
+    const parts = s.split(/[\/\-\.T ]/);
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+      return { year: y, month: m, day: d, timeMs: new Date(y, m - 1, d).getTime() };
+    }
+  }
+  const parts = s.split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    let d = parseInt(parts[0], 10);
+    let m = parseInt(parts[1], 10);
+    let y = parseInt(parts[2], 10);
+    if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+      if (y < 100) y += 2000;
+      return { year: y, month: m, day: d, timeMs: new Date(y, m - 1, d).getTime() };
+    }
+  }
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    return {
+      year: parsed.getFullYear(),
+      month: parsed.getMonth() + 1,
+      day: parsed.getDate(),
+      timeMs: new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime()
+    };
+  }
+  return null;
+}
+
+// ── GET /daily-summary/pending-challans ───────────────────────────────────────
+// Live, database-driven pending challan records from Shipment Register (cement_register)
+// from start of current FY (01 April) through today. Excludes completed STAMP and NON-STAMP.
+router.get("/pending-challans", auth, async (req, res) => {
+  try {
+    const col = getCementCol();
+    const allEntries = await col.find({}).toArray();
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
+    const currentDay = now.getDate();
+
+    let startYear;
+    if (req.query.fy && /^FY\s*\d{4}-\d{2}$/i.test(req.query.fy)) {
+      startYear = parseInt(req.query.fy.replace(/\D/g, '').substring(0, 4), 10);
+    } else {
+      startYear = currentMonth < 4 ? currentYear - 1 : currentYear;
+    }
+    const endYear = startYear + 1;
+
+    const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0); // 1 April startYear
+    const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999); // 31 March endYear
+    const todayEnd = new Date(currentYear, currentMonth - 1, currentDay, 23, 59, 59, 999);
+
+    const reportEnd = todayEnd.getTime() < fyEnd.getTime() ? todayEnd : fyEnd;
+    const fyStartMs = fyStart.getTime();
+    const reportEndMs = reportEnd.getTime();
+
+    const pendingRecords = [];
+    let totalBillingAmount = 0;
+
+    for (const record of allEntries) {
+      // 1. Challan Status Rule: PENDING only when NOT STAMP and NOT NON-STAMP
+      const status = String(record["CHALLAN STATUS"] || "").toUpperCase().trim();
+      const isCompleted = status === "STAMP" || status === "NON-STAMP" || status === "NON STAMP";
+      if (isCompleted) {
+        continue;
+      }
+
+      // 2. Authoritative Loading Date from record
+      const rawDate = record["LOADING DT"] || record["LOADING DATE"] || record["BILL DATE"] || record["DATE"];
+      const dateObj = parseDateToCalendar(rawDate);
+      if (!dateObj) {
+        continue;
+      }
+
+      // 3. Date filter: Loading Date >= FY_START and Loading Date <= REPORT_END (MIN(FY_END, TODAY))
+      if (dateObj.timeMs < fyStartMs || dateObj.timeMs > reportEndMs) {
+        continue;
+      }
+
+      const bAmt = parseNum(record["Billing Amount"] ?? record["BILLING AMOUNT"] ?? record["AMOUNT"]);
+      totalBillingAmount += bAmt;
+
+      pendingRecords.push(record);
+    }
+
+    // Chronological order by Loading Date
+    pendingRecords.sort((a, b) => {
+      const dateA = parseDateToCalendar(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["DATE"])?.timeMs || 0;
+      const dateB = parseDateToCalendar(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["DATE"])?.timeMs || 0;
+      if (dateA !== dateB) return dateA - dateB;
+      const invA = String(a["INVOICE NO"] || a["INVOICE NO."] || "");
+      const invB = String(b["INVOICE NO"] || b["INVOICE NO."] || "");
+      return invA.localeCompare(invB);
+    });
+
+    res.json({
+      success: true,
+      fy: `FY ${startYear}-${String(endYear).substring(2)}`,
+      count: pendingRecords.length,
+      totalBillingAmount,
+      records: pendingRecords
+    });
+  } catch (err) {
+    console.error("[DailySummary] pending-challans error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── GET /daily-summary/alerts-ytd ───────────────────────────────────────────
+// Live database-driven Year-To-Till-Date (YTD) alerts for:
+// 1. CHALLAN STATUS PENDING
+// 2. STAMP BILLS
+// 3. NON-STAMP BILLS
+// 4. STAMP BUT NON-BILLED (Tabs: ALL, FREIGHT, UNLOADING)
+// Global Rule: LOADING DATE >= Current FY Start (01 April) AND LOADING DATE <= TODAY
+router.get("/alerts-ytd", auth, async (req, res) => {
+  try {
+    const col = getCementCol();
+    const allEntries = await col.find({}).toArray();
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
+    const currentDay = now.getDate();
+
+    let startYear;
+    if (req.query.fy && /^FY\s*\d{4}-\d{2}$/i.test(req.query.fy)) {
+      startYear = parseInt(req.query.fy.replace(/\D/g, '').substring(0, 4), 10);
+    } else {
+      startYear = currentMonth < 4 ? currentYear - 1 : currentYear;
+    }
+    const endYear = startYear + 1;
+
+    const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0); // 1 April startYear
+    const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999); // 31 March endYear
+    const todayEnd = new Date(currentYear, currentMonth - 1, currentDay, 23, 59, 59, 999);
+
+    const reportEnd = todayEnd.getTime() < fyEnd.getTime() ? todayEnd : fyEnd;
+    const fyStartMs = fyStart.getTime();
+    const reportEndMs = reportEnd.getTime();
+
+    const pendingRecords = [];
+    const stampRecords = [];
+    const nonStampRecords = [];
+    const stampNonBilledAll = [];
+    const stampNonBilledFreight = [];
+    const stampNonBilledUnloading = [];
+    const stampNonBilledTotal = [];
+
+    for (const record of allEntries) {
+      // 1. Authoritative Loading Date from record
+      const rawDate = record["LOADING DT"] || record["LOADING DATE"] || record["BILL DATE"] || record["DATE"];
+      const dateObj = parseDateToCalendar(rawDate);
+      if (!dateObj) continue;
+
+      // 2. GLOBAL YTD DATE BOUNDARY: Loading Date >= FY_START && Loading Date <= TODAY
+      if (dateObj.timeMs < fyStartMs || dateObj.timeMs > reportEndMs) {
+        continue;
+      }
+
+      const status = String(record["CHALLAN STATUS"] || "").toUpperCase().trim();
+      const isStamp = status === "STAMP";
+      const isNonStamp = status.includes("NON-STAMP") || status.includes("NON STAMP");
+
+      // 1. Pending Challan: neither STAMP nor NON-STAMP
+      if (!isStamp && !isNonStamp) {
+        pendingRecords.push(record);
+      }
+
+      // 2. STAMP Bills
+      if (isStamp) {
+        stampRecords.push(record);
+      }
+
+      // 3. NON-STAMP Bills
+      if (isNonStamp) {
+        nonStampRecords.push(record);
+      }
+
+      // 4. STAMP BUT NON-BILLED (STAMP only)
+      if (isStamp) {
+        const freightBillNo = String(record["BILL NO"] || record["BILL NUMBER"] || record["FREIGHT BILL NO"] || record["Freight Bill No"] || record.freightBillNo || "").trim();
+        const hasFreight = freightBillNo !== "" && freightBillNo !== "-" && freightBillNo.toLowerCase() !== "null" && freightBillNo.toLowerCase() !== "undefined";
+
+        const unloadingBillNo = String(record["UNLOADING BILL NO"] || record["UNLOADING BILL NUMBER"] || record["Unloading Bill No"] || record.unloadingBillNo || "").trim();
+        const hasUnloading = unloadingBillNo !== "" && unloadingBillNo !== "-" && unloadingBillNo.toLowerCase() !== "null" && unloadingBillNo.toLowerCase() !== "undefined";
+
+        // Exclude fully billed (both exist)
+        if (!hasFreight || !hasUnloading) {
+          stampNonBilledTotal.push(record);
+
+          // ALL: both missing
+          if (!hasFreight && !hasUnloading) {
+            stampNonBilledAll.push(record);
+          }
+          // FREIGHT: freight missing
+          if (!hasFreight) {
+            stampNonBilledFreight.push(record);
+          }
+          // UNLOADING: unloading missing
+          if (!hasUnloading) {
+            stampNonBilledUnloading.push(record);
+          }
+        }
+      }
+    }
+
+    const sortFn = (a, b) => {
+      const dateA = parseDateToCalendar(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["DATE"])?.timeMs || 0;
+      const dateB = parseDateToCalendar(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["DATE"])?.timeMs || 0;
+      if (dateA !== dateB) return dateA - dateB;
+      const invA = String(a["INVOICE NO"] || a["INVOICE NO."] || "");
+      const invB = String(b["INVOICE NO"] || b["INVOICE NO."] || "");
+      return invA.localeCompare(invB);
+    };
+
+    res.json({
+      success: true,
+      fy: `FY ${startYear}-${String(endYear).substring(2)}`,
+      ytdRange: {
+        start: `01-04-${startYear}`,
+        end: `${String(currentDay).padStart(2, '0')}-${String(currentMonth).padStart(2, '0')}-${currentYear}`
+      },
+      pending: {
+        count: pendingRecords.length,
+        records: pendingRecords.sort(sortFn)
+      },
+      stamp: {
+        count: stampRecords.length,
+        records: stampRecords.sort(sortFn)
+      },
+      nonStamp: {
+        count: nonStampRecords.length,
+        records: nonStampRecords.sort(sortFn)
+      },
+      stampNonBilled: {
+        count: stampNonBilledTotal.length,
+        all: stampNonBilledAll.sort(sortFn),
+        freight: stampNonBilledFreight.sort(sortFn),
+        unloading: stampNonBilledUnloading.sort(sortFn)
+      }
+    });
+  } catch (err) {
+    console.error("[DailySummary] alerts-ytd error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.get("/data", auth, async (req, res) => {
   try {
     const { date, fy, month } = req.query;
