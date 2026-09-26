@@ -35,6 +35,7 @@ import AiExtraExpense from './pages/AiExtraExpense';
 import TdsReportsPage from './pages/TdsReportsPage';
 import OthersCreditor from './pages/OthersCreditor';
 import PrintingStationaryRegister from './pages/PrintingStationaryRegister';
+import PaymentReceiveHistory from './pages/PaymentReceiveHistory';
 import VantaTrunkBackground from './components/VantaTrunkBackground';
 
 const theme = createTheme({
@@ -263,6 +264,10 @@ function AppContent() {
       return <AccountDetails onBack={() => handleViewChange('dashboard')} onOpenPrintingStationary={() => handleViewChange('printingStationary')} />;
     }
 
+    if (currentView === 'paymentReceiveHistory') {
+      return <PaymentReceiveHistory onBack={() => handleViewChange('dashboard')} />;
+    }
+
     if (currentView === 'accountApprovals') {
       return <AccountApprovalsPage onBack={() => handleViewChange('dashboard')} />;
     }
@@ -410,6 +415,7 @@ function AppContent() {
           onOpenTdsReports={() => handleViewChange('tdsReports')}
           onOpenOthersCreditor={(tabIdx = 0) => { setOthersCreditorInitialTab(tabIdx); handleViewChange('othersCreditor'); }}
           onOpenPrintingStationary={() => handleViewChange('printingStationary')}
+          onOpenPaymentReceiveHistory={() => handleViewChange('paymentReceiveHistory')}
         />
       );
     }

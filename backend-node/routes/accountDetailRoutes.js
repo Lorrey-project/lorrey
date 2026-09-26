@@ -1725,49 +1725,213 @@ router.post('/sync-main-cash', async (req, res) => {
   }
 });
 
-// ── GET /api/account-details/vehicle-validities/:vehicleNo ──
-router.get('/vehicle-validities/:vehicleNo', async (req, res) => {
+// ── GET /api/account-details/payment-receive-history ─────────────────────────
+// Complete, live database-driven history of all Payment Received transactions from Bank Book
+router.get('/payment-receive-history', async (req, res) => {
   try {
-    const truckClean = (req.params.vehicleNo || '').trim().toUpperCase();
-    const vehicleRegex = makeSpaceAgnosticRegex(truckClean);
-    const ownerCol = mongoose.connection.useDb('invoice_system').collection('owner details');
-    const truckCol = mongoose.connection.useDb('invoice_system').collection('Truck Contact Number');
+    const { fy, month, invoice, search } = req.query;
 
-    const contact = (await ownerCol.findOne({
-      $or: [
-        { "Truck No": { $regex: vehicleRegex } },
-        { "Truck No ": { $regex: vehicleRegex } },
-        { truck_no: { $regex: vehicleRegex } }
-      ]
-    })) || (await truckCol.findOne({
-      $or: [
-        { truck_no: { $regex: vehicleRegex } },
-        { "Truck No": { $regex: vehicleRegex } },
-        { "Truck No ": { $regex: vehicleRegex } }
-      ]
-    }));
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
+    const currentDay = now.getDate();
 
-    if (!contact) {
-      return res.json({ success: true, validities: VALIDITY_FIELD_CONFIGS.map(v => v.label) });
+    // 1. Determine Financial Year bounds
+    let startYear;
+    if (fy && /^FY\s*\d{4}-\d{2}$/i.test(fy)) {
+      startYear = parseInt(fy.replace(/\D/g, '').substring(0, 4), 10);
+    } else {
+      startYear = currentMonth < 4 ? currentYear - 1 : currentYear;
+    }
+    const endYear = startYear + 1;
+
+    const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0); // 01-April-startYear
+    const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999); // 31-March-endYear
+    const todayEnd = new Date(currentYear, currentMonth - 1, currentDay, 23, 59, 59, 999);
+
+    // Current/future FY cutoff at today; past FY cutoff at fyEnd
+    const cutoffDate = todayEnd.getTime() < fyEnd.getTime() ? todayEnd : fyEnd;
+    const fyStartMs = fyStart.getTime();
+    const cutoffMs = cutoffDate.getTime();
+
+    // 2. Determine Month bounds if specified
+    const MONTHS_LIST = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    let rangeStartMs = fyStartMs;
+    let rangeEndMs = cutoffMs;
+
+    if (month && month.toUpperCase() !== 'ALL') {
+      const mIdx = MONTHS_LIST.findIndex(m => m.toLowerCase() === month.toLowerCase());
+      if (mIdx !== -1) {
+        const yearForMonth = mIdx >= 3 ? startYear : endYear;
+        const mStart = new Date(yearForMonth, mIdx, 1, 0, 0, 0, 0);
+        const mEnd = new Date(yearForMonth, mIdx + 1, 0, 23, 59, 59, 999);
+        const effEnd = mEnd.getTime() < cutoffMs ? mEnd : new Date(cutoffMs);
+
+        rangeStartMs = Math.max(fyStartMs, mStart.getTime());
+        rangeEndMs = effEnd.getTime();
+      }
     }
 
-    const available = VALIDITY_FIELD_CONFIGS.filter(cfg => {
-      let val = contact[cfg.primaryKey];
-      if (!val) {
-        for (const alt of cfg.altKeys) {
-          if (contact[alt]) { val = contact[alt]; break; }
-        }
+    // 3. Query all Bank Book documents that represent Payment Received
+    const docs = await AccountDetail.find({
+      $or: [
+        { deposit: { $exists: true, $nin: ['', null, '0', 0] } },
+        { ledgerName: { $regex: /payment\s*received/i } },
+        { particulars: { $regex: /payment\s*received/i } }
+      ]
+    }).lean();
+
+    const allInvoicesSet = new Set();
+    const transactions = [];
+
+    docs.forEach(doc => {
+      // Must have positive received amount
+      const depAmt = num(doc.deposit);
+      const withAmt = num(doc.withdraw);
+      const isExplicitPayment = (doc.ledgerName && /payment\s*received/i.test(doc.ledgerName)) || (doc.particulars && /payment\s*received/i.test(doc.particulars));
+
+      if (depAmt <= 0 && !isExplicitPayment) {
+        return;
       }
-      return val && String(val).trim() !== '-' && String(val).trim().toUpperCase() !== 'N/A';
-    }).map(cfg => cfg.label);
+
+      const rawDate = doc.transactionDate || doc['Transaction Date'] || doc.createdAt;
+      const dateParts = parseDateParts(rawDate);
+      if (!dateParts) return;
+
+      const dateObj = new Date(dateParts.year, dateParts.month - 1, dateParts.day);
+      const tMs = dateObj.getTime();
+
+      // Check date bounds: >= rangeStartMs && <= rangeEndMs (strictly no future dates!)
+      if (tMs < rangeStartMs || tMs > rangeEndMs) {
+        return;
+      }
+
+      // Extract invoice numbers
+      const invList = [];
+      if (Array.isArray(doc._allocations) && doc._allocations.length > 0) {
+        doc._allocations.forEach(a => {
+          const iNo = String(a.invoiceNumber || a.billNo || a.invoiceNo || '').trim();
+          if (iNo && !invList.includes(iNo)) invList.push(iNo);
+        });
+      }
+
+      const allText = `${doc.particulars || ''} ${doc.remarks || ''}`;
+      const matches = allText.match(/\b(26\d{8}|21\d{8})\b/g);
+      if (matches) {
+        matches.forEach(m => {
+          const cleanM = m.trim();
+          if (cleanM && !invList.includes(cleanM)) invList.push(cleanM);
+        });
+      }
+
+      invList.forEach(i => allInvoicesSet.add(i));
+
+      const invDisplay = invList.length > 0 ? invList.join(', ') : '—';
+      const amtReceived = depAmt > 0 ? depAmt : withAmt;
+
+      const refNo = String(doc.referenceNo || '').trim();
+      const chqNo = String(doc.chequeNo || '').trim();
+      let refType = '—';
+      if (chqNo && chqNo !== '-') refType = 'CHEQUE';
+      else if (refNo && refNo !== '-') refType = 'REFERENCE';
+      else if (/neft|rtgs|imps|upi/i.test(doc.particulars || '')) refType = 'ONLINE';
+
+      const finalRefNum = (refNo && refNo !== '-') ? refNo : ((chqNo && chqNo !== '-') ? chqNo : '—');
+
+      transactions.push({
+        id: doc._id.toString(),
+        _id: doc._id.toString(),
+        date: dateParts.dateStr,
+        dateMs: tMs,
+        transactionType: doc.ledgerName || 'Payment Received',
+        ledger: doc.ledgerName || 'Payment Received',
+        month: doc.month || doc.selectedMonth || MONTHS_LIST[dateParts.month - 1] || '—',
+        particulars: doc.particulars || '—',
+        name: doc.names || '—',
+        invoiceNo: invDisplay,
+        invoiceList: invList,
+        reference: refType,
+        referenceNumber: finalRefNum,
+        amountReceived: amtReceived,
+        status: 'RECEIVED',
+        remarks: doc.remarks || '—',
+        vehicle: doc.vehicle || '—',
+        closingBalance: doc.closingBalance || '—',
+        createdAt: doc.createdAt
+      });
+    });
+
+    // 4. Sort deterministically by date ascending, then ID ascending
+    transactions.sort((a, b) => {
+      if (a.dateMs !== b.dateMs) return a.dateMs - b.dateMs;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    // Available invoices for the current FY / Month
+    const availableInvoices = Array.from(allInvoicesSet).sort();
+
+    // 5. Apply Invoice filter
+    let filteredTransactions = transactions;
+    if (invoice && invoice.toUpperCase() !== 'ALL') {
+      const invClean = String(invoice).trim();
+      filteredTransactions = filteredTransactions.filter(t =>
+        t.invoiceList.includes(invClean) || t.invoiceNo.includes(invClean)
+      );
+    }
+
+    // 6. Apply Search filter
+    if (search && String(search).trim() !== '') {
+      const s = String(search).trim().toLowerCase();
+      filteredTransactions = filteredTransactions.filter(t =>
+        (t.invoiceNo || '').toLowerCase().includes(s) ||
+        (t.referenceNumber || '').toLowerCase().includes(s) ||
+        (t.reference || '').toLowerCase().includes(s) ||
+        (t.ledger || '').toLowerCase().includes(s) ||
+        (t.name || '').toLowerCase().includes(s) ||
+        (t.particulars || '').toLowerCase().includes(s) ||
+        (t.vehicle || '').toLowerCase().includes(s) ||
+        (t.remarks || '').toLowerCase().includes(s) ||
+        (t.date || '').toLowerCase().includes(s) ||
+        String(t.amountReceived).includes(s)
+      );
+    }
+
+    // 7. Calculate SL NO & Summary Metrics
+    const recordsWithSl = filteredTransactions.map((t, idx) => ({
+      slNo: idx + 1,
+      ...t
+    }));
+
+    const totalPaymentReceived = recordsWithSl.reduce((sum, r) => sum + (r.amountReceived || 0), 0);
+
+    const formattedStartDate = `01-04-${startYear}`;
+    const formattedEndDate = `${String(new Date(rangeEndMs).getDate()).padStart(2, '0')}-${String(new Date(rangeEndMs).getMonth() + 1).padStart(2, '0')}-${new Date(rangeEndMs).getFullYear()}`;
 
     res.json({
       success: true,
-      validities: available.length > 0 ? available : VALIDITY_FIELD_CONFIGS.map(v => v.label)
+      fy: `FY ${startYear}-${String(endYear).slice(-2)}`,
+      month: month || 'ALL',
+      period: {
+        start: formattedStartDate,
+        end: formattedEndDate,
+        display: `${formattedStartDate} to ${formattedEndDate}`
+      },
+      summary: {
+        totalTransactions: recordsWithSl.length,
+        totalPaymentReceived: Math.round(totalPaymentReceived * 100) / 100
+      },
+      availableInvoices,
+      count: recordsWithSl.length,
+      records: recordsWithSl
     });
-  } catch (err) {
-    console.error('Error fetching vehicle validities:', err);
-    res.status(500).json({ success: false, error: err.message });
+
+  } catch (error) {
+    console.error('[PaymentReceiveHistory] API Error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
