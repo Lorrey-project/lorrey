@@ -25,6 +25,9 @@ const partyPaymentSchema = new mongoose.Schema({
   creditRefund: { type: Number, default: 0 },
   paidToParty: { type: Number, default: 0 },
   dedicatedIncentive: { type: Number },
+  dedicatedIncentive_manual: { type: Boolean, default: false },
+  tds: { type: Number },
+  tds_manual: { type: Boolean, default: false },
   paymentDate: { type: String, default: '' },
   remarks: { type: String, default: '' }
 }, { timestamps: true });

@@ -180,7 +180,20 @@ router.post('/bulk', async (req, res) => {
         remarks: record.remarks || ''
       };
       if (record.dedicatedIncentive !== undefined) {
-        setFields.dedicatedIncentive = Number(record.dedicatedIncentive);
+        if (record.dedicatedIncentive === '' || record.dedicatedIncentive === null) {
+          setFields.dedicatedIncentive = null;
+        } else {
+          setFields.dedicatedIncentive = Number(record.dedicatedIncentive);
+        }
+        setFields.dedicatedIncentive_manual = record.dedicatedIncentive_manual !== undefined ? record.dedicatedIncentive_manual : true;
+      }
+      if (record.tds !== undefined) {
+        if (record.tds === '' || record.tds === null) {
+          setFields.tds = null;
+        } else {
+          setFields.tds = Number(record.tds);
+        }
+        setFields.tds_manual = record.tds_manual !== undefined ? record.tds_manual : true;
       }
       return {
         updateOne: {

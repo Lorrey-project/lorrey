@@ -40,6 +40,35 @@ const round2 = (n) => Math.round(n);
 // Normalise a vehicle number: uppercase + strip all whitespace
 const normVeh = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, '');
 
+function parseTdsField(doc) {
+  if (!doc || typeof doc !== 'object') return null;
+  const candidates = [
+    'TDS Applicability', 'TDS Applicability ', 'tds_applicability', 'tdsApplicability',
+    'TDS', 'TDS %', 'TDS Rate', 'TDSApplicability',
+    'tds', 'tds_rate', 'Tds', 'TDS_APPLICABILITY',
+    'TDSApplicable', 'TDS (%)'
+  ];
+  for (const k of candidates) {
+    if (doc[k] !== undefined && doc[k] !== null && doc[k] !== '') {
+      let v = doc[k];
+      if (typeof v === 'string') {
+        v = v.replace('%', '').trim();
+      }
+      const parsed = parseFloat(v);
+      if (!isNaN(parsed)) {
+        if (parsed === 0) return 0;
+        if (parsed > 0 && parsed <= 0.2) {
+          return parsed; // e.g. 0.01 = 1%, 0.02 = 2%, 0.015 = 1.5%
+        } else if (parsed > 0 && parsed <= 20) {
+          return parsed / 100; // e.g. entered as 1 or 2 meaning 1% or 2% -> 0.01 or 0.02
+        }
+        return parsed;
+      }
+    }
+  }
+  return null;
+}
+
 // ─── Column definitions ───────────────────────────────────────────────────────
 // calc   = auto-calculated (read-only, purple header)
 // editable = manual entry (red header)
@@ -52,7 +81,7 @@ const COLUMNS = [
   { key: 'GROSS FREIGHT', label: 'Gross Freight\n(95% Payable)', width: 110, calc: true, bg: '#fef3c7' },
   { key: 'LOADING ADVANCE', label: 'Loading\nAdvance', width: 90, calc: true },
   { key: 'FUEL', label: 'Fuel\n(HSD Amt)', width: 90, calc: true },
-  { key: 'TDS', label: 'TDS\n(1%)', width: 80, calc: true },
+  { key: 'TDS', label: 'TDS', width: 90, editable: true, bg: '#fee2e2' },
   { key: 'TRAVELLING EXP', label: 'Travelling\nExp', width: 90, calc: true },
   { key: 'DAMAGE RECOVERY', label: 'Damage\nRecovery', width: 90, calc: true },
   { key: 'CASH_BANK_OTHERS', label: 'Cash/Bank\nTF/Others', width: 100, calc: true },
@@ -64,7 +93,7 @@ const COLUMNS = [
   { key: 'NET AMOUNT', label: 'Net Amount', width: 100, calc: true, highlight: '#dcfce7' },
   // ⑭–⑲ Incentives from Cement Register
   { key: '8.5% NVCL', label: '8.5% NVCL\nIncentive', width: 90, calc: true, bg: '#e0f2fe' },
-  { key: 'DEDICATED INCENTIVE', label: 'Dedicated\nIncentive', width: 90, calc: true, bg: '#e0f2fe' },
+  { key: 'DEDICATED INCENTIVE', label: 'Dedicated\nIncentive', width: 110, editable: true, bg: '#e0f2fe' },
   { key: 'RAFTER', label: 'Others', width: 80, calc: true, bg: '#e0f2fe' },
   { key: 'EXTRA U/L', label: 'Extra U/L', width: 80, calc: true, bg: '#e0f2fe' },
   { key: 'TOLL UP', label: 'Toll UP', width: 80, calc: true, bg: '#fef08a' },
@@ -139,17 +168,27 @@ export default function PartyPaymentDetails({ onBack }) {
 
       setDebugInfo(`Cement entries for month: ${entries.length}`);
 
-      // 1. Truck contacts → vehicle→owner map
+      // 1. Truck contacts → vehicle→owner map & vehicle/owner→TDS rate map
       const truckMap = {}; // normVeh → owner name
       const truckOwnerIdMap = {}; // normVeh → ownerId / unique key
+      const vehicleToTdsRateMap = {}; // normVeh → decimal TDS rate from Owner Details
+      const ownerToTdsRateMap = {}; // OWNER NAME → decimal TDS rate
+
       trucksData.forEach(t => {
         const raw = t['Truck No '] || t['Truck No'] || t['Vehicle No'] || t['vehicleNo'] || '';
         const owner = (t['Owner Name '] || t['Owner Name'] || t['ownerName'] || '').trim();
         const ownerId = t.ownerId || t._id || '';
         const key = normVeh(raw);
+        const parsedTds = parseTdsField(t);
         if (key) {
           truckMap[key] = owner;
           if (ownerId) truckOwnerIdMap[key] = String(ownerId);
+          if (parsedTds !== null) {
+            vehicleToTdsRateMap[key] = parsedTds;
+          }
+        }
+        if (owner && parsedTds !== null && ownerToTdsRateMap[owner.toUpperCase()] === undefined) {
+          ownerToTdsRateMap[owner.toUpperCase()] = parsedTds;
         }
       });
 
@@ -182,7 +221,6 @@ export default function PartyPaymentDetails({ onBack }) {
             'GROSS FREIGHT': 0,   // = SUM of "BILLING @ 95% (PARTY PAYABLE)"
             'LOADING ADVANCE': 0,   // = SUM of "ADVANCE"
             'FUEL': 0,   // = SUM of "HSD AMOUNT"
-            'TDS': 0,   // = SUM of "TDS"
             'TRAVELLING EXP': 0,   // = SUM of "TRAVELLING EXP"
             'DAMAGE RECOVERY': 0,   // = SUM of "SHORTAGE AMOUNT"
             'CASH_BANK_OTHERS': 0,   // = SUM of BANK TF + OTHERS + SITE CASH
@@ -190,7 +228,6 @@ export default function PartyPaymentDetails({ onBack }) {
             'GPS TRIP CHARGE': 0,   // Populated once per party per month below
             'GPS DEVICE': 0,   // = SUM of "GPS DEVICE"
             '8.5% NVCL': 0,   // = SUM of "10W EXTRA 8.5%"
-            'DEDICATED INCENTIVE': 0,   // Populated from Incentive Sheet TOTAL (Projected) below
             'RAFTER': 0,   // = SUM of "RAFTER"
             'EXTRA U/L': 0,   // = SUM of "EXTRA UNLOADING"
             'TOLL UP': 0,   // = SUM of "UP TOLL"
@@ -214,7 +251,7 @@ export default function PartyPaymentDetails({ onBack }) {
           return 0;
         };
 
-        // ③ Gross Freight
+        // ③ Gross Freight (95% Party Payable)
         a['GROSS FREIGHT'] += getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT');
 
         // ④ Loading Advance
@@ -222,19 +259,6 @@ export default function PartyPaymentDetails({ onBack }) {
 
         // ⑤ Fuel (HSD Amount)
         a['FUEL'] += getF('HSD AMOUNT');
-
-        // ⑥ TDS — stored as decimal rate in TDS / _tds_percent (e.g. 0.01 = 1%, 0 = 0%) or absolute
-        const rawTds = getF('TDS', 'TDS 1%');
-        const tdsPct = getF('_tds_percent');
-        const grFr = getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'AMOUNT');
-        const rate = (rawTds > 0 && rawTds < 1)
-          ? rawTds
-          : (tdsPct > 0 && tdsPct < 1
-            ? tdsPct
-            : (tdsPct >= 1 && tdsPct <= 10
-              ? tdsPct / 100
-              : (rawTds >= 1 && rawTds <= 10 ? rawTds / 100 : 0)));
-        a['TDS'] += (rate > 0) ? (grFr * rate) : (rawTds > 10 ? rawTds : 0);
 
         // ⑦ Travelling Expense
         a['TRAVELLING EXP'] += getF('TRAVELLING EXP', 'TRAVELLING  EXP', 'TRAVEL EXP');
@@ -282,15 +306,35 @@ export default function PartyPaymentDetails({ onBack }) {
         const vKey = normVeh(ag['VEHICLE NO']);
         const saved = manualMap[vKey] || {};
 
+        // Matched TDS rate from Owner Details (vehicle-specific first, then owner)
+        let matchedTdsRate = vehicleToTdsRateMap[vKey];
+        if (matchedTdsRate === undefined) {
+          const ownerUpper = (ag['OWNER NAME'] || '').trim().toUpperCase();
+          matchedTdsRate = ownerToTdsRateMap[ownerUpper];
+        }
+        const tdsRate = (matchedTdsRate !== undefined && matchedTdsRate !== null) ? matchedTdsRate : 0;
+
+        // Auto TDS = CROSSPAID (GROSS FREIGHT) × Owner Details TDS Applicability
+        const grossFreight = ag['GROSS FREIGHT'] || 0;
+        const autoTds = Math.round(grossFreight * tdsRate * 100) / 100;
+
+        const isTdsManual = saved.tds_manual === true || saved._tds_manual === true || (saved.tds !== undefined && saved.tds !== null);
+        const tdsVal = isTdsManual ? num(saved.tds) : autoTds;
+
         // ── Primary Source: Incentive Calculation Sheet TOTAL (Projected) vehicle-wise ──
         const vehicleProjectedIncentive = vehicleProjectedIncentiveMap[vKey] !== undefined ? vehicleProjectedIncentiveMap[vKey] : 0;
-        const dedicatedIncentiveVal = (saved.dedicatedIncentive !== undefined && saved.dedicatedIncentive !== null)
+        const isDedicatedIncentiveManual = saved.dedicatedIncentive_manual === true || saved._dedicatedIncentive_manual === true || (saved.dedicatedIncentive !== undefined && saved.dedicatedIncentive !== null);
+        const dedicatedIncentiveVal = isDedicatedIncentiveManual
           ? num(saved.dedicatedIncentive)
           : vehicleProjectedIncentive;
 
         return {
           ...ag,
+          'TDS': tdsVal,
+          'tds_manual': isTdsManual,
+          '_tds_rate': tdsRate,
           'DEDICATED INCENTIVE': dedicatedIncentiveVal,
+          'dedicatedIncentive_manual': isDedicatedIncentiveManual,
           'GST FCM': num(saved.gstFcm),
           'WITHHOLD AMOUNT': num(saved.withholdAmount),
           'WITHHOLD REASON': saved.withholdReason || '',
@@ -358,7 +402,24 @@ export default function PartyPaymentDetails({ onBack }) {
   // ── Computed rows (formulas) ──────────────────────────────────────────────────
   const computedRows = useMemo(() => {
     return rows.map((base, ri) => {
-      const r = { ...base, ...(localEdits[ri] || {}) };
+      const edits = localEdits[ri] || {};
+      const r = { ...base, ...edits };
+
+      // Check if TDS is manually overridden in draft or base
+      const isTdsManual = edits['TDS'] !== undefined ? true : base.tds_manual;
+      if (isTdsManual) {
+        r['TDS'] = edits['TDS'] !== undefined ? (edits['TDS'] === '' ? '' : num(edits['TDS'])) : base['TDS'];
+      } else {
+        // Automatically calculate from GROSS FREIGHT (CROSSPAID) and Owner Details TDS rate
+        const rate = num(base._tds_rate);
+        r['TDS'] = Math.round(num(r['GROSS FREIGHT']) * rate * 100) / 100;
+      }
+
+      // Check if Dedicated Incentive is manually overridden in draft or base
+      const isDedManual = edits['DEDICATED INCENTIVE'] !== undefined ? true : base.dedicatedIncentive_manual;
+      if (isDedManual) {
+        r['DEDICATED INCENTIVE'] = edits['DEDICATED INCENTIVE'] !== undefined ? (edits['DEDICATED INCENTIVE'] === '' ? '' : num(edits['DEDICATED INCENTIVE'])) : base['DEDICATED INCENTIVE'];
+      }
 
       // ⑬ Net Amount = Gross Freight - (all deductions)
       const totalDeductions =
@@ -373,8 +434,8 @@ export default function PartyPaymentDetails({ onBack }) {
         num(r['GPS DEVICE']);
       r['NET AMOUNT'] = round2(num(r['GROSS FREIGHT']) - totalDeductions);
 
-      // ⑳ TDS on Incentive = (Dedicated Incentive + Extra U/L) × 1%
-      r['TDS ON INCENTIVE'] = round2((num(r['DEDICATED INCENTIVE']) + num(r['EXTRA U/L'])) * 0.01);
+      // ⑳ TDS on Incentive = (Dedicated Incentive + Extra U/L) × 1% (or vehicle TDS rate)
+      r['TDS ON INCENTIVE'] = round2((num(r['DEDICATED INCENTIVE']) + num(r['EXTRA U/L'])) * (base._tds_rate !== undefined ? num(base._tds_rate) : 0.01));
 
       // ㉑ Total Freight = Net Amount + (8.5% NVCL + Dedicated + Extra UL + Toll UP + Toll Down) − TDS on Incentive
       const incentiveSum =
@@ -421,8 +482,6 @@ export default function PartyPaymentDetails({ onBack }) {
 
     const todayStr = new Date().toLocaleDateString('en-IN').replace(/\//g, '-');
     const todayParts = todayStr.split('-');
-    // try formatting to YYYY-MM-DD for comparison if needed, or just compare exact string 
-    // Since PAYMENT DATE is typed, it's usually YYYY-MM-DD from <input type="date">
     const todayYYYYMMDD = `${todayParts[2]}-${todayParts[1]?.padStart(2, '0')}-${todayParts[0]?.padStart(2, '0')}`;
 
     computedRows.forEach(r => {
@@ -462,7 +521,8 @@ export default function PartyPaymentDetails({ onBack }) {
       const token = localStorage.getItem('token');
       const data = dirtyIdxs.map(ri => {
         const cr = computedRows[ri];
-        return {
+        const edits = localEdits[ri] || {};
+        const item = {
           vehicleNo: cr['VEHICLE NO'],
           gstFcm: num(cr['GST FCM']),
           withholdAmount: num(cr['WITHHOLD AMOUNT']),
@@ -474,23 +534,33 @@ export default function PartyPaymentDetails({ onBack }) {
           paidToParty: num(cr['PAID TO PARTY']),
           paymentDate: cr['PAYMENT DATE'] || '',
           remarks: cr['REMARKS'] || '',
-          ...(localEdits[ri]?.['DEDICATED INCENTIVE'] !== undefined ? { dedicatedIncentive: num(cr['DEDICATED INCENTIVE']) } : {})
         };
+        if (edits['TDS'] !== undefined) {
+          item.tds = edits['TDS'] === '' ? null : num(edits['TDS']);
+          item.tds_manual = true;
+        } else if (cr.tds_manual) {
+          item.tds = num(cr['TDS']);
+          item.tds_manual = true;
+        }
+        if (edits['DEDICATED INCENTIVE'] !== undefined) {
+          item.dedicatedIncentive = edits['DEDICATED INCENTIVE'] === '' ? null : num(edits['DEDICATED INCENTIVE']);
+          item.dedicatedIncentive_manual = true;
+        } else if (cr.dedicatedIncentive_manual) {
+          item.dedicatedIncentive = num(cr['DEDICATED INCENTIVE']);
+          item.dedicatedIncentive_manual = true;
+        }
+        return item;
       });
       await axios.post(`${API_URL}/party-payment/bulk`,
         { month: selMonth, year: calendarYear, data },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
-      setSnack({ severity: 'success', msg: 'Saved successfully!' });
-      setRows(prev => {
-        const next = [...prev];
-        dirtyIdxs.forEach(ri => { next[ri] = { ...next[ri], ...(localEdits[ri]) }; });
-        return next;
-      });
+      setSnack({ severity: 'success', msg: `Saved ${data.length} vehicle record(s) successfully.` });
       setLocalEdits({});
+      await fetchData();
     } catch (err) {
-      console.error(err);
-      setSnack({ severity: 'error', msg: 'Save failed.' });
+      console.error('PartyPayment save error:', err);
+      setSnack({ severity: 'error', msg: `Save failed: ${err.response?.data?.error || err.message}` });
     } finally {
       setSaving(false);
     }
