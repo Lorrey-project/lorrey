@@ -533,7 +533,7 @@ export default function VehicleWiseTripSummaryTab({
               <Tab label="DAILY SUMMARY REPORTS" />
               <Tab label="ALL PARTY REPORTS" />
               <Tab label="VEHICLE WISE TRIP SUMMARY" />
-              <Tab label="DAILY REVENUE NVL & NVCL" />
+              <Tab label="SUMMARY REVENUE NVL AND NVCL" />
               <Tab label="REVENEW" />
             </Tabs>
           </Box>

@@ -1452,42 +1452,39 @@ router.get("/vehicle-not-loaded-alerts", auth, async (req, res) => {
 });
 
 // ── GET /daily-summary/revenue-nvl-nvcl ──────────────────────────────────────────────
+// Live database-driven Financial Year Consolidated Summary for NVL, NVCL, and TOTAL
 router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
   try {
-    const { date, fy, month } = req.query;
+    const { fy } = req.query;
 
     // 1. Determine Financial Year bounds
-    let startYear = 2026;
-    if (fy && fy !== "ALL") {
-      const parts = String(fy).replace(/^FY\s*/i, "").split("-");
-      let sy = parseInt(parts[0], 10);
-      if (sy < 100) sy += 2000;
-      if (!isNaN(sy)) startYear = sy;
-    } else if (date && date !== "ALL") {
-      const dParts = String(date).split(/[\/\-\.]/);
-      if (dParts.length === 3) {
-        let yr = parseInt(dParts[0], 10);
-        let mo = parseInt(dParts[1], 10);
-        if (dParts[0].length <= 2 && dParts[2].length >= 4) {
-          yr = parseInt(dParts[2], 10);
-          mo = parseInt(dParts[1], 10);
-        }
-        startYear = mo >= 4 ? yr : yr - 1;
-      }
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
+    let startYear;
+    if (fy && /^FY\s*\d{4}-\d{2}$/i.test(fy)) {
+      startYear = parseInt(fy.replace(/\D/g, '').substring(0, 4), 10);
+    } else {
+      startYear = currentMonth < 4 ? currentYear - 1 : currentYear;
     }
+    const endYear = startYear + 1;
+    const fyStr = `${startYear}-${endYear}`;
 
-    const fyShortYear = String(startYear).slice(-2);
-    const fyStr = `${startYear}-${startYear + 1}`;
+    // 2. Financial Year date range (01 April -> 31 March)
+    const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0); // 01-04-startYear
+    const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999); // 31-03-endYear
+    const todayEnd = new Date(currentYear, currentMonth - 1, now.getDate(), 23, 59, 59, 999);
 
-    // 2. Determine target month and year
-    let targetMonthName = month && month !== "ALL" ? month : "September";
-    let mIdx = MONTH_NAMES.findIndex(name => name.toLowerCase() === String(targetMonthName).toLowerCase());
-    if (mIdx === -1) mIdx = 8; // September by default (0-indexed: 8 is September)
-    const mNum = mIdx + 1; // 1-12
-    const targetYear = mNum >= 4 ? startYear : startYear + 1;
+    // For current/future FY: FY start through TODAY (no future records).
+    // For past/completed FY: full FY (through 31 March).
+    const cutoffDate = todayEnd.getTime() < fyEnd.getTime() ? todayEnd : fyEnd;
+    const fyStartMs = fyStart.getTime();
+    const cutoffMs = cutoffDate.getTime();
 
-    // Days in this month dynamically (handles leap years e.g. Feb 28/29, 30, 31)
-    const daysInMonth = new Date(targetYear, mNum, 0).getDate();
+    const formattedStartDate = `01-04-${startYear}`;
+    const formattedEndDate = `${String(cutoffDate.getDate()).padStart(2, '0')}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${cutoffDate.getFullYear()}`;
+    const selectedPeriodDisplay = `${formattedStartDate} to ${formattedEndDate}`;
 
     // 3. Fetch Billed Revenue from Bill Register single source of truth
     const { rows: billRows = [], payments = [] } = await getBillRegisterData({ fy: fyStr });
@@ -1496,277 +1493,121 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
     const submittedGstBills = await gstCol.find({ type: "gstr1" }, { projection: { sourceBillId: 1 } }).toArray();
     const submittedBillSet = new Set(submittedGstBills.map(g => String(g.sourceBillId)));
 
-    // 4. Fetch Unbilled Revenue from Cement Register
-    const cementCol = getCementCol();
-    const unbilledEntries = await cementCol.find({
-      "CHALLAN STATUS": { $not: /^BILLED$/i }
-    }).toArray();
+    // 4. Initialize Summary Dimensions
+    const summary = {
+      NVL: {
+        site: "NVL",
+        billedRevenue: 0,
+        billedSubmitted: 0,
+        paymentReceived: 0,
+        revisedBilledRevenue: 0
+      },
+      NVCL: {
+        site: "NVCL",
+        billedRevenue: 0,
+        billedSubmitted: 0,
+        paymentReceived: 0,
+        revisedBilledRevenue: 0
+      },
+      TOTAL: {
+        site: "TOTAL",
+        billedRevenue: 0,
+        billedSubmitted: 0,
+        paymentReceived: 0,
+        revisedBilledRevenue: 0
+      }
+    };
 
-    // Pre-organize bills by exact calendar day string "YYYY-MM-DD"
-    const billsByDay = {};
+    // 5. Aggregate billRows by Site
     billRows.forEach(r => {
       const bDate = parseDate(r.invoiceDate);
       if (!bDate) return;
-      if (bDate.getFullYear() === targetYear && bDate.getMonth() === mIdx) {
-        const day = bDate.getDate();
-        if (!billsByDay[day]) billsByDay[day] = [];
-        billsByDay[day].push(r);
+      const t = bDate.getTime();
+      if (t < fyStartMs || t > cutoffMs) return;
+
+      const site = normalizeSite(r.site);
+      if (site !== "NVL" && site !== "NVCL") return;
+
+      const amt = Number(r.amount) || 0;
+      const debitAmt = Number(r.debitAmount) || 0;
+      const payAmt = Number(r.paymentAmount) || 0;
+
+      summary[site].billedRevenue += amt;
+
+      const isSubmitted = r.sentToGST || submittedBillSet.has(String(r.invoiceNumber)) || submittedBillSet.has(String(r.billNo));
+      if (isSubmitted) {
+        summary[site].billedSubmitted += amt;
       }
+
+      if (payAmt > 0) {
+        summary[site].paymentReceived += payAmt;
+      }
+      summary[site].revisedBilledRevenue += (amt - debitAmt);
     });
 
-    // Pre-organize payments by paymentDate
-    const paymentsByDay = {};
+    // 6. Aggregate payments by Site
     payments.forEach(p => {
       if (!p.paymentDate) return;
       const pDate = parseDate(p.paymentDate);
       if (!pDate) return;
-      if (pDate.getFullYear() === targetYear && pDate.getMonth() === mIdx) {
-        const day = pDate.getDate();
-        if (!paymentsByDay[day]) paymentsByDay[day] = [];
-        paymentsByDay[day].push(p);
+      const t = pDate.getTime();
+      if (t < fyStartMs || t > cutoffMs) return;
+
+      const pAmt = Number(p.paymentAmount) || 0;
+      if (pAmt <= 0) return;
+
+      let site = null;
+      if (p.billNos && p.billNos.length > 0) {
+        const matchingBill = billRows.find(b => p.billNos.includes(String(b.invoiceNumber)) || p.billNos.includes(String(b.billNo)));
+        if (matchingBill) {
+          site = normalizeSite(matchingBill.site);
+        }
+      }
+      if (site === "NVL" || site === "NVCL") {
+        summary[site].paymentReceived += pAmt;
       }
     });
 
-    // Pre-organize unbilled cement entries by exact loading date
-    const unbilledByDay = {};
-    unbilledEntries.forEach(entry => {
-      const dateVal = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || "";
-      const dObj = parseDate(dateVal);
-      if (!dObj) return;
-      if (dObj.getFullYear() === targetYear && dObj.getMonth() === mIdx) {
-        const day = dObj.getDate();
-        if (!unbilledByDay[day]) unbilledByDay[day] = [];
-        unbilledByDay[day].push(entry);
-      }
+    // 7. Round numeric values
+    ["NVL", "NVCL"].forEach(site => {
+      summary[site].billedRevenue = Math.round(summary[site].billedRevenue);
+      summary[site].billedSubmitted = Math.round(summary[site].billedSubmitted);
+      summary[site].paymentReceived = Math.round(summary[site].paymentReceived);
+      summary[site].revisedBilledRevenue = Math.round(summary[site].revisedBilledRevenue);
     });
 
-    // 5. Build Day-by-Day report
-    const days = [];
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dStr = String(d).padStart(2, "0");
-      const mStr = String(mNum).padStart(2, "0");
-      const dateKey = `${dStr}-${mStr}-${targetYear}`;
-
-      const dayResult = {
-        date: dateKey,
-        day: d,
-        NVL: {
-          billedRevenue: 0,
-          billedSubmitted: 0,
-          paymentReceived: 0,
-          revisedBilledRevenue: 0,
-          stampNotBilled: 0,
-          nonStampNotBilled: 0,
-          challanNotReceived: 0,
-          total: 0
-        },
-        NVCL: {
-          billedRevenue: 0,
-          billedSubmitted: 0,
-          paymentReceived: 0,
-          revisedBilledRevenue: 0,
-          stampNotBilled: 0,
-          nonStampNotBilled: 0,
-          challanNotReceived: 0,
-          total: 0
-        },
-        TOTAL: {
-          billedRevenue: 0,
-          billedSubmitted: 0,
-          paymentReceived: 0,
-          revisedBilledRevenue: 0,
-          stampNotBilled: 0,
-          nonStampNotBilled: 0,
-          challanNotReceived: 0,
-          total: 0
-        }
-      };
-
-      // Process bills for this day
-      const dayBills = billsByDay[d] || [];
-      dayBills.forEach(r => {
-        const site = normalizeSite(r.site);
-        if (site !== "NVL" && site !== "NVCL") return;
-
-        const amt = Number(r.amount) || 0;
-        const debitAmt = Number(r.debitAmount) || 0;
-        const payAmt = Number(r.paymentAmount) || 0;
-
-        dayResult[site].billedRevenue += amt;
-
-        const isSubmitted = r.sentToGST || submittedBillSet.has(String(r.invoiceNumber)) || submittedBillSet.has(String(r.billNo));
-        if (isSubmitted) {
-          dayResult[site].billedSubmitted += amt;
-        }
-
-        if (payAmt > 0) {
-          dayResult[site].paymentReceived += payAmt;
-        }
-        dayResult[site].revisedBilledRevenue += (amt - debitAmt);
-      });
-
-      // Process payments for this day
-      const dayPayments = paymentsByDay[d] || [];
-      dayPayments.forEach(p => {
-        const pAmt = Number(p.paymentAmount) || 0;
-        if (pAmt <= 0) return;
-
-        let site = null;
-        if (p.billNos && p.billNos.length > 0) {
-          const matchingBill = billRows.find(b => p.billNos.includes(String(b.invoiceNumber)) || p.billNos.includes(String(b.billNo)));
-          if (matchingBill) {
-            site = normalizeSite(matchingBill.site);
-          }
-        }
-        if (site === "NVL" || site === "NVCL") {
-          dayResult[site].paymentReceived += pAmt;
-        }
-      });
-
-      // Process unbilled entries for this day
-      const dayUnbilled = unbilledByDay[d] || [];
-      dayUnbilled.forEach(entry => {
-        let site = normalizeSite(entry.SITE);
-        if (site !== "NVL" && site !== "NVCL") return;
-
-        const amt = parseNum(entry["BILLING AMOUNT"] || entry["Billing Amount"] || entry["BILLING ER 95%"] || entry["AMOUNT"] || 0);
-        const status = String(entry["CHALLAN STATUS"] || "").toUpperCase().trim();
-
-        if (status === "STAMP") {
-          dayResult[site].stampNotBilled += amt;
-        } else if (status.includes("NON STAMP") || status.includes("NON-STAMP")) {
-          dayResult[site].nonStampNotBilled += amt;
-        } else {
-          dayResult[site].challanNotReceived += amt;
-        }
-      });
-
-      // Compute site totals and round
-      ["NVL", "NVCL"].forEach(site => {
-        dayResult[site].total = Math.round(
-          (dayResult[site].revisedBilledRevenue || 0) +
-          (dayResult[site].stampNotBilled || 0) +
-          (dayResult[site].nonStampNotBilled || 0) +
-          (dayResult[site].challanNotReceived || 0)
-        );
-        dayResult[site].billedRevenue = Math.round(dayResult[site].billedRevenue);
-        dayResult[site].billedSubmitted = Math.round(dayResult[site].billedSubmitted);
-        dayResult[site].paymentReceived = Math.round(dayResult[site].paymentReceived);
-        dayResult[site].revisedBilledRevenue = Math.round(dayResult[site].revisedBilledRevenue);
-        dayResult[site].stampNotBilled = Math.round(dayResult[site].stampNotBilled);
-        dayResult[site].nonStampNotBilled = Math.round(dayResult[site].nonStampNotBilled);
-        dayResult[site].challanNotReceived = Math.round(dayResult[site].challanNotReceived);
-      });
-
-      // Compute Day TOTAL row (NVL + NVCL)
-      dayResult.TOTAL = {
-        billedRevenue: dayResult.NVL.billedRevenue + dayResult.NVCL.billedRevenue,
-        billedSubmitted: dayResult.NVL.billedSubmitted + dayResult.NVCL.billedSubmitted,
-        paymentReceived: dayResult.NVL.paymentReceived + dayResult.NVCL.paymentReceived,
-        revisedBilledRevenue: dayResult.NVL.revisedBilledRevenue + dayResult.NVCL.revisedBilledRevenue,
-        stampNotBilled: dayResult.NVL.stampNotBilled + dayResult.NVCL.stampNotBilled,
-        nonStampNotBilled: dayResult.NVL.nonStampNotBilled + dayResult.NVCL.nonStampNotBilled,
-        challanNotReceived: dayResult.NVL.challanNotReceived + dayResult.NVCL.challanNotReceived,
-        total: dayResult.NVL.total + dayResult.NVCL.total
-      };
-
-      days.push(dayResult);
-    }
-
-    // 6. Compute Month Grand Total
-    const monthTotal = {
-      NVL: {
-        billedRevenue: 0,
-        billedSubmitted: 0,
-        paymentReceived: 0,
-        revisedBilledRevenue: 0,
-        stampNotBilled: 0,
-        nonStampNotBilled: 0,
-        challanNotReceived: 0,
-        total: 0
-      },
-      NVCL: {
-        billedRevenue: 0,
-        billedSubmitted: 0,
-        paymentReceived: 0,
-        revisedBilledRevenue: 0,
-        stampNotBilled: 0,
-        nonStampNotBilled: 0,
-        challanNotReceived: 0,
-        total: 0
-      },
-      TOTAL: {
-        billedRevenue: 0,
-        billedSubmitted: 0,
-        paymentReceived: 0,
-        revisedBilledRevenue: 0,
-        stampNotBilled: 0,
-        nonStampNotBilled: 0,
-        challanNotReceived: 0,
-        total: 0
-      }
+    // 8. Compute TOTAL = NVL + NVCL
+    summary.TOTAL = {
+      site: "TOTAL",
+      billedRevenue: summary.NVL.billedRevenue + summary.NVCL.billedRevenue,
+      billedSubmitted: summary.NVL.billedSubmitted + summary.NVCL.billedSubmitted,
+      paymentReceived: summary.NVL.paymentReceived + summary.NVCL.paymentReceived,
+      revisedBilledRevenue: summary.NVL.revisedBilledRevenue + summary.NVCL.revisedBilledRevenue
     };
 
-    days.forEach(day => {
-      ["NVL", "NVCL", "TOTAL"].forEach(cat => {
-        monthTotal[cat].billedRevenue += day[cat].billedRevenue;
-        monthTotal[cat].billedSubmitted += day[cat].billedSubmitted;
-        monthTotal[cat].paymentReceived += day[cat].paymentReceived;
-        monthTotal[cat].revisedBilledRevenue += day[cat].revisedBilledRevenue;
-        monthTotal[cat].stampNotBilled += day[cat].stampNotBilled;
-        monthTotal[cat].nonStampNotBilled += day[cat].nonStampNotBilled;
-        monthTotal[cat].challanNotReceived += day[cat].challanNotReceived;
-        monthTotal[cat].total += day[cat].total;
-      });
-    });
-
-    // Format selected date display and handle single date vs full month mode
-    let returnedDays = days;
-    let selectedDateDisplay = `${targetMonthName} ${targetYear}`;
-
-    if (date && date !== "ALL") {
-      let targetDay = null;
-      const parsed = parseDate(date);
-      if (parsed) {
-        targetDay = parsed.getDate();
-      } else {
-        const dNum = parseInt(date, 10);
-        if (!isNaN(dNum)) targetDay = dNum;
-      }
-
-      if (targetDay !== null) {
-        returnedDays = days.filter(d => d.day === targetDay);
-        if (returnedDays.length > 0) {
-          selectedDateDisplay = returnedDays[0].date;
-        } else {
-          selectedDateDisplay = date;
-        }
-      } else {
-        selectedDateDisplay = date;
-      }
-    } else {
-      const lastDayStr = String(daysInMonth).padStart(2, "0");
-      const mStr = String(mNum).padStart(2, "0");
-      selectedDateDisplay = `${lastDayStr}-${mStr}-${targetYear}`;
-    }
+    const rows = [
+      summary.NVL,
+      summary.NVCL,
+      summary.TOTAL
+    ];
 
     return res.json({
       success: true,
-      fy: fyStr,
-      month: targetMonthName,
-      year: targetYear,
-      daysCount: daysInMonth,
-      selectedDate: selectedDateDisplay,
-      days: returnedDays,
-      allDays: days,
-      monthTotal,
-      data: returnedDays.length === 1 ? returnedDays[0] : monthTotal
+      fy: `FY ${startYear}-${String(endYear).slice(-2)}`,
+      period: {
+        start: formattedStartDate,
+        end: formattedEndDate,
+        display: selectedPeriodDisplay
+      },
+      selectedDate: selectedPeriodDisplay,
+      summary,
+      rows,
+      data: summary
     });
 
   } catch (err) {
     console.error("[DailySummary] /revenue-nvl-nvcl error:", err);
-    return res.status(500).json({ success: false, error: err.message || "Failed to calculate revenue" });
+    return res.status(500).json({ success: false, error: err.message || "Failed to calculate revenue summary" });
   }
 });
 
