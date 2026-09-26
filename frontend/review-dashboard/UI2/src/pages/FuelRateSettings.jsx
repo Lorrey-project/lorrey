@@ -602,7 +602,7 @@ function ProjectedDeductionTab({ snackHandler }) {
                                 fullWidth
                             />
                             <TextField 
-                                label="GPS Trip Charge (₹)" 
+                                label="GPS Monitoring / Trip Charge (₹)" 
                                 type="number" 
                                 value={settings.gpsTripCharge}
                                 onChange={(e) => handleChange('gpsTripCharge', e.target.value)}

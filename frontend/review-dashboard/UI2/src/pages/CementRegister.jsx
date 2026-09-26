@@ -137,10 +137,10 @@ const RAW_EXCEL_HEADER_MAP = {
   // Deductions
   'others deduction': 'Others deduction', 'other deduction': 'Others deduction', 'deduction': 'Others deduction',
   'other': 'Other',
-  'gps monitoring charge': 'GPS Monitoring Charge', 'gps charge': 'GPS Monitoring Charge', 'gps': 'GPS Monitoring Charge', 'gps monitaring charge': 'GPS Monitoring Charge',
+  'gps monitoring charge': 'GPS Monitoring Charge', 'gps monitoring / trip charge': 'GPS Monitoring Charge', 'gps monitoring/trip charge': 'GPS Monitoring Charge', 'gps charge': 'GPS Monitoring Charge', 'gps': 'GPS Monitoring Charge', 'gps monitaring charge': 'GPS Monitoring Charge',
   'gps device': 'Give GPS DEVICE',
   'gps deviation charges': 'GPS Deviation Charges', 'gps deviation': 'GPS Deviation Charges',
-  'gps trip charges': 'GPS Trip Charges', 'gps trip': 'GPS Trip Charges',
+  'gps trip charges': 'GPS Monitoring Charge', 'gps trip charge': 'GPS Monitoring Charge', 'gps trip': 'GPS Monitoring Charge',
   'suspense': 'Suspense',
   'rfid tag': 'Give RFID TAG', 'rfid': 'Give RFID TAG',
 

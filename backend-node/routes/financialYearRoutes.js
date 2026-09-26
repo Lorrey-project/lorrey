@@ -112,7 +112,7 @@ router.post('/validate-deduction', async (req, res) => {
         for (const reason of reasons) {
           let projectedCol = '';
           if (reason === 'Damage / Shortage') projectedCol = 'SHORTAGE (AMOUNT)';
-          else if (reason === 'GPS Trip Charges') projectedCol = 'GPS Trip Charges';
+          else if (reason === 'GPS Trip Charges' || reason === 'GPS Monitoring / Trip Charge' || reason === 'GPS Monitoring Charge') projectedCol = 'GPS Monitoring Charge';
           else if (reason === 'GPS Deviation Charges') projectedCol = 'GPS Deviation Charges';
           else if (reason === 'Device Installation Charges') projectedCol = 'Give GPS DEVICE';
           else if (reason === 'RFID Deduction / Charges') projectedCol = 'Give RFID TAG';
@@ -792,7 +792,7 @@ router.post('/save-row', async (req, res) => {
       const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
 
       // 1. Clear any existing overrides in cement register for this bill across all possible reasons to avoid stale data
-      const ALL_REASONS = ['Damage / Shortage', 'GPS Trip Charges', 'GPS Deviation Charges', 'Device Installation Charges', 'RFID Deduction / Charges', 'Suspense', 'Site office Rent', 'Safty violation charges'];
+      const ALL_REASONS = ['Damage / Shortage', 'GPS Trip Charges', 'GPS Monitoring / Trip Charges', 'GPS Deviation Charges', 'Device Installation Charges', 'RFID Deduction / Charges', 'Suspense', 'Site office Rent', 'Safty violation charges'];
       for (const reason of ALL_REASONS) {
         const overridePath = `deductionsOverride.${reason}`;
         await cementCol.updateMany(
@@ -888,7 +888,7 @@ router.post('/save-row', async (req, res) => {
 
               let projectedCol = '';
               if (reason === 'Damage / Shortage') projectedCol = 'SHORTAGE (AMOUNT)';
-              else if (reason === 'GPS Trip Charges') projectedCol = 'GPS Trip Charges';
+              else if (reason === 'GPS Trip Charges' || reason === 'GPS Monitoring / Trip Charge' || reason === 'GPS Monitoring Charge') projectedCol = 'GPS Monitoring Charge';
               else if (reason === 'GPS Deviation Charges') projectedCol = 'GPS Deviation Charges';
               else if (reason === 'Device Installation Charges') projectedCol = 'Give GPS DEVICE';
               else if (reason === 'RFID Deduction / Charges') projectedCol = 'Give RFID TAG';
@@ -908,7 +908,7 @@ router.post('/save-row', async (req, res) => {
                 } else if (reason === 'RFID Deduction / Charges' || reason === 'RFID') {
                   hasProjectedSetting = true;
                   projectedSettingVal = projSettingsDoc.rfid || 0;
-                } else if (reason === 'GPS Trip Charges' || reason === 'GPS Trip Charge') {
+                } else if (reason === 'GPS Monitoring / Trip Charges' || reason === 'GPS Trip Charges' || reason === 'GPS Trip Charge' || reason === 'GPS Monitoring / Trip Charge') {
                   hasProjectedSetting = true;
                   projectedSettingVal = projSettingsDoc.gpsTripCharge || 0;
                 }

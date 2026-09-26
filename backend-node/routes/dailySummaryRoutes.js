@@ -135,7 +135,7 @@ function parseDateToCalendar(dVal) {
 
 // ── GET /daily-summary/pending-challans ───────────────────────────────────────
 // Live, database-driven pending challan records from Shipment Register (cement_register)
-// from start of current FY (01 April) through today. Excludes completed STAMP and NON-STAMP.
+// from start of current FY (01 April) through YESTERDAY (TODAY - 1 DAY). Excludes completed STAMP and NON-STAMP.
 router.get("/pending-challans", auth, async (req, res) => {
   try {
     const col = getCementCol();
@@ -156,9 +156,9 @@ router.get("/pending-challans", auth, async (req, res) => {
 
     const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0); // 1 April startYear
     const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999); // 31 March endYear
-    const todayEnd = new Date(currentYear, currentMonth - 1, currentDay, 23, 59, 59, 999);
+    const yesterdayEnd = new Date(currentYear, currentMonth - 1, currentDay - 1, 23, 59, 59, 999);
 
-    const reportEnd = todayEnd.getTime() < fyEnd.getTime() ? todayEnd : fyEnd;
+    const reportEnd = yesterdayEnd.getTime() < fyEnd.getTime() ? yesterdayEnd : fyEnd;
     const fyStartMs = fyStart.getTime();
     const reportEndMs = reportEnd.getTime();
 
@@ -180,7 +180,7 @@ router.get("/pending-challans", auth, async (req, res) => {
         continue;
       }
 
-      // 3. Date filter: Loading Date >= FY_START and Loading Date <= REPORT_END (MIN(FY_END, TODAY))
+      // 3. Date filter: Loading Date >= FY_START and Loading Date <= YESTERDAY (MIN(FY_END, TODAY - 1))
       if (dateObj.timeMs < fyStartMs || dateObj.timeMs > reportEndMs) {
         continue;
       }
@@ -215,12 +215,11 @@ router.get("/pending-challans", auth, async (req, res) => {
 });
 
 // ── GET /daily-summary/alerts-ytd ───────────────────────────────────────────
-// Live database-driven Year-To-Till-Date (YTD) alerts for:
-// 1. CHALLAN STATUS PENDING
-// 2. STAMP BILLS
-// 3. NON-STAMP BILLS
-// 4. STAMP BUT NON-BILLED (Tabs: ALL, FREIGHT, UNLOADING)
-// Global Rule: LOADING DATE >= Current FY Start (01 April) AND LOADING DATE <= TODAY
+// Live database-driven Year-To-Till-Date (YTD) alerts:
+// 1. CHALLAN STATUS PENDING: FY START -> YESTERDAY (TODAY - 1 DAY)
+// 2. STAMP BILLS: FY START -> TODAY
+// 3. NON-STAMP BILLS: FY START -> TODAY
+// 4. STAMP BUT NON-BILLED: FY START -> TODAY (Tabs: ALL, FREIGHT, UNLOADING)
 router.get("/alerts-ytd", auth, async (req, res) => {
   try {
     const col = getCementCol();
@@ -242,10 +241,14 @@ router.get("/alerts-ytd", auth, async (req, res) => {
     const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0); // 1 April startYear
     const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999); // 31 March endYear
     const todayEnd = new Date(currentYear, currentMonth - 1, currentDay, 23, 59, 59, 999);
+    const yesterdayEnd = new Date(currentYear, currentMonth - 1, currentDay - 1, 23, 59, 59, 999);
 
-    const reportEnd = todayEnd.getTime() < fyEnd.getTime() ? todayEnd : fyEnd;
+    const reportEndToday = todayEnd.getTime() < fyEnd.getTime() ? todayEnd : fyEnd;
+    const reportEndPending = yesterdayEnd.getTime() < fyEnd.getTime() ? yesterdayEnd : fyEnd;
+
     const fyStartMs = fyStart.getTime();
-    const reportEndMs = reportEnd.getTime();
+    const reportEndTodayMs = reportEndToday.getTime();
+    const reportEndPendingMs = reportEndPending.getTime();
 
     const pendingRecords = [];
     const stampRecords = [];
@@ -261,53 +264,57 @@ router.get("/alerts-ytd", auth, async (req, res) => {
       const dateObj = parseDateToCalendar(rawDate);
       if (!dateObj) continue;
 
-      // 2. GLOBAL YTD DATE BOUNDARY: Loading Date >= FY_START && Loading Date <= TODAY
-      if (dateObj.timeMs < fyStartMs || dateObj.timeMs > reportEndMs) {
-        continue;
-      }
+      const t = dateObj.timeMs;
+      // Exclude records outside current FY start
+      if (t < fyStartMs) continue;
 
       const status = String(record["CHALLAN STATUS"] || "").toUpperCase().trim();
       const isStamp = status === "STAMP";
       const isNonStamp = status.includes("NON-STAMP") || status.includes("NON STAMP");
 
-      // 1. Pending Challan: neither STAMP nor NON-STAMP
+      // 1. Pending Challan: neither STAMP nor NON-STAMP, date range = FY START -> YESTERDAY
       if (!isStamp && !isNonStamp) {
-        pendingRecords.push(record);
+        if (t <= reportEndPendingMs) {
+          pendingRecords.push(record);
+        }
       }
 
-      // 2. STAMP Bills
-      if (isStamp) {
-        stampRecords.push(record);
-      }
+      // For STAMP, NON-STAMP, and STAMP BUT NON-BILLED: date range = FY START -> TODAY
+      if (t <= reportEndTodayMs) {
+        // 2. STAMP Bills
+        if (isStamp) {
+          stampRecords.push(record);
+        }
 
-      // 3. NON-STAMP Bills
-      if (isNonStamp) {
-        nonStampRecords.push(record);
-      }
+        // 3. NON-STAMP Bills
+        if (isNonStamp) {
+          nonStampRecords.push(record);
+        }
 
-      // 4. STAMP BUT NON-BILLED (STAMP only)
-      if (isStamp) {
-        const freightBillNo = String(record["BILL NO"] || record["BILL NUMBER"] || record["FREIGHT BILL NO"] || record["Freight Bill No"] || record.freightBillNo || "").trim();
-        const hasFreight = freightBillNo !== "" && freightBillNo !== "-" && freightBillNo.toLowerCase() !== "null" && freightBillNo.toLowerCase() !== "undefined";
+        // 4. STAMP BUT NON-BILLED (STAMP only)
+        if (isStamp) {
+          const freightBillNo = String(record["BILL NO"] || record["BILL NUMBER"] || record["FREIGHT BILL NO"] || record["Freight Bill No"] || record.freightBillNo || "").trim();
+          const hasFreight = freightBillNo !== "" && freightBillNo !== "-" && freightBillNo.toLowerCase() !== "null" && freightBillNo.toLowerCase() !== "undefined";
 
-        const unloadingBillNo = String(record["UNLOADING BILL NO"] || record["UNLOADING BILL NUMBER"] || record["Unloading Bill No"] || record.unloadingBillNo || "").trim();
-        const hasUnloading = unloadingBillNo !== "" && unloadingBillNo !== "-" && unloadingBillNo.toLowerCase() !== "null" && unloadingBillNo.toLowerCase() !== "undefined";
+          const unloadingBillNo = String(record["UNLOADING BILL NO"] || record["UNLOADING BILL NUMBER"] || record["Unloading Bill No"] || record.unloadingBillNo || "").trim();
+          const hasUnloading = unloadingBillNo !== "" && unloadingBillNo !== "-" && unloadingBillNo.toLowerCase() !== "null" && unloadingBillNo.toLowerCase() !== "undefined";
 
-        // Exclude fully billed (both exist)
-        if (!hasFreight || !hasUnloading) {
-          stampNonBilledTotal.push(record);
+          // Exclude fully billed (both exist)
+          if (!hasFreight || !hasUnloading) {
+            stampNonBilledTotal.push(record);
 
-          // ALL: both missing
-          if (!hasFreight && !hasUnloading) {
-            stampNonBilledAll.push(record);
-          }
-          // FREIGHT: freight missing
-          if (!hasFreight) {
-            stampNonBilledFreight.push(record);
-          }
-          // UNLOADING: unloading missing
-          if (!hasUnloading) {
-            stampNonBilledUnloading.push(record);
+            // ALL: both missing
+            if (!hasFreight && !hasUnloading) {
+              stampNonBilledAll.push(record);
+            }
+            // FREIGHT: freight missing
+            if (!hasFreight) {
+              stampNonBilledFreight.push(record);
+            }
+            // UNLOADING: unloading missing
+            if (!hasUnloading) {
+              stampNonBilledUnloading.push(record);
+            }
           }
         }
       }
@@ -982,6 +989,465 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
   } catch (err) {
     console.error("[DailySummary] /vehicle-trip-summary error:", err);
     return res.status(500).json({ success: false, error: err.message || "Failed to generate vehicle trip summary" });
+  }
+});
+
+// Helper to fetch all registered vehicles from Owner Details MongoDB & Truck Contacts
+async function getAllRegisteredVehicles() {
+  const combinedMap = new Map();
+  try {
+    const ownerCol = mongoose.connection.useDb("invoice_system").collection("owner details");
+    const truckCol = mongoose.connection.useDb("invoice_system").collection("Truck Contact Number");
+    const lorreyTruckCol = mongoose.connection.useDb("lorrey").collection("truck_contacts");
+
+    const ownerDocs = await ownerCol.find({}).toArray();
+    const truckDocs = await truckCol.find({}).toArray();
+    let lorreyDocs = [];
+    try {
+      lorreyDocs = await lorreyTruckCol.find({}).toArray();
+    } catch (e) {}
+
+    // 1. Primary: owner details
+    for (const doc of ownerDocs) {
+      const rawNo = (doc["Truck No"] || doc["Truck No "] || doc.truck_no || doc._id.toString()).toString().trim().toUpperCase();
+      const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
+      if (normKey && normKey.length >= 5) {
+        combinedMap.set(normKey, {
+          vehicleNo: rawNo,
+          normKey,
+          ownerName: (doc["Owner Name"] || doc["Owner Name "] || doc.owner_name || doc.owner || "").trim(),
+          wheel: (doc["Type of vehicle"] || doc["Type of vehicle "] || doc.veh_type || doc.wheel || "").trim()
+        });
+      }
+    }
+
+    // 2. Secondary: invoice_system "Truck Contact Number"
+    for (const doc of truckDocs) {
+      const rawNo = (doc.truck_no || doc["Truck No "] || doc["Truck No"] || doc._id.toString()).toString().trim().toUpperCase();
+      const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
+      if (normKey && normKey.length >= 5 && !combinedMap.has(normKey)) {
+        combinedMap.set(normKey, {
+          vehicleNo: rawNo,
+          normKey,
+          ownerName: (doc["Owner Name "] || doc["Owner Name"] || doc.owner_name || doc.owner || "").trim(),
+          wheel: (doc["Type of vehicle "] || doc["Type of vehicle"] || doc.veh_type || doc.wheel || "").trim()
+        });
+      }
+    }
+
+    // 3. Fallback: lorrey "truck_contacts"
+    for (const doc of lorreyDocs) {
+      const rawNo = (doc["Truck No "] || doc["Truck No"] || doc.truck_no || "").toString().trim().toUpperCase();
+      const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
+      if (normKey && normKey.length >= 5 && !combinedMap.has(normKey)) {
+        combinedMap.set(normKey, {
+          vehicleNo: rawNo,
+          normKey,
+          ownerName: (doc["Owner Name "] || doc["Owner Name"] || doc.owner_name || doc.owner || "").trim(),
+          wheel: (doc["Type of vehicle "] || doc["Type of vehicle"] || doc.veh_type || doc.wheel || "").trim()
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[getAllRegisteredVehicles] Error:", err);
+  }
+  return Array.from(combinedMap.values());
+}
+
+// ── GET /daily-summary/six-trip-alerts ───────────────────────────────────────
+// Alert: SIX TRIP NOT COMPLETE
+// Evaluates every registered vehicle from Owner Details MongoDB for Day 1 to Day 25.
+// Triggers ONLY after the 25th of the month (IF TODAY >= 25).
+router.get("/six-trip-alerts", auth, async (req, res) => {
+  try {
+    const { fy, month } = req.query;
+
+    const now = new Date();
+    const currentDay = now.getDate();
+    const currentYear = now.getFullYear();
+    const currentMonthIdx = now.getMonth(); // 0-11
+
+    // Determine financial year start
+    let startYear = 2026;
+    if (fy && /^FY\s*\d{4}-\d{2}$/i.test(fy)) {
+      startYear = parseInt(fy.replace(/\D/g, '').substring(0, 4), 10);
+    } else {
+      startYear = currentMonthIdx < 3 ? currentYear - 1 : currentYear;
+    }
+
+    const monthNamesArray = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const monthShortNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+
+    let targetMonthName = month && month !== "ALL" ? month : monthNamesArray[currentMonthIdx];
+    let mIdx = monthNamesArray.findIndex(m => m.toLowerCase() === String(targetMonthName).toLowerCase());
+    if (mIdx === -1) mIdx = currentMonthIdx;
+
+    const monthInt = mIdx + 1; // 1-12
+    const targetYear = mIdx < 3 ? startYear + 1 : startYear;
+
+    // Check if target month is in future, current, or past
+    const isFuture = (targetYear > currentYear) || (targetYear === currentYear && mIdx > currentMonthIdx);
+    const isCurrentMonth = (targetYear === currentYear && mIdx === currentMonthIdx);
+    const isPastMonth = (targetYear < currentYear) || (targetYear === currentYear && mIdx < currentMonthIdx);
+
+    // Rule: IF TODAY < 25 for current month, or future month, DO NOT SHOW ALERT
+    if (isFuture || (isCurrentMonth && currentDay < 25)) {
+      return res.json({
+        success: true,
+        isApplicable: false,
+        month: monthNamesArray[mIdx],
+        monthShort: `${monthShortNames[mIdx]}-${targetYear}`,
+        monthFullName: `${monthNamesArray[mIdx]} ${targetYear}`,
+        year: targetYear,
+        evaluationPeriod: `01-${String(monthInt).padStart(2, '0')}-${targetYear} to 25-${String(monthInt).padStart(2, '0')}-${targetYear}`,
+        count: 0,
+        records: []
+      });
+    }
+
+    // 1. Fetch registered vehicles
+    const registeredVehicles = await getAllRegisteredVehicles();
+
+    // 2. Fetch cement register records
+    const cementCol = getCementCol();
+    const rawDocs = await cementCol.find({
+      $or: [
+        { month: monthInt, year: targetYear },
+        { month: String(monthInt), year: String(targetYear) },
+        { month: { $exists: false } },
+        { month: null }
+      ]
+    }).toArray();
+
+    // Group trips for Day 1 to Day 25 strictly by vehicle
+    const tripsByVeh = {};
+    const seenTripIds = new Set();
+
+    rawDocs.forEach(row => {
+      const id = String(row._id);
+      if (seenTripIds.has(id)) return;
+      seenTripIds.add(id);
+
+      const rawVeh = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "";
+      const normKey = String(rawVeh).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!normKey || normKey.length < 5) return;
+
+      const mtVal = parseNum(row["MT"]);
+      const billAmt = parseNum(row["Billing Amount"] || row["BILLING AMOUNT"] || row["AMOUNT"]);
+      const invNo = String(row["INVOICE NO"] || row["INVOICE NO."] || "").trim();
+
+      // Exclude adjustment rows with no MT, no amount, and no invoice
+      if (mtVal === 0 && billAmt === 0 && !invNo) return;
+
+      const loadDateRaw = row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || row["DATE"] || "";
+      const dObj = parseDateToCalendar(loadDateRaw);
+      if (!dObj) return;
+
+      // Verify exact target month and year
+      if (dObj.year !== targetYear || dObj.month !== monthInt) return;
+
+      // Strictly evaluate ONLY Day 1 through Day 25!
+      if (dObj.day < 1 || dObj.day > 25) return;
+
+      if (!tripsByVeh[normKey]) {
+        tripsByVeh[normKey] = {
+          totalMT: 0,
+          rawInvoices: 0,
+          trips: []
+        };
+      }
+
+      if (mtVal > 0) {
+        tripsByVeh[normKey].totalMT += mtVal;
+      }
+      tripsByVeh[normKey].rawInvoices += 1;
+      tripsByVeh[normKey].trips.push(row);
+    });
+
+    // 3. Evaluate each registered vehicle
+    const failedVehicles = [];
+
+    registeredVehicles.forEach(v => {
+      let standardCap = 0;
+      const rawWheel = String(v.wheel || "").toUpperCase();
+      if (rawWheel.includes("6")) standardCap = 13;
+      else if (rawWheel.includes("10")) standardCap = 19;
+      else if (rawWheel.includes("12")) standardCap = 25;
+      else if (rawWheel.includes("14")) standardCap = 30;
+
+      const vehTripData = tripsByVeh[v.normKey];
+      let tripCount = 0;
+      let totalMT = 0;
+
+      if (vehTripData) {
+        totalMT = Math.round(vehTripData.totalMT * 100) / 100;
+        if (standardCap > 0) {
+          tripCount = Math.round((totalMT / standardCap) * 100) / 100;
+        } else {
+          tripCount = vehTripData.rawInvoices;
+        }
+      }
+
+      // Check condition: Trips < 6
+      if (tripCount < 6) {
+        const shortfall = Math.round((6 - tripCount) * 100) / 100;
+        failedVehicles.push({
+          vehicleNo: v.vehicleNo,
+          normKey: v.normKey,
+          ownerName: v.ownerName || "Unknown",
+          wheel: v.wheel || (standardCap > 0 ? `${standardCap === 13 ? 6 : standardCap === 19 ? 10 : standardCap === 25 ? 12 : 14}-Wheel` : "-"),
+          month: `${monthShortNames[mIdx]}-${targetYear}`,
+          monthFullName: `${monthNamesArray[mIdx]} ${targetYear}`,
+          tripCount,
+          requiredTrips: 6,
+          shortfall,
+          totalMT,
+          evaluationPeriod: `01-${String(monthInt).padStart(2, '0')}-${targetYear} to 25-${String(monthInt).padStart(2, '0')}-${targetYear}`
+        });
+      }
+    });
+
+    // Sort failed vehicles by shortfall descending, then vehicle number ascending
+    failedVehicles.sort((a, b) => b.shortfall - a.shortfall || a.vehicleNo.localeCompare(b.vehicleNo));
+
+    const recordsWithSl = failedVehicles.map((v, idx) => ({
+      slNo: idx + 1,
+      ...v
+    }));
+
+    return res.json({
+      success: true,
+      isApplicable: true,
+      month: monthNamesArray[mIdx],
+      monthShort: `${monthShortNames[mIdx]}-${targetYear}`,
+      monthFullName: `${monthNamesArray[mIdx]} ${targetYear}`,
+      year: targetYear,
+      evaluationPeriod: `01-${String(monthInt).padStart(2, '0')}-${targetYear} to 25-${String(monthInt).padStart(2, '0')}-${targetYear}`,
+      count: recordsWithSl.length,
+      records: recordsWithSl
+    });
+  } catch (err) {
+    console.error("[DailySummary] /six-trip-alerts error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to generate six-trip alerts" });
+  }
+});
+
+// ── GET /daily-summary/vehicle-not-loaded-alerts ──────────────────────────────
+// Live database-driven alert: VEHICLE NOT LOADED
+// Evaluates vehicles from CIM/CIMA Register (cement_register entries):
+// 1. For each vehicle, find its latest completed unloading record (valid unloading date).
+// 2. 3-day turnaround period: waitingPeriodEndDate = unloadingDate + 3 calendar days.
+// 3. If a newer invoice/loading record exists for that vehicle with loadingDate >= unloadingDate (different _id):
+//    - If it hasn't completed unloading, it's currently loaded -> NO ALERT.
+// 4. If no newer invoice/loading record exists, check if TODAY > waitingPeriodEndDate:
+//    - If today <= waitingPeriodEndDate -> NO ALERT (within allowed 3-day turnaround).
+//    - If today > waitingPeriodEndDate -> ALERT (Vehicle not loaded).
+//    - Days since eligible: difference in calendar days from waitingPeriodEndDate to TODAY.
+router.get("/vehicle-not-loaded-alerts", auth, async (req, res) => {
+  try {
+    const registeredVehicles = await getAllRegisteredVehicles();
+    const regVehMap = new Map();
+    registeredVehicles.forEach(v => {
+      regVehMap.set(v.normKey, v);
+    });
+
+    const cementCol = getCementCol();
+    const allEntries = await cementCol.find({}, {
+      projection: {
+        _id: 1,
+        "VEHICLE NUMBER": 1,
+        "VEHICLE NO": 1,
+        "VEHICLE NO.": 1,
+        "UNLOADING STATUS": 1,
+        "RECEIVING DATE": 1,
+        "UNLOADING DATE": 1,
+        "RECEIVING DT": 1,
+        "UNLOADING DT": 1,
+        "unloadingStatus": 1,
+        "receivingDate": 1,
+        "unloadingDate": 1,
+        "UNLOADING_STATUS": 1,
+        "RECEIVING_DATE": 1,
+        "UNLOADING_DATE": 1,
+        "LOADING DT": 1,
+        "LOADING DATE": 1,
+        "BILL DATE": 1,
+        "INVOICE DATE": 1,
+        "DATE": 1,
+        "loadingDate": 1,
+        "INVOICE NO": 1,
+        "INVOICE NO.": 1,
+        "BILL NO": 1,
+        "BILL NUMBER": 1,
+        "OWNER NAME": 1,
+        "PARTY NAME": 1
+      }
+    }).toArray();
+
+    // Group records by vehicle (normKey)
+    const recordsByVeh = new Map();
+
+    const getUnloadDate = (row) => {
+      const unloadingRaw = String(
+        row["UNLOADING STATUS"] ||
+        row["RECEIVING DATE"] ||
+        row["UNLOADING DATE"] ||
+        row["RECEIVING DT"] ||
+        row["UNLOADING DT"] ||
+        row["unloadingStatus"] ||
+        row["receivingDate"] ||
+        row["unloadingDate"] ||
+        row["UNLOADING_STATUS"] ||
+        row["RECEIVING_DATE"] ||
+        row["UNLOADING_DATE"] ||
+        ""
+      ).trim();
+
+      if (!unloadingRaw || unloadingRaw === "-" || unloadingRaw.toLowerCase() === "null" || unloadingRaw.toLowerCase() === "undefined") {
+        return null;
+      }
+      return parseDateToCalendar(unloadingRaw);
+    };
+
+    const getLoadDate = (row) => {
+      const loadDateRaw = String(
+        row["LOADING DT"] ||
+        row["LOADING DATE"] ||
+        row["BILL DATE"] ||
+        row["INVOICE DATE"] ||
+        row["RECEIVING DATE"] ||
+        row["DATE"] ||
+        row["loadingDate"] ||
+        ""
+      ).trim();
+
+      if (!loadDateRaw || loadDateRaw === "-" || loadDateRaw.toLowerCase() === "null" || loadDateRaw.toLowerCase() === "undefined") {
+        return null;
+      }
+      return parseDateToCalendar(loadDateRaw);
+    };
+
+    for (const row of allEntries) {
+      const rawVeh = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || row.vehicleNo || "";
+      const normKey = String(rawVeh).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!normKey || normKey.length < 5) continue;
+
+      if (!recordsByVeh.has(normKey)) {
+        const reg = regVehMap.get(normKey);
+        recordsByVeh.set(normKey, {
+          vehicleNo: reg?.vehicleNo || String(rawVeh).trim().toUpperCase(),
+          normKey,
+          ownerName: reg?.ownerName || (row["OWNER NAME"] || row["PARTY NAME"] || "").trim(),
+          records: []
+        });
+      }
+
+      const vehGroup = recordsByVeh.get(normKey);
+      if (!vehGroup.ownerName && (row["OWNER NAME"] || row["PARTY NAME"])) {
+        vehGroup.ownerName = (row["OWNER NAME"] || row["PARTY NAME"]).trim();
+      }
+
+      const uDate = getUnloadDate(row);
+      const lDate = getLoadDate(row);
+
+      vehGroup.records.push({
+        _id: String(row._id),
+        unloadingDate: uDate,
+        loadingDate: lDate,
+        raw: row
+      });
+    }
+
+    const now = new Date();
+    const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const formattedToday = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+
+    const failedVehicles = [];
+
+    for (const vehGroup of recordsByVeh.values()) {
+      // 1. Find completed unloading records
+      const completedUnloads = vehGroup.records.filter(r => r.unloadingDate !== null);
+      if (completedUnloads.length === 0) continue;
+
+      // 2. Latest completed unloading event (highest timeMs)
+      completedUnloads.sort((a, b) => b.unloadingDate.timeMs - a.unloadingDate.timeMs);
+      const latestUnloadRecord = completedUnloads[0];
+      const latestUnloadDate = latestUnloadRecord.unloadingDate;
+
+      // 3. Check if there is a NEW loading/invoice record for the SAME vehicle after that unloading event
+      // Record must have unique MongoDB ID and loadingDate >= latestUnloadDate.timeMs
+      const newerLoadingRecords = vehGroup.records.filter(r =>
+        r._id !== latestUnloadRecord._id &&
+        r.loadingDate !== null &&
+        r.loadingDate.timeMs >= latestUnloadDate.timeMs
+      );
+
+      // If a newer loading record exists and has not completed unloading, or is loaded, vehicle is considered loaded
+      if (newerLoadingRecords.length > 0) {
+        continue;
+      }
+
+      // 4. Calculate 3-day turnaround period
+      // Example: Unloading 01-09 -> Waiting period end = 04-09 (01 + 3 days)
+      const uY = latestUnloadDate.year;
+      const uM = latestUnloadDate.month;
+      const uD = latestUnloadDate.day;
+
+      const waitingPeriodEndDate = new Date(uY, uM - 1, uD + 3);
+      const waitingEndYear = waitingPeriodEndDate.getFullYear();
+      const waitingEndMonth = waitingPeriodEndDate.getMonth() + 1;
+      const waitingEndDay = waitingPeriodEndDate.getDate();
+      const waitingEndMs = new Date(waitingEndYear, waitingEndMonth - 1, waitingEndDay).getTime();
+
+      // Rule: Vehicle must NOT be alerted during allowed 3-day period (todayMs <= waitingEndMs)
+      if (todayMs <= waitingEndMs) {
+        continue;
+      }
+
+      // From day AFTER 3-day period onward (todayMs > waitingEndMs) -> Show VEHICLE NOT LOADED alert
+      const daysSinceEligible = Math.max(1, Math.round((todayMs - waitingEndMs) / (24 * 60 * 60 * 1000)));
+
+      const formattedUnloadDate = `${String(uD).padStart(2, '0')}-${String(uM).padStart(2, '0')}-${uY}`;
+      const formattedWaitingEndDate = `${String(waitingEndDay).padStart(2, '0')}-${String(waitingEndMonth).padStart(2, '0')}-${waitingEndYear}`;
+
+      failedVehicles.push({
+        vehicleNo: vehGroup.vehicleNo,
+        normKey: vehGroup.normKey,
+        ownerName: vehGroup.ownerName || '—',
+        lastUnloadingDate: formattedUnloadDate,
+        waitingPeriodEndDate: formattedWaitingEndDate,
+        today: formattedToday,
+        daysSinceEligible,
+        lastInvoiceLoadingDate: '—',
+        status: 'NOT LOADED',
+        daysSinceEligibleNum: daysSinceEligible
+      });
+    }
+
+    // Sort failed vehicles by daysSinceEligible descending, then vehicle number ascending
+    failedVehicles.sort((a, b) => b.daysSinceEligibleNum - a.daysSinceEligibleNum || a.vehicleNo.localeCompare(b.vehicleNo));
+
+    const recordsWithSl = failedVehicles.map((v, idx) => ({
+      slNo: idx + 1,
+      ...v
+    }));
+
+    return res.json({
+      success: true,
+      today: formattedToday,
+      count: recordsWithSl.length,
+      records: recordsWithSl
+    });
+
+  } catch (err) {
+    console.error("[DailySummary] /vehicle-not-loaded-alerts error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to generate vehicle not loaded alerts" });
   }
 });
 

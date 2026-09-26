@@ -4,13 +4,15 @@ import axios from 'axios';
 import {
   Box, Button, Typography, IconButton, Select, MenuItem,
   Tooltip, Divider, Dialog, DialogTitle, DialogContent, DialogActions,
-  CircularProgress, Snackbar, Alert, Chip
+  CircularProgress, Snackbar, Alert, Chip, Popover
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import * as XLSX from 'xlsx';
 
@@ -132,7 +134,7 @@ function truckDisplayType(row) {
 //   Sum of Amt      = 9.5% of Sum of ORG FREIGHT  → the incentive figure
 //   Total           = NVL Sum of Amt + NVCL Sum of Amt
 //   Final TOTAL     = Total + 10W Extra 8.5%
-function buildIncentiveData(rows, year, month, truckContacts = []) {
+export function buildIncentiveData(rows, year, month, truckContacts = []) {
   // 1. Filter to selected month (by LOADING DT)
   const filtered = rows.filter(row => {
     const ld = row['LOADING DT'];
@@ -440,6 +442,313 @@ function findDediSmtDiffColIdx(excelData) {
   }
 
   return -1;
+}
+
+// ─── Headline Categorizer & Month/Year Extractor ──────────────────────────────
+export function parseHeadlineInfo(headlineText) {
+  if (!headlineText || typeof headlineText !== 'string') return null;
+  const raw = String(headlineText).trim();
+  const text = raw.toLowerCase().replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
+
+  // Look for signature keywords in headline
+  const isDedicatedKeyword = text.includes('dedicated') || text.includes('dedi');
+  const isExtraKeyword = text.includes('extra') || text.includes('8.5%') || text.includes('15%') || text.includes('10wh') || text.includes('10w') || text.includes('6wh') || text.includes('6w');
+  const isSiteKeyword = text.includes('nvl') || text.includes('nvcl') || text.includes('dispatch') || text.includes('wb so') || text.includes('so of');
+
+  if (!((isDedicatedKeyword || isExtraKeyword) && isSiteKeyword)) {
+    return null;
+  }
+
+  // Determine Category & Target Field
+  // 1. Check NVCL vs NVL
+  const isNVCL = text.includes('nvcl') || text.includes('mkt') || text.includes('market');
+  const isNVL = (text.includes('nvl') || text.includes('ato') || text.includes('atoa')) && !isNVCL;
+
+  // 2. Check 10WH vs 6WH vs Normal Dedicated
+  const is10W = text.includes('10wh') || text.includes('10w') || text.includes('8.5%') || text.includes('10 wheel') || text.includes('10-wheel');
+  const is6W = text.includes('6wh') || text.includes('6w') || text.includes('15%') || text.includes('6 wheel') || text.includes('6-wheel');
+  const isDedicatedFreight = isDedicatedKeyword && !is10W && !is6W;
+
+  let category = '';
+  let targetField = '';
+  let subField = '';
+
+  if (isDedicatedFreight) {
+    if (isNVCL) {
+      category = 'Dedicated Freight 9.5% of NVCL';
+      targetField = 'nvcl';
+    } else {
+      category = 'Dedicated Freight 9.5% of NVL';
+      targetField = 'nvl';
+    }
+  } else if (is10W) {
+    if (isNVCL) {
+      category = 'Extra Freight 8.5% 10WH of NVCL';
+      targetField = 'w10';
+      subField = 'w10_nvcl';
+    } else {
+      category = 'Extra Freight 8.5% 10WH of NVL';
+      targetField = 'w10';
+      subField = 'w10_nvl';
+    }
+  } else if (is6W) {
+    if (isNVCL) {
+      category = 'Extra Freight 15% 6WH of NVCL';
+      targetField = 'w6';
+      subField = 'w6_nvcl';
+    } else {
+      category = 'Extra Freight 15% 6WH of NVL';
+      targetField = 'w6';
+      subField = 'w6_nvl';
+    }
+  } else if (isNVCL) {
+    category = 'Dedicated Freight 9.5% of NVCL';
+    targetField = 'nvcl';
+  } else if (isNVL) {
+    category = 'Dedicated Freight 9.5% of NVL';
+    targetField = 'nvl';
+  } else {
+    return null;
+  }
+
+  // 3. Extract Month & Year from headline
+  let detectedMonthIndex = null; // 0 for Jan ... 11 for Dec
+  let detectedCalendarYear = null; // e.g. 2026
+  let detectedFY = null; // e.g. "FY 2026–27"
+
+  const monthRegex = /(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember))[\s'_/-]*(\d{2,4})/i;
+  const match = text.match(monthRegex);
+  if (match) {
+    const mStr = match[1].toLowerCase().slice(0, 3);
+    const mIdxMap = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+    if (mIdxMap[mStr] !== undefined) {
+      detectedMonthIndex = mIdxMap[mStr];
+      let yNum = parseInt(match[2], 10);
+      if (yNum < 100) {
+        yNum += (yNum >= 70 ? 1900 : 2000);
+      }
+      detectedCalendarYear = yNum;
+      if (detectedMonthIndex >= 3) {
+        detectedFY = `FY ${yNum}–${String(yNum + 1).slice(-2)}`;
+      } else {
+        detectedFY = `FY ${yNum - 1}–${String(yNum).slice(-2)}`;
+      }
+    }
+  }
+
+  return {
+    rawHeadline: raw,
+    category,
+    targetField,
+    subField,
+    detectedMonthIndex,
+    detectedCalendarYear,
+    detectedFY
+  };
+}
+
+// ─── Multi-Table Workbook Parser ──────────────────────────────────────────────
+export function parseIncentiveWorkbook(wb, systemTrucks = []) {
+  if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return null;
+
+  const allTables = [];
+  const normalizedRecords = [];
+  let globalDetectedMonthIndex = null;
+  let globalDetectedYear = null;
+  let globalDetectedFY = null;
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const aoa = parseWorksheetToAOA(ws);
+    if (!aoa || aoa.length === 0) continue;
+
+    let r = 0;
+    while (r < aoa.length) {
+      const row = aoa[r];
+      if (!row) { r++; continue; }
+
+      let headlineInfo = null;
+      for (let c = 0; c < row.length; c++) {
+        const cell = row[c];
+        if (cell && typeof cell === 'string' && cell.trim().length > 8) {
+          const info = parseHeadlineInfo(cell);
+          if (info) {
+            headlineInfo = info;
+            break;
+          }
+        }
+      }
+
+      if (headlineInfo) {
+        if (headlineInfo.detectedMonthIndex !== null && globalDetectedMonthIndex === null) {
+          globalDetectedMonthIndex = headlineInfo.detectedMonthIndex;
+          globalDetectedYear = headlineInfo.detectedCalendarYear;
+          globalDetectedFY = headlineInfo.detectedFY;
+        }
+
+        // Find header row for this table
+        let headerRowIdx = -1;
+        let truckColIdx = -1;
+        let diffAmtColIdx = -1;
+        let amtColIdx = -1;
+
+        for (let hr = r + 1; hr <= Math.min(r + 6, aoa.length - 1); hr++) {
+          const hRow = aoa[hr];
+          if (!hRow) continue;
+          const isNextHead = hRow.some(c => c && typeof c === 'string' && c.trim().length > 8 && parseHeadlineInfo(c));
+          if (isNextHead) break;
+
+          for (let c = 0; c < hRow.length; c++) {
+            const hText = String(hRow[c] || '').toLowerCase().trim().replace(/[\r\n]+/g, ' ');
+            if (hText.includes('truck') || hText.includes('vehicle') || hText === 'no' || hText.includes('truck no') || hText.includes('vehicle no')) {
+              truckColIdx = c;
+            }
+            if (hText.includes('diff') || (hText.includes('dedi') && hText.includes('diff')) || hText.includes('difference')) {
+              diffAmtColIdx = c;
+            }
+            if (hText.includes('sum of') && (hText.includes('amt') || hText.includes('amount') || hText.includes('dedi'))) {
+              amtColIdx = c;
+            }
+          }
+          if (truckColIdx !== -1 && (diffAmtColIdx !== -1 || amtColIdx !== -1)) {
+            headerRowIdx = hr;
+            break;
+          }
+        }
+
+        const chosenAmtColIdx = diffAmtColIdx !== -1 ? diffAmtColIdx : amtColIdx;
+
+        // Fallback column identification if header text was merged or implicit
+        let finalTruckColIdx = truckColIdx;
+        let finalAmtColIdx = chosenAmtColIdx;
+
+        if (finalTruckColIdx === -1 || finalAmtColIdx === -1) {
+          const scanStart = r + 1;
+          for (let dr = scanStart; dr < Math.min(scanStart + 12, aoa.length); dr++) {
+            const dRow = aoa[dr];
+            if (!dRow) continue;
+            for (let c = 0; c < dRow.length; c++) {
+              if (finalTruckColIdx === -1 && extractTruckNo(dRow[c])) {
+                finalTruckColIdx = c;
+              }
+              if (finalAmtColIdx === -1 && typeof dRow[c] === 'number' && dRow[c] > 0) {
+                finalAmtColIdx = c;
+              }
+            }
+          }
+        }
+
+        const tableRows = [];
+        let currRow = (headerRowIdx !== -1 ? headerRowIdx + 1 : r + 1);
+
+        while (currRow < aoa.length) {
+          const row = aoa[currRow];
+          if (!row) { currRow++; continue; }
+
+          const isAnotherHeadline = row.some(cell => cell && typeof cell === 'string' && cell.trim().length > 8 && parseHeadlineInfo(cell));
+          if (isAnotherHeadline) {
+            break;
+          }
+
+          const firstNonEmpty = row.find(c => String(c || '').trim() !== '');
+          const firstLower = String(firstNonEmpty || '').toLowerCase().trim();
+          if (firstLower.startsWith('total') || firstLower.startsWith('grand total') || firstLower === 'sum' || firstLower === 'totals') {
+            currRow++;
+            break;
+          }
+
+          if (finalTruckColIdx !== -1 && finalAmtColIdx !== -1) {
+            const rawTruck = row[finalTruckColIdx];
+            const cleanTruck = extractTruckNo(rawTruck);
+            const rawAmt = row[finalAmtColIdx];
+            const cleanAmt = parseExcelNum(rawAmt);
+
+            if (cleanTruck) {
+              const record = {
+                sheetName,
+                headline: headlineInfo.rawHeadline,
+                category: headlineInfo.category,
+                targetField: headlineInfo.targetField,
+                subField: headlineInfo.subField,
+                truckNo: cleanTruck,
+                rawTruckNo: String(rawTruck || '').trim(),
+                amount: cleanAmt,
+                rowIdx: currRow
+              };
+              tableRows.push(record);
+              normalizedRecords.push(record);
+            }
+          }
+
+          currRow++;
+        }
+
+        allTables.push({
+          headline: headlineInfo.rawHeadline,
+          category: headlineInfo.category,
+          targetField: headlineInfo.targetField,
+          subField: headlineInfo.subField,
+          rowCount: tableRows.length,
+          totalAmount: tableRows.reduce((sum, tr) => sum + tr.amount, 0),
+          records: tableRows
+        });
+
+        r = currRow - 1;
+      }
+      r++;
+    }
+  }
+
+  // Construct actuals map: { [truckNo]: { nvl, nvcl, w10, w6, w10_nvl, w10_nvcl, w6_nvcl, w6_nvl } }
+  const actuals = {};
+  normalizedRecords.forEach(rec => {
+    const t = rec.truckNo;
+    if (!actuals[t]) {
+      actuals[t] = { nvl: '', nvcl: '', w10: '', w6: '', w10_nvl: 0, w10_nvcl: 0, w6_nvcl: 0, w6_nvl: 0 };
+    }
+    if (rec.targetField === 'nvl') {
+      actuals[t].nvl = rec.amount;
+    } else if (rec.targetField === 'nvcl') {
+      actuals[t].nvcl = rec.amount;
+    } else if (rec.targetField === 'w10') {
+      if (rec.subField === 'w10_nvl') actuals[t].w10_nvl = rec.amount;
+      if (rec.subField === 'w10_nvcl') actuals[t].w10_nvcl = rec.amount;
+      actuals[t].w10 = (Number(actuals[t].w10_nvl) || 0) + (Number(actuals[t].w10_nvcl) || 0);
+    } else if (rec.targetField === 'w6') {
+      if (rec.subField === 'w6_nvl') actuals[t].w6_nvl = rec.amount;
+      if (rec.subField === 'w6_nvcl') actuals[t].w6_nvcl = rec.amount;
+      actuals[t].w6 = (Number(actuals[t].w6_nvl) || 0) + (Number(actuals[t].w6_nvcl) || 0);
+    }
+  });
+
+  // System trucks matching comparison
+  const systemTruckSet = new Set((systemTrucks || []).map(st => extractTruckNo(st.truckNo)).filter(Boolean));
+  const uniqueExcelTrucks = Array.from(new Set(normalizedRecords.map(r => r.truckNo)));
+  const matchedTrucks = uniqueExcelTrucks.filter(t => systemTruckSet.has(t));
+  const unmatchedTrucks = uniqueExcelTrucks.filter(t => !systemTruckSet.has(t));
+  const totalAmount = normalizedRecords.reduce((sum, r) => sum + r.amount, 0);
+
+  return {
+    detectedMonthIndex: globalDetectedMonthIndex,
+    detectedCalendarYear: globalDetectedYear,
+    detectedFY: globalDetectedFY,
+    tables: allTables,
+    normalizedRecords,
+    actuals,
+    totalRows: normalizedRecords.length,
+    uniqueTruckCount: uniqueExcelTrucks.length,
+    matchedCount: matchedTrucks.length,
+    unmatchedCount: unmatchedTrucks.length,
+    unmatchedTrucks: unmatchedTrucks.map(t => ({
+      truckNo: t,
+      records: normalizedRecords.filter(r => r.truckNo === t)
+    })),
+    totalAmount
+  };
 }
 
 // Extract the "Sum of Dedi SMT Diff" values and map them to truck numbers
@@ -1180,9 +1489,12 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
 
   // Data rows
   for (const t of data) {
-    const act = parseFloat(actuals[t.truckNo]) || 0;
+    const rawAct = actuals[t.truckNo];
+    const act = (typeof rawAct === 'object' && rawAct !== null)
+      ? (num(rawAct.nvl) + num(rawAct.nvcl) + num(rawAct.w10) + num(rawAct.w6))
+      : (parseFloat(rawAct) || 0);
     const diff = act - t.totalFinal;
-    const settled = act > t.totalFinal ? t.totalFinal : act;
+    const settled = (act > 0 && act > t.totalFinal) ? t.totalFinal : act;
     aoa.push([
       t.type,
       t.ownerName,
@@ -1214,10 +1526,13 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
     acc.total += t.total;
     acc.w10 += t.extra10W;
     acc.grand += t.totalFinal;
-    const act = parseFloat(actuals[t.truckNo]) || 0;
+    const rawAct = actuals[t.truckNo];
+    const act = (typeof rawAct === 'object' && rawAct !== null)
+      ? (num(rawAct.nvl) + num(rawAct.nvcl) + num(rawAct.w10) + num(rawAct.w6))
+      : (parseFloat(rawAct) || 0);
     acc.actual += act;
     acc.diff += act - t.totalFinal;
-    acc.settled += (act > t.totalFinal ? t.totalFinal : act);
+    acc.settled += (act > 0 && act > t.totalFinal) ? t.totalFinal : act;
     return acc;
   }, { nvlQty: 0, nvlFreight: 0, nvlAmt: 0, nvclQty: 0, nvclFreight: 0, nvclAmt: 0, total: 0, w10: 0, grand: 0, actual: 0, diff: 0, settled: 0 });
 
@@ -1301,6 +1616,9 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
 
   // UI Modal state
   const [comparisonModalOpen, setComparisonModalOpen] = useState(false);
+  const [uploadSummaryModalOpen, setUploadSummaryModalOpen] = useState(false);
+  const [uploadSummaryData, setUploadSummaryData] = useState(null);
+  const [importingExcel, setImportingExcel] = useState(false);
   const [mailNvlTotal, setMailNvlTotal] = useState('');
   const [mailW10Total, setMailW10Total] = useState('');
   const [mailNvclTotal, setMailNvclTotal] = useState('');
@@ -1309,6 +1627,8 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   const [uploadedPdfUrl, setUploadedPdfUrl] = useState(null);
   const [uploadedExcelName, setUploadedExcelName] = useState(null);
   const [uploadedExcelData, setUploadedExcelData] = useState(null);
+  const [pendingExcelRemoval, setPendingExcelRemoval] = useState(false);
+  const [excelFileAnchorEl, setExcelFileAnchorEl] = useState(null);
   const [actuals, setActuals] = useState({});
   const [loadingState, setLoadingState] = useState(false);
   const [savingActuals, setSavingActuals] = useState(false);
@@ -1348,10 +1668,10 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   }, [uploadedPdfUrl, uploadedExcelName, uploadedExcelData, actuals]);
 
   const getStatusChip = () => {
-    if (hasNewUpload) {
+    if (hasNewUpload || pendingExcelRemoval) {
       return (
         <Chip
-          label="⚠️ Preview (Unsaved)"
+          label={pendingExcelRemoval ? "⚠️ File Removal (Unsaved)" : "⚠️ Preview (Unsaved)"}
           size="small"
           sx={{
             fontWeight: 700,
@@ -1403,20 +1723,99 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   const isActualsModified = useMemo(() => {
-    const keys1 = Object.keys(actuals);
-    const keys2 = Object.keys(dbActuals);
+    const keys1 = Object.keys(actuals || {});
+    const keys2 = Object.keys(dbActuals || {});
+    const allKeys = Array.from(new Set([...keys1, ...keys2]));
     
-    const activeKeys1 = keys1.filter(k => actuals[k] !== undefined && actuals[k] !== null && String(actuals[k]).trim() !== '');
-    const activeKeys2 = keys2.filter(k => dbActuals[k] !== undefined && dbActuals[k] !== null && String(dbActuals[k]).trim() !== '');
-    
-    if (activeKeys1.length !== activeKeys2.length) return true;
-    for (const key of activeKeys1) {
-      if (String(actuals[key]).trim() !== String(dbActuals[key] ?? '').trim()) return true;
+    for (const key of allKeys) {
+      const v1 = actuals?.[key];
+      const v2 = dbActuals?.[key];
+      if (typeof v1 === 'object' || typeof v2 === 'object') {
+        const o1 = typeof v1 === 'object' && v1 !== null ? v1 : { nvl: v1 || '' };
+        const o2 = typeof v2 === 'object' && v2 !== null ? v2 : { nvl: v2 || '' };
+        if (
+          String(o1.nvl ?? '').trim() !== String(o2.nvl ?? '').trim() ||
+          String(o1.nvcl ?? '').trim() !== String(o2.nvcl ?? '').trim() ||
+          String(o1.w10 ?? '').trim() !== String(o2.w10 ?? '').trim() ||
+          String(o1.w6 ?? '').trim() !== String(o2.w6 ?? '').trim()
+        ) {
+          return true;
+        }
+      } else {
+        if (String(v1 ?? '').trim() !== String(v2 ?? '').trim()) return true;
+      }
     }
     return false;
   }, [actuals, dbActuals]);
 
-  const isDirty = hasNewUpload || isActualsModified;
+  const isDirty = hasNewUpload || isActualsModified || pendingExcelRemoval;
+
+  // ── Unified Excel Upload Handler ──────────────────────────────────────────
+  const handleExcelUpload = async (file) => {
+    if (!file) return;
+    setImportingExcel(true);
+    try {
+      setUploadedExcelName(file.name);
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { cellDates: true });
+      const mainSheetName = wb.SheetNames.find(name => name.toUpperCase().includes('INCENTIVE')) || wb.SheetNames[0];
+      const parsedRows = parseWorksheetToAOA(wb.Sheets[mainSheetName]);
+      setUploadedExcelData(parsedRows);
+
+      // Run multi-table workbook parser
+      const parsedResult = parseIncentiveWorkbook(wb, data);
+      if (!parsedResult || (parsedResult.tables.length === 0 && Object.keys(parsedResult.actuals).length === 0)) {
+        // Fallback to legacy single table mapping
+        const mapped = mapExcelToActuals(parsedRows, data);
+        if (Object.keys(mapped).length === 0) {
+          alert("The uploaded Excel sheet does not contain valid incentive tables or truck data.");
+          setImportingExcel(false);
+          return;
+        }
+        setActuals(prev => ({ ...prev, ...mapped }));
+        setHasNewUpload(true);
+        setSaveCompleted(false);
+        setComparisonModalOpen(true);
+        setImportingExcel(false);
+        return;
+      }
+
+      // Check if month/year detected from Excel differs from current UI view
+      let targetYear = year;
+      let targetMonth = month;
+      if (parsedResult.detectedCalendarYear !== null && parsedResult.detectedMonthIndex !== null) {
+        targetYear = parsedResult.detectedCalendarYear;
+        targetMonth = parsedResult.detectedMonthIndex;
+        if (targetYear !== year || targetMonth !== month) {
+          setYear(targetYear);
+          setMonth(targetMonth);
+          if (onPeriodChange) {
+            onPeriodChange(targetYear, targetMonth + 1);
+          }
+        }
+      }
+
+      // Merge parsed actuals with existing actuals
+      const mergedActuals = { ...actuals, ...parsedResult.actuals };
+      setActuals(mergedActuals);
+      setUploadedExcelName(file.name);
+      setUploadedExcelData(parsedRows);
+      setUploadSummaryData(parsedResult);
+      setHasNewUpload(true);
+      setPendingExcelRemoval(false);
+      setSaveCompleted(false);
+      setUploadSummaryModalOpen(true);
+      setSnack({
+        severity: 'info',
+        msg: `Excel parsed: ${parsedResult.tables.length} tables found (${parsedResult.totalRows} records). Click SAVE to persist.`
+      });
+    } catch (err) {
+      console.error("Excel upload failed:", err);
+      alert("Failed to process uploaded Excel: " + (err.response?.data?.error || err.message));
+    } finally {
+      setImportingExcel(false);
+    }
+  };
 
   // Auto-initialize month/year based on latest record date if not provided
   useEffect(() => {
@@ -1464,6 +1863,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     if (year === undefined || month === undefined) return;
     const fetchState = async () => {
       setLoadingState(true);
+      setPendingExcelRemoval(false);
       try {
         const token = localStorage.getItem('token');
         const API_URL = import.meta.env.VITE_API_URL;
@@ -1477,8 +1877,10 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           setUploadedPdfUrl(st.pdfUrl || null);
           setUploadedExcelName(st.excelName || null);
           setUploadedExcelData(st.excelData || null);
-          setSaveCompleted(!!st.excelData);
+          setUploadSummaryData(st.uploadSummary || null);
+          setSaveCompleted(!!st.excelName);
           setHasNewUpload(false);
+          setPendingExcelRemoval(false);
           if (st.excelData && st.excelData.length > 0) {
             setComparisonModalOpen(true);
           } else {
@@ -1490,8 +1892,10 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           setUploadedPdfUrl(null);
           setUploadedExcelName(null);
           setUploadedExcelData(null);
+          setUploadSummaryData(null);
           setSaveCompleted(false);
           setHasNewUpload(false);
+          setPendingExcelRemoval(false);
           setComparisonModalOpen(false);
         }
       } catch (err) {
@@ -1504,24 +1908,42 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   }, [year, month]);
 
   const handleSaveActuals = async () => {
+    if (!isDirty && !pendingExcelRemoval) {
+      return setSnack({ severity: 'info', msg: 'No unsaved changes to save.' });
+    }
     setSavingActuals(true);
     try {
       const token = localStorage.getItem('token');
       const API_URL = import.meta.env.VITE_API_URL;
+      const targetExcelName = pendingExcelRemoval ? null : uploadedExcelName;
+      const targetExcelData = pendingExcelRemoval ? null : uploadedExcelData;
+      const targetUploadSummary = pendingExcelRemoval ? null : uploadSummaryData;
+      const fy = (month >= 3 ? `FY ${year}-${String(year + 1).slice(-2)}` : `FY ${year - 1}-${String(year).slice(-2)}`);
+
       await axios.post(`${API_URL}/cement-register/incentive-state`, {
         year,
         month,
         actuals,
         pdfUrl: uploadedPdfUrl,
-        excelName: uploadedExcelName,
-        excelData: uploadedExcelData
+        excelName: targetExcelName,
+        excelData: targetExcelData,
+        uploadSummary: targetUploadSummary,
+        financialYear: fy,
+        normalizedRecords: pendingExcelRemoval ? [] : (uploadSummaryData?.normalizedRecords || [])
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
+
+      if (pendingExcelRemoval) {
+        setUploadedExcelName(null);
+        setUploadedExcelData(null);
+        setUploadSummaryData(null);
+        setPendingExcelRemoval(false);
+      }
       setSaveCompleted(true);
       setDbActuals(actuals);
       setHasNewUpload(false);
-      setSnack({ severity: 'success', msg: 'Incentive data saved successfully!' });
+      setSnack({ severity: 'success', msg: 'Incentive Calculation Sheet saved successfully!' });
     } catch (err) {
       setSnack({ severity: 'error', msg: 'Failed to save incentive data: ' + (err.response?.data?.error || err.message) });
       console.error("Error saving incentive state:", err);
@@ -1896,98 +2318,163 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
             }} />
           </Button>
 
-          {saveCompleted && (
+          {uploadSummaryData && !pendingExcelRemoval && (
             <Button
-              size="small" variant="contained" component="label" startIcon={<UploadIcon />}
+              size="small" variant="outlined"
+              onClick={() => setUploadSummaryModalOpen(true)}
               sx={{
-                fontWeight: 700, borderRadius: 2, px: 2, fontSize: '11px',
-                background: 'linear-gradient(135deg,#7c3aed,#6d28d9)',
-                color: '#fff',
+                fontWeight: 700, borderRadius: 2, px: 1.5, fontSize: '11px',
+                borderColor: '#10b981', color: '#047857', bgcolor: '#ecfdf5',
                 textTransform: 'none',
-                cursor: 'pointer',
-                '&:hover': { background: 'linear-gradient(135deg,#6d28d9,#5b21b6)' }
+                '&:hover': { bgcolor: '#d1fae5', borderColor: '#059669' }
               }}>
-              Upload New
-              <input type="file" accept=".xls,.xlsx" hidden onChange={async (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                  setUploadedExcelName(file.name);
-                  const ab = await file.arrayBuffer();
-                  const wb = XLSX.read(ab);
-                  const sheetName = wb.SheetNames.find(name => name.toUpperCase().includes('INCENTIVE')) || wb.SheetNames[0];
-                  const ws = wb.Sheets[sheetName];
-                  const parsedRows = parseWorksheetToAOA(ws);
-                  if (!parsedRows || parsedRows.length === 0) {
-                    alert("The uploaded Excel sheet is empty or invalid.");
-                    return;
-                  }
-                  const hasTrucks = parsedRows.some(row => row.some(cell => extractTruckNo(cell)));
-                  if (!hasTrucks) {
-                    alert("Warning: No valid vehicle/truck numbers were detected in this Excel sheet. Please verify you uploaded the correct file.");
-                  }
-                  setUploadedExcelData(parsedRows);
-                  const mapped = mapExcelToActuals(parsedRows, data);
-                  setActuals(prev => ({ ...prev, ...mapped }));
-                  setHasNewUpload(true);
-                  setSaveCompleted(false);
-                  setComparisonModalOpen(true);
-                }
-              }} />
+              📊 Import Report ({uploadSummaryData.tables?.length || uploadSummaryData.tablesDetected || 0} Tables)
             </Button>
           )}
 
-          <Button
-            size="small" variant="outlined" component="label" startIcon={<UploadIcon />}
-            disabled={saveCompleted}
-            sx={{
-              fontWeight: 700, borderRadius: 2, px: 1.5, fontSize: '11px',
-              borderColor: '#cbd5e1', color: '#475569',
-              textTransform: 'none',
-              cursor: saveCompleted ? 'default' : 'pointer',
-              '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' },
-              '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' }
-            }}>
-            Upload Incentive Excel
-            <input type="file" accept=".xls,.xlsx" hidden onChange={async (e) => {
-              const file = e.target.files[0];
-              if (file) {
-                setUploadedExcelName(file.name);
-                const ab = await file.arrayBuffer();
-                const wb = XLSX.read(ab);
-                const sheetName = wb.SheetNames.find(name => name.toUpperCase().includes('INCENTIVE')) || wb.SheetNames[0];
-                const ws = wb.Sheets[sheetName];
-                const parsedRows = parseWorksheetToAOA(ws);
-                if (!parsedRows || parsedRows.length === 0) {
-                  alert("The uploaded Excel sheet is empty or invalid.");
-                  return;
-                }
-                const hasTrucks = parsedRows.some(row => row.some(cell => extractTruckNo(cell)));
-                if (!hasTrucks) {
-                  alert("Warning: No valid vehicle/truck numbers were detected in this Excel sheet. Please verify you uploaded the correct file.");
-                }
-                setUploadedExcelData(parsedRows);
-                const mapped = mapExcelToActuals(parsedRows, data);
-                setActuals(prev => ({ ...prev, ...mapped }));
-                setHasNewUpload(true);
-                setComparisonModalOpen(true);
-              }
-            }} />
-          </Button>
+          {/* ── UPLOAD INCENTIVE EXCEL & ATTACHED FILE INDICATOR ── */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {uploadedExcelName && !pendingExcelRemoval ? (
+              <>
+                {/* Visual blurred/disabled-looking upload button */}
+                <Tooltip title="An Excel file is already attached. Click the file chip to remove or replace.">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<UploadIcon />}
+                    sx={{
+                      fontWeight: 700,
+                      borderRadius: 2,
+                      px: 1.5,
+                      fontSize: '11px',
+                      borderColor: '#cbd5e1',
+                      color: '#94a3b8',
+                      textTransform: 'none',
+                      bgcolor: '#f8fafc',
+                      filter: 'blur(0.8px)',
+                      opacity: 0.65,
+                      cursor: 'default',
+                      userSelect: 'none',
+                    }}
+                  >
+                    Upload Incentive Excel
+                  </Button>
+                </Tooltip>
 
-          <Button
-            size="small" variant="contained" startIcon={<SaveIcon />}
-            onClick={handleSaveActuals}
-            disabled={!isDirty || savingActuals}
-            sx={{
-              fontWeight: 700, borderRadius: 2, px: 2, fontSize: '11px',
-              background: isDirty ? '#10b981' : '#f1f5f9',
-              color: isDirty ? '#fff' : '#94a3b8',
-              boxShadow: isDirty ? '0 2px 4px rgba(16, 185, 129, 0.2)' : 'none',
-              '&:hover': { background: isDirty ? '#059669' : '#f1f5f9' },
-              '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' }
-            }}>
-            {savingActuals ? 'Saving…' : 'Save Changes'}
-          </Button>
+                {/* Compact chip / card displaying the uploaded file name */}
+                <Tooltip title="Click to view file details or remove">
+                  <Box
+                    onClick={(e) => setExcelFileAnchorEl(e.currentTarget)}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.75,
+                      px: 1.25,
+                      py: 0.5,
+                      borderRadius: 2,
+                      bgcolor: '#eff6ff',
+                      border: '1px solid #bfdbfe',
+                      color: '#1d4ed8',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      maxWidth: 220,
+                      transition: 'all 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                      '&:hover': {
+                        bgcolor: '#dbeafe',
+                        borderColor: '#93c5fd',
+                        transform: 'translateY(-1px)',
+                        boxShadow: '0 2px 5px rgba(29, 78, 216, 0.15)'
+                      }
+                    }}
+                  >
+                    <InsertDriveFileIcon sx={{ fontSize: 16, color: '#2563eb' }} />
+                    <Typography
+                      sx={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        color: '#1e40af',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {uploadedExcelName}
+                    </Typography>
+                  </Box>
+                </Tooltip>
+              </>
+            ) : pendingExcelRemoval ? (
+              <>
+                {/* Active upload control when pending removal */}
+                <Button
+                  size="small"
+                  variant="outlined"
+                  component="label"
+                  startIcon={importingExcel ? <CircularProgress size={14} color="inherit" /> : <UploadIcon />}
+                  disabled={importingExcel}
+                  sx={{
+                    fontWeight: 700,
+                    borderRadius: 2,
+                    px: 1.5,
+                    fontSize: '11px',
+                    borderColor: '#cbd5e1',
+                    color: '#475569',
+                    textTransform: 'none',
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' }
+                  }}
+                >
+                  {importingExcel ? 'Importing Excel…' : 'Upload Incentive Excel'}
+                  <input type="file" accept=".xls,.xlsx" hidden onChange={(e) => handleExcelUpload(e.target.files[0])} />
+                </Button>
+
+                {/* Staged unsaved removal indicator chip */}
+                <Tooltip title="Marked for removal. Click to manage or click SAVE to commit.">
+                  <Chip
+                    icon={<DeleteOutlineIcon sx={{ fontSize: '14px !important', color: '#dc2626 !important' }} />}
+                    label="File removed — UNSAVED"
+                    size="small"
+                    onClick={(e) => setExcelFileAnchorEl(e.currentTarget)}
+                    sx={{
+                      bgcolor: '#fef2f2',
+                      border: '1px dashed #f87171',
+                      color: '#b91c1c',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      '&:hover': { bgcolor: '#fee2e2' }
+                    }}
+                  />
+                </Tooltip>
+              </>
+            ) : (
+              /* No file attached: active upload button */
+              <Button
+                size="small"
+                variant="outlined"
+                component="label"
+                startIcon={importingExcel ? <CircularProgress size={14} color="inherit" /> : <UploadIcon />}
+                disabled={importingExcel}
+                sx={{
+                  fontWeight: 700,
+                  borderRadius: 2,
+                  px: 1.5,
+                  fontSize: '11px',
+                  borderColor: '#cbd5e1',
+                  color: '#475569',
+                  textTransform: 'none',
+                  cursor: 'pointer',
+                  '&:hover': { bgcolor: 'background.default', borderColor: '#94a3b8' },
+                  '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' }
+                }}
+              >
+                {importingExcel ? 'Importing Excel…' : 'Upload Incentive Excel'}
+                <input type="file" accept=".xls,.xlsx" hidden onChange={(e) => handleExcelUpload(e.target.files[0])} />
+              </Button>
+            )}
+          </Box>
 
           <Button
             size="small" variant="contained" color="error" startIcon={deletingState ? <CircularProgress size={14} color="inherit" /> : <DeleteIcon />}
@@ -2003,19 +2490,143 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
 
           <Divider orientation="vertical" flexItem sx={{ my: 0.5, borderColor: '#e2e8f0' }} />
 
+          {/* ── Top-Right Action Buttons: [ EXPORT EXCEL ] [ SAVE ] ── */}
           <Button
             size="small" variant="contained" startIcon={<DownloadIcon />}
             onClick={() => exportIncentiveExcel(data, year, month, actuals)}
             sx={{
-              fontWeight: 800, borderRadius: 2, px: 2, fontSize: '12px',
+              fontWeight: 800, borderRadius: 2, px: 2, fontSize: '11.5px',
               background: 'linear-gradient(135deg,#059669,#047857)',
               boxShadow: '0 4px 12px rgba(5,150,105,0.3)',
+              textTransform: 'none',
+              letterSpacing: '0.2px',
               '&:hover': { background: 'linear-gradient(135deg,#047857,#065f46)' },
             }}>
             Export Excel
           </Button>
+
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={savingActuals ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}
+            onClick={handleSaveActuals}
+            disabled={!isDirty || savingActuals}
+            sx={{
+              fontWeight: 800,
+              borderRadius: 2,
+              px: 2.2,
+              fontSize: '11.5px',
+              background: isDirty ? 'linear-gradient(135deg,#10b981,#059669)' : '#f1f5f9',
+              color: isDirty ? '#fff' : '#94a3b8',
+              boxShadow: isDirty ? '0 4px 12px rgba(16, 185, 129, 0.3)' : 'none',
+              textTransform: 'none',
+              letterSpacing: '0.3px',
+              '&:hover': { background: isDirty ? 'linear-gradient(135deg,#059669,#047857)' : '#f1f5f9' },
+              '&:disabled': { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' }
+            }}>
+            {savingActuals ? 'Saving…' : 'SAVE'}
+          </Button>
         </Box>
       </Box>
+
+      {/* ── Management Popover for Uploaded Excel ────────────────────────────── */}
+      <Popover
+        open={Boolean(excelFileAnchorEl)}
+        anchorEl={excelFileAnchorEl}
+        onClose={() => setExcelFileAnchorEl(null)}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'left',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+        PaperProps={{
+          sx: {
+            p: 2,
+            mt: 1,
+            width: 290,
+            borderRadius: 2.5,
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+            border: '1px solid #e2e8f0'
+          }
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 1.5 }}>
+          <Box sx={{ p: 1, borderRadius: 1.5, bgcolor: '#eff6ff', color: '#2563eb', display: 'flex' }}>
+            <InsertDriveFileIcon sx={{ fontSize: 24 }} />
+          </Box>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, display: 'block', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Attached Incentive Excel
+            </Typography>
+            <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', wordBreak: 'break-all', fontSize: '12px', lineHeight: 1.3 }}>
+              {uploadedExcelName || 'Incentive Excel'}
+            </Typography>
+            {uploadSummaryData && (
+              <Typography variant="caption" sx={{ color: '#059669', fontWeight: 600, display: 'block', mt: 0.5, fontSize: '11px' }}>
+                ✓ {uploadSummaryData.tables?.length || uploadSummaryData.tablesDetected || 0} tables parsed
+              </Typography>
+            )}
+          </Box>
+        </Box>
+
+        <Divider sx={{ my: 1.25, borderColor: '#f1f5f9' }} />
+
+        {pendingExcelRemoval ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Typography variant="caption" sx={{ color: '#dc2626', fontWeight: 600, fontSize: '11px' }}>
+              Marked for removal. Click <b>SAVE</b> to persist removal to database.
+            </Typography>
+            <Button
+              fullWidth
+              size="small"
+              variant="outlined"
+              onClick={() => {
+                setPendingExcelRemoval(false);
+                setExcelFileAnchorEl(null);
+              }}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 700,
+                fontSize: '11px',
+                borderColor: '#94a3b8',
+                color: '#475569'
+              }}
+            >
+              Undo Remove
+            </Button>
+          </Box>
+        ) : (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '10.5px' }}>
+              Clicking Remove will detach this Excel in the current unsaved state. Click <b>SAVE</b> afterwards to commit.
+            </Typography>
+            <Button
+              fullWidth
+              size="small"
+              variant="contained"
+              color="error"
+              startIcon={<DeleteOutlineIcon sx={{ fontSize: 16 }} />}
+              onClick={() => {
+                setPendingExcelRemoval(true);
+                setExcelFileAnchorEl(null);
+              }}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 700,
+                fontSize: '11.5px',
+                borderRadius: 1.5,
+                bgcolor: '#ef4444',
+                '&:hover': { bgcolor: '#dc2626' }
+              }}
+            >
+              REMOVE
+            </Button>
+          </Box>
+        )}
+      </Popover>
 
       {/* ── Main Table Area ──────────────────────────────────────────────── */}
       <Box sx={{ flex: 1, overflow: 'auto', p: 2, position: 'relative' }}>
@@ -2262,6 +2873,165 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
         )}
 
       </Box>
+
+      {/* ── Excel Import Summary Modal ── */}
+      <Dialog
+        open={uploadSummaryModalOpen}
+        onClose={() => setUploadSummaryModalOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            bgcolor: 'background.paper',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+            overflow: 'hidden'
+          }
+        }}
+      >
+        <DialogTitle
+          sx={{
+            fontWeight: 800,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid #e2e8f0',
+            bgcolor: '#f8fafc',
+            py: 2,
+            px: 3
+          }}
+        >
+          <Box display="flex" alignItems="center" gap={1.5}>
+            <Box sx={{ width: 10, height: 10, bgcolor: '#10b981', borderRadius: '50%' }} />
+            <Typography variant="h6" fontWeight={800} color="#0f172a">
+              Incentive Excel Import Summary
+            </Typography>
+            {uploadSummaryData?.detectedFY && (
+              <Chip
+                label={`${uploadSummaryData.detectedMonthIndex !== null ? MONTH_NAMES[uploadSummaryData.detectedMonthIndex] : ''} ${uploadSummaryData.detectedCalendarYear || ''} (${uploadSummaryData.detectedFY})`}
+                size="small"
+                sx={{ fontWeight: 800, bgcolor: '#ede9fe', color: '#6d28d9', fontSize: '11px' }}
+              />
+            )}
+          </Box>
+          <Button size="small" variant="outlined" onClick={() => setUploadSummaryModalOpen(false)} sx={{ fontWeight: 700 }}>
+            Close
+          </Button>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 3, bgcolor: 'background.default' }}>
+          {uploadSummaryData && (
+            <Box display="flex" flexDirection="column" gap={2.5}>
+              {/* Stat Metric Cards */}
+              <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(130px, 1fr))" gap={1.5}>
+                <Box sx={{ p: 2, borderRadius: 2, bgcolor: '#eff6ff', border: '1px solid #dbeafe', textAlign: 'center' }}>
+                  <Typography variant="caption" fontWeight={700} color="#1e40af" textTransform="uppercase">Tables Detected</Typography>
+                  <Typography variant="h5" fontWeight={900} color="#1d4ed8" mt={0.5}>{uploadSummaryData.tables?.length || 0}</Typography>
+                </Box>
+                <Box sx={{ p: 2, borderRadius: 2, bgcolor: '#f5f3ff', border: '1px solid #ede9fe', textAlign: 'center' }}>
+                  <Typography variant="caption" fontWeight={700} color="#5b21b6" textTransform="uppercase">Extracted Rows</Typography>
+                  <Typography variant="h5" fontWeight={900} color="#6d28d9" mt={0.5}>{uploadSummaryData.totalRows || 0}</Typography>
+                </Box>
+                <Box sx={{ p: 2, borderRadius: 2, bgcolor: '#f0fdf4', border: '1px solid #dcfce7', textAlign: 'center' }}>
+                  <Typography variant="caption" fontWeight={700} color="#166534" textTransform="uppercase">Matched Vehicles</Typography>
+                  <Typography variant="h5" fontWeight={900} color="#15803d" mt={0.5}>{uploadSummaryData.matchedCount || 0}</Typography>
+                </Box>
+                <Box sx={{ p: 2, borderRadius: 2, bgcolor: uploadSummaryData.unmatchedCount > 0 ? '#fff7ed' : '#f8fafc', border: '1px solid #fed7aa', textAlign: 'center' }}>
+                  <Typography variant="caption" fontWeight={700} color="#c2410c" textTransform="uppercase">Unmatched</Typography>
+                  <Typography variant="h5" fontWeight={900} color="#ea580c" mt={0.5}>{uploadSummaryData.unmatchedCount || 0}</Typography>
+                </Box>
+                <Box sx={{ p: 2, borderRadius: 2, bgcolor: '#fefce8', border: '1px solid #fef08a', textAlign: 'center' }}>
+                  <Typography variant="caption" fontWeight={700} color="#854d0e" textTransform="uppercase">Total Amount</Typography>
+                  <Typography variant="h6" fontWeight={900} color="#a16207" mt={0.5}>₹{Math.round(uploadSummaryData.totalAmount || 0).toLocaleString('en-IN')}</Typography>
+                </Box>
+              </Box>
+
+              {/* Detected Tables Breakdown */}
+              <Box sx={{ bgcolor: 'background.paper', p: 2, borderRadius: 2, border: '1px solid #e2e8f0' }}>
+                <Typography variant="subtitle2" fontWeight={800} color="#0f172a" mb={1.5}>
+                  Detected Tables & Destination Columns
+                </Typography>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 700, color: '#475569' }}>#</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 700, color: '#475569' }}>Category / Headline Detected</th>
+                      <th style={{ textAlign: 'center', padding: '8px 12px', fontWeight: 700, color: '#475569' }}>Destination Column</th>
+                      <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 700, color: '#475569' }}>Rows</th>
+                      <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 700, color: '#475569' }}>Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uploadSummaryData.tables?.map((tbl, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 600, color: '#64748b' }}>{idx + 1}</td>
+                        <td style={{ padding: '8px 12px', fontWeight: 700, color: '#0f172a' }}>{tbl.headline || tbl.category}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                          <Chip
+                            label={`ACTUAL / DEDICATED → ${tbl.targetField.toUpperCase()}${tbl.subField ? ` (${tbl.subField.includes('nvl') ? 'NVL' : 'NVCL'})` : ''}`}
+                            size="small"
+                            sx={{ fontWeight: 700, fontSize: '10px', bgcolor: tbl.targetField === 'nvl' ? '#ede9fe' : tbl.targetField === 'nvcl' ? '#dcfce7' : '#ffedd5', color: '#0f172a' }}
+                          />
+                        </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700 }}>{tbl.rowCount}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 800, color: '#047857' }}>
+                          ₹{tbl.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Box>
+
+              {/* Unmatched Records Alert */}
+              {uploadSummaryData.unmatchedCount > 0 && (
+                <Alert severity="warning" sx={{ fontWeight: 600, borderRadius: 2 }}>
+                  <Typography variant="body2" fontWeight={700}>
+                    {uploadSummaryData.unmatchedCount} vehicles in the Excel were not found in this month's Cement Register trips:
+                  </Typography>
+                  <Box display="flex" flexWrap="wrap" gap={0.8} mt={1}>
+                    {uploadSummaryData.unmatchedTrucks?.map((u, i) => (
+                      <Chip
+                        key={i}
+                        label={`${u.truckNo} (₹${u.records?.reduce((s, r) => s + r.amount, 0)?.toFixed(2) || 0})`}
+                        size="small"
+                        sx={{ bgcolor: '#fff', border: '1px solid #fcd34d', fontWeight: 700, fontSize: '10.5px' }}
+                      />
+                    ))}
+                  </Box>
+                </Alert>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, px: 3, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0', justifyContent: 'space-between' }}>
+          <Button
+            variant="outlined"
+            startIcon={<CompareArrowsIcon />}
+            onClick={() => {
+              setUploadSummaryModalOpen(false);
+              setComparisonModalOpen(true);
+            }}
+            sx={{ fontWeight: 700, textTransform: 'none' }}
+          >
+            Open Comparison View
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => setUploadSummaryModalOpen(false)}
+            sx={{
+              fontWeight: 800,
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              color: '#fff',
+              px: 3,
+              textTransform: 'none'
+            }}
+          >
+            Done & View Sheet
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Comparison Modal ── */}
       <Dialog open={comparisonModalOpen} onClose={() => setComparisonModalOpen(false)} maxWidth="xl" fullWidth PaperProps={{ sx: { height: '95vh', bgcolor: 'background.default', m: 2 } }}>

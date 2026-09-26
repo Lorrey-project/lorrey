@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Typography, Button, IconButton, TextField, CircularProgress,
@@ -19,6 +19,7 @@ import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 import { useShortcut } from '../context/ShortcutContext';
 import { useTableNavigation } from '../hooks/useTableNavigation';
+import { buildIncentiveData } from '../components/IncentiveAnalysis';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -57,7 +58,7 @@ const COLUMNS = [
   { key: 'CASH_BANK_OTHERS', label: 'Cash/Bank\nTF/Others', width: 100, calc: true },
   { key: 'OTHER DEDUCTION', label: 'Other\nDeduction', width: 90, calc: true },
   { key: 'OTHER REASON', label: 'Other\nReason', width: 120, editable: true, bg: '#fef3c7' },
-  { key: 'GPS TRIP CHARGE', label: 'GPS Trip\nCharge', width: 80, calc: true },
+  { key: 'GPS TRIP CHARGE', label: 'GPS Monitoring /\nTrip Charge', width: 110, calc: true },
   { key: 'GPS DEVICE', label: 'GPS\nDevice', width: 80, calc: true },
   // ⑬ Net Amount  (calculated)
   { key: 'NET AMOUNT', label: 'Net Amount', width: 100, calc: true, highlight: '#dcfce7' },
@@ -118,14 +119,30 @@ export default function PartyPaymentDetails({ onBack }) {
     const fyStartYear = parseInt(selYear.split('-')[0], 10);
     const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
     try {
-      // 1. Truck contacts → vehicle→owner map
-      const truckRes = await axios.get(`${API_URL}/truck-contacts`);
-      const trucksData = truckRes.data?.contacts || [];
+      const token = localStorage.getItem('token');
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
+      // ── High Performance: Fetch all independent data in parallel via Promise.all ──
+      const [truckRes, deductionRes, cementRes, manualRes] = await Promise.all([
+        axios.get(`${API_URL}/truck-contacts`),
+        axios.get(`${API_URL}/settings/projected-deductions`, { headers: authHeaders }).catch(() => ({ data: {} })),
+        axios.get(`${API_URL}/party-payment/cement-data`, { params: { month: selMonth, year: calendarYear } }),
+        axios.get(`${API_URL}/party-payment`, { params: { month: selMonth, year: calendarYear } })
+      ]);
+
+      const trucksData = truckRes.data?.contacts || [];
+      const entries = cementRes.data?.entries || [];
+      const manuals = manualRes.data || [];
+      const gpsTripChargeSetting = (deductionRes.data?.success && deductionRes.data?.data)
+        ? num(deductionRes.data.data.gpsTripCharge)
+        : 0;
+
+      setDebugInfo(`Cement entries for month: ${entries.length}`);
+
+      // 1. Truck contacts → vehicle→owner map
       const truckMap = {}; // normVeh → owner name
       const truckOwnerIdMap = {}; // normVeh → ownerId / unique key
       trucksData.forEach(t => {
-        // The collection stores fields with trailing spaces e.g. "Truck No "
         const raw = t['Truck No '] || t['Truck No'] || t['Vehicle No'] || t['vehicleNo'] || '';
         const owner = (t['Owner Name '] || t['Owner Name'] || t['ownerName'] || '').trim();
         const ownerId = t.ownerId || t._id || '';
@@ -136,31 +153,17 @@ export default function PartyPaymentDetails({ onBack }) {
         }
       });
 
-      // 1b. Fetch GPS Trip Charge amount directly from Deduction Settings
-      let gpsTripChargeSetting = 0;
-      try {
-        const token = localStorage.getItem('token');
-        const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
-        const deductionRes = await axios.get(`${API_URL}/settings/projected-deductions`, { headers: authHeaders });
-        if (deductionRes.data?.success && deductionRes.data?.data) {
-          gpsTripChargeSetting = num(deductionRes.data.data.gpsTripCharge);
+      // 2. Compute exact Vehicle-Wise Incentive Calculation Sheet -> TOTAL (Projected)
+      const incentiveList = buildIncentiveData(entries, calendarYear, selMonth - 1, trucksData);
+      const vehicleProjectedIncentiveMap = {};
+      incentiveList.forEach(item => {
+        const vKey = normVeh(item.truckNo);
+        if (vKey) {
+          vehicleProjectedIncentiveMap[vKey] = item.totalFinal || 0;
         }
-      } catch (e) {
-        console.warn('Failed to fetch projected deductions for GPS trip charge:', e);
-      }
-
-      // 2. Cement register entries for this month via our date-aware endpoint
-      const cementRes = await axios.get(`${API_URL}/party-payment/cement-data`, {
-        params: { month: selMonth, year: calendarYear }
       });
-      const entries = cementRes.data?.entries || [];
-      setDebugInfo(`Cement entries for month: ${entries.length}`);
 
-      // 3. Saved manual overrides
-      const manualRes = await axios.get(`${API_URL}/party-payment`, {
-        params: { month: selMonth, year: calendarYear }
-      });
-      const manuals = manualRes.data || [];
+      // 3. Saved manual overrides map
       const manualMap = {};
       manuals.forEach(m => { manualMap[normVeh(m.vehicleNo)] = m; });
 
@@ -168,7 +171,6 @@ export default function PartyPaymentDetails({ onBack }) {
       const agg = {}; // normVeh → accumulated row
 
       entries.forEach(row => {
-        // Field name in DB: "VEHICLE NUMBER"
         const rawVeh = row['VEHICLE NUMBER'] || '';
         const vKey = normVeh(rawVeh);
         if (!vKey) return;
@@ -188,7 +190,7 @@ export default function PartyPaymentDetails({ onBack }) {
             'GPS TRIP CHARGE': 0,   // Populated once per party per month below
             'GPS DEVICE': 0,   // = SUM of "GPS DEVICE"
             '8.5% NVCL': 0,   // = SUM of "10W EXTRA 8.5%"
-            'DEDICATED INCENTIVE': 0,   // = SUM of "DEDICATED"
+            'DEDICATED INCENTIVE': 0,   // Populated from Incentive Sheet TOTAL (Projected) below
             'RAFTER': 0,   // = SUM of "RAFTER"
             'EXTRA U/L': 0,   // = SUM of "EXTRA UNLOADING"
             'TOLL UP': 0,   // = SUM of "UP TOLL"
@@ -199,13 +201,11 @@ export default function PartyPaymentDetails({ onBack }) {
         const a = agg[vKey];
 
         // Multi-variant field reader — tries multiple possible key names
-        // (DB field names differ from the schema comment due to Excel import variations)
         const getF = (...keys) => {
           for (const k of keys) {
             const v = row[k];
             if (v !== undefined && v !== null && v !== '') {
               if (typeof v === 'object' && !Array.isArray(v)) {
-                // Nested object like '10W EXTRA 8': {'5%': 59.92} — sum all values
                 return Object.values(v).reduce((s, x) => s + num(x), 0);
               }
               return num(v);
@@ -214,7 +214,7 @@ export default function PartyPaymentDetails({ onBack }) {
           return 0;
         };
 
-        // ③ Gross Freight — actual DB keys include 'BILLING ER 95%', 'BILLING ER VAR', and 'AMOUNT'
+        // ③ Gross Freight
         a['GROSS FREIGHT'] += getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT');
 
         // ④ Loading Advance
@@ -223,31 +223,38 @@ export default function PartyPaymentDetails({ onBack }) {
         // ⑤ Fuel (HSD Amount)
         a['FUEL'] += getF('HSD AMOUNT');
 
-        // ⑥ TDS — stored as _tds_percent (percentage) or TDS (absolute)
-        const tdsAbs = getF('TDS', 'TDS 1%');
+        // ⑥ TDS — stored as decimal rate in TDS / _tds_percent (e.g. 0.01 = 1%, 0 = 0%) or absolute
+        const rawTds = getF('TDS', 'TDS 1%');
         const tdsPct = getF('_tds_percent');
         const grFr = getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'AMOUNT');
-        a['TDS'] += tdsAbs !== 0 ? tdsAbs : (tdsPct > 0 ? grFr * (tdsPct / 100) : grFr * 0.01);
+        const rate = (rawTds > 0 && rawTds < 1)
+          ? rawTds
+          : (tdsPct > 0 && tdsPct < 1
+            ? tdsPct
+            : (tdsPct >= 1 && tdsPct <= 10
+              ? tdsPct / 100
+              : (rawTds >= 1 && rawTds <= 10 ? rawTds / 100 : 0)));
+        a['TDS'] += (rate > 0) ? (grFr * rate) : (rawTds > 10 ? rawTds : 0);
 
         // ⑦ Travelling Expense
         a['TRAVELLING EXP'] += getF('TRAVELLING EXP', 'TRAVELLING  EXP', 'TRAVEL EXP');
 
-        // ⑧ Damage Recovery (check direct amount or price per bag * total bags)
+        // ⑧ Damage Recovery
         const shortageAmt = getF('SHORTAGE (AMOUNT)', 'SHORTAGE AMOUNT');
         const shortageBags = getF('SHORTAGE (BAG)', 'SHORTAGE BAG');
         const shortageRate = getF('SHORTAGE (RATE)', 'SHORTAGE RATE');
         a['DAMAGE RECOVERY'] += shortageAmt || (shortageBags * shortageRate);
 
-        // ⑨ Cash/Bank TF/Others — note actual keys include 'Site Cash', 'OFFICE CASH', 'Bank TF'
+        // ⑨ Cash/Bank TF/Others
         a['CASH_BANK_OTHERS'] += getF('BANK TF', 'BANK TF ', 'Bank TF') + getF('Site Cash', 'SITE CASH', 'SITE_CASH') + getF('OFFICE CASH', 'Office Cash', 'OFFICE_CASH');
 
-        // ⑩ Other Deduction — check manual entry keys
+        // ⑩ Other Deduction
         a['OTHER DEDUCTION'] += getF('OTHERS DEDUCTION', 'OTHERS  DEDUCTION', 'OTHER DEDUCTION', 'OTHERS', 'Others deduction', 'Other');
 
         // ⑫ GPS Device
         a['GPS DEVICE'] += getF('GPS DEVICE', 'GPS  DEVICE');
 
-        // ⑭ 8.5% NVCL Incentive — stored as nested '10W EXTRA 8': {'5%': 59.92}
+        // ⑭ 8.5% NVCL Incentive
         const ncvl85 = row['10W EXTRA 8.5%'] !== undefined
           ? num(row['10W EXTRA 8.5%'])
           : row['10W EXTRA 8'] !== undefined
@@ -256,9 +263,6 @@ export default function PartyPaymentDetails({ onBack }) {
               : num(row['10W EXTRA 8']))
             : 0;
         a['8.5% NVCL'] += ncvl85;
-
-        // ⑮ Dedicated Incentive
-        a['DEDICATED INCENTIVE'] += getF('DEDICATED', 'DEDICATED INCENTIVE');
 
         // ⑯ Rafter
         a['RAFTER'] += getF('RAFTER');
@@ -273,12 +277,20 @@ export default function PartyPaymentDetails({ onBack }) {
         a['TOLL DOWN'] += getF('DOWN TOLL', 'TOLL DOWN', 'TOLL_DOWN', 'TOLL DOWN ');
       });
 
-      // 5. Build final rows merging aggregated + saved manuals
+      // 5. Build final rows merging aggregated + vehicle-wise Incentive Sheet TOTAL (Projected) + saved manuals
       const finalRows = Object.values(agg).map(ag => {
         const vKey = normVeh(ag['VEHICLE NO']);
         const saved = manualMap[vKey] || {};
+
+        // ── Primary Source: Incentive Calculation Sheet TOTAL (Projected) vehicle-wise ──
+        const vehicleProjectedIncentive = vehicleProjectedIncentiveMap[vKey] !== undefined ? vehicleProjectedIncentiveMap[vKey] : 0;
+        const dedicatedIncentiveVal = (saved.dedicatedIncentive !== undefined && saved.dedicatedIncentive !== null)
+          ? num(saved.dedicatedIncentive)
+          : vehicleProjectedIncentive;
+
         return {
           ...ag,
+          'DEDICATED INCENTIVE': dedicatedIncentiveVal,
           'GST FCM': num(saved.gstFcm),
           'WITHHOLD AMOUNT': num(saved.withholdAmount),
           'WITHHOLD REASON': saved.withholdReason || '',
@@ -329,6 +341,12 @@ export default function PartyPaymentDetails({ onBack }) {
 
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socket.on('partyPaymentUpdate', () => {
+      fetchData();
+    });
+    socket.on('cementUpdates', () => {
+      fetchData();
+    });
+    socket.on('incentiveStateUpdates', () => {
       fetchData();
     });
 
@@ -456,6 +474,7 @@ export default function PartyPaymentDetails({ onBack }) {
           paidToParty: num(cr['PAID TO PARTY']),
           paymentDate: cr['PAYMENT DATE'] || '',
           remarks: cr['REMARKS'] || '',
+          ...(localEdits[ri]?.['DEDICATED INCENTIVE'] !== undefined ? { dedicatedIncentive: num(cr['DEDICATED INCENTIVE']) } : {})
         };
       });
       await axios.post(`${API_URL}/party-payment/bulk`,

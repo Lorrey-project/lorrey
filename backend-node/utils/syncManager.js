@@ -17,26 +17,72 @@ function getCementCol() {
 function getInvoiceSystemDb() {
   return mongoose.connection.useDb("invoice_system");
 }
+function parseTdsField(doc) {
+  if (!doc || typeof doc !== 'object') return null;
+  const candidates = [
+    'TDS Applicability', 'TDS Applicability ', 'tds_applicability', 'tdsApplicability',
+    'TDS', 'TDS %', 'TDS Rate', 'TDSApplicability',
+    'tds', 'tds_rate', 'Tds', 'TDS_APPLICABILITY',
+    'TDSApplicable', 'TDS (%)'
+  ];
+  for (const k of candidates) {
+    if (doc[k] !== undefined && doc[k] !== null && doc[k] !== '') {
+      let v = doc[k];
+      if (typeof v === 'string') {
+        v = v.replace('%', '').trim();
+      }
+      const parsed = parseFloat(v);
+      if (!isNaN(parsed)) {
+        if (parsed === 0) return 0;
+        if (parsed > 0 && parsed <= 0.2) {
+          return parsed; // e.g. 0.01 = 1%, 0.02 = 2%, 0.015 = 1.5%
+        } else if (parsed > 0 && parsed <= 20) {
+          return parsed / 100; // e.g. entered as 1 or 2 meaning 1% or 2% -> 0.01 or 0.02
+        }
+        return parsed;
+      }
+    }
+  }
+  return null;
+}
+
 // ─── Shared Truck Contact Lookup ──────────────────────────────────────────────
 async function getTruckDetails(vehicleNumber) {
-  let wheel = "", ownerName = "", tdsPercent = 1, isATO = false, driverNo = "", hasStO = false;
+  let wheel = "", ownerName = "", tdsPercent = 0, isATO = false, driverNo = "", hasStO = false;
   let basicFreightCommission = 0.05;
 
   if (!vehicleNumber) return { wheel, ownerName, tdsPercent, isATO, driverNo, hasStO, basicFreightCommission };
 
+  const ownerCol = getInvoiceSystemDb().db.collection("owner details");
   const truckCol = getInvoiceSystemDb().db.collection("Truck Contact Number");
   const truckRegex = makeSpaceAgnosticRegex(vehicleNumber);
-  const truck = await truckCol.findOne({
+
+  // 1. Check Owner Details first as primary source of truth
+  let truck = await ownerCol.findOne({
     $or: [
       { "Truck No": { $regex: truckRegex } },
+      { "Truck No ": { $regex: truckRegex } },
       { truck_no: { $regex: truckRegex } },
       { "Contact No.(Truck No.)": { $regex: truckRegex } },
       { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
     ]
   });
 
+  // 2. Fallback to Truck Contact Number
+  if (!truck) {
+    truck = await truckCol.findOne({
+      $or: [
+        { "Truck No": { $regex: truckRegex } },
+        { "Truck No ": { $regex: truckRegex } },
+        { truck_no: { $regex: truckRegex } },
+        { "Contact No.(Truck No.)": { $regex: truckRegex } },
+        { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
+      ]
+    });
+  }
+
   if (truck) {
-    let vType = truck["Type of vehicle"] || truck.type || truck["Vehicle Type"] || truck.type_of_vehicle || truck.vehicle_type || "";
+    let vType = truck["Type of vehicle"] || truck["Type of vehicle "] || truck.type || truck["Vehicle Type"] || truck.type_of_vehicle || truck.vehicle_type || "";
     if (!vType) {
       for (let key in truck) {
         const lk = key.toLowerCase();
@@ -49,24 +95,24 @@ async function getTruckDetails(vehicleNumber) {
     }
     const wheelMatch = vType ? vType.toString().match(/(\d+)/) : null;
     wheel = wheelMatch ? `${wheelMatch[1]}W` : vType;
-    ownerName = safe(truck["Owner Name"] || truck.owner_name);
-    driverNo = safe(truck["DRIVER CONTACT"] || truck.contact_no || truck["Contact No."]);
+    ownerName = safe(truck["Owner Name"] || truck["Owner Name "] || truck.owner_name);
+    driverNo = safe(truck["DRIVER CONTACT"] || truck["DRIVER CONTACT "] || truck.contact_no || truck["Contact No."] || truck["Contact No. "]);
 
-    const custType = safe(truck["TYPE OF CUSTOMER"] || truck["type_of_customer"] || "").toUpperCase();
+    const custType = safe(truck["TYPE OF CUSTOMER"] || truck["TYPE OF CUSTOMER "] || truck["type_of_customer"] || "").toUpperCase();
     isATO = custType.includes("ATO");
     hasStO = custType.includes("STO");
 
-    // TDS dynamic logic
-    const rawTds = truck["tds_applicability"] || truck["TDS Applicability"];
-    if (rawTds !== undefined && rawTds !== null && String(rawTds).trim() !== "") {
-      tdsPercent = num(rawTds) * 100;
+    // TDS dynamic logic from Owner Details
+    const parsedTds = parseTdsField(truck);
+    if (parsedTds !== null) {
+      tdsPercent = parsedTds;
     } else {
-      const pan = safe(truck["PAN No."] || truck.pan_no);
-      const aadhar = safe(truck["Aadhar No."] || truck.aadhar_no);
-      tdsPercent = (pan && aadhar) ? 0 : 1;
+      const pan = safe(truck["PAN No."] || truck["PAN No. "] || truck.pan_no);
+      const aadhar = safe(truck["Aadhar No."] || truck["Aadhar No. "] || truck.aadhar_no);
+      tdsPercent = (pan && aadhar) ? 0 : 0.01;
     }
 
-    const rawComm = truck["basic_freight_commission"];
+    const rawComm = truck["basic_freight_commission"] || truck["Basic Freight Commission"];
     let commVal = (rawComm !== null && rawComm !== undefined && rawComm !== '') ? num(rawComm) : 5;
     if (commVal > 0 && commVal < 1) {
       commVal = commVal * 100;
@@ -541,7 +587,7 @@ async function pushToRegister(invoiceId, overrides) {
       "BILLING ER VAR": billingErVar !== undefined ? billingErVar : "",
       "AMOUNT": amount || "",
       "PROFIT": profit || "",
-      "TDS": tdsAmount || "",
+      "TDS": (tdsPercent !== undefined && tdsPercent !== null) ? tdsPercent : "",
       "_freight_commission": basicFreightCommission,
       "ADVANCE": advance || "",
       "Site Cash": siteCash || "",
@@ -589,6 +635,13 @@ async function pushToRegister(invoiceId, overrides) {
     // VERIFICATION STATUS: once "Verified", never revert back to "Not Verified"
     if (existing && existing["VERIFICATION STATUS"] === "Verified") {
       clean["VERIFICATION STATUS"] = "Verified";
+    }
+
+    // Preserve manually edited TDS value
+    if (existing && (existing.tds_manual || existing._tds_manual)) {
+      clean["TDS"] = existing["TDS"];
+      clean["_tds_percent"] = existing["_tds_percent"];
+      clean["tds_manual"] = true;
     }
 
     // PAYMENT STATUS, PAYMENT PROOF URL, PAYMENT DATE, PAYMENT REF: never overwrite from auto-sync

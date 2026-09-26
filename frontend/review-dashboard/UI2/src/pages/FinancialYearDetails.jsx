@@ -121,7 +121,7 @@ const formatDateForInput = (dateStr) => {
 const DEBIT_REASONS = [
   'Damage / Shortage',
   'GPS Deviation Charges',
-  'GPS Trip Charges',
+  'GPS Monitoring / Trip Charges',
   'Device Installation Charges',
   'RFID Deduction / Charges',
   'Suspense',

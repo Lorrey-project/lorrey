@@ -85,14 +85,8 @@ export const COLUMNS = [
   },
   { key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.05) },
   {
-    key: 'TDS', label: 'TDS', width: 80, type: 'calc', group: 'billing',
-    formula: r => {
-      const comm = r._freight_commission;
-      const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
-      const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
-      const tdsPct = (r._tds_percent !== undefined && r._tds_percent !== null && r._tds_percent !== '') ? num(r._tds_percent) : 1;
-      return fmt2(base * tdsPct / 100);
-    }
+    key: 'TDS', label: 'TDS', width: 80, type: 'manual', group: 'billing',
+    hint: 'TDS Applicability decimal rate (e.g. 0.01 = 1%, 0 = 0%) from Owner Details MongoDB (Editable)'
   },
   { key: 'ADVANCE', label: 'LOADING ADVANCE', width: 110, type: 'auto', group: 'billing' },
   { key: 'Site Cash', label: 'SITE CASH ADVANCE', width: 160, type: 'auto', group: 'billing', hasAttach: 'site_cash_auto' },
@@ -102,10 +96,9 @@ export const COLUMNS = [
   // ── Group 3: Deductions ────────────────────────────────────────────────────
   { key: 'Others deduction', label: 'OTHERS\nDEDUCTION', width: 130, type: 'manual', group: 'deductions' },
   { key: 'Other', label: 'OTHER', width: 100, type: 'manual', group: 'deductions' },
-  { key: 'GPS Monitoring Charge', label: 'GPS MONITORING\nCHARGE', width: 150, type: 'manual', group: 'deductions' },
+  { key: 'GPS Monitoring Charge', label: 'GPS MONITORING /\nTRIP CHARGE', width: 160, type: 'manual', group: 'deductions' },
   { key: 'Give GPS DEVICE', label: 'GIVE GPS DEVICE', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
   { key: 'GPS Deviation Charges', label: 'GPS DEVIATION\nCHARGES', width: 150, type: 'manual', group: 'deductions' },
-  { key: 'GPS Trip Charges', label: 'GPS TRIP\nCHARGES', width: 140, type: 'manual', group: 'deductions' },
   { key: 'Suspense', label: 'SUSPENSE', width: 120, type: 'manual', group: 'deductions' },
   { key: 'Give RFID TAG', label: 'GIVE RFID TAG', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
 
@@ -181,18 +174,26 @@ export const COLUMNS = [
       const comm = r._freight_commission;
       const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
       const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
+      const rawTds = r['TDS'];
+      const tdsRate = (rawTds !== undefined && rawTds !== null && rawTds !== '')
+        ? num(rawTds)
+        : ((r._tds_percent !== undefined && r._tds_percent !== null && r._tds_percent !== '') ? num(r._tds_percent) : 0);
+      
+      // TDS Amount = Base Amount × TDS Applicability Rate (e.g. 0.01 for 1%, 0 for 0%, 0.02 for 2%)
+      const tdsDeduction = (tdsRate > 0 && tdsRate < 1)
+        ? fmt2(base * tdsRate)
+        : (tdsRate >= 1 && tdsRate <= 10 ? fmt2(base * (tdsRate / 100)) : (tdsRate > 10 ? tdsRate : 0));
       return fmt2(
         base
-        - num(r['TDS'])
+        - tdsDeduction
         - num(r.ADVANCE)
         - num(r['Site Cash'])
         - num(r['OFFICE CASH'])
         - num(r['Bank TF'])
         - num(r['Others deduction'])
-        - num(r['GPS Monitoring Charge'])
+        - (num(r['GPS Monitoring Charge']) || num(r['GPS MONITORING / TRIP CHARGE']) || num(r['GPS Trip Charges']))
         - num(r['Give GPS DEVICE'])
         - num(r['GPS Deviation Charges'])
-        - num(r['GPS Trip Charges'])
         - num(r['Suspense'])
         - num(r['Give RFID TAG'])
         - num(r['RFID REASSURANCE'])

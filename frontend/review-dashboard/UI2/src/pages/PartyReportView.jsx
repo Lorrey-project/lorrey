@@ -1208,7 +1208,7 @@ export default function PartyReportView({
 
                     {/* 2. GPS TRIP MONITORING CHARGES */}
                     <tr style={{ background: '#f8fafc' }}>
-                      <td style={{ padding: '16px 20px', borderBottom: '1px dashed #cbd5e1', borderRight: '1px solid #e2e8f0' }}>GPS TRIP MONITORING CHARGES</td>
+                      <td style={{ padding: '16px 20px', borderBottom: '1px dashed #cbd5e1', borderRight: '1px solid #e2e8f0' }}>GPS MONITORING / TRIP CHARGE</td>
                       <td style={{ padding: '10px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           <span style={{ color: '#64748b' }}>₹</span>

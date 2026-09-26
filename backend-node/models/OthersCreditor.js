@@ -28,6 +28,7 @@ const othersCreditorSchema = new mongoose.Schema({
   pdfName: { type: String, default: '' },
   month: { type: Number },
   year: { type: String },
+  sourceBankBookTxId: { type: String, default: '', trim: true },
   appliedBankBookTxIds: { type: [String], default: [] }
 }, {
   timestamps: true,

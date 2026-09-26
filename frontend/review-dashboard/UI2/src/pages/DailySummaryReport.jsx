@@ -41,6 +41,7 @@ import * as XLSX from 'xlsx';
 import PartyReportView from './PartyReportView';
 import VehicleWiseTripSummaryTab from '../components/VehicleWiseTripSummaryTab';
 import DailyRevenueNvlNvclTab from '../components/DailyRevenueNvlNvclTab';
+import RevenewTab from '../components/RevenewTab';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -520,6 +521,121 @@ function DailySummaryTab({
     }
   }, []);
 
+  // ── Live SIX TRIP NOT COMPLETE Alerts State (Monthly check by 25th) ─────────
+  const [sixTripAlerts, setSixTripAlerts] = useState({
+    count: 0,
+    isApplicable: false,
+    records: [],
+    monthFullName: '',
+    monthShort: '',
+    evaluationPeriod: ''
+  });
+  const [loadingSixTripAlerts, setLoadingSixTripAlerts] = useState(false);
+
+  const fetchSixTripAlerts = useCallback(async () => {
+    setLoadingSixTripAlerts(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.get(`${API_URL}/daily-summary/six-trip-alerts`, {
+        params: { fy: financialYear, month },
+        headers
+      });
+      if (res.data?.success) {
+        setSixTripAlerts({
+          count: res.data.count || 0,
+          isApplicable: res.data.isApplicable || false,
+          records: res.data.records || [],
+          monthFullName: res.data.monthFullName || '',
+          monthShort: res.data.monthShort || '',
+          evaluationPeriod: res.data.evaluationPeriod || ''
+        });
+      }
+    } catch (err) {
+      console.error('[DailySummaryReport] Fetch six-trip alerts error:', err);
+    } finally {
+      setLoadingSixTripAlerts(false);
+    }
+  }, [financialYear, month]);
+
+  const handleExportSixTripExcel = () => {
+    try {
+      const rows = alertModalData.map((v, idx) => ({
+        'SL NO': idx + 1,
+        'VEHICLE NUMBER': v.vehicleNo,
+        'OWNER': v.ownerName || '-',
+        'MONTH': v.month || v.monthFullName || '-',
+        'TRIP COUNT (DAY 1-25)': v.tripCount,
+        'REQUIRED TRIPS': v.requiredTrips || 6,
+        'SHORTFALL': v.shortfall,
+        'TOTAL MT LOADED': v.totalMT,
+        'EVALUATION PERIOD': v.evaluationPeriod
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, "Six Trip Not Complete");
+      XLSX.writeFile(wb, `Six_Trip_Not_Complete_${financialYear}_${month}.xlsx`);
+      setSnack({ severity: 'success', msg: 'Six Trip Not Complete Excel exported successfully.' });
+    } catch (err) {
+      console.error(err);
+      setSnack({ severity: 'error', msg: 'Failed to export Excel report.' });
+    }
+  };
+
+  // ── Live VEHICLE NOT LOADED Alerts State (>3 days after unloading) ───────────
+  const [vehicleNotLoadedAlerts, setVehicleNotLoadedAlerts] = useState({
+    count: 0,
+    records: [],
+    today: ''
+  });
+  const [loadingVehicleNotLoadedAlerts, setLoadingVehicleNotLoadedAlerts] = useState(false);
+
+  const fetchVehicleNotLoadedAlerts = useCallback(async () => {
+    setLoadingVehicleNotLoadedAlerts(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.get(`${API_URL}/daily-summary/vehicle-not-loaded-alerts`, { headers });
+      if (res.data?.success) {
+        setVehicleNotLoadedAlerts({
+          count: res.data.count || 0,
+          records: res.data.records || [],
+          today: res.data.today || ''
+        });
+      }
+    } catch (err) {
+      console.error('[DailySummaryReport] Fetch vehicle not loaded alerts error:', err);
+    } finally {
+      setLoadingVehicleNotLoadedAlerts(false);
+    }
+  }, []);
+
+  const handleExportVehicleNotLoadedExcel = () => {
+    try {
+      const rows = (alertModalData.length > 0 ? alertModalData : (vehicleNotLoadedAlerts.records || [])).map((r, idx) => ({
+        'SL NO': r.slNo || idx + 1,
+        'VEHICLE NUMBER': r.vehicleNo,
+        'OWNER': r.ownerName || '—',
+        'LAST UNLOADING DATE': r.lastUnloadingDate || '—',
+        'WAITING PERIOD END DATE': r.waitingPeriodEndDate || '—',
+        'TODAY': r.today || '—',
+        'DAYS SINCE ELIGIBLE': r.daysSinceEligible,
+        'LAST INVOICE / LOADING DATE': r.lastInvoiceLoadingDate || '—',
+        'STATUS': r.status || 'NOT LOADED'
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, "Vehicle Not Loaded");
+      XLSX.writeFile(wb, `Vehicle_Not_Loaded_Alerts_${new Date().toISOString().split('T')[0]}.xlsx`);
+      setSnack({ severity: 'success', msg: 'Vehicle Not Loaded Excel exported successfully.' });
+    } catch (err) {
+      console.error(err);
+      setSnack({ severity: 'error', msg: 'Failed to export Excel report.' });
+    }
+  };
+
   const handleSaveVehicleValidityExtension = async () => {
     if (!extendValidityItem || !extendValidityDate) return;
     setSavingValidityExt(true);
@@ -665,6 +781,8 @@ function DailySummaryTab({
     fetchValidityAlerts();
     fetchPendingChallans();
     fetchAlertsYtd();
+    fetchSixTripAlerts();
+    fetchVehicleNotLoadedAlerts();
     try {
       const token = localStorage.getItem('token');
 
@@ -683,7 +801,7 @@ function DailySummaryTab({
     } finally {
       setLoading(false);
     }
-  }, [dateOptions, fetchValidityAlerts, fetchPendingChallans, fetchAlertsYtd, financialYear, month]);
+  }, [dateOptions, fetchValidityAlerts, fetchPendingChallans, fetchAlertsYtd, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts, financialYear, month]);
 
   useEffect(() => {
     fetchData(date);
@@ -692,7 +810,9 @@ function DailySummaryTab({
   useEffect(() => {
     fetchAlertsYtd();
     fetchPendingChallans();
-  }, [fetchAlertsYtd, fetchPendingChallans]);
+    fetchSixTripAlerts();
+    fetchVehicleNotLoadedAlerts();
+  }, [fetchAlertsYtd, fetchPendingChallans, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts]);
 
   // Live auto-refresh when Main Cashbook or Cement Register data changes
   useEffect(() => {
@@ -701,6 +821,8 @@ function DailySummaryTab({
       fetchValidityAlerts();
       fetchPendingChallans();
       fetchAlertsYtd();
+      fetchSixTripAlerts();
+      fetchVehicleNotLoadedAlerts();
     };
     socket.on('mainCashbookUpdates', handler);
     socket.on('cementUpdates', handler);
@@ -708,7 +830,7 @@ function DailySummaryTab({
       socket.off('mainCashbookUpdates', handler);
       socket.off('cementUpdates', handler);
     };
-  }, [date, fetchData, fetchValidityAlerts, fetchPendingChallans, fetchAlertsYtd]);
+  }, [date, fetchData, fetchValidityAlerts, fetchPendingChallans, fetchAlertsYtd, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts]);
 
   const handleExportExcel = () => {
     if (!data) return;
@@ -973,7 +1095,9 @@ function DailySummaryTab({
       };
     }
 
-    // Fallback using client-side YTD filtering (Loading Date >= Current FY Start && Loading Date <= TODAY)
+    // Fallback using client-side YTD filtering:
+    // Pending Challan: FY START -> YESTERDAY (TODAY - 1 DAY)
+    // STAMP / NON-STAMP: FY START -> TODAY
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
@@ -986,7 +1110,9 @@ function DailySummaryTab({
     const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0).getTime();
     const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999).getTime();
     const todayEnd = new Date(currentYear, currentMonth - 1, currentDay, 23, 59, 59, 999).getTime();
-    const reportEnd = todayEnd < fyEnd ? todayEnd : fyEnd;
+    const yesterdayEnd = new Date(currentYear, currentMonth - 1, currentDay - 1, 23, 59, 59, 999).getTime();
+    const reportEndToday = todayEnd < fyEnd ? todayEnd : fyEnd;
+    const reportEndPending = yesterdayEnd < fyEnd ? yesterdayEnd : fyEnd;
 
     const pending = [];
     const nonStamp = [];
@@ -996,12 +1122,16 @@ function DailySummaryTab({
       const rawDate = e["LOADING DT"] || e["LOADING DATE"] || e["BILL DATE"] || e["DATE"];
       const t = parseDateToStartOfDay(rawDate);
       if (!t) return;
-      if (t < fyStart || t > reportEnd) return;
+      if (t < fyStart) return;
 
       const status = String(e["CHALLAN STATUS"] || "").toUpperCase().trim();
-      if (status === "STAMP") stamp.push(e);
-      else if (status.includes("NON-STAMP") || status.includes("NON STAMP")) nonStamp.push(e);
-      else pending.push(e);
+      if (status === "STAMP") {
+        if (t <= reportEndToday) stamp.push(e);
+      } else if (status.includes("NON-STAMP") || status.includes("NON STAMP")) {
+        if (t <= reportEndToday) nonStamp.push(e);
+      } else {
+        if (t <= reportEndPending) pending.push(e);
+      }
     });
 
     return { pending, nonStamp, stamp };
@@ -1171,7 +1301,7 @@ function DailySummaryTab({
     return { chartData };
   }, [data]);
 
-  const handleAlertClick = (type, records) => {
+  const handleAlertClick = (type, records, customTitle) => {
     if (type === 'Pending') {
       setAlertModalTitle('PENDING CHALLAN DETAILS');
       setAlertModalData(pendingChallansData.records.length > 0 ? pendingChallansData.records : (records || []));
@@ -1190,6 +1320,19 @@ function DailySummaryTab({
     }
     else if (type === 'E-WAY-BILL') setAlertModalTitle('E-WAY BILL VALIDITY ALERTS');
     else if (type === 'VALIDITY-END') setAlertModalTitle('VALIDITY END');
+    else if (type === 'VEHICLE-NOT-LOADED') {
+      setAlertModalTitle(customTitle || 'VEHICLE NOT LOADED');
+      setAlertModalData(vehicleNotLoadedAlerts.records);
+      setAlertModalOpen(true);
+      return;
+    }
+    else if (type === 'SIX-TRIP-NOT-COMPLETE') {
+      const monthTitle = sixTripAlerts.monthFullName ? sixTripAlerts.monthFullName.toUpperCase() : (month ? `${month.toUpperCase()} ${financialYear}` : 'MONTHLY CHECK');
+      setAlertModalTitle(customTitle || `SIX TRIP NOT COMPLETE — ${monthTitle}`);
+      setAlertModalData(sixTripAlerts.records);
+      setAlertModalOpen(true);
+      return;
+    }
 
     setAlertModalData(records);
     setAlertModalOpen(true);
@@ -1210,8 +1353,12 @@ function DailySummaryTab({
       setAlertModalData(eWayAlerts.urgentRecords);
     } else if (alertModalOpen && alertModalTitle === 'VALIDITY END') {
       setAlertModalData(validityAlerts.alerts);
+    } else if (alertModalOpen && alertModalTitle === 'VEHICLE NOT LOADED') {
+      setAlertModalData(vehicleNotLoadedAlerts.records);
+    } else if (alertModalOpen && alertModalTitle.startsWith('SIX TRIP NOT COMPLETE')) {
+      setAlertModalData(sixTripAlerts.records);
     }
-  }, [data, alertModalOpen, alertModalTitle, stampNonBilledTab, pendingChallansData.records, challanAlerts.stamp, challanAlerts.nonStamp, stampNonBilledAlerts, eWayAlerts.urgentRecords, validityAlerts.alerts]);
+  }, [data, alertModalOpen, alertModalTitle, stampNonBilledTab, pendingChallansData.records, challanAlerts.stamp, challanAlerts.nonStamp, stampNonBilledAlerts, eWayAlerts.urgentRecords, validityAlerts.alerts, vehicleNotLoadedAlerts.records, sixTripAlerts.records]);
 
 
   return (
@@ -1290,6 +1437,7 @@ function DailySummaryTab({
             <Tab label="ALL PARTY REPORTS" />
             <Tab label="VEHICLE WISE TRIP SUMMARY" />
             <Tab label="DAILY REVENUE NVL & NVCL" />
+            <Tab label="REVENEW" />
           </Tabs>
         </Box>
 
@@ -1671,6 +1819,73 @@ function DailySummaryTab({
                       <Typography variant="caption" fontWeight={600} color={validityAlerts.count > 0 ? '#e11d48' : '#94a3b8'} noWrap display="block">Vehicle validities ending</Typography>
                     </Box>
                     <Typography variant="h6" fontWeight={900} color={validityAlerts.count > 0 ? '#881337' : '#64748b'}>{validityAlerts.count}</Typography>
+                  </Box>
+
+                  {/* ── VEHICLE NOT LOADED ALERT ──────────────────────────────────────── */}
+                  <Box
+                    onClick={() => handleAlertClick('VEHICLE-NOT-LOADED', vehicleNotLoadedAlerts.records, 'VEHICLE NOT LOADED')}
+                    display="flex" alignItems="center" gap={1.5} p={1.5} mt={1.5} borderRadius="12px"
+                    sx={{
+                      cursor: 'pointer',
+                      bgcolor: vehicleNotLoadedAlerts.count > 0 ? '#fff1f2' : '#f8fafc',
+                      border: `1px solid ${vehicleNotLoadedAlerts.count > 0 ? '#fecdd3' : '#e2e8f0'}`,
+                      transition: 'all 0.2s',
+                      '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
+                      animation: vehicleNotLoadedAlerts.count > 0 ? 'pulseVehicleNotLoadedCardRed 1.5s infinite ease-in-out' : 'none',
+                      '@keyframes pulseVehicleNotLoadedCardRed': {
+                        '0%, 100%': { boxShadow: '0 0 0 0 rgba(225, 29, 72, 0.4)' },
+                        '50%': { boxShadow: '0 0 0 8px rgba(225, 29, 72, 0)' }
+                      }
+                    }}
+                  >
+                    <WarningAmberIcon sx={{ color: vehicleNotLoadedAlerts.count > 0 ? '#e11d48' : '#94a3b8', fontSize: 26 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={800} color={vehicleNotLoadedAlerts.count > 0 ? '#be123c' : '#64748b'} noWrap>
+                        VEHICLE NOT LOADED
+                      </Typography>
+                      <Typography variant="caption" fontWeight={600} color={vehicleNotLoadedAlerts.count > 0 ? '#e11d48' : '#94a3b8'} noWrap display="block">
+                        {vehicleNotLoadedAlerts.count > 0 ? `${vehicleNotLoadedAlerts.count} vehicle(s) waiting for loading (>3 days)` : 'No unloaded vehicles pending'}
+                      </Typography>
+                    </Box>
+                    <Typography variant="h6" fontWeight={900} color={vehicleNotLoadedAlerts.count > 0 ? '#881337' : '#64748b'}>
+                      {vehicleNotLoadedAlerts.count}
+                    </Typography>
+                  </Box>
+
+                  {/* ── SIX TRIP NOT COMPLETE ALERT ──────────────────────────────────────── */}
+                  <Box
+                    onClick={() => {
+                      const monthTitle = sixTripAlerts.monthFullName ? sixTripAlerts.monthFullName.toUpperCase() : (month ? `${month.toUpperCase()} ${financialYear}` : 'MONTHLY CHECK');
+                      handleAlertClick('SIX-TRIP-NOT-COMPLETE', sixTripAlerts.records, `SIX TRIP NOT COMPLETE — ${monthTitle}`);
+                    }}
+                    display="flex" alignItems="center" gap={1.5} p={1.5} mt={1.5} borderRadius="12px"
+                    sx={{
+                      cursor: 'pointer',
+                      bgcolor: (sixTripAlerts.isApplicable && sixTripAlerts.count > 0) ? '#fff1f2' : '#f8fafc',
+                      border: `1px solid ${(sixTripAlerts.isApplicable && sixTripAlerts.count > 0) ? '#fecdd3' : '#e2e8f0'}`,
+                      transition: 'all 0.2s',
+                      '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
+                      animation: (sixTripAlerts.isApplicable && sixTripAlerts.count > 0) ? 'pulseSixTripCardRed 1.5s infinite ease-in-out' : 'none',
+                      '@keyframes pulseSixTripCardRed': {
+                        '0%, 100%': { boxShadow: '0 0 0 0 rgba(225, 29, 72, 0.4)' },
+                        '50%': { boxShadow: '0 0 0 8px rgba(225, 29, 72, 0)' }
+                      }
+                    }}
+                  >
+                    <WarningAmberIcon sx={{ color: (sixTripAlerts.isApplicable && sixTripAlerts.count > 0) ? '#e11d48' : '#94a3b8', fontSize: 26 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={800} color={(sixTripAlerts.isApplicable && sixTripAlerts.count > 0) ? '#be123c' : '#64748b'} noWrap>
+                        SIX TRIP NOT COMPLETE
+                      </Typography>
+                      <Typography variant="caption" fontWeight={600} color={(sixTripAlerts.isApplicable && sixTripAlerts.count > 0) ? '#e11d48' : '#94a3b8'} noWrap display="block">
+                        {sixTripAlerts.isApplicable
+                          ? `Vehicles < 6 trips by 25th (${sixTripAlerts.monthShort || month})`
+                          : `Evaluation active after 25th (${month})`}
+                      </Typography>
+                    </Box>
+                    <Typography variant="h6" fontWeight={900} color={(sixTripAlerts.isApplicable && sixTripAlerts.count > 0) ? '#881337' : '#64748b'}>
+                      {sixTripAlerts.isApplicable ? sixTripAlerts.count : 0}
+                    </Typography>
                   </Box>
 
                 </CardContent>
@@ -2247,6 +2462,54 @@ function DailySummaryTab({
               {alertModalTitle}
             </Typography>
             <Box display="flex" alignItems="center" gap={1.5}>
+              {alertModalTitle.startsWith('SIX TRIP NOT COMPLETE') && (
+                <>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<DownloadIcon />}
+                    onClick={handleExportSixTripExcel}
+                    sx={{
+                      bgcolor: '#ffffff',
+                      color: '#0f172a',
+                      fontWeight: 700,
+                      borderRadius: '8px',
+                      px: 2,
+                      py: 0.75,
+                      textTransform: 'none',
+                      border: '1px solid #cbd5e1',
+                      '&:hover': { bgcolor: '#f1f5f9' }
+                    }}
+                  >
+                    Export Excel
+                  </Button>
+                  <Chip
+                    label={`Cutoff: ${sixTripAlerts.evaluationPeriod || 'Day 1 to 25'}`}
+                    sx={{ bgcolor: '#fee2e2', color: '#991b1b', fontWeight: 800, borderRadius: '8px' }}
+                  />
+                </>
+              )}
+              {alertModalTitle === 'VEHICLE NOT LOADED' && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<DownloadIcon />}
+                  onClick={handleExportVehicleNotLoadedExcel}
+                  sx={{
+                    bgcolor: '#ffffff',
+                    color: '#0f172a',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    px: 2,
+                    py: 0.75,
+                    textTransform: 'none',
+                    border: '1px solid #cbd5e1',
+                    '&:hover': { bgcolor: '#f1f5f9' }
+                  }}
+                >
+                  Export Excel
+                </Button>
+              )}
               {alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' && (
                 <Button
                   variant="contained"
@@ -2326,6 +2589,8 @@ function DailySummaryTab({
           {(() => {
             const isStampNonBilled = alertModalTitle === 'STAMP BUT NON-BILLED';
             const isStampOrNonStamp = alertModalTitle === 'STAMP BILL DETAILS' || alertModalTitle === 'NON-STAMP BILL DETAILS';
+            const isSixTrip = alertModalTitle.startsWith('SIX TRIP NOT COMPLETE');
+            const isVehicleNotLoaded = alertModalTitle === 'VEHICLE NOT LOADED';
             return (
               <TableContainer
                 component={Paper}
@@ -2337,9 +2602,31 @@ function DailySummaryTab({
                   maxHeight: '65vh'
                 }}
               >
-                <Table stickyHeader size="small" sx={{ minWidth: alertModalTitle === 'VALIDITY END' ? 1000 : (isStampNonBilled ? 1700 : (isStampOrNonStamp ? 1500 : 1400)) }}>
+                <Table stickyHeader size="small" sx={{ minWidth: (isSixTrip || isVehicleNotLoaded) ? 1000 : (alertModalTitle === 'VALIDITY END' ? 1000 : (isStampNonBilled ? 1700 : (isStampOrNonStamp ? 1500 : 1400))) }}>
                   <TableHead>
-                    {alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? (
+                    {isSixTrip ? (
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', py: 1.5, bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>SL NO</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>VEHICLE NUMBER</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>OWNER</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>MONTH</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>TRIP COUNT (DAY 1–25)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>REQUIRED TRIPS</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>SHORTFALL</TableCell>
+                      </TableRow>
+                    ) : isVehicleNotLoaded ? (
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', py: 1.5, bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>SL NO</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>VEHICLE NUMBER</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>OWNER</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>LAST UNLOADING DATE</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>WAITING PERIOD END DATE</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>TODAY</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap', textAlign: 'center' }}>DAYS SINCE ELIGIBLE</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>LAST INVOICE / LOADING DATE</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap', textAlign: 'center' }}>STATUS</TableCell>
+                      </TableRow>
+                    ) : alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? (
                       <TableRow>
                         <TableCell sx={{ fontWeight: 800, color: '#475569', py: 1.5, bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>SL</TableCell>
                         <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: '#f1f5f9', whiteSpace: 'nowrap' }}>INVOICE DATE</TableCell>
@@ -2415,10 +2702,82 @@ function DailySummaryTab({
                   <TableBody>
                     {alertModalData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? 11 : alertModalTitle === 'VALIDITY END' ? 8 : (isStampNonBilled ? 14 : (isStampOrNonStamp ? 12 : 11))} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
+                        <TableCell colSpan={isSixTrip ? 7 : (isVehicleNotLoaded ? 9 : (alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? 11 : alertModalTitle === 'VALIDITY END' ? 8 : (isStampNonBilled ? 14 : (isStampOrNonStamp ? 12 : 11))))} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
                           No records found.
                         </TableCell>
                       </TableRow>
+                    ) : isSixTrip ? (
+                      alertModalData.map((row, idx) => (
+                        <TableRow key={row.vehicleNo || idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#64748b' }}>{row.slNo || idx + 1}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#0f172a' }}>{row.vehicleNo}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#334155' }}>{row.ownerName || '-'}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                            <Chip
+                              size="small"
+                              label={row.month || row.monthFullName || '-'}
+                              sx={{ bgcolor: '#f1f5f9', color: '#475569', fontWeight: 700, fontSize: '0.75rem' }}
+                            />
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 800, color: row.tripCount === 0 ? '#dc2626' : '#d97706' }}>
+                            {row.tripCount}
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#16a34a' }}>
+                            {row.requiredTrips || 6}
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                            <Chip
+                              size="small"
+                              label={`-${row.shortfall}`}
+                              sx={{
+                                fontWeight: 900,
+                                fontSize: '0.75rem',
+                                bgcolor: '#fee2e2',
+                                color: '#b91c1c',
+                                border: '1px solid #fca5a5'
+                              }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : isVehicleNotLoaded ? (
+                      alertModalData.map((row, idx) => (
+                        <TableRow key={row.vehicleNo || idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#64748b' }}>{row.slNo || idx + 1}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#0f172a' }}>{row.vehicleNo}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#334155' }}>{row.ownerName || '—'}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#047857' }}>{row.lastUnloadingDate || '—'}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#d97706' }}>{row.waitingPeriodEndDate || '—'}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 600, color: '#475569' }}>{row.today || '—'}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', textAlign: 'center' }}>
+                            <Chip
+                              size="small"
+                              label={`${row.daysSinceEligible} ${row.daysSinceEligible === 1 ? 'day' : 'days'}`}
+                              sx={{
+                                fontWeight: 900,
+                                fontSize: '0.75rem',
+                                bgcolor: '#fee2e2',
+                                color: '#b91c1c',
+                                border: '1px solid #fca5a5'
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 600, color: '#64748b' }}>{row.lastInvoiceLoadingDate || '—'}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', textAlign: 'center' }}>
+                            <Chip
+                              size="small"
+                              label={row.status || 'NOT LOADED'}
+                              sx={{
+                                fontWeight: 800,
+                                fontSize: '0.75rem',
+                                bgcolor: '#ffe4e6',
+                                color: '#be123c',
+                                border: '1px solid #fecdd3'
+                              }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
                     ) : alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? (
                       alertModalData.map((row, idx) => {
                         const info = getEWayBillStatus(row);
@@ -3074,6 +3433,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
             <Tab label="ALL PARTY REPORTS" />
             <Tab label="VEHICLE WISE TRIP SUMMARY" />
             <Tab label="DAILY REVENUE NVL & NVCL" />
+            <Tab label="REVENEW" />
           </Tabs>
         </Box>
 
@@ -3304,9 +3664,23 @@ export default function DailySummaryReport(props) {
         monthOptions={monthOptions}
       />
     );
-  } else {
+  } else if (mainTab === 3) {
     return (
       <DailyRevenueNvlNvclTab
+        {...props}
+        mainTab={mainTab}
+        setMainTab={setMainTab}
+        financialYear={financialYear}
+        setFinancialYear={setFinancialYear}
+        month={month}
+        setMonth={setMonth}
+        date={date}
+        setDate={setDate}
+      />
+    );
+  } else {
+    return (
+      <RevenewTab
         {...props}
         mainTab={mainTab}
         setMainTab={setMainTab}

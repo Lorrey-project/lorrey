@@ -913,6 +913,8 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
 };
 
 // ── Auto-sync Bank Book MONOJ BANDHAN -> Others Creditor (Monoj Bandhan) ──
+// Every separate Bank Book withdrawal transaction for MONOJ BANDHAN creates a SEPARATE CREDIT ROW in OthersCreditor.
+// Uses source Bank Book transaction ID (_id) for exact 1-to-1 linkage, edit/delete sync, and duplicate prevention.
 const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
   if (!affectedDocs || !Array.isArray(affectedDocs) || affectedDocs.length === 0) {
     return { warnings: [] };
@@ -938,31 +940,6 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
     return String(dStr).trim();
   };
 
-  // Helper: Generate date variations to match legacy or formatted entries in DB
-  const getDateVariations = (dStr) => {
-    const ymd = normalizeToYMD(dStr);
-    if (!ymd) return [];
-    const d = parseToDate(ymd);
-    if (d.getTime() > 0) {
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      const dInt = parseInt(dd, 10);
-      const mInt = parseInt(mm, 10);
-      return [
-        `${yyyy}-${mm}-${dd}`,
-        `${dd}/${mm}/${yyyy}`,
-        `${dd}-${mm}-${yyyy}`,
-        `${dInt}/${mInt}/${yyyy}`,
-        `${dInt}-${mInt}-${yyyy}`,
-        `${yyyy}/${mm}/${dd}`,
-        `${yyyy}.${mm}.${dd}`,
-        `${dd}.${mm}.${yyyy}`
-      ];
-    }
-    return [String(dStr).trim()];
-  };
-
   // Deduplicate docs by _id
   const docMap = new Map();
   for (const doc of affectedDocs) {
@@ -973,12 +950,13 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
   let monojNeedsBalanceRecalc = false;
 
   for (const doc of docMap.values()) {
+    const txIdStr = doc._id.toString();
     const ledger = String(doc.ledgerName || '').trim();
     const name = String(doc.names || '').trim();
     const isMonojLedger = /^monoj\s*bandhan$/i.test(ledger);
     const isMonojName = /^monoj\s*bandhan$/i.test(name);
+    const withdrawAmount = num(doc.withdraw);
 
-    const txIdStr = doc._id.toString();
     let prevSync = doc._monojSync;
     if (!prevSync && doc._id) {
       const dbDoc = await AccountDetail.findById(doc._id).lean();
@@ -990,48 +968,50 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
     const wasApplied = Boolean(prevSync.applied);
     const prevAmount = num(prevSync.amount);
 
-    // If user changed ledger or name away from MONOJ BANDHAN on a previously synced doc
-    if (wasApplied && (!isMonojLedger || !isMonojName)) {
-      if (prevSync.monojRecordId && mongoose.Types.ObjectId.isValid(prevSync.monojRecordId)) {
-        const oldRec = await OthersCreditor.findById(prevSync.monojRecordId);
-        if (oldRec) {
-          const oldCredit = num(oldRec.credit);
-          const newCredit = Math.max(0, oldCredit - prevAmount);
+    // ── Find existing linked OthersCreditor record by unique transaction ID ──
+    let linkedRecord = null;
+    if (prevSync.monojRecordId && mongoose.Types.ObjectId.isValid(prevSync.monojRecordId)) {
+      linkedRecord = await OthersCreditor.findById(prevSync.monojRecordId);
+    }
+    if (!linkedRecord) {
+      linkedRecord = await OthersCreditor.findOne({
+        creditorName: 'MONOJ BANDHAN',
+        $or: [
+          { sourceBankBookTxId: txIdStr },
+          { appliedBankBookTxIds: txIdStr }
+        ]
+      });
+    }
+
+    // ── DELETE OR UNLINK SCENARIO ──
+    // User deleted the Bank Book row, or changed ledger/name away from MONOJ BANDHAN, or reduced withdraw to 0
+    if (isDelete || (wasApplied && (!isMonojLedger || !isMonojName || withdrawAmount <= 0))) {
+      if (linkedRecord) {
+        const hasOtherData = num(linkedRecord.debit) > 0 || (Array.isArray(linkedRecord.appliedBankBookTxIds) && linkedRecord.appliedBankBookTxIds.filter(id => id !== txIdStr).length > 0);
+        if (!hasOtherData) {
+          // Exclusively created for this Bank Book row: delete it
+          await OthersCreditor.deleteOne({ _id: linkedRecord._id });
+        } else {
+          // Has other debits/transactions: subtract credit and remove tx ID
+          const curCredit = num(linkedRecord.credit);
+          const newCredit = Math.max(0, curCredit - (wasApplied ? prevAmount : withdrawAmount));
           await OthersCreditor.updateOne(
-            { _id: oldRec._id },
+            { _id: linkedRecord._id },
             {
               $set: { credit: newCredit },
               $pull: { appliedBankBookTxIds: txIdStr }
             }
           );
-          monojNeedsBalanceRecalc = true;
         }
+        monojNeedsBalanceRecalc = true;
       }
       await AccountDetail.updateOne({ _id: doc._id }, { $unset: { _monojSync: "" } });
       if (doc) delete doc._monojSync;
       continue;
     }
 
-    // Must satisfy: Ledger Name = MONOJ BANDHAN and Names = MONOJ BANDHAN
-    if (!isMonojLedger || !isMonojName) {
-      continue;
-    }
-
-    const withdrawAmount = num(doc.withdraw);
-
-    let delta = 0;
-    if (isDelete) {
-      delta = wasApplied ? -prevAmount : 0;
-    } else {
-      delta = wasApplied ? (withdrawAmount - prevAmount) : withdrawAmount;
-    }
-
-    // Duplicate check: already applied and amount hasn't changed
-    if (delta === 0 && wasApplied && !isDelete) {
-      continue;
-    }
-
-    if (withdrawAmount <= 0 && !wasApplied) {
+    // Must satisfy: Ledger Name = MONOJ BANDHAN and Names = MONOJ BANDHAN and withdraw > 0
+    if (!isMonojLedger || !isMonojName || withdrawAmount <= 0) {
       continue;
     }
 
@@ -1041,7 +1021,6 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
     if (!docDate) {
       docDate = new Date().toISOString().split('T')[0];
     }
-    const dateVariations = getDateVariations(docDate);
 
     let docMonthNum = null;
     let docYearStr = doc.selectedYear || String(new Date().getFullYear());
@@ -1062,157 +1041,78 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
       }
     }
 
-    // ── Check if transaction date changed on a previously applied doc ──
-    if (wasApplied && prevSync.monojRecordId && mongoose.Types.ObjectId.isValid(prevSync.monojRecordId)) {
-      const oldRec = await OthersCreditor.findById(prevSync.monojRecordId);
-      if (oldRec) {
-        const prevRecDate = normalizeToYMD(oldRec.date);
-        if (prevRecDate && prevRecDate !== docDate) {
-          // Date changed: remove this transaction amount and ID from old record
-          const oldCredit = num(oldRec.credit);
-          const newOldCredit = Math.max(0, oldCredit - prevAmount);
-          await OthersCreditor.updateOne(
-            { _id: oldRec._id },
-            {
-              $set: { credit: newOldCredit },
-              $pull: { appliedBankBookTxIds: txIdStr }
-            }
-          );
-          monojNeedsBalanceRecalc = true;
-          prevSync.monojRecordId = null;
+    if (linkedRecord) {
+      // ── EDIT SCENARIO: Update the exact corresponding linked record ──
+      const curCredit = num(linkedRecord.credit);
+      const curDate = normalizeToYMD(linkedRecord.date);
+
+      // Check if anything changed
+      if (curCredit === withdrawAmount && curDate === docDate && wasApplied) {
+        // No changes needed
+        continue;
+      }
+
+      await OthersCreditor.updateOne(
+        { _id: linkedRecord._id },
+        {
+          $set: {
+            credit: withdrawAmount,
+            date: docDate,
+            creditorName: 'MONOJ BANDHAN',
+            ledgerName: 'MONOJ BANDHAN',
+            names: 'MONOJ BANDHAN',
+            vehicleNo: doc.vehicle || '',
+            month: docMonthNum,
+            year: docYearStr,
+            sourceBankBookTxId: txIdStr,
+            remarks: doc.remarks || `Bank Book Transfer (${rawMonth || ''})`
+          },
+          $addToSet: { appliedBankBookTxIds: txIdStr }
         }
-      }
-    }
-
-    // ── Find or Create Target Record in OthersCreditor (Monoj Bandhan) ──
-    let targetRecord = null;
-
-    // 1. By previously linked monojRecordId (if still same date)
-    if (prevSync.monojRecordId && mongoose.Types.ObjectId.isValid(prevSync.monojRecordId)) {
-      targetRecord = await OthersCreditor.findById(prevSync.monojRecordId);
-    }
-
-    // 2. By txIdStr in appliedBankBookTxIds
-    if (!targetRecord) {
-      targetRecord = await OthersCreditor.findOne({
-        creditorName: 'MONOJ BANDHAN',
-        appliedBankBookTxIds: txIdStr
-      });
-    }
-
-    // 3. Same-Date matching: If not found yet, find ANY existing Monoj Bandhan record for that exact date
-    if (!targetRecord && !isDelete) {
-      const sameDateRecords = await OthersCreditor.find({
-        creditorName: 'MONOJ BANDHAN',
-        date: { $in: dateVariations }
-      }).sort({ createdAt: 1 });
-
-      if (sameDateRecords.length > 0) {
-        targetRecord = sameDateRecords[0];
-        // If there are multiple legacy rows for this same date, merge them into targetRecord
-        if (sameDateRecords.length > 1) {
-          for (let k = 1; k < sameDateRecords.length; k++) {
-            const dup = sameDateRecords[k];
-            targetRecord.credit = num(targetRecord.credit) + num(dup.credit);
-            targetRecord.debit = num(targetRecord.debit) + num(dup.debit);
-            if (Array.isArray(dup.appliedBankBookTxIds)) {
-              for (const dupTx of dup.appliedBankBookTxIds) {
-                if (!targetRecord.appliedBankBookTxIds.includes(dupTx)) {
-                  targetRecord.appliedBankBookTxIds.push(dupTx);
-                }
-              }
-            }
-            await OthersCreditor.deleteOne({ _id: dup._id });
-          }
-        }
-      }
-    }
-
-    if (isDelete) {
-      if (targetRecord) {
-        const curCredit = num(targetRecord.credit);
-        const newCredit = Math.max(0, curCredit - prevAmount);
-        await OthersCreditor.updateOne(
-          { _id: targetRecord._id },
-          {
-            $set: { credit: newCredit },
-            $pull: { appliedBankBookTxIds: txIdStr }
-          }
-        );
-        monojNeedsBalanceRecalc = true;
-      }
-      await AccountDetail.updateOne({ _id: doc._id }, { $unset: { _monojSync: "" } });
-      if (doc) delete doc._monojSync;
-    } else {
-      if (targetRecord) {
-        const curCredit = num(targetRecord.credit);
-        const alreadyApplied = Array.isArray(targetRecord.appliedBankBookTxIds) && targetRecord.appliedBankBookTxIds.includes(txIdStr);
-        let newCredit = curCredit;
-
-        if (alreadyApplied) {
-          // Same transaction was edited: apply the delta
-          const effectiveDelta = wasApplied ? delta : (withdrawAmount - (num(prevSync.amount) || withdrawAmount));
-          newCredit = Math.max(0, curCredit + effectiveDelta);
-        } else {
-          // Different/new Bank Book transaction on the SAME DATE: aggregate into the existing record!
-          newCredit = curCredit + withdrawAmount;
-        }
-
-        await OthersCreditor.updateOne(
-          { _id: targetRecord._id },
-          {
-            $set: {
-              credit: newCredit,
-              date: docDate, // Keep canonical YYYY-MM-DD
-              creditorName: 'MONOJ BANDHAN',
-              ledgerName: targetRecord.ledgerName || 'MONOJ BANDHAN',
-              names: targetRecord.names || 'MONOJ BANDHAN',
-              vehicleNo: targetRecord.vehicleNo || doc.vehicle || ''
-            },
-            $addToSet: { appliedBankBookTxIds: txIdStr }
-          }
-        );
-        monojNeedsBalanceRecalc = true;
-      } else {
-        // Create brand new record for this date in OthersCreditor
-        const maxDoc = await OthersCreditor.findOne({ creditorName: 'MONOJ BANDHAN' }).sort({ slNo: -1 }).lean();
-        const nextSlNo = (maxDoc && maxDoc.slNo ? Number(maxDoc.slNo) : 0) + 1;
-        targetRecord = new OthersCreditor({
-          creditorName: 'MONOJ BANDHAN',
-          slNo: nextSlNo,
-          date: docDate,
-          ledgerName: 'MONOJ BANDHAN',
-          names: 'MONOJ BANDHAN',
-          vehicleNo: doc.vehicle || '',
-          credit: withdrawAmount,
-          debit: 0,
-          balance: withdrawAmount,
-          remarks: doc.remarks || `Bank Book Transfer (${rawMonth || ''})`,
-          month: docMonthNum,
-          year: docYearStr,
-          appliedBankBookTxIds: [txIdStr]
-        });
-        await targetRecord.save();
-        monojNeedsBalanceRecalc = true;
-      }
-
-      const syncMeta = {
-        applied: true,
-        appliedAt: new Date(),
-        txId: txIdStr,
-        monojRecordId: targetRecord._id.toString(),
-        amount: withdrawAmount,
-        date: docDate,
-        month: doc.month || doc.selectedMonth,
-        ledgerName: doc.ledgerName,
-        names: doc.names
-      };
-      await AccountDetail.updateOne(
-        { _id: doc._id },
-        { $set: { _monojSync: syncMeta } }
       );
-      if (doc) doc._monojSync = syncMeta;
+      monojNeedsBalanceRecalc = true;
+    } else {
+      // ── NEW ROW SCENARIO: Create a brand new SEPARATE credit row for this transaction ──
+      const maxDoc = await OthersCreditor.findOne({ creditorName: 'MONOJ BANDHAN' }).sort({ slNo: -1 }).lean();
+      const nextSlNo = (maxDoc && maxDoc.slNo ? Number(maxDoc.slNo) : 0) + 1;
+
+      linkedRecord = new OthersCreditor({
+        creditorName: 'MONOJ BANDHAN',
+        slNo: nextSlNo,
+        date: docDate,
+        ledgerName: 'MONOJ BANDHAN',
+        names: 'MONOJ BANDHAN',
+        vehicleNo: doc.vehicle || '',
+        credit: withdrawAmount,
+        debit: 0,
+        balance: withdrawAmount,
+        remarks: doc.remarks || `Bank Book Transfer (${rawMonth || ''})`,
+        month: docMonthNum,
+        year: docYearStr,
+        sourceBankBookTxId: txIdStr,
+        appliedBankBookTxIds: [txIdStr]
+      });
+      await linkedRecord.save();
+      monojNeedsBalanceRecalc = true;
     }
+
+    // Save sync metadata on Bank Book document
+    const syncMeta = {
+      applied: true,
+      appliedAt: new Date(),
+      txId: txIdStr,
+      monojRecordId: linkedRecord._id.toString(),
+      amount: withdrawAmount,
+      date: docDate,
+      month: doc.month || doc.selectedMonth,
+      ledgerName: doc.ledgerName,
+      names: doc.names
+    };
+    await AccountDetail.updateOne(
+      { _id: doc._id },
+      { $set: { _monojSync: syncMeta } }
+    );
+    if (doc) doc._monojSync = syncMeta;
   }
 
   // ── Recalculate Monoj Bandhan Running Balances if records modified ──
@@ -1232,7 +1132,8 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
         if (sA && sB && sA !== sB) return sA - sB;
         const cA = new Date(a.createdAt || 0).getTime();
         const cB = new Date(b.createdAt || 0).getTime();
-        return cA - cB;
+        if (cA && cB && cA !== cB) return cA - cB;
+        return String(a._id || '').localeCompare(String(b._id || ''));
       });
 
       let runningBal = 0;

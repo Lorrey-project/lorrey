@@ -106,7 +106,10 @@ const computeMonojBalances = (rowList) => {
     const sA = num(a.slNo);
     const sB = num(b.slNo);
     if (sA && sB && sA !== sB) return sA - sB;
-    return 0;
+    const cA = new Date(a.createdAt || 0).getTime();
+    const cB = new Date(b.createdAt || 0).getTime();
+    if (cA && cB && cA !== cB) return cA - cB;
+    return String(a._id || '').localeCompare(String(b._id || ''));
   });
 
   let currentBalance = 0;
@@ -526,7 +529,22 @@ function MonojBandhanSection() {
 
       const res = await axios.post(`${API_URL}/others-creditors/bulk-save`, { rows: payloadRows }, { headers });
       if (res.data?.success) {
-        setSnack({ severity: 'success', message: 'MONOJ BANDHAN ledger saved successfully!' });
+        const syncResults = res.data.cementSyncResults || [];
+        const appliedMsgs = syncResults.filter(s => s && s.applied && s.message).map(s => s.message);
+        const notFoundMsgs = syncResults.filter(s => s && s.notFound && s.message).map(s => s.message);
+
+        let finalMsg = 'MONOJ BANDHAN ledger saved successfully!';
+        let severity = 'success';
+        if (appliedMsgs.length > 0 && notFoundMsgs.length === 0) {
+          finalMsg = `Saved! ${appliedMsgs.join(' | ')}`;
+        } else if (notFoundMsgs.length > 0 && appliedMsgs.length === 0) {
+          finalMsg = notFoundMsgs.join(' | ');
+          severity = 'warning';
+        } else if (notFoundMsgs.length > 0 && appliedMsgs.length > 0) {
+          finalMsg = `${appliedMsgs.join(' | ')}. Warning: ${notFoundMsgs.join(' | ')}`;
+        }
+
+        setSnack({ severity, message: finalMsg });
         fetchData();
       }
     } catch (err) {

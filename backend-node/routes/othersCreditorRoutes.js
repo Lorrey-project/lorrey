@@ -3,6 +3,11 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const OthersCreditor = require('../models/OthersCreditor');
 const truckContactUpload = require('../middleware/truckContactUpload');
+const {
+  applyMonojDebitToCement,
+  reverseMonojDebitContribution,
+  syncMonojDebitsBatch
+} = require('../utils/monojCementAdvanceManager');
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return 0;
@@ -206,11 +211,15 @@ router.post('/', async (req, res) => {
     const entry = new OthersCreditor(data);
     await entry.save();
 
+    let cementSyncResult = null;
     if (data.creditorName === 'MONOJ BANDHAN') {
       await recalculateMonojBandhanBalances();
+      if (num(entry.debit) > 0 && entry.vehicleNo) {
+        cementSyncResult = await applyMonojDebitToCement(entry);
+      }
     }
 
-    res.status(201).json({ success: true, entry });
+    res.status(201).json({ success: true, entry, cementSyncResult });
   } catch (err) {
     console.error('[OthersCreditor] Create error:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -221,20 +230,24 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const data = computeRowMetrics(req.body);
+    const existing = await OthersCreditor.findById(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Record not found' });
+    }
+
     const updated = await OthersCreditor.findByIdAndUpdate(
       req.params.id,
       { $set: data },
       { new: true, runValidators: true }
     );
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Record not found' });
-    }
 
+    let cementSyncResult = null;
     if (updated.creditorName === 'MONOJ BANDHAN') {
       await recalculateMonojBandhanBalances();
+      cementSyncResult = await applyMonojDebitToCement(updated);
     }
 
-    res.json({ success: true, entry: updated });
+    res.json({ success: true, entry: updated, cementSyncResult });
   } catch (err) {
     console.error('[OthersCreditor] Update error:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -278,11 +291,13 @@ router.post('/bulk-save', async (req, res) => {
       }
     }
 
+    let cementSyncResults = [];
     if (hasMonoj) {
       await recalculateMonojBandhanBalances();
+      cementSyncResults = await syncMonojDebitsBatch(saved);
     }
 
-    res.json({ success: true, count: saved.length, entries: saved });
+    res.json({ success: true, count: saved.length, entries: saved, cementSyncResults });
   } catch (err) {
     console.error('[OthersCreditor] Bulk save error:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -292,11 +307,17 @@ router.post('/bulk-save', async (req, res) => {
 // ── DELETE /api/others-creditors/:id ────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
-    const deleted = await OthersCreditor.findByIdAndDelete(req.params.id);
-    if (!deleted) {
+    const docToDelete = await OthersCreditor.findById(req.params.id);
+    if (!docToDelete) {
       return res.status(404).json({ success: false, error: 'Record not found' });
     }
-    if (deleted.creditorName === 'MONOJ BANDHAN') {
+
+    if (docToDelete.creditorName === 'MONOJ BANDHAN') {
+      await reverseMonojDebitContribution(docToDelete);
+    }
+
+    const deleted = await OthersCreditor.findByIdAndDelete(req.params.id);
+    if (deleted && deleted.creditorName === 'MONOJ BANDHAN') {
       await recalculateMonojBandhanBalances();
     }
     res.json({ success: true, message: 'Record deleted' });
@@ -312,6 +333,13 @@ router.post('/bulk-delete', async (req, res) => {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ success: false, error: 'Provide an array of ids' });
+    }
+
+    const docsToDelete = await OthersCreditor.find({ _id: { $in: ids } });
+    for (const doc of docsToDelete) {
+      if (doc.creditorName === 'MONOJ BANDHAN') {
+        await reverseMonojDebitContribution(doc);
+      }
     }
 
     const result = await OthersCreditor.deleteMany({ _id: { $in: ids } });

@@ -45,7 +45,7 @@ function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
 }
 
-// GET all cement records for a specific month using JS filtering
+// GET all cement records for a specific month using fast indexed query + precise JS filtering
 router.get('/cement-data', async (req, res) => {
   try {
     const { month, year } = req.query;
@@ -54,16 +54,26 @@ router.get('/cement-data', async (req, res) => {
     }
     const m = parseInt(month, 10);
     const y = parseInt(year, 10);
+    const shortY = String(y).slice(-2);
 
-    // Fetch all records (since date might be string) and filter
-    // To avoid fetching completely everything, we can projection
-    // but the db is likely not huge enough to crash node.
-    const all = await getCementCol().find({}).toArray();
+    // Fast indexed MongoDB query
+    const query = {
+      $or: [
+        { month: m, year: y },
+        { month: String(m), year: String(y) },
+        { "LOADING DT": { $regex: new RegExp(`[\\.\\-\\/\s]0?${m}[\\.\\-\\/\s](${y}|${shortY})`) } },
+        { "LOADING DATE": { $regex: new RegExp(`[\\.\\-\\/\s]0?${m}[\\.\\-\\/\s](${y}|${shortY})`) } }
+      ]
+    };
 
-    const entries = all.filter(e => {
+    const docs = await getCementCol().find(query).toArray();
+
+    const entries = docs.filter(e => {
       const dateVal = e["LOADING DT"] || e["LOADING DATE"];
       const parts = getDateParts(dateVal);
-      if (!parts) return false;
+      if (!parts) {
+        return (e.month === m || parseInt(e.month, 10) === m) && (e.year === y || parseInt(e.year, 10) === y);
+      }
       return parts.year === y && parts.month === m;
     });
 
@@ -119,11 +129,13 @@ router.get('/', async (req, res) => {
     const m = parseInt(month, 10);
     const y = parseInt(year, 10);
 
-    // Auto-sync existing Freight Payment entries from Bank Book
+    // Auto-sync targeted Freight Payment entries from Bank Book for this month/year
     try {
       const freightDocs = await AccountDetail.find({
-        ledgerName: { $regex: /^freight payment$/i }
-      });
+        ledgerName: { $regex: /^freight payment$/i },
+        month: m,
+        year: y
+      }).lean();
       if (freightDocs.length > 0) {
         await syncPartyPayments(freightDocs);
       }
@@ -134,7 +146,7 @@ router.get('/', async (req, res) => {
     const records = await PartyPayment.find({
       month: m,
       year: y
-    });
+    }).lean();
 
     return res.json(records);
   } catch (error) {
@@ -154,26 +166,30 @@ router.post('/bulk', async (req, res) => {
     const monthInt = parseInt(month, 10);
     const yearInt = parseInt(year, 10);
 
-    const operations = data.map(record => ({
-      updateOne: {
-        filter: { month: monthInt, year: yearInt, vehicleNo: record.vehicleNo },
-        update: {
-          $set: {
-            gstFcm: record.gstFcm !== undefined ? Number(record.gstFcm) : 0,
-            withholdAmount: record.withholdAmount !== undefined ? Number(record.withholdAmount) : 0,
-            withholdReason: record.withholdReason || '',
-            otherReason: record.otherReason || '',
-            prevMonthDue: record.prevMonthDue !== undefined ? Number(record.prevMonthDue) : 0,
-            recoveredToDac: record.recoveredToDac !== undefined ? Number(record.recoveredToDac) : 0,
-            creditRefund: record.creditRefund !== undefined ? Number(record.creditRefund) : 0,
-            paidToParty: record.paidToParty !== undefined ? Number(record.paidToParty) : 0,
-            paymentDate: record.paymentDate || '',
-            remarks: record.remarks || ''
-          }
-        },
-        upsert: true
+    const operations = data.map(record => {
+      const setFields = {
+        gstFcm: record.gstFcm !== undefined ? Number(record.gstFcm) : 0,
+        withholdAmount: record.withholdAmount !== undefined ? Number(record.withholdAmount) : 0,
+        withholdReason: record.withholdReason || '',
+        otherReason: record.otherReason || '',
+        prevMonthDue: record.prevMonthDue !== undefined ? Number(record.prevMonthDue) : 0,
+        recoveredToDac: record.recoveredToDac !== undefined ? Number(record.recoveredToDac) : 0,
+        creditRefund: record.creditRefund !== undefined ? Number(record.creditRefund) : 0,
+        paidToParty: record.paidToParty !== undefined ? Number(record.paidToParty) : 0,
+        paymentDate: record.paymentDate || '',
+        remarks: record.remarks || ''
+      };
+      if (record.dedicatedIncentive !== undefined) {
+        setFields.dedicatedIncentive = Number(record.dedicatedIncentive);
       }
-    }));
+      return {
+        updateOne: {
+          filter: { month: monthInt, year: yearInt, vehicleNo: record.vehicleNo },
+          update: { $set: setFields },
+          upsert: true
+        }
+      };
+    });
 
     if (operations.length > 0) {
       await PartyPayment.bulkWrite(operations);

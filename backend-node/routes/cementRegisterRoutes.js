@@ -9,6 +9,40 @@ const adminOnly = require("../middleware/adminOnly");
 const { cementValidationRules, validateCement } = require("../middleware/validateCement");
 const cementAttachUpload = require("../middleware/cementAttachUpload");
 
+function normVeh(v) {
+  if (!v) return "";
+  return String(v).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
+function parseTdsField(doc) {
+  if (!doc || typeof doc !== 'object') return null;
+  const candidates = [
+    'TDS Applicability', 'TDS Applicability ', 'tds_applicability', 'tdsApplicability',
+    'TDS', 'TDS %', 'TDS Rate', 'TDSApplicability',
+    'tds', 'tds_rate', 'Tds', 'TDS_APPLICABILITY',
+    'TDSApplicable', 'TDS (%)'
+  ];
+  for (const k of candidates) {
+    if (doc[k] !== undefined && doc[k] !== null && doc[k] !== '') {
+      let v = doc[k];
+      if (typeof v === 'string') {
+        v = v.replace('%', '').trim();
+      }
+      const parsed = parseFloat(v);
+      if (!isNaN(parsed)) {
+        if (parsed === 0) return 0;
+        if (parsed > 0 && parsed <= 0.2) {
+          return parsed; // e.g. 0.01 = 1%, 0.02 = 2%, 0.015 = 1.5%
+        } else if (parsed > 0 && parsed <= 20) {
+          return parsed / 100; // e.g. entered as 1 or 2 meaning 1% or 2% -> 0.01 or 0.02
+        }
+        return parsed;
+      }
+    }
+  }
+  return null;
+}
+
 const parseToDate = (dStr) => {
   if (!dStr) return new Date(0);
   const clean = String(dStr).trim();
@@ -103,14 +137,49 @@ router.get("/", async (req, res) => {
       ];
     }
 
-    let entries = await col.find(filter).toArray();
+    const [entries, ownerDocs, truckDocs] = await Promise.all([
+      col.find(filter).toArray(),
+      mongoose.connection.useDb("invoice_system").collection("owner details").find({}).toArray().catch(() => []),
+      mongoose.connection.useDb("invoice_system").collection("Truck Contact Number").find({}).toArray().catch(() => [])
+    ]);
+
+    // Build vehicle/owner TDS mappings from Owner Details (Primary) & Truck Contacts
+    const vehicleToTdsMap = new Map();
+    const ownerToTdsMap = new Map();
+
+    // 1. Owner Details (Primary source of truth)
+    ownerDocs.forEach(d => {
+      const v = normVeh(d['Truck No'] || d['Truck No '] || d.truck_no || d.vehicleNo || d['Vehicle No'] || d['Vehicle Number']);
+      const rawTds = parseTdsField(d);
+      if (v && rawTds !== null) {
+        vehicleToTdsMap.set(v, rawTds);
+      }
+      const rawName = (d['Owner Name'] || d['Owner Name '] || d.owner_name || '').trim();
+      if (rawName && rawTds !== null) {
+        ownerToTdsMap.set(rawName.toUpperCase(), rawTds);
+      }
+    });
+
+    // 2. Truck Contact Number (Fallback)
+    truckDocs.forEach(c => {
+      const v = normVeh(c.truck_no || c['Truck No '] || c['Truck No'] || c.vehicleNo);
+      const rawTds = parseTdsField(c);
+      if (v && rawTds !== null && !vehicleToTdsMap.has(v)) {
+        vehicleToTdsMap.set(v, rawTds);
+      }
+      const rawName = (c.owner_name || c['Owner Name '] || c['Owner Name'] || c.ownerName || '').trim();
+      if (rawName && rawTds !== null && !ownerToTdsMap.has(rawName.toUpperCase())) {
+        ownerToTdsMap.set(rawName.toUpperCase(), rawTds);
+      }
+    });
 
     // Post-filter to guarantee strictly exact month and year match based on actual bill/record date
+    let filteredEntries = entries;
     if (reqMonth && reqYear) {
       const startDate = new Date(reqYear, reqMonth - 1, 1, 0, 0, 0, 0);
       const endDate = new Date(reqYear, reqMonth, 0, 23, 59, 59, 999);
 
-      entries = entries.filter(entry => {
+      filteredEntries = entries.filter(entry => {
         const rawDate = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || entry["RECEIVING DATE"] || entry["INVOICE DATE"] || entry["UNLOADING STATUS"];
         const dObj = parseToDate(rawDate);
         if (dObj.getTime() > 0) {
@@ -121,7 +190,7 @@ router.get("/", async (req, res) => {
     }
 
     // Sort chronologically by date
-    entries.sort((a, b) => {
+    filteredEntries.sort((a, b) => {
       const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"] || a["UNLOADING STATUS"]);
       const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"] || b["UNLOADING STATUS"]);
       if (dateA.getTime() !== dateB.getTime()) {
@@ -132,11 +201,26 @@ router.get("/", async (req, res) => {
       return slA - slB;
     });
 
-    // Format dates to DD.MM.YY and assign sequential SL NO
-    const formattedEntries = entries.map((entry, index) => {
+    // Format dates to DD.MM.YY and assign sequential SL NO + apply Owner Details TDS mapping
+    const formattedEntries = filteredEntries.map((entry, index) => {
       entry["SL NO"] = String(index + 1);
       if (entry["LOADING DT"]) entry["LOADING DT"] = formatDateToDDMMYY(entry["LOADING DT"]);
       if (entry["LOADING DATE"]) entry["LOADING DATE"] = formatDateToDDMMYY(entry["LOADING DATE"]);
+      
+      // ── TDS Priority Rule: Owner Details MongoDB (Default) vs User Manual Override ──
+      const isManual = entry.tds_manual === true || entry.tds_manual === 'true' || entry._tds_manual === true;
+      if (!isManual) {
+        const v = normVeh(entry["VEHICLE NUMBER"] || entry["VEHICLE NO"] || entry.vehicleNumber);
+        let matchedTds = vehicleToTdsMap.get(v);
+        if (matchedTds === undefined) {
+          const o = String(entry["OWNER NAME"] || entry["PARTY NAME"] || "").trim().toUpperCase();
+          matchedTds = ownerToTdsMap.get(o);
+        }
+        if (matchedTds !== undefined && matchedTds !== null) {
+          entry["TDS"] = matchedTds;
+          entry["_tds_percent"] = matchedTds;
+        }
+      }
       
       return entry;
     });
@@ -359,20 +443,59 @@ router.get("/incentive-state", auth, async (req, res) => {
 // ── POST /cement-register/incentive-state ───────────────────────────────────
 router.post("/incentive-state", auth, async (req, res) => {
   try {
-    const { year, month, actuals, pdfUrl, excelName, excelData } = req.body;
+    const { year, month, actuals, pdfUrl, excelName, excelData, uploadSummary, financialYear, normalizedRecords } = req.body;
     if (year === undefined || month === undefined) {
       return res.status(400).json({ success: false, error: "year and month are required." });
     }
     const db = mongoose.connection.useDb("cement_register");
     const col = db.collection("incentive_states");
     
-    const query = { year: parseInt(year), month: parseInt(month) };
+    const m = parseInt(month, 10);
+    const y = parseInt(year, 10);
+    const fy = financialYear || (m >= 3 ? `FY ${y}-${String(y + 1).slice(-2)}` : `FY ${y - 1}-${String(y).slice(-2)}`);
+
+    // Bulk upsert normalized records to incentive_project_actuals collection if provided
+    if (Array.isArray(normalizedRecords) && normalizedRecords.length > 0) {
+      const colActuals = db.collection("incentive_project_actuals");
+      const bulkOps = normalizedRecords.map(rec => ({
+        updateOne: {
+          filter: {
+            year: y,
+            month: m,
+            category: rec.category,
+            truckNo: String(rec.truckNo).toUpperCase().trim()
+          },
+          update: {
+            $set: {
+              financialYear: fy,
+              year: y,
+              month: m,
+              sourceHeadline: rec.headline || rec.sourceHeadline || '',
+              category: rec.category,
+              targetField: rec.targetField,
+              subField: rec.subField || '',
+              truckNo: String(rec.truckNo).toUpperCase().trim(),
+              rawTruckNo: rec.rawTruckNo || rec.truckNo,
+              amount: Number(rec.amount) || 0,
+              uploadSourceId: rec.uploadSourceId || excelName || '',
+              uploadedAt: new Date()
+            }
+          },
+          upsert: true
+        }
+      }));
+      await colActuals.bulkWrite(bulkOps);
+    }
+
+    const query = { year: y, month: m };
     const update = {
       $set: {
         actuals: actuals || {},
         pdfUrl: pdfUrl || null,
         excelName: excelName || null,
         excelData: excelData || null,
+        uploadSummary: uploadSummary || null,
+        financialYear: fy,
         updatedAt: new Date()
       }
     };
@@ -381,7 +504,7 @@ router.post("/incentive-state", auth, async (req, res) => {
     try {
       const io = getIO();
       if (io) {
-        io.emit("incentiveStateUpdates", { year: parseInt(year), month: parseInt(month) });
+        io.emit("incentiveStateUpdates", { year: y, month: m });
         io.emit("cementUpdates");
       }
     } catch (socketErr) {
@@ -389,6 +512,24 @@ router.post("/incentive-state", auth, async (req, res) => {
     }
 
     res.json({ success: true, message: "Incentive state saved successfully." });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── GET /cement-register/incentive-state/actual-records ─────────────────────
+router.get("/incentive-state/actual-records", auth, async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10);
+    const month = parseInt(req.query.month, 10);
+    const db = mongoose.connection.useDb("cement_register");
+    const colActuals = db.collection("incentive_project_actuals");
+    const query = {};
+    if (!isNaN(year)) query.year = year;
+    if (!isNaN(month)) query.month = month;
+    if (req.query.truckNo) query.truckNo = String(req.query.truckNo).toUpperCase().trim();
+    const records = await colActuals.find(query).toArray();
+    res.json({ success: true, count: records.length, records });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -492,13 +633,33 @@ router.put("/bulk-update", auth, async (req, res) => {
 
     const io = getIO();
     
-    // Inject dynamic truck details if VEHICLE NUMBER changed
+    // Inject dynamic truck details if VEHICLE NUMBER changed or TDS edited
     for (const u of updates) {
-      if (u.changes && u.changes["VEHICLE NUMBER"]) {
-        const truckDetails = await getTruckDetails(u.changes["VEHICLE NUMBER"]);
-        if (truckDetails.ownerName) u.changes["OWNER NAME"] = truckDetails.ownerName;
-        u.changes["_tds_percent"] = truckDetails.tdsPercent;
-        u.changes["_freight_commission"] = truckDetails.basicFreightCommission;
+      if (u.changes) {
+        if (u.changes["TDS"] !== undefined) {
+          u.changes["tds_manual"] = true;
+          const val = u.changes["TDS"];
+          if (val !== "" && val !== null && !isNaN(Number(val))) {
+            let numVal = Number(val);
+            if (numVal >= 1 && numVal <= 10) {
+              numVal = numVal / 100;
+            }
+            u.changes["TDS"] = numVal;
+            u.changes["_tds_percent"] = numVal;
+          } else {
+            u.changes["_tds_percent"] = 0;
+            u.changes["TDS"] = "";
+          }
+        }
+        if (u.changes["VEHICLE NUMBER"]) {
+          const truckDetails = await getTruckDetails(u.changes["VEHICLE NUMBER"]);
+          if (truckDetails.ownerName) u.changes["OWNER NAME"] = truckDetails.ownerName;
+          if (!u.changes["tds_manual"]) {
+            u.changes["_tds_percent"] = truckDetails.tdsPercent;
+            u.changes["TDS"] = truckDetails.tdsPercent;
+          }
+          u.changes["_freight_commission"] = truckDetails.basicFreightCommission;
+        }
       }
     }
 
@@ -722,11 +883,29 @@ router.put("/:id", auth, cementValidationRules, validateCement, async (req, res)
   try {
     const col = getCollection();
     
-    // Inject dynamic truck details if VEHICLE NUMBER changed
+    // Inject dynamic truck details if VEHICLE NUMBER changed or TDS edited
+    if (req.body["TDS"] !== undefined) {
+      req.body["tds_manual"] = true;
+      const val = req.body["TDS"];
+      if (val !== "" && val !== null && !isNaN(Number(val))) {
+        let numVal = Number(val);
+        if (numVal >= 1 && numVal <= 10) {
+          numVal = numVal / 100;
+        }
+        req.body["TDS"] = numVal;
+        req.body["_tds_percent"] = numVal;
+      } else {
+        req.body["_tds_percent"] = 0;
+        req.body["TDS"] = "";
+      }
+    }
     if (req.body["VEHICLE NUMBER"]) {
       const truckDetails = await getTruckDetails(req.body["VEHICLE NUMBER"]);
       if (truckDetails.ownerName) req.body["OWNER NAME"] = truckDetails.ownerName;
-      req.body["_tds_percent"] = truckDetails.tdsPercent;
+      if (!req.body["tds_manual"]) {
+        req.body["_tds_percent"] = truckDetails.tdsPercent;
+        req.body["TDS"] = truckDetails.tdsPercent;
+      }
       req.body["_freight_commission"] = truckDetails.basicFreightCommission;
     }
 
