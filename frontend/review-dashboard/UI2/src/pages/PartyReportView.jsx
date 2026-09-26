@@ -83,15 +83,50 @@ function buildActiveColumns(show6WH, show10WH) {
 // Date helpers
 function ddmmyyyyToIso(str) {
   if (!str) return '';
-  const m = String(str).match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const clean = String(str).trim();
+  if (!clean || clean === '-' || clean === '—') return '';
+
+  // 1. Check YYYY-MM-DD
+  const ymdMatch = clean.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})/);
+  if (ymdMatch) {
+    const y = ymdMatch[1];
+    const m = String(ymdMatch[2]).padStart(2, '0');
+    const d = String(ymdMatch[3]).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // 2. Check DD-MM-YYYY or DD.MM.YYYY or DD/MM/YYYY or DD-MM-YY or DD.MM.YY or DD/MM/YY
+  const dmyMatch = clean.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{2,4})/);
+  if (dmyMatch) {
+    const d = String(dmyMatch[1]).padStart(2, '0');
+    const m = String(dmyMatch[2]).padStart(2, '0');
+    let y = dmyMatch[3];
+    if (y.length === 2) {
+      y = parseInt(y, 10) >= 70 ? `19${y}` : `20${y}`;
+    }
+    return `${y}-${m}-${d}`;
+  }
+
+  // 3. Fallback for ISO date strings
+  const dateObj = new Date(clean);
+  if (!isNaN(dateObj.getTime()) && dateObj.getTime() > 0) {
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
   return '';
 }
+
 function isoToDdmmyyyy(str) {
   if (!str) return '';
-  const m = String(str).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  const iso = ddmmyyyyToIso(str);
+  if (!iso) return str;
+  const parts = iso.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
   return str;
 }
 
@@ -788,7 +823,13 @@ export default function PartyReportView({
     return {
       _original: originalRow,
       'SL NO': i + 1,
-      'LOADING DATE': getVal('LOADING DATE', 'INVOICE DATE') || getVal('LOADING DATE', 'LOADING DATE', '-'),
+      'LOADING DATE': (() => {
+        if (changes['_PR_LOADING DATE'] !== undefined) return changes['_PR_LOADING DATE'];
+        if (originalRow['_PR_LOADING DATE'] !== undefined) return originalRow['_PR_LOADING DATE'];
+        const rawDate = originalRow['LOADING DATE'] || originalRow['LOADING DT'] || originalRow['BILL DATE'] || originalRow['DATE'] || originalRow['RECEIVING DATE'] || originalRow['INVOICE DATE'] || '';
+        if (!rawDate || rawDate === '-' || rawDate === '—') return '';
+        return isoToDdmmyyyy(rawDate);
+      })(),
       'SITE': getVal('SITE', 'SITE', '-'),
       'CHALLAN STATUS': getVal('CHALLAN STATUS', 'CHALLAN STATUS', '-'),
       'DESTINATION': getVal('DESTINATION', 'DESTINATION', '-'),

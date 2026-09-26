@@ -150,28 +150,52 @@ router.get("/", async (req, res) => {
   try {
     const col = getCollection();
 
-    const filter = {};
-    if (req.query.site) filter["SITE"] = req.query.site;
-    if (req.query.owner) filter["OWNER NAME"] = req.query.owner;
+    const andConditions = [];
+    if (req.query.site) andConditions.push({ "SITE": req.query.site });
+    if (req.query.owner) {
+      const oRegex = new RegExp(`^${req.query.owner.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}$`, 'i');
+      andConditions.push({
+        $or: [
+          { "OWNER NAME": oRegex },
+          { "PARTY NAME": oRegex },
+          { "Owner Name": oRegex },
+          { "owner_name": oRegex }
+        ]
+      });
+    }
     if (req.query.vehicle) {
       const stripped = req.query.vehicle.replace(/[^a-zA-Z0-9]/g, '');
       const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
-      filter["VEHICLE NUMBER"] = { $regex: new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i') };
+      const vRegex = new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
+      andConditions.push({
+        $or: [
+          { "VEHICLE NUMBER": vRegex },
+          { "VEHICLE NO": vRegex },
+          { "VEHICLE NO.": vRegex },
+          { "vehicleNumber": vRegex }
+        ]
+      });
     }
     if (req.query.from || req.query.to) {
-      filter["LOADING DATE"] = {};
-      if (req.query.from) filter["LOADING DATE"]["$gte"] = new Date(req.query.from);
-      if (req.query.to) filter["LOADING DATE"]["$lte"] = new Date(req.query.to);
+      const dateCond = {};
+      if (req.query.from) dateCond["$gte"] = new Date(req.query.from);
+      if (req.query.to) dateCond["$lte"] = new Date(req.query.to);
+      andConditions.push({ "LOADING DATE": dateCond });
     }
 
     let reqMonth = req.query.month ? parseInt(req.query.month, 10) : null;
     let reqYear = req.query.year ? parseInt(req.query.year, 10) : null;
 
     if (reqMonth && reqYear) {
-      filter.$or = [
-        { month: reqMonth, year: reqYear }
-      ];
+      andConditions.push({
+        $or: [
+          { month: reqMonth, year: reqYear },
+          { month: String(reqMonth), year: String(reqYear) }
+        ]
+      });
     }
+
+    const filter = andConditions.length > 0 ? { $and: andConditions } : {};
 
     const [entries, ownerDocs, truckDocs] = await Promise.all([
       col.find(filter).toArray(),
