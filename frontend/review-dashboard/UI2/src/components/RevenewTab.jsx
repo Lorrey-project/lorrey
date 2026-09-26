@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box, Typography, Paper, IconButton,
   FormControl, Select, MenuItem, Button, Tooltip, Tabs, Tab,
   Popover, Grid, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, TextField, InputAdornment
+  TableHead, TableRow, TextField, InputAdornment, CircularProgress
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -12,11 +12,22 @@ import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
+import axios from 'axios';
+import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 
+const API_URL = import.meta.env.VITE_API_URL;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+
 const MONTH_NAMES = [
-  'April', 'May', 'June', 'July', 'August', 'September',
+  'ALL', 'April', 'May', 'June', 'July', 'August', 'September',
   'October', 'November', 'December', 'January', 'February', 'March'
+];
+
+const FULL_MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
 const FY_OPTIONS = ['FY 2026-27', 'FY 2025-26', 'FY 2024-25'];
@@ -30,22 +41,176 @@ const fmtNumber = (val) => {
   return '₹' + num.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 };
 
+// Safe date parser to avoid timezone shifts
+function parseCalendarDate(val) {
+  if (!val && val !== 0) return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    return {
+      year: val.getFullYear(),
+      month: val.getMonth() + 1,
+      day: val.getDate()
+    };
+  }
+
+  const rawStr = String(val).trim();
+  if (!rawStr || rawStr === '-' || rawStr === 'undefined' || rawStr === 'null') return null;
+  const str = rawStr.replace(/\s+\d{1,2}:\d{2}(:\d{2})?.*$/, '').replace(/T\d{2}:\d{2}.*$/, '').trim();
+
+  // Excel serial number (numeric or string)
+  if (/^\d{5}(\.\d+)?$/.test(str) || (typeof val === 'number' && val >= 1000 && val <= 100000)) {
+    const excelDays = typeof val === 'number' ? val : parseFloat(str);
+    const msPerDay = 86400 * 1000;
+    const epochMs = Date.UTC(1899, 11, 30);
+    const date = new Date(epochMs + Math.round(excelDays * msPerDay));
+    return {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate()
+    };
+  }
+
+  // DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY, DD-MM-YY, DD/MM/YY, DD.MM.YY
+  const ddmmyyyy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (ddmmyyyy) {
+    let d = parseInt(ddmmyyyy[1], 10), m = parseInt(ddmmyyyy[2], 10), y = parseInt(ddmmyyyy[3], 10);
+    if (y < 100) y += 2000;
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return { year: y, month: m, day: d };
+    }
+  }
+
+  // YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+  const yyyymmdd = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  if (yyyymmdd) {
+    let y = parseInt(yyyymmdd[1], 10), m = parseInt(yyyymmdd[2], 10), d = parseInt(yyyymmdd[3], 10);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return { year: y, month: m, day: d };
+    }
+  }
+
+  // DD-MMM-YYYY or DD MMM YYYY (e.g. 21-Sep-2026, 21-Sep-26)
+  const ddmmmyyyy = str.match(/^(\d{1,2})[\/\-\.\s]([A-Za-z]+)[\/\-\.\s](\d{2,4})$/);
+  if (ddmmmyyyy) {
+    const d = parseInt(ddmmmyyyy[1], 10);
+    const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const mIdx = monthNames.indexOf(ddmmmyyyy[2].toLowerCase().slice(0, 3));
+    let y = parseInt(ddmmmyyyy[3], 10);
+    if (y < 100) y += 2000;
+    if (mIdx >= 0 && d >= 1 && d <= 31) {
+      return { year: y, month: mIdx + 1, day: d };
+    }
+  }
+
+  return null;
+}
+
+function formatDisplayDate(val) {
+  const cal = parseCalendarDate(val);
+  if (!cal) return String(val || '-').trim();
+  const d = String(cal.day).padStart(2, '0');
+  const m = String(cal.month).padStart(2, '0');
+  const y = String(cal.year);
+  return `${d}-${m}-${y}`;
+}
+
+function getCalNum(cal) {
+  if (!cal) return 0;
+  return cal.year * 10000 + cal.month * 100 + cal.day;
+}
+
+function getDisplayMonth(monthVal, invoiceDateVal) {
+  if (monthVal) {
+    const str = String(monthVal).trim();
+    const num = parseInt(str, 10);
+    if (!isNaN(num) && num >= 1 && num <= 12) {
+      return FULL_MONTH_NAMES[num - 1].toUpperCase();
+    }
+    return str.toUpperCase();
+  }
+  const cal = parseCalendarDate(invoiceDateVal);
+  if (cal && cal.month >= 1 && cal.month <= 12) {
+    return FULL_MONTH_NAMES[cal.month - 1].toUpperCase();
+  }
+  return '-';
+}
+
 export default function RevenewTab({
   onBack,
   mainTab,
   setMainTab,
   financialYear: initialFY = 'FY 2026-27',
-  month: initialMonth = 'September',
+  month: initialMonth = 'ALL',
   date: initialDate = 'ALL'
 }) {
-  const [financialYear, setFinancialYear] = useState(initialFY);
-  const [month, setMonth] = useState(initialMonth);
-  const [date, setDate] = useState(initialDate);
+  const [financialYear, setFinancialYear] = useState(initialFY || 'FY 2026-27');
+  const [month, setMonth] = useState(initialMonth || 'ALL');
+  const [date, setDate] = useState(initialDate || 'ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [calendarAnchorEl, setCalendarAnchorEl] = useState(null);
 
-  // Table records state (data source ready for future population)
-  const [records, setRecords] = useState([]);
+  // Authoritative live rows from Bill Register
+  const [rawRows, setRawRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch authoritative Bill Register data
+  const fetchBillRegisterData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      // Normalize FY parameter (e.g. "FY 2026-27" -> "2026-2027")
+      let cleanFY = '2026-2027';
+      const parts = String(financialYear).replace(/^FY\s*/i, '').split('-');
+      if (parts.length > 0) {
+        let sy = parseInt(parts[0], 10);
+        if (sy < 100) sy += 2000;
+        if (!isNaN(sy)) cleanFY = `${sy}-${sy + 1}`;
+      }
+
+      const res = await axios.get(`${API_URL}/fy-details/data`, {
+        params: { fy: cleanFY },
+        headers
+      });
+
+      setRawRows(res.data?.rows || []);
+    } catch (err) {
+      console.error('[RevenewTab] Failed to fetch Bill Register data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [financialYear]);
+
+  useEffect(() => {
+    fetchBillRegisterData();
+  }, [fetchBillRegisterData]);
+
+  // Real-time live synchronization with Bill Register updates
+  useEffect(() => {
+    const socket = io(SOCKET_URL, { autoConnect: true, transports: ['websocket', 'polling'] });
+
+    const handleUpdate = () => {
+      fetchBillRegisterData();
+    };
+
+    socket.on('billRegisterUpdated', handleUpdate);
+    socket.on('billRegisterCleared', handleUpdate);
+    socket.on('billRegisterExcelImport', handleUpdate);
+    socket.on('cementUpdates', handleUpdate);
+    socket.on('fyDetailsUpdates', handleUpdate);
+    socket.on('batchBillsGenerated', handleUpdate);
+
+    return () => {
+      socket.off('billRegisterUpdated', handleUpdate);
+      socket.off('billRegisterCleared', handleUpdate);
+      socket.off('billRegisterExcelImport', handleUpdate);
+      socket.off('cementUpdates', handleUpdate);
+      socket.off('fyDetailsUpdates', handleUpdate);
+      socket.off('batchBillsGenerated', handleUpdate);
+      socket.disconnect();
+    };
+  }, [fetchBillRegisterData]);
 
   const handleOpenCalendar = (e) => setCalendarAnchorEl(e.currentTarget);
   const handleCloseCalendar = () => setCalendarAnchorEl(null);
@@ -60,7 +225,7 @@ export default function RevenewTab({
       if (!isNaN(sy)) startYear = sy;
     }
     const mIdx = MONTH_NAMES.indexOf(month);
-    return mIdx >= 9 ? startYear + 1 : startYear;
+    return mIdx >= 10 ? startYear + 1 : startYear;
   }, [financialYear, month]);
 
   // Compute available dates dynamically for the selected month & year
@@ -89,25 +254,132 @@ export default function RevenewTab({
 
   const selectedDateDisplay = useMemo(() => {
     if (date === 'ALL') {
-      return `${month} ${displayYear}`;
+      return month === 'ALL' ? `All Months (FY to Date)` : `${month} ${displayYear}`;
     }
     return date;
   }, [date, month, displayYear]);
 
-  // Filter records based on search term
-  const filteredRecords = useMemo(() => {
-    if (!searchTerm.trim()) return records;
-    const term = searchTerm.toLowerCase().trim();
-    return records.filter(r => {
-      return (
-        String(r.invoiceNumber || '').toLowerCase().includes(term) ||
-        String(r.invoiceDate || '').toLowerCase().includes(term) ||
-        String(r.site || '').toLowerCase().includes(term) ||
-        String(r.bill || '').toLowerCase().includes(term) ||
-        String(r.month || '').toLowerCase().includes(term)
-      );
+  // ── Process Bill Register Rows with 12 Column Mapping & FY-Till-Date Boundary ──
+  const processedBillRegisterRows = useMemo(() => {
+    const now = new Date();
+    const todayCal = {
+      year: now.getFullYear(),
+      month: now.getMonth() + 1,
+      day: now.getDate()
+    };
+    const todayNum = getCalNum(todayCal);
+    const currentFYStartYear = todayCal.month >= 4 ? todayCal.year : todayCal.year - 1;
+
+    let startYear = 2026;
+    const parts = String(financialYear).replace(/^FY\s*/i, '').split('-');
+    if (parts.length > 0) {
+      let sy = parseInt(parts[0], 10);
+      if (sy < 100) sy += 2000;
+      if (!isNaN(sy)) startYear = sy;
+    }
+    const endYear = startYear + 1;
+    const fyStartNum = startYear * 10000 + 401; // 01 April
+    const fyEndNum = endYear * 10000 + 331;     // 31 March
+
+    // For current financial year, strictly include records up to TODAY
+    const maxAllowedDateNum = (startYear === currentFYStartYear)
+      ? Math.min(fyEndNum, todayNum)
+      : (startYear < currentFYStartYear ? fyEndNum : todayNum);
+
+    const validRows = rawRows.filter(r => {
+      if (!r) return false;
+      const invCal = parseCalendarDate(r.invoiceDate);
+      if (!invCal) return false;
+      const invNum = getCalNum(invCal);
+      return invNum >= fyStartNum && invNum <= maxAllowedDateNum;
     });
-  }, [records, searchTerm]);
+
+    const mapped = validRows.map(r => {
+      const amt = parseFloat(r.amount || 0) || 0;
+      const cgst = r.cgst !== undefined && r.cgst !== null ? Number(r.cgst) : Math.round(amt * 0.09 * 100) / 100;
+      const sgst = r.sgst !== undefined && r.sgst !== null ? Number(r.sgst) : Math.round(amt * 0.09 * 100) / 100;
+      const totalAmount = r.totalAmount !== undefined && r.totalAmount !== null ? Number(r.totalAmount) : (amt + cgst + sgst);
+
+      const siteUpper = String(r.site || '').trim().toUpperCase();
+      const billUpper = String(r.billType || r.bill || 'FREIGHT').trim().toUpperCase();
+
+      const isTollNvl = siteUpper === 'NVL' && billUpper === 'TOLL';
+      const tdsRate = isTollNvl ? 0 : 0.02;
+      const tds = r.tds !== undefined && r.tds !== null ? Number(r.tds) : Math.round(amt * tdsRate * 100) / 100;
+
+      const receivableAmount = r.receivable !== undefined && r.receivable !== null ? Number(r.receivable) : (totalAmount - tds);
+
+      return {
+        _id: r._id || r.id,
+        rawInvoiceDate: r.invoiceDate,
+        invoiceDate: formatDisplayDate(r.invoiceDate),
+        invoiceDateCal: parseCalendarDate(r.invoiceDate),
+        invoiceNumber: r.displayInvoiceNumber || r.invoiceNumber || r.billNo || '-',
+        month: getDisplayMonth(r.month, r.invoiceDate),
+        site: siteUpper,
+        bill: billUpper,
+        dueDate: r.dueDate ? formatDisplayDate(r.dueDate) : (r.editedDueDate ? formatDisplayDate(r.editedDueDate) : '-'),
+        amount: amt,
+        cgst,
+        sgst,
+        totalAmount,
+        tds,
+        receivableAmount
+      };
+    });
+
+    // Chronological sort by actual calendar Invoice Date timestamp
+    mapped.sort((a, b) => {
+      const numA = getCalNum(a.invoiceDateCal);
+      const numB = getCalNum(b.invoiceDateCal);
+      if (numA !== numB) return numA - numB;
+      const invComp = String(a.invoiceNumber).localeCompare(String(b.invoiceNumber));
+      if (invComp !== 0) return invComp;
+      return String(a._id || '').localeCompare(String(b._id || ''));
+    });
+
+    return mapped;
+  }, [rawRows, financialYear]);
+
+  // Filter records based on Month, Date, and Search Term
+  const filteredRecords = useMemo(() => {
+    let result = processedBillRegisterRows;
+
+    // Month filter
+    if (month && month !== 'ALL') {
+      const targetMonthUpper = month.toUpperCase();
+      result = result.filter(r => {
+        const mStr = String(r.month || '').toUpperCase();
+        return mStr.includes(targetMonthUpper);
+      });
+    }
+
+    // Date filter
+    if (date && date !== 'ALL') {
+      const targetDateFormatted = formatDisplayDate(date);
+      result = result.filter(r => r.invoiceDate === targetDateFormatted);
+    }
+
+    // Search filter
+    if (searchTerm && searchTerm.trim()) {
+      const term = searchTerm.toLowerCase().trim();
+      result = result.filter(r => {
+        return (
+          String(r.invoiceNumber || '').toLowerCase().includes(term) ||
+          String(r.invoiceDate || '').toLowerCase().includes(term) ||
+          String(r.site || '').toLowerCase().includes(term) ||
+          String(r.bill || '').toLowerCase().includes(term) ||
+          String(r.month || '').toLowerCase().includes(term) ||
+          String(r.dueDate || '').toLowerCase().includes(term) ||
+          String(r.amount || '').includes(term) ||
+          String(r.totalAmount || '').includes(term) ||
+          String(r.receivableAmount || '').includes(term)
+        );
+      });
+    }
+
+    return result;
+  }, [processedBillRegisterRows, month, date, searchTerm]);
 
   // Dynamic calculation for bottom total row
   const totals = useMemo(() => {
@@ -341,7 +613,9 @@ export default function RevenewTab({
               }}
             >
               {MONTH_NAMES.map((m) => (
-                <MenuItem key={m} value={m} sx={{ fontSize: '0.8rem', fontWeight: 600 }}>{m}</MenuItem>
+                <MenuItem key={m} value={m} sx={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                  {m === 'ALL' ? 'ALL (Full FY)' : m}
+                </MenuItem>
               ))}
             </Select>
           </FormControl>
@@ -353,6 +627,7 @@ export default function RevenewTab({
             onClick={handleOpenCalendar}
             startIcon={<CalendarTodayIcon sx={{ fontSize: '15px !important' }} />}
             endIcon={<KeyboardArrowDownIcon sx={{ fontSize: '15px !important' }} />}
+            disabled={month === 'ALL'}
             sx={{
               borderRadius: '8px',
               bgcolor: 'background.default',
@@ -429,8 +704,13 @@ export default function RevenewTab({
 
           {/* Refresh button */}
           <Tooltip title="Refresh">
-            <IconButton size="small" sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}>
-              <RefreshIcon fontSize="small" />
+            <IconButton
+              size="small"
+              onClick={fetchBillRegisterData}
+              disabled={loading}
+              sx={{ color: '#0f172a', bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' }, p: 0.8 }}
+            >
+              {loading ? <CircularProgress size={18} color="inherit" /> : <RefreshIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
 
@@ -484,6 +764,13 @@ export default function RevenewTab({
                 <SearchIcon sx={{ color: '#94a3b8', fontSize: 20 }} />
               </InputAdornment>
             ),
+            endAdornment: searchTerm ? (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={() => setSearchTerm('')} sx={{ p: 0.2 }}>
+                  <ClearIcon sx={{ fontSize: '0.95rem' }} />
+                </IconButton>
+              </InputAdornment>
+            ) : null
           }}
           sx={{
             width: { xs: '100%', sm: 280, md: 340 },
@@ -563,10 +850,19 @@ export default function RevenewTab({
             </TableHead>
 
             <TableBody>
-              {filteredRecords.length > 0 ? (
+              {loading && filteredRecords.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={13} align="center" sx={{ py: 6, border: '1px solid #e2e8f0' }}>
+                    <CircularProgress size={32} />
+                    <Typography variant="body2" sx={{ mt: 1, color: '#64748b', fontWeight: 600 }}>
+                      Loading live Bill Register data...
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : filteredRecords.length > 0 ? (
                 filteredRecords.map((row, idx) => (
                   <TableRow
-                    key={row._id || idx}
+                    key={row._id || `${row.invoiceNumber}-${idx}`}
                     hover
                     sx={{
                       '&:nth-of-type(even)': { bgcolor: '#f8fafc' },
@@ -620,10 +916,10 @@ export default function RevenewTab({
                     <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center">
                       <MonetizationOnIcon sx={{ fontSize: 44, color: '#cbd5e1', mb: 1 }} />
                       <Typography variant="body1" fontWeight={700} color="#475569">
-                        No revenue records available
+                        No revenue records found for selected period
                       </Typography>
                       <Typography variant="caption" color="#94a3b8">
-                        The table structure is ready. Records will appear here when loaded.
+                        Records from Bill Register dated between 01 April and today will automatically appear here.
                       </Typography>
                     </Box>
                   </TableCell>
