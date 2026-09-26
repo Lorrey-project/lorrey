@@ -3,7 +3,7 @@ import {
   Box, Typography, IconButton, Grid, Select, MenuItem, TextField,
   CircularProgress, Button, Divider, Dialog, DialogTitle, DialogContent,
   DialogActions, TableContainer, Table, TableHead, TableRow, TableCell,
-  TableBody, TablePagination, Chip, Alert
+  TableBody, TablePagination, Chip, Alert, Tabs, Tab
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SearchIcon from '@mui/icons-material/Search';
@@ -97,6 +97,7 @@ const GlassBox = ({ children, sx = {}, onClick }) => (
 );
 
 const PieChartDashboard = ({ onBack }) => {
+  const [activeSubTab, setActiveSubTab] = useState('barGraph');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLedger, setSelectedLedger] = useState('Freight Payment');
   
@@ -316,31 +317,103 @@ const PieChartDashboard = ({ onBack }) => {
     <Box sx={{ p: { xs: 2, md: 3 }, minHeight: '100vh', color: '#F5F7FA', bgcolor: '#111315' }}>
       
       {/* HEADER */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2.5, flexWrap: 'wrap', gap: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <IconButton onClick={onBack} sx={{ mr: 2, color: '#AAB4C0', bgcolor: 'rgba(255,255,255,0.05)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}>
             <ArrowBackIcon fontSize="small" />
           </IconButton>
           <Box>
             <Typography variant="h6" fontWeight={800} sx={{ letterSpacing: '-0.5px', lineHeight: 1.2 }}>
-              FINANCIAL ANALYTICS
+              FINANCIAL ANALYTICS & BAR GHAPH
             </Typography>
             <Typography variant="caption" color="#AAB4C0">
               Real-time multi-source financial control and verification system
             </Typography>
           </Box>
         </Box>
-        <Button 
-          variant="outlined" 
-          startIcon={<IosShareIcon fontSize="small" />}
-          onClick={handleExportAll}
-          sx={{ color: '#FFF', borderColor: 'rgba(255,255,255,0.2)', textTransform: 'none', fontSize: '0.8rem', px: 2, '&:hover': { borderColor: '#FFF', bgcolor: 'rgba(255,255,255,0.05)' } }}
-        >
-          Export Report
-        </Button>
+        {activeSubTab === 'barGraph' && (
+          <Button 
+            variant="outlined" 
+            startIcon={<IosShareIcon fontSize="small" />}
+            onClick={handleExportAll}
+            sx={{ color: '#FFF', borderColor: 'rgba(255,255,255,0.2)', textTransform: 'none', fontSize: '0.8rem', px: 2, '&:hover': { borderColor: '#FFF', bgcolor: 'rgba(255,255,255,0.05)' } }}
+          >
+            Export Report
+          </Button>
+        )}
       </Box>
 
-      <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', md: 'row' } }}>
+      {/* 3 SUB-TABS */}
+      <Box sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', mb: 3 }}>
+        <Tabs
+          value={activeSubTab}
+          onChange={(e, val) => setActiveSubTab(val)}
+          textColor="inherit"
+          sx={{
+            minHeight: 44,
+            '& .MuiTabs-indicator': {
+              backgroundColor: '#8b5cf6',
+              height: 3,
+              borderRadius: '3px 3px 0 0',
+            },
+            '& .MuiTab-root': {
+              color: '#94a3b8',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              textTransform: 'none',
+              py: 1,
+              px: 2.5,
+              minHeight: 44,
+              letterSpacing: '0.2px',
+              transition: 'all 0.2s ease',
+              '&.Mui-selected': {
+                color: '#ffffff',
+                fontWeight: 700,
+              },
+              '&:hover': {
+                color: '#e2e8f0',
+                bgcolor: 'rgba(255, 255, 255, 0.03)',
+              }
+            }
+          }}
+        >
+          <Tab label="Volume Tonnage Growth versus Revenue Growth" value="volumeTonnage" />
+          <Tab label="PTPK Analysis" value="ptpkAnalysis" />
+          <Tab label="Bar Graph" value="barGraph" />
+        </Tabs>
+      </Box>
+
+      {/* TAB 1 — Volume Tonnage Growth versus Revenue Growth (EMPTY / NULL STATE) */}
+      {activeSubTab === 'volumeTonnage' && (
+        <Box sx={{
+          p: 8,
+          minHeight: '65vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: '12px',
+          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          bgcolor: 'rgba(20, 24, 28, 0.3)',
+        }} />
+      )}
+
+      {/* TAB 2 — PTPK Analysis (EMPTY / NULL STATE) */}
+      {activeSubTab === 'ptpkAnalysis' && (
+        <Box sx={{
+          p: 8,
+          minHeight: '65vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: '12px',
+          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          bgcolor: 'rgba(20, 24, 28, 0.3)',
+        }} />
+      )}
+
+      {/* TAB 3 — Bar Graph (COMPLETE EXISTING FINANCIAL ANALYTICS PROCESS) */}
+      {activeSubTab === 'barGraph' && (
+        <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', md: 'row' } }}>
         
         {/* LEFT SIDEBAR - LEDGER LIST */}
         <Box sx={{ width: { xs: '100%', md: '250px', lg: '280px' }, flexShrink: 0 }}>
@@ -670,6 +743,7 @@ const PieChartDashboard = ({ onBack }) => {
 
         </Box>
       </Box>
+      )}
 
       {/* PIE CHART SLICE DRILL-DOWN MODAL (Requirement 15) */}
       <Dialog
