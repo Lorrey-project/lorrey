@@ -748,20 +748,40 @@ export default function PartyReportView({
     else if (originalRow['_PR_BASIC AMOUNT'] !== undefined) basicAmount = parseNum(originalRow['_PR_BASIC AMOUNT']);
 
     // INCENTIVE DEDICATED:
-    // originalIncentiveDedicated = existing calculated value
-    // manualIncentiveDedicated = user-entered manual override
-    // IF manual override exists (including 0) -> use manual override, ELSE -> use original calculated value
+    // 1. Check local unsaved changes for manual override
+    // 2. Check DB persisted record for manual override (_PR_INCENTIVE)
+    // 3. Fallback to authoritative automatic calculation (originalRow['DEDICATED'] ?? originalRow['INCENTIVE'] ?? 0)
     const originalIncentiveDedicated = parseNum(originalRow['DEDICATED'] ?? originalRow['INCENTIVE'] ?? 0);
-    let manualIncentiveDedicated = null;
+    let isManualIncentive = false;
+    let manualIncentiveVal = null;
+
     if (changes['_PR_INCENTIVE'] !== undefined) {
-      manualIncentiveDedicated = (changes['_PR_INCENTIVE'] !== '' && changes['_PR_INCENTIVE'] !== null)
-        ? parseNum(changes['_PR_INCENTIVE'])
-        : 0;
-    } else if (originalRow['_PR_INCENTIVE'] !== undefined && originalRow['_PR_INCENTIVE'] !== null && originalRow['_PR_INCENTIVE'] !== '') {
-      manualIncentiveDedicated = parseNum(originalRow['_PR_INCENTIVE']);
+      isManualIncentive = true;
+      manualIncentiveVal = changes['_PR_INCENTIVE'];
+    } else if (originalRow['_PR_INCENTIVE'] !== undefined && originalRow['_PR_INCENTIVE'] !== null) {
+      isManualIncentive = true;
+      manualIncentiveVal = originalRow['_PR_INCENTIVE'];
     }
 
-    const incentive = manualIncentiveDedicated !== null ? manualIncentiveDedicated : originalIncentiveDedicated;
+    let incentiveNum = 0;
+    let incentiveDisplay = '';
+
+    if (isManualIncentive) {
+      if (manualIncentiveVal === '' || manualIncentiveVal === null) {
+        incentiveNum = 0;
+        incentiveDisplay = '';
+      } else {
+        incentiveNum = parseNum(manualIncentiveVal);
+        incentiveDisplay = manualIncentiveVal;
+      }
+    } else {
+      incentiveNum = originalIncentiveDedicated;
+      incentiveDisplay = originalIncentiveDedicated > 0
+        ? originalIncentiveDedicated
+        : (originalRow['DEDICATED'] !== undefined || originalRow['INCENTIVE'] !== undefined ? originalIncentiveDedicated : '');
+    }
+
+    const incentive = incentiveNum;
     const extraUL = parseNum(getVal('EXTRA UNLOADING', 'EXTRA UNLOADING') || getVal('EXTRA UNLOADING', 'EXTRA U/L', 0));
 
     // TOLL (preserved if present in record)
@@ -842,7 +862,7 @@ export default function PartyReportView({
       'HSD RATE': hsdRate,
       'HSD AMOUNT': hsdAmt,
       'BASIC AMOUNT': basicAmount,
-      'INCENTIVE': incentive,
+      'INCENTIVE': incentiveDisplay,
       '10WH_INCENTIVE': incentive10WH,
       '6WH_INCENTIVE': incentive6WH,
       'EXTRA UNLOADING': extraUL,
