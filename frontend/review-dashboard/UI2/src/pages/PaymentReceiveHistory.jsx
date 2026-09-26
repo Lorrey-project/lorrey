@@ -160,12 +160,13 @@ export default function PaymentReceiveHistory({ onBack }) {
     const exportRows = records.map((r) => ({
       'SL NO': r.slNo,
       'DATE': r.date,
+      'INVOICE NO': r.invoiceNo,
+      'INVOICE DATE': r.invoiceDate,
       'PAYMENT RECEIVE / TRANSACTION TYPE': r.transactionType,
       'LEDGER': r.ledger,
       'MONTH': r.month,
       'PARTICULARS': r.particulars,
       'NAME': r.name,
-      'INVOICE NO': r.invoiceNo,
       'REFERENCE': r.reference,
       'REFERENCE NUMBER': r.referenceNumber,
       'AMOUNT RECEIVED (₹)': r.amountReceived,
@@ -217,7 +218,7 @@ export default function PaymentReceiveHistory({ onBack }) {
               />
             </Box>
             <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500 }}>
-              Financial Management • Live payment receive transactions synchronized with Bank Book
+              Financial Management • Live payment receive transactions synchronized with Bank Book & Bill Register
             </Typography>
           </Box>
         </Box>
@@ -274,7 +275,7 @@ export default function PaymentReceiveHistory({ onBack }) {
       >
         <Grid container spacing={2} alignItems="center">
           {/* FY Filter */}
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={2.5}>
             <FormControl fullWidth size="small">
               <InputLabel id="fy-select-label" sx={{ fontWeight: 600 }}>Financial Year</InputLabel>
               <Select
@@ -294,7 +295,7 @@ export default function PaymentReceiveHistory({ onBack }) {
           </Grid>
 
           {/* Month Filter */}
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={2.5}>
             <FormControl fullWidth size="small">
               <InputLabel id="month-select-label" sx={{ fontWeight: 600 }}>Month</InputLabel>
               <Select
@@ -313,8 +314,31 @@ export default function PaymentReceiveHistory({ onBack }) {
             </FormControl>
           </Grid>
 
+          {/* Invoice Filter */}
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth size="small">
+              <InputLabel id="invoice-select-label" sx={{ fontWeight: 600 }}>Invoice</InputLabel>
+              <Select
+                labelId="invoice-select-label"
+                value={selectedInvoice}
+                label="Invoice"
+                onChange={(e) => setSelectedInvoice(e.target.value)}
+                sx={{ borderRadius: '10px', fontWeight: 600 }}
+              >
+                <MenuItem value="ALL" sx={{ fontWeight: 700 }}>
+                  ALL
+                </MenuItem>
+                {availableInvoices.map((inv) => (
+                  <MenuItem key={inv} value={inv} sx={{ fontWeight: 500 }}>
+                    {inv}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
           {/* Search Input */}
-          <Grid item xs={12} sm={12} md={6}>
+          <Grid item xs={12} sm={6} md={4}>
             <TextField
               fullWidth
               size="small"
@@ -496,40 +520,43 @@ export default function PaymentReceiveHistory({ onBack }) {
           <Table stickyHeader size="small">
             <TableHead>
               <TableRow>
-                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 70 }}>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 60 }}>
                   SL NO
                 </TableCell>
-                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 110 }}>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 100 }}>
                   DATE
-                </TableCell>
-                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 160 }}>
-                  PAYMENT RECEIVE / TYPE
-                </TableCell>
-                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 140 }}>
-                  LEDGER
-                </TableCell>
-                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 110 }}>
-                  MONTH
-                </TableCell>
-                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 200 }}>
-                  PARTICULARS
-                </TableCell>
-                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 160 }}>
-                  NAME
                 </TableCell>
                 <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 140 }}>
                   INVOICE NO
                 </TableCell>
-                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 120 }}>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 110 }}>
+                  INVOICE DATE
+                </TableCell>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 150 }}>
+                  PAYMENT RECEIVE / TYPE
+                </TableCell>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 130 }}>
+                  LEDGER
+                </TableCell>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 100 }}>
+                  MONTH
+                </TableCell>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 180 }}>
+                  PARTICULARS
+                </TableCell>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 150 }}>
+                  NAME
+                </TableCell>
+                <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 110 }}>
                   REFERENCE
                 </TableCell>
                 <TableCell sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, minWidth: 140 }}>
                   REFERENCE NUMBER
                 </TableCell>
-                <TableCell align="right" sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 150 }}>
+                <TableCell align="right" sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 140 }}>
                   AMOUNT RECEIVED
                 </TableCell>
-                <TableCell align="center" sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 100 }}>
+                <TableCell align="center" sx={{ bgcolor: '#0f172a', color: '#f8fafc', fontWeight: 800, fontSize: '0.78rem', py: 1.8, width: 90 }}>
                   STATUS
                 </TableCell>
               </TableRow>
@@ -538,7 +565,7 @@ export default function PaymentReceiveHistory({ onBack }) {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={12} align="center" sx={{ py: 8 }}>
+                  <TableCell colSpan={13} align="center" sx={{ py: 8 }}>
                     <CircularProgress size={32} sx={{ color: '#10b981', mb: 1.5 }} />
                     <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
                       Loading live payment receive records from Bank Book...
@@ -547,13 +574,13 @@ export default function PaymentReceiveHistory({ onBack }) {
                 </TableRow>
               ) : records.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={12} align="center" sx={{ py: 8 }}>
+                  <TableCell colSpan={13} align="center" sx={{ py: 8 }}>
                     <ReceiptLongIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
                     <Typography variant="h6" sx={{ color: '#475569', fontWeight: 700 }}>
                       No Payment Receive Transactions Found
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.5 }}>
-                      Try adjusting the Financial Year, Month, or Search query.
+                      Try adjusting the Financial Year, Month, Invoice filter, or Search query.
                     </Typography>
                   </TableCell>
                 </TableRow>
@@ -575,12 +602,22 @@ export default function PaymentReceiveHistory({ onBack }) {
                         {r.slNo}
                       </TableCell>
 
-                      {/* 2. DATE */}
+                      {/* 2. DATE (Payment Transaction Date) */}
                       <TableCell sx={{ fontWeight: 700, color: '#0f172a', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
                         {r.date}
                       </TableCell>
 
-                      {/* 3. TRANSACTION TYPE */}
+                      {/* 3. INVOICE NO (Authoritative Bill Register Invoice Number) */}
+                      <TableCell sx={{ fontSize: '0.82rem', fontWeight: 800, color: r.invoiceNo !== '—' ? '#0284c7' : '#94a3b8' }}>
+                        {r.invoiceNo}
+                      </TableCell>
+
+                      {/* 4. INVOICE DATE (Authoritative Bill Register Invoice Date) */}
+                      <TableCell sx={{ fontSize: '0.82rem', fontWeight: 600, color: r.invoiceDate !== '—' ? '#334155' : '#94a3b8', whiteSpace: 'nowrap' }}>
+                        {r.invoiceDate || '—'}
+                      </TableCell>
+
+                      {/* 5. TRANSACTION TYPE */}
                       <TableCell sx={{ fontSize: '0.82rem', color: '#334155' }}>
                         <Chip
                           label={r.transactionType || 'Payment Received'}
@@ -595,47 +632,42 @@ export default function PaymentReceiveHistory({ onBack }) {
                         />
                       </TableCell>
 
-                      {/* 4. LEDGER */}
+                      {/* 6. LEDGER */}
                       <TableCell sx={{ fontWeight: 600, color: '#1e293b', fontSize: '0.82rem' }}>
                         {r.ledger}
                       </TableCell>
 
-                      {/* 5. MONTH */}
+                      {/* 7. MONTH */}
                       <TableCell sx={{ color: '#475569', fontSize: '0.82rem', fontWeight: 600 }}>
                         {r.month}
                       </TableCell>
 
-                      {/* 6. PARTICULARS */}
-                      <TableCell sx={{ color: '#334155', fontSize: '0.82rem', maxWidth: 280, wordBreak: 'break-word' }}>
+                      {/* 8. PARTICULARS */}
+                      <TableCell sx={{ color: '#334155', fontSize: '0.82rem', maxWidth: 260, wordBreak: 'break-word' }}>
                         {r.particulars}
                       </TableCell>
 
-                      {/* 7. NAME */}
+                      {/* 9. NAME */}
                       <TableCell sx={{ fontWeight: 700, color: '#0f172a', fontSize: '0.82rem' }}>
                         {r.name}
                       </TableCell>
 
-                      {/* 8. INVOICE NO */}
-                      <TableCell sx={{ fontSize: '0.82rem', fontWeight: 700, color: r.invoiceNo !== '—' ? '#0284c7' : '#94a3b8' }}>
-                        {r.invoiceNo}
-                      </TableCell>
-
-                      {/* 9. REFERENCE */}
+                      {/* 10. REFERENCE */}
                       <TableCell sx={{ color: '#475569', fontSize: '0.82rem', fontWeight: 600 }}>
                         {r.reference}
                       </TableCell>
 
-                      {/* 10. REFERENCE NUMBER */}
+                      {/* 11. REFERENCE NUMBER */}
                       <TableCell sx={{ color: '#1e293b', fontSize: '0.82rem', fontFamily: 'monospace', fontWeight: 600 }}>
                         {r.referenceNumber}
                       </TableCell>
 
-                      {/* 11. AMOUNT RECEIVED */}
+                      {/* 12. AMOUNT RECEIVED */}
                       <TableCell align="right" sx={{ fontWeight: 900, color: '#059669', fontSize: '0.88rem' }}>
                         {fmtAmt(r.amountReceived)}
                       </TableCell>
 
-                      {/* 12. STATUS */}
+                      {/* 13. STATUS */}
                       <TableCell align="center">
                         <Chip
                           label="RECEIVED"

@@ -1776,7 +1776,85 @@ router.get('/payment-receive-history', async (req, res) => {
       }
     }
 
-    // 3. Query all Bank Book documents that represent Payment Received
+    // 3. Fetch authoritative Bill Register data and mappings
+    const { getBillRegisterData } = require('../utils/billRegisterHelper');
+    const FinancialYearRow = require('../models/FinancialYearRow');
+    const FinancialYearPayment = require('../models/FinancialYearPayment');
+
+    const [billData, fyRowDocs, fyPayments] = await Promise.all([
+      getBillRegisterData({ fy: 'ALL' }),
+      FinancialYearRow.find({}).lean(),
+      FinancialYearPayment.find({}).lean()
+    ]);
+
+    const billRows = billData?.rows || [];
+
+    // Build authoritative Bill Register lookup map
+    const billMap = new Map();
+
+    const registerBill = (key, billObj) => {
+      if (!key) return;
+      const k = String(key).trim();
+      if (!k) return;
+      if (!billMap.has(k)) {
+        billMap.set(k, billObj);
+      }
+      const cleanKey = k.toLowerCase().replace(/[\s\-\/\_]/g, '');
+      if (cleanKey && !billMap.has(cleanKey)) {
+        billMap.set(cleanKey, billObj);
+      }
+    };
+
+    const extractBillInfo = (item) => {
+      const invNum = String(item.displayInvoiceNumber || item.editedInvoiceNumber || item.invoiceNumber || item.billNo || '').trim();
+      const invDt = String(item.editedInvoiceDate || item.invoiceDate || '').trim();
+      return {
+        id: String(item._id || item.id || ''),
+        invoiceNumber: invNum,
+        invoiceDate: invDt || '—',
+        site: item.site || item.editedSite || '',
+        billNo: item.billNo || item.rawBillNumber || ''
+      };
+    };
+
+    billRows.forEach(r => {
+      const info = extractBillInfo(r);
+      if (!info.invoiceNumber) return;
+      if (r._id) registerBill(r._id.toString(), info);
+      if (r.id) registerBill(r.id, info);
+      if (r.billNo) registerBill(r.billNo, info);
+      if (r.invoiceNumber) registerBill(r.invoiceNumber, info);
+      if (r.displayInvoiceNumber) registerBill(r.displayInvoiceNumber, info);
+      if (r.editedInvoiceNumber) registerBill(r.editedInvoiceNumber, info);
+      if (Array.isArray(r.invoiceNos)) {
+        r.invoiceNos.forEach(inNo => registerBill(inNo, info));
+      }
+    });
+
+    fyRowDocs.forEach(r => {
+      const info = extractBillInfo(r);
+      if (!info.invoiceNumber) return;
+      if (r._id) registerBill(r._id.toString(), info);
+      if (r.billNo) registerBill(r.billNo, info);
+      if (r.editedInvoiceNumber) registerBill(r.editedInvoiceNumber, info);
+    });
+
+    // Map deductionAllocations linking bankBookRecordId -> bill
+    const bankDocToBillMap = new Map();
+    fyRowDocs.forEach(r => {
+      const info = extractBillInfo(r);
+      if (Array.isArray(r.deductionAllocations)) {
+        r.deductionAllocations.forEach(alloc => {
+          if (alloc.bankBookRecordId) {
+            const bId = String(alloc.bankBookRecordId).trim();
+            if (!bankDocToBillMap.has(bId)) bankDocToBillMap.set(bId, []);
+            bankDocToBillMap.get(bId).push(info);
+          }
+        });
+      }
+    });
+
+    // 4. Query all Bank Book documents that represent Payment Received
     const docs = await AccountDetail.find({
       $or: [
         { deposit: { $exists: true, $nin: ['', null, '0', 0] } },
@@ -1810,27 +1888,62 @@ router.get('/payment-receive-history', async (req, res) => {
         return;
       }
 
-      // Extract invoice numbers
-      const invList = [];
+      // Match genuine Bill Register record(s)
+      const matchedBills = [];
+
+      // 1. Explicit allocations on the Bank Book document
       if (Array.isArray(doc._allocations) && doc._allocations.length > 0) {
-        doc._allocations.forEach(a => {
-          const iNo = String(a.invoiceNumber || a.billNo || a.invoiceNo || '').trim();
-          if (iNo && !invList.includes(iNo)) invList.push(iNo);
+        doc._allocations.forEach(alloc => {
+          const rawBill = String(alloc.rawBillNumber || alloc.billNo || alloc.invoiceNumber || alloc.billId || alloc._id || '').trim();
+          if (rawBill) {
+            const b = billMap.get(rawBill) || billMap.get(rawBill.toLowerCase().replace(/[\s\-\/\_]/g, ''));
+            if (b && !matchedBills.some(m => m.invoiceNumber === b.invoiceNumber)) {
+              matchedBills.push(b);
+            }
+          }
         });
       }
 
-      const allText = `${doc.particulars || ''} ${doc.remarks || ''}`;
-      const matches = allText.match(/\b(26\d{8}|21\d{8})\b/g);
-      if (matches) {
-        matches.forEach(m => {
-          const cleanM = m.trim();
-          if (cleanM && !invList.includes(cleanM)) invList.push(cleanM);
+      // 2. Check deductionAllocations on FinancialYearRow
+      const linkedFromDeductions = bankDocToBillMap.get(doc._id.toString());
+      if (linkedFromDeductions && linkedFromDeductions.length > 0) {
+        linkedFromDeductions.forEach(b => {
+          if (!matchedBills.some(m => m.invoiceNumber === b.invoiceNumber)) {
+            matchedBills.push(b);
+          }
         });
       }
 
-      invList.forEach(i => allInvoicesSet.add(i));
+      // 3. Check FinancialYearPayment exact reference match
+      const docRef = String(doc.referenceNo || '').trim();
+      if (docRef && docRef !== '-' && docRef !== '—') {
+        const matchingPay = fyPayments.find(p => p.referenceNo && String(p.referenceNo).trim() === docRef);
+        if (matchingPay && Array.isArray(matchingPay.billNos)) {
+          matchingPay.billNos.forEach(bNo => {
+            const b = billMap.get(bNo) || billMap.get(String(bNo).toLowerCase().replace(/[\s\-\/\_]/g, ''));
+            if (b && !matchedBills.some(m => m.invoiceNumber === b.invoiceNumber)) {
+              matchedBills.push(b);
+            }
+          });
+        }
+      }
 
-      const invDisplay = invList.length > 0 ? invList.join(', ') : '—';
+      // Authoritative genuine values (never guessed or regex extracted)
+      let invoiceNoDisplay = '—';
+      let invoiceDateDisplay = '—';
+      const invList = [];
+
+      if (matchedBills.length > 0) {
+        invoiceNoDisplay = matchedBills.map(b => b.invoiceNumber).filter(Boolean).join(', ');
+        invoiceDateDisplay = matchedBills.map(b => b.invoiceDate).filter(Boolean).join(', ');
+        matchedBills.forEach(b => {
+          if (b.invoiceNumber && !invList.includes(b.invoiceNumber)) {
+            invList.push(b.invoiceNumber);
+            allInvoicesSet.add(b.invoiceNumber);
+          }
+        });
+      }
+
       const amtReceived = depAmt > 0 ? depAmt : withAmt;
 
       const refNo = String(doc.referenceNo || '').trim();
@@ -1852,7 +1965,8 @@ router.get('/payment-receive-history', async (req, res) => {
         month: doc.month || doc.selectedMonth || MONTHS_LIST[dateParts.month - 1] || '—',
         particulars: doc.particulars || '—',
         name: doc.names || '—',
-        invoiceNo: invDisplay,
+        invoiceNo: invoiceNoDisplay,
+        invoiceDate: invoiceDateDisplay,
         invoiceList: invList,
         reference: refType,
         referenceNumber: finalRefNum,
