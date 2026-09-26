@@ -434,6 +434,7 @@ function DailySummaryTab({
   const [unloadingStatusOpen, setUnloadingStatusOpen] = useState(false);
   const [unloadingActiveTab, setUnloadingActiveTab] = useState(0); // 0: YESTERDAY UNLOADED, 1: TODAY UNLOADING
   const [unloadingSearchTerm, setUnloadingSearchTerm] = useState('');
+  const [eWayAlertsSearchTerm, setEWayAlertsSearchTerm] = useState('');
 
   // ── Live YTD Alerts Data from Cement Register (01 April to Today) ───────────
   const [ytdAlertsData, setYtdAlertsData] = useState({
@@ -1430,7 +1431,10 @@ function DailySummaryTab({
       setAlertModalOpen(true);
       return;
     }
-    else if (type === 'E-WAY-BILL') setAlertModalTitle('E-WAY BILL VALIDITY ALERTS');
+    else if (type === 'E-WAY-BILL') {
+      setAlertModalTitle('E-WAY BILL VALIDITY ALERTS');
+      setEWayAlertsSearchTerm('');
+    }
     else if (type === 'VALIDITY-END') setAlertModalTitle('VALIDITY END');
     else if (type === 'VEHICLE-NOT-LOADED') {
       setAlertModalTitle(customTitle || 'VEHICLE NOT LOADED');
@@ -1471,6 +1475,21 @@ function DailySummaryTab({
       setAlertModalData(sixTripAlerts.records);
     }
   }, [data, alertModalOpen, alertModalTitle, stampNonBilledTab, pendingChallansData.records, challanAlerts.stamp, challanAlerts.nonStamp, stampNonBilledAlerts, eWayAlerts.urgentRecords, validityAlerts.alerts, vehicleNotLoadedAlerts.records, sixTripAlerts.records]);
+
+  const displayedAlertModalData = useMemo(() => {
+    if (alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' && eWayAlertsSearchTerm.trim()) {
+      const term = eWayAlertsSearchTerm.trim().toLowerCase().replace(/\s+/g, '');
+      return alertModalData.filter(row => {
+        const eway = String(row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || row["E-WAY BILL NO."] || row["E-WAY BILL"] || "").toLowerCase().replace(/\s+/g, '');
+        const veh = String(row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "").toLowerCase().replace(/\s+/g, '');
+        const inv = String(row["INVOICE NO"] || row["INVOICE NO."] || "").toLowerCase().replace(/\s+/g, '');
+        const party = String(row["PARTY NAME"] || row["PARTY"] || "").toLowerCase().replace(/\s+/g, '');
+        const dest = String(row["DESTINATION"] || "").toLowerCase().replace(/\s+/g, '');
+        return eway.includes(term) || veh.includes(term) || inv.includes(term) || party.includes(term) || dest.includes(term);
+      });
+    }
+    return alertModalData;
+  }, [alertModalTitle, alertModalData, eWayAlertsSearchTerm]);
 
 
   return (
@@ -2567,7 +2586,7 @@ function DailySummaryTab({
       </Dialog>
 
       {/* --- Dynamic Alert Detail Dialog --- */}
-      <Dialog open={alertModalOpen} onClose={() => setAlertModalOpen(false)} maxWidth="xl" fullWidth PaperProps={{ sx: { borderRadius: '16px', bgcolor: 'background.default' } }}>
+      <Dialog open={alertModalOpen} onClose={() => { setAlertModalOpen(false); setEWayAlertsSearchTerm(''); }} maxWidth="xl" fullWidth PaperProps={{ sx: { borderRadius: '16px', bgcolor: 'background.default' } }}>
         <DialogTitle sx={{ bgcolor: 'background.paper', borderBottom: alertModalTitle === 'STAMP BUT NON-BILLED' ? 'none' : '1px solid #e2e8f0', px: 3, py: 2.5 }}>
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Typography variant="h6" fontWeight={800} color="#0f172a">
@@ -2624,6 +2643,45 @@ function DailySummaryTab({
               )}
               {alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' && (
                 <Box display="flex" alignItems="center" gap={1.2}>
+                  <TextField
+                    size="small"
+                    placeholder="Search E-Way Bill No..."
+                    value={eWayAlertsSearchTerm}
+                    onChange={(e) => setEWayAlertsSearchTerm(e.target.value)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon sx={{ color: '#64748b', fontSize: '1.1rem' }} />
+                        </InputAdornment>
+                      ),
+                      endAdornment: eWayAlertsSearchTerm ? (
+                        <InputAdornment position="end">
+                          <IconButton
+                            size="small"
+                            onClick={() => setEWayAlertsSearchTerm('')}
+                            sx={{ p: 0.2 }}
+                          >
+                            <ClearIcon sx={{ fontSize: '0.95rem' }} />
+                          </IconButton>
+                        </InputAdornment>
+                      ) : null
+                    }}
+                    sx={{
+                      width: { xs: 180, sm: 240 },
+                      bgcolor: '#ffffff',
+                      borderRadius: '8px',
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: '8px',
+                        fontSize: '0.82rem',
+                        '& fieldset': { borderColor: '#cbd5e1' },
+                        '&:hover fieldset': { borderColor: '#94a3b8' },
+                        '&.Mui-focused fieldset': { borderColor: '#2563eb' }
+                      },
+                      '& .MuiInputBase-input': {
+                        py: '6.5px'
+                      }
+                    }}
+                  />
                   <Button
                     variant="outlined"
                     size="small"
@@ -2671,7 +2729,7 @@ function DailySummaryTab({
                   sx={{ bgcolor: '#dcfce7', color: '#15803d', fontWeight: 800, borderRadius: '8px' }}
                 />
               )}
-              <Chip label={`${alertModalData.length} Records`} sx={{ bgcolor: '#e0e7ff', color: '#4338ca', fontWeight: 800, borderRadius: '8px' }} />
+              <Chip label={`${displayedAlertModalData.length} Records`} sx={{ bgcolor: '#e0e7ff', color: '#4338ca', fontWeight: 800, borderRadius: '8px' }} />
             </Box>
           </Box>
         </DialogTitle>
@@ -2834,7 +2892,7 @@ function DailySummaryTab({
                     )}
                   </TableHead>
                   <TableBody>
-                    {alertModalData.length === 0 ? (
+                    {displayedAlertModalData.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={isSixTrip ? 7 : (isVehicleNotLoaded ? 9 : (alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? 11 : alertModalTitle === 'VALIDITY END' ? 8 : (isStampNonBilled ? 14 : (isStampOrNonStamp ? 12 : 11))))} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
                           No records found.
@@ -2913,7 +2971,7 @@ function DailySummaryTab({
                         </TableRow>
                       ))
                     ) : alertModalTitle === 'E-WAY BILL VALIDITY ALERTS' ? (
-                      alertModalData.map((row, idx) => {
+                      displayedAlertModalData.map((row, idx) => {
                         const info = getEWayBillStatus(row);
                         return (
                           <TableRow key={idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
@@ -3134,7 +3192,7 @@ function DailySummaryTab({
           })()}
         </DialogContent>
         <DialogActions sx={{ p: 3, pt: 0 }}>
-          <Button onClick={() => setAlertModalOpen(false)} variant="contained" sx={{ bgcolor: '#0f172a', color: '#fff', borderRadius: '8px', px: 4, fontWeight: 700, '&:hover': { bgcolor: '#1e293b' } }}>
+          <Button onClick={() => { setAlertModalOpen(false); setEWayAlertsSearchTerm(''); }} variant="contained" sx={{ bgcolor: '#0f172a', color: '#fff', borderRadius: '8px', px: 4, fontWeight: 700, '&:hover': { bgcolor: '#1e293b' } }}>
             Close
           </Button>
         </DialogActions>
