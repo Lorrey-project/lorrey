@@ -438,28 +438,28 @@ export default function FinancialYearDetails({ onBack }) {
         const map = {};
         headers.forEach((h, colIdx) => {
           const cleanH = String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (['slno', 'sno', 'sl', 'srno'].includes(cleanH)) map.slNo = colIdx;
-          else if (['invoicenumber', 'invoiceno', 'invoicen', 'billnumber', 'billno', 'billn', 'invno'].includes(cleanH)) map.invoiceNumber = colIdx;
-          else if (['invoicedate', 'invdate', 'date', 'billdate'].includes(cleanH)) map.invoiceDate = colIdx;
-          else if (['shipmentnumber', 'shipmentno', 'shipment', 'shipmentn'].includes(cleanH)) map.shipmentNumber = colIdx;
-          else if (['month'].includes(cleanH)) map.month = colIdx;
-          else if (['site', 'plant'].includes(cleanH)) map.site = colIdx;
+          if (['slno', 'sno', 'sl', 'srno', 'sln'].includes(cleanH)) map.slNo = colIdx;
+          else if (['invoicenumber', 'invoiceno', 'invoicen', 'billnumber', 'billno', 'billn', 'invno', 'freightbillno', 'unloadingbillno'].includes(cleanH)) map.invoiceNumber = colIdx;
+          else if (['invoicedate', 'invdate', 'date', 'billdate', 'freightbilldate', 'unloadingbilldate'].includes(cleanH)) map.invoiceDate = colIdx;
+          else if (['shipmentnumber', 'shipmentno', 'shipment', 'shipmentn', 'shipmentnum'].includes(cleanH)) map.shipmentNumber = colIdx;
+          else if (['month', 'mnth'].includes(cleanH)) map.month = colIdx;
+          else if (['site', 'plant', 'location'].includes(cleanH)) map.site = colIdx;
           else if (['billtype', 'type', 'bill', 'billname'].includes(cleanH)) map.billType = colIdx;
-          else if (['amount', 'taxableamount', 'taxablevalue', 'taxableval', 'billingamount', 'netamount'].includes(cleanH)) map.amount = colIdx;
-          else if (['cgst', 'cgstamount'].includes(cleanH)) map.cgst = colIdx;
-          else if (['sgst', 'sgstamount'].includes(cleanH)) map.sgst = colIdx;
-          else if (['igst', 'igstamount'].includes(cleanH)) map.igst = colIdx;
-          else if (['totalamount', 'total', 'grossamount', 'grandtotal'].includes(cleanH)) map.totalAmount = colIdx;
-          else if (['tds2', 'tds', 'tdsamount', 'tds2percent'].includes(cleanH)) map.tds = colIdx;
-          else if (['receivable', 'receivableamount', 'receivableamountfromnuvoco'].includes(cleanH)) map.receivable = colIdx;
-          else if (['paymentamountpaid', 'paymentamount', 'paidamount', 'amountpaid'].includes(cleanH)) map.paymentAmount = colIdx;
-          else if (['tdsprovision'].includes(cleanH)) map.tdsProvision = colIdx;
-          else if (['difference'].includes(cleanH)) map.difference = colIdx;
-          else if (['paymentdate'].includes(cleanH)) map.paymentDate = colIdx;
-          else if (['referenceno', 'refno', 'reference', 'referenceno.'].includes(cleanH)) map.referenceNo = colIdx;
-          else if (['debitamount'].includes(cleanH)) map.debitAmount = colIdx;
-          else if (['debitreasonsdeduction', 'debitreasons', 'debitreason', 'deductionreasons'].includes(cleanH)) map.debitReasons = colIdx;
-          else if (['remarks', 'remark'].includes(cleanH)) map.remarks = colIdx;
+          else if (['amount', 'taxableamount', 'taxablevalue', 'taxableval', 'billingamount', 'netamount', 'taxable'].includes(cleanH)) map.amount = colIdx;
+          else if (['cgst', 'cgstamount', 'cgstamt'].includes(cleanH)) map.cgst = colIdx;
+          else if (['sgst', 'sgstamount', 'sgstamt'].includes(cleanH)) map.sgst = colIdx;
+          else if (['igst', 'igstamount', 'igstamt'].includes(cleanH)) map.igst = colIdx;
+          else if (['totalamount', 'total', 'grossamount', 'grandtotal', 'billamount', 'totamount'].includes(cleanH)) map.totalAmount = colIdx;
+          else if (['tds2', 'tds', 'tdsamount', 'tds2percent', 'tdsamt'].includes(cleanH)) map.tds = colIdx;
+          else if (['receivable', 'receivableamount', 'receivableamountfromnuvoco', 'receivableamt'].includes(cleanH)) map.receivable = colIdx;
+          else if (['paymentamountpaid', 'paymentamount', 'paidamount', 'amountpaid', 'paymentamt', 'payment'].includes(cleanH)) map.paymentAmount = colIdx;
+          else if (['tdsprovision', 'tdsprov'].includes(cleanH)) map.tdsProvision = colIdx;
+          else if (['difference', 'diff'].includes(cleanH)) map.difference = colIdx;
+          else if (['paymentdate', 'paydate'].includes(cleanH)) map.paymentDate = colIdx;
+          else if (['referenceno', 'refno', 'reference', 'referenceno.', 'ref', 'chqno', 'chequeno', 'utr', 'utrno'].includes(cleanH)) map.referenceNo = colIdx;
+          else if (['debitamount', 'debitamt', 'debit'].includes(cleanH)) map.debitAmount = colIdx;
+          else if (['debitreasonsdeduction', 'debitreasons', 'debitreason', 'deductionreasons', 'deductionreason', 'reason', 'reasons'].includes(cleanH)) map.debitReasons = colIdx;
+          else if (['remarks', 'remark', 'narration', 'notes'].includes(cleanH)) map.remarks = colIdx;
         });
 
         // Positional fallback mapping if header mapping missed key fields
@@ -504,6 +504,7 @@ export default function FinancialYearDetails({ onBack }) {
             failedErrors.push({ row: rIdx + 1, error: `Invalid / Unparseable Bill Date: "${rawDateVal}"` });
           }
 
+          let invNo = parseExcelString(getVal(map.invoiceNumber));
           let shipNo = parseExcelString(getVal(map.shipmentNumber));
           let monthStr = parseExcelString(getVal(map.month));
 
