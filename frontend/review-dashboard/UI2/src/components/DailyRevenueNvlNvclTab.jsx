@@ -41,9 +41,9 @@ export default function DailyRevenueNvlNvclTab({
 
   const [loading, setLoading] = useState(false);
   const [summaryData, setSummaryData] = useState({
-    NVL: { site: 'NVL', billedRevenue: 0, billedSubmitted: 0, paymentReceived: 0, revisedBilledRevenue: 0 },
-    NVCL: { site: 'NVCL', billedRevenue: 0, billedSubmitted: 0, paymentReceived: 0, revisedBilledRevenue: 0 },
-    TOTAL: { site: 'TOTAL', billedRevenue: 0, billedSubmitted: 0, paymentReceived: 0, revisedBilledRevenue: 0 }
+    NVL: { site: 'NVL', billedRevenue: 0, billedSubmitted: 0, paymentReceived: 0, revisedBilledRevenue: 0, stampNotBilled: 0, nonStampNotBilled: 0, challanNotReceived: 0, total: 0 },
+    NVCL: { site: 'NVCL', billedRevenue: 0, billedSubmitted: 0, paymentReceived: 0, revisedBilledRevenue: 0, stampNotBilled: 0, nonStampNotBilled: 0, challanNotReceived: 0, total: 0 },
+    TOTAL: { site: 'TOTAL', billedRevenue: 0, billedSubmitted: 0, paymentReceived: 0, revisedBilledRevenue: 0, stampNotBilled: 0, nonStampNotBilled: 0, challanNotReceived: 0, total: 0 }
   });
   const [selectedDateDisplay, setSelectedDateDisplay] = useState('01-04-2026 to Current');
 
@@ -99,7 +99,7 @@ export default function DailyRevenueNvlNvclTab({
     };
   }, [fetchRevenueReport]);
 
-  // Export to Excel for the 3 consolidated rows
+  // Export to Excel replicating the exact grouped header structure
   const handleExportExcel = () => {
     try {
       const nvl = summaryData.NVL || {};
@@ -107,16 +107,25 @@ export default function DailyRevenueNvlNvclTab({
       const total = summaryData.TOTAL || {};
 
       const wsData = [
-        ['SUMMARY REVENUE NVL AND NVCL', '', '', '', selectedDateDisplay],
-        ['SITE', 'BILL REVENUE', 'BILL SUBMITTED', 'PAYMENT RECEIVED', 'REVISED BILL REVENUE'],
-        ['NVL', nvl.billedRevenue || '-', nvl.billedSubmitted || '-', nvl.paymentReceived || '-', nvl.revisedBilledRevenue || '-'],
-        ['NVCL', nvcl.billedRevenue || '-', nvcl.billedSubmitted || '-', nvcl.paymentReceived || '-', nvcl.revisedBilledRevenue || '-'],
-        ['TOTAL', total.billedRevenue || '-', total.billedSubmitted || '-', total.paymentReceived || '-', total.revisedBilledRevenue || '-']
+        ['Summary', '', '', '', '', '', '', selectedDateDisplay],
+        ['Site', 'Billed Revenue\n(As per Bill register)', 'Billed Submitted', 'Payment Received', 'Revised Billed Revenue', 'Unbilled Revenue', '', '', 'TOTAL'],
+        ['', '', '', '', '', 'Stamp (Not Billed)', 'Non Stamp(Not Billed)', 'Challan Not Received', ''],
+        ['NVL', nvl.billedRevenue || '-', nvl.billedSubmitted || '-', nvl.paymentReceived || '-', nvl.revisedBilledRevenue || '-', nvl.stampNotBilled || '-', nvl.nonStampNotBilled || '-', nvl.challanNotReceived || '-', nvl.total || '-'],
+        ['NVCL', nvcl.billedRevenue || '-', nvcl.billedSubmitted || '-', nvcl.paymentReceived || '-', nvcl.revisedBilledRevenue || '-', nvcl.stampNotBilled || '-', nvcl.nonStampNotBilled || '-', nvcl.challanNotReceived || '-', nvcl.total || '-'],
+        ['TOTAL', total.billedRevenue || '-', total.billedSubmitted || '-', total.paymentReceived || '-', total.revisedBilledRevenue || '-', total.stampNotBilled || '-', total.nonStampNotBilled || '-', total.challanNotReceived || '-', total.total || '-']
       ];
 
       const ws = XLSX.utils.aoa_to_sheet(wsData);
       ws['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }, // Summary across col 0 to 6
+        { s: { r: 0, c: 7 }, e: { r: 0, c: 8 } }, // Date col 7 to 8
+        { s: { r: 1, c: 0 }, e: { r: 2, c: 0 } }, // Site header
+        { s: { r: 1, c: 1 }, e: { r: 2, c: 1 } }, // Billed Revenue
+        { s: { r: 1, c: 2 }, e: { r: 2, c: 2 } }, // Billed Submitted
+        { s: { r: 1, c: 3 }, e: { r: 2, c: 3 } }, // Payment Received
+        { s: { r: 1, c: 4 }, e: { r: 2, c: 4 } }, // Revised Billed Revenue
+        { s: { r: 1, c: 5 }, e: { r: 1, c: 7 } }, // Unbilled Revenue colSpan 3
+        { s: { r: 1, c: 8 }, e: { r: 2, c: 8 } }  // TOTAL
       ];
 
       const wb = XLSX.utils.book_new();
@@ -132,9 +141,9 @@ export default function DailyRevenueNvlNvclTab({
   const tableBorder = '1px solid #000000';
   const thStyle = {
     border: tableBorder,
-    padding: '10px 14px',
+    padding: '8px 10px',
     fontWeight: 800,
-    fontSize: '0.88rem',
+    fontSize: '0.85rem',
     textAlign: 'center',
     verticalAlign: 'middle',
     color: '#000000',
@@ -145,8 +154,8 @@ export default function DailyRevenueNvlNvclTab({
 
   const tdStyle = {
     border: tableBorder,
-    padding: '10px 14px',
-    fontSize: '0.92rem',
+    padding: '7px 10px',
+    fontSize: '0.88rem',
     fontWeight: 700,
     color: '#000000',
     fontFamily: '"Calibri", "Segoe UI", Arial, sans-serif',
@@ -197,7 +206,7 @@ export default function DailyRevenueNvlNvclTab({
               SUMMARY REVENUE NVL AND NVCL
             </Typography>
             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, display: { xs: 'none', '2xl': 'block' }, lineHeight: 1 }}>
-              Live Billed Revenue Statement • {activeFY} ({selectedDateDisplay})
+              Live Billed & Unbilled Revenue Statement • {activeFY} ({selectedDateDisplay})
             </Typography>
           </Box>
         </Box>
@@ -349,7 +358,7 @@ export default function DailyRevenueNvlNvclTab({
         ) : (
           /* ── Responsive Horizontal Scrolling Wrapper ── */
           <Box sx={{ width: '100%', overflowX: 'auto' }}>
-            <Box sx={{ minWidth: 800, display: 'inline-block', width: '100%' }}>
+            <Box sx={{ minWidth: 980, display: 'inline-block', width: '100%' }}>
               <table
                 style={{
                   width: '100%',
@@ -359,56 +368,97 @@ export default function DailyRevenueNvlNvclTab({
                 }}
               >
                 <thead style={{ backgroundColor: '#ffffff' }}>
-                  {/* Top Bar: Summary Title and Selected FY Period */}
+                  {/* Top Bar: Summary (Left/Center) and Selected Reporting Period (Right) */}
                   <tr>
                     <th
-                      colSpan={3}
+                      colSpan={7}
                       style={{
                         ...thStyle,
                         borderBottom: tableBorder,
-                        fontSize: '0.98rem',
+                        fontSize: '1rem',
                         fontWeight: 900,
-                        padding: '10px 16px',
-                        textAlign: 'left',
-                        backgroundColor: '#f8fafc'
+                        padding: '9px 16px',
+                        textAlign: 'center',
+                        backgroundColor: '#ffffff'
                       }}
                     >
-                      SUMMARY REVENUE ({activeFY})
+                      Summary
                     </th>
                     <th
                       colSpan={2}
                       style={{
                         ...thStyle,
                         borderBottom: tableBorder,
-                        fontSize: '0.9rem',
-                        fontWeight: 800,
+                        fontSize: '0.92rem',
+                        fontWeight: 900,
                         textAlign: 'right',
-                        padding: '10px 16px',
-                        backgroundColor: '#f8fafc',
-                        color: '#475569'
+                        padding: '9px 16px',
+                        textDecoration: 'underline',
+                        backgroundColor: '#ffffff',
+                        color: '#0f172a'
                       }}
                     >
-                      Period: {selectedDateDisplay}
+                      {selectedDateDisplay}
                     </th>
                   </tr>
 
-                  {/* Header Row: SITE, BILL REVENUE, BILL SUBMITTED, PAYMENT RECEIVED, REVISED BILL REVENUE */}
-                  <tr style={{ backgroundColor: '#f1f5f9' }}>
-                    <th style={{ ...thStyle, width: '18%', backgroundColor: '#f8fafc' }}>
-                      SITE
+                  {/* Header Row 1: Site, Billed Revenue, Billed Submitted, Payment Received, Revised Billed Revenue, Unbilled Revenue (merged), TOTAL */}
+                  <tr>
+                    <th rowSpan={2} style={{ ...thStyle, width: '8%' }}>
+                      Site
                     </th>
-                    <th style={{ ...thStyle, width: '22%' }}>
-                      BILL REVENUE<br />
-                      <span style={{ fontWeight: 600, fontSize: '0.78rem', color: '#64748b' }}>( As per Bill register )</span>
+                    <th rowSpan={2} style={{ ...thStyle, width: '15%' }}>
+                      Billed Revenue<br />
+                      <span style={{ fontWeight: 700, fontSize: '0.78rem' }}>( As per Bill register )</span>
                     </th>
-                    <th style={{ ...thStyle, width: '20%' }}>
-                      BILL SUBMITTED
+                    <th rowSpan={2} style={{ ...thStyle, width: '11%' }}>
+                      Billed<br />Submitted
                     </th>
-                    <th style={{ ...thStyle, width: '20%' }}>
-                      PAYMENT RECEIVED
+                    <th rowSpan={2} style={{ ...thStyle, width: '11%' }}>
+                      Payment Received
                     </th>
-                    <th style={{ ...thStyle, width: '20%' }}>
-                      REVISED BILL REVENUE
+                    <th rowSpan={2} style={{ ...thStyle, width: '14%' }}>
+                      Revised Billed Revenue
+                    </th>
+                    <th
+                      colSpan={3}
+                      style={{
+                        ...thStyle,
+                        width: '30%',
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      Unbilled Revenue
+                    </th>
+                    <th rowSpan={2} style={{ ...thStyle, width: '11%' }}>
+                      TOTAL
+                    </th>
+                  </tr>
+
+                  {/* Header Row 2: Sub-columns under Unbilled Revenue */}
+                  <tr>
+                    <th style={{ ...thStyle, width: '10%' }}>
+                      Stamp ( Not Billed )
+                    </th>
+                    <th
+                      style={{
+                        ...thStyle,
+                        width: '10%',
+                        backgroundColor: '#ffff00', // Yellow highlighted as in reference image
+                        color: '#000000'
+                      }}
+                    >
+                      Non Stamp( Not Billed)
+                    </th>
+                    <th
+                      style={{
+                        ...thStyle,
+                        width: '10%',
+                        backgroundColor: '#ffff00', // Yellow highlighted as in reference image
+                        color: '#000000'
+                      }}
+                    >
+                      Challan Not Received
                     </th>
                   </tr>
                 </thead>
@@ -416,58 +466,140 @@ export default function DailyRevenueNvlNvclTab({
                 <tbody>
                   {/* Row 1: NVL */}
                   <tr>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, backgroundColor: '#ffffff' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800 }}>
                       NVL
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       {fmt(nvl.billedRevenue)}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
                       {fmt(nvl.billedSubmitted)}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
                       {fmt(nvl.paymentReceived)}
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       {fmt(nvl.revisedBilledRevenue)}
                     </td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                      {fmt(nvl.stampNotBilled)}
+                    </td>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        textAlign: 'right',
+                        backgroundColor: '#ffff00',
+                        color: '#000000'
+                      }}
+                    >
+                      {fmt(nvl.nonStampNotBilled)}
+                    </td>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        textAlign: 'right',
+                        backgroundColor: '#ffff00',
+                        color: '#000000'
+                      }}
+                    >
+                      {fmt(nvl.challanNotReceived)}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800 }}>
+                      {fmt(nvl.total)}
+                    </td>
                   </tr>
 
                   {/* Row 2: NVCL */}
                   <tr>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, backgroundColor: '#ffffff' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800 }}>
                       NVCL
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       {fmt(nvcl.billedRevenue)}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
                       {fmt(nvcl.billedSubmitted)}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
                       {fmt(nvcl.paymentReceived)}
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       {fmt(nvcl.revisedBilledRevenue)}
                     </td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                      {fmt(nvcl.stampNotBilled)}
+                    </td>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        textAlign: 'right',
+                        backgroundColor: '#ffff00',
+                        color: '#000000'
+                      }}
+                    >
+                      {fmt(nvcl.nonStampNotBilled)}
+                    </td>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        textAlign: 'right',
+                        backgroundColor: '#ffff00',
+                        color: '#000000'
+                      }}
+                    >
+                      {fmt(nvcl.challanNotReceived)}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800 }}>
+                      {fmt(nvcl.total)}
+                    </td>
                   </tr>
 
                   {/* Row 3: TOTAL */}
-                  <tr style={{ backgroundColor: '#e2e8f0' }}>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '0.96rem', borderTop: '2px solid #0f172a', borderBottom: '3px double #0f172a', backgroundColor: '#e2e8f0' }}>
+                  <tr style={{ backgroundColor: '#f1f5f9' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, borderBottom: '3px double #0f172a' }}>
                       TOTAL
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, fontSize: '0.96rem', borderTop: '2px solid #0f172a', borderBottom: '3px double #0f172a' }}>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, borderBottom: '3px double #0f172a' }}>
                       {fmt(total.billedRevenue)}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, fontSize: '0.96rem', borderTop: '2px solid #0f172a', borderBottom: '3px double #0f172a' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, borderBottom: '3px double #0f172a' }}>
                       {fmt(total.billedSubmitted)}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, fontSize: '0.96rem', borderTop: '2px solid #0f172a', borderBottom: '3px double #0f172a' }}>
+                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, borderBottom: '3px double #0f172a' }}>
                       {fmt(total.paymentReceived)}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, fontSize: '0.96rem', borderTop: '2px solid #0f172a', borderBottom: '3px double #0f172a' }}>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, borderBottom: '3px double #0f172a' }}>
                       {fmt(total.revisedBilledRevenue)}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, borderBottom: '3px double #0f172a' }}>
+                      {fmt(total.stampNotBilled)}
+                    </td>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        textAlign: 'right',
+                        fontWeight: 900,
+                        backgroundColor: '#ffff00',
+                        color: '#000000',
+                        borderBottom: '3px double #0f172a'
+                      }}
+                    >
+                      {fmt(total.nonStampNotBilled)}
+                    </td>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        textAlign: 'right',
+                        fontWeight: 900,
+                        backgroundColor: '#ffff00',
+                        color: '#000000',
+                        borderBottom: '3px double #0f172a'
+                      }}
+                    >
+                      {fmt(total.challanNotReceived)}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, fontSize: '0.94rem', borderBottom: '3px double #0f172a' }}>
+                      {fmt(total.total)}
                     </td>
                   </tr>
                 </tbody>

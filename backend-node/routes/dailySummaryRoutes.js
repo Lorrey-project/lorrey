@@ -1493,32 +1493,50 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
     const submittedGstBills = await gstCol.find({ type: "gstr1" }, { projection: { sourceBillId: 1 } }).toArray();
     const submittedBillSet = new Set(submittedGstBills.map(g => String(g.sourceBillId)));
 
-    // 4. Initialize Summary Dimensions
+    // 4. Fetch Unbilled Revenue from Cement Register
+    const cementCol = getCementCol();
+    const unbilledEntries = await cementCol.find({
+      "CHALLAN STATUS": { $not: /^BILLED$/i }
+    }).toArray();
+
+    // 5. Initialize Summary Dimensions
     const summary = {
       NVL: {
         site: "NVL",
         billedRevenue: 0,
         billedSubmitted: 0,
         paymentReceived: 0,
-        revisedBilledRevenue: 0
+        revisedBilledRevenue: 0,
+        stampNotBilled: 0,
+        nonStampNotBilled: 0,
+        challanNotReceived: 0,
+        total: 0
       },
       NVCL: {
         site: "NVCL",
         billedRevenue: 0,
         billedSubmitted: 0,
         paymentReceived: 0,
-        revisedBilledRevenue: 0
+        revisedBilledRevenue: 0,
+        stampNotBilled: 0,
+        nonStampNotBilled: 0,
+        challanNotReceived: 0,
+        total: 0
       },
       TOTAL: {
         site: "TOTAL",
         billedRevenue: 0,
         billedSubmitted: 0,
         paymentReceived: 0,
-        revisedBilledRevenue: 0
+        revisedBilledRevenue: 0,
+        stampNotBilled: 0,
+        nonStampNotBilled: 0,
+        challanNotReceived: 0,
+        total: 0
       }
     };
 
-    // 5. Aggregate billRows by Site
+    // 6. Aggregate billRows by Site
     billRows.forEach(r => {
       const bDate = parseDate(r.invoiceDate);
       if (!bDate) return;
@@ -1545,7 +1563,7 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       summary[site].revisedBilledRevenue += (amt - debitAmt);
     });
 
-    // 6. Aggregate payments by Site
+    // 7. Aggregate payments by Site
     payments.forEach(p => {
       if (!p.paymentDate) return;
       const pDate = parseDate(p.paymentDate);
@@ -1568,21 +1586,57 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       }
     });
 
-    // 7. Round numeric values
+    // 8. Aggregate unbilled entries by Site
+    unbilledEntries.forEach(entry => {
+      const dateVal = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || "";
+      const dObj = parseDate(dateVal);
+      if (!dObj) return;
+      const t = dObj.getTime();
+      if (t < fyStartMs || t > cutoffMs) return;
+
+      let site = normalizeSite(entry.SITE);
+      if (site !== "NVL" && site !== "NVCL") return;
+
+      const amt = parseNum(entry["BILLING AMOUNT"] || entry["Billing Amount"] || entry["BILLING ER 95%"] || entry["AMOUNT"] || 0);
+      const status = String(entry["CHALLAN STATUS"] || "").toUpperCase().trim();
+
+      if (status === "STAMP") {
+        summary[site].stampNotBilled += amt;
+      } else if (status.includes("NON STAMP") || status.includes("NON-STAMP")) {
+        summary[site].nonStampNotBilled += amt;
+      } else {
+        summary[site].challanNotReceived += amt;
+      }
+    });
+
+    // 9. Round numeric values and compute site totals
     ["NVL", "NVCL"].forEach(site => {
       summary[site].billedRevenue = Math.round(summary[site].billedRevenue);
       summary[site].billedSubmitted = Math.round(summary[site].billedSubmitted);
       summary[site].paymentReceived = Math.round(summary[site].paymentReceived);
       summary[site].revisedBilledRevenue = Math.round(summary[site].revisedBilledRevenue);
+      summary[site].stampNotBilled = Math.round(summary[site].stampNotBilled);
+      summary[site].nonStampNotBilled = Math.round(summary[site].nonStampNotBilled);
+      summary[site].challanNotReceived = Math.round(summary[site].challanNotReceived);
+      summary[site].total = Math.round(
+        (summary[site].revisedBilledRevenue || 0) +
+        (summary[site].stampNotBilled || 0) +
+        (summary[site].nonStampNotBilled || 0) +
+        (summary[site].challanNotReceived || 0)
+      );
     });
 
-    // 8. Compute TOTAL = NVL + NVCL
+    // 10. Compute TOTAL = NVL + NVCL
     summary.TOTAL = {
       site: "TOTAL",
       billedRevenue: summary.NVL.billedRevenue + summary.NVCL.billedRevenue,
       billedSubmitted: summary.NVL.billedSubmitted + summary.NVCL.billedSubmitted,
       paymentReceived: summary.NVL.paymentReceived + summary.NVCL.paymentReceived,
-      revisedBilledRevenue: summary.NVL.revisedBilledRevenue + summary.NVCL.revisedBilledRevenue
+      revisedBilledRevenue: summary.NVL.revisedBilledRevenue + summary.NVCL.revisedBilledRevenue,
+      stampNotBilled: summary.NVL.stampNotBilled + summary.NVCL.stampNotBilled,
+      nonStampNotBilled: summary.NVL.nonStampNotBilled + summary.NVCL.nonStampNotBilled,
+      challanNotReceived: summary.NVL.challanNotReceived + summary.NVCL.challanNotReceived,
+      total: summary.NVL.total + summary.NVCL.total
     };
 
     const rows = [
