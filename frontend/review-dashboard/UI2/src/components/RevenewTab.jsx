@@ -3,7 +3,7 @@ import {
   Box, Typography, Paper, IconButton,
   FormControl, Select, MenuItem, Button, Tooltip, Tabs, Tab,
   Popover, Grid, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, TextField, InputAdornment, CircularProgress, Chip, Menu
+  TableHead, TableRow, TextField, InputAdornment, CircularProgress, Menu
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -23,10 +23,7 @@ const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_AP
 
 const VALID_BILL_TYPES = ['FREIGHT', 'UNLOADING', 'TOLL'];
 
-const MONTH_NAMES = [
-  'ALL', 'April', 'May', 'June', 'July', 'August', 'September',
-  'October', 'November', 'December', 'January', 'February', 'March'
-];
+const SITE_OPTIONS = ['ALL', 'NVL', 'NVCL'];
 
 const FULL_MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -164,11 +161,10 @@ export default function RevenewTab({
   mainTab,
   setMainTab,
   financialYear: initialFY = 'FY 2026-27',
-  month: initialMonth = 'ALL',
   date: initialDate = 'ALL'
 }) {
   const [financialYear, setFinancialYear] = useState(initialFY || 'FY 2026-27');
-  const [month, setMonth] = useState(initialMonth || 'ALL');
+  const [siteFilter, setSiteFilter] = useState('ALL'); // Default is ALWAYS 'ALL' (NVL + NVCL)
   const [date, setDate] = useState(initialDate || 'ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [calendarAnchorEl, setCalendarAnchorEl] = useState(null);
@@ -289,49 +285,32 @@ export default function RevenewTab({
     handleCloseBillMenu();
   };
 
-  // Compute calendar year for selected FY and Month
-  const displayYear = useMemo(() => {
-    let startYear = 2026;
-    const parts = String(financialYear).replace(/^FY\s*/i, '').split('-');
-    if (parts.length > 0) {
-      let sy = parseInt(parts[0], 10);
-      if (sy < 100) sy += 2000;
-      if (!isNaN(sy)) startYear = sy;
-    }
-    const mIdx = MONTH_NAMES.indexOf(month);
-    return mIdx >= 10 ? startYear + 1 : startYear;
-  }, [financialYear, month]);
-
-  // Compute available dates dynamically for the selected month & year
+  // Compute available dates dynamically for the calendar
   const dateOptions = useMemo(() => {
-    const jsMonthNames = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    const jsMonthIdx = jsMonthNames.indexOf(month);
-    if (jsMonthIdx === -1) return [];
-
-    const daysInMonth = new Date(displayYear, jsMonthIdx + 1, 0).getDate();
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonthIdx = now.getMonth();
+    const daysInMonth = new Date(curYear, curMonthIdx + 1, 0).getDate();
     const list = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const dStr = String(d).padStart(2, '0');
-      const mStr = String(jsMonthIdx + 1).padStart(2, '0');
+      const mStr = String(curMonthIdx + 1).padStart(2, '0');
       list.push({
         day: d,
-        display: `${dStr}-${mStr}-${displayYear}`,
-        value: `${dStr}-${mStr}-${displayYear}`,
-        isoDate: `${displayYear}-${mStr}-${dStr}`
+        display: `${dStr}-${mStr}-${curYear}`,
+        value: `${dStr}-${mStr}-${curYear}`,
+        isoDate: `${curYear}-${mStr}-${dStr}`
       });
     }
     return list;
-  }, [displayYear, month]);
+  }, []);
 
   const selectedDateDisplay = useMemo(() => {
     if (date === 'ALL') {
-      return month === 'ALL' ? `All Months (FY to Date)` : `${month} ${displayYear}`;
+      return siteFilter === 'ALL' ? 'All Sites • FY to Date' : `${siteFilter} • FY to Date`;
     }
-    return date;
-  }, [date, month, displayYear]);
+    return `${date} • ${siteFilter}`;
+  }, [date, siteFilter]);
 
   // ── Process Bill Register Rows with 12 Column Mapping & FY-Till-Date Boundary ──
   const processedBillRegisterRows = useMemo(() => {
@@ -430,17 +409,14 @@ export default function RevenewTab({
     return mapped;
   }, [rawRows, financialYear, manualBillOverrides]);
 
-  // Filter records based on Month, Date, and Search Term
+  // Filter records based on SITE (ALL, NVL, NVCL), Date, and Search Term
   const filteredRecords = useMemo(() => {
     let result = processedBillRegisterRows;
 
-    // Month filter
-    if (month && month !== 'ALL') {
-      const targetMonthUpper = month.toUpperCase();
-      result = result.filter(r => {
-        const mStr = String(r.month || '').toUpperCase();
-        return mStr.includes(targetMonthUpper);
-      });
+    // Site filter (ALL, NVL, NVCL)
+    if (siteFilter && siteFilter !== 'ALL') {
+      const targetSiteUpper = siteFilter.toUpperCase();
+      result = result.filter(r => (r.site || '').toUpperCase() === targetSiteUpper);
     }
 
     // Date filter
@@ -468,9 +444,9 @@ export default function RevenewTab({
     }
 
     return result;
-  }, [processedBillRegisterRows, month, date, searchTerm]);
+  }, [processedBillRegisterRows, siteFilter, date, searchTerm]);
 
-  // Dynamic calculation for bottom total row
+  // Dynamic calculation for bottom total row based on filtered records
   const totals = useMemo(() => {
     return filteredRecords.reduce((acc, r) => {
       acc.amount += Number(r.amount || 0);
@@ -490,12 +466,12 @@ export default function RevenewTab({
     });
   }, [filteredRecords]);
 
-  // Export to Excel handler
+  // Export to Excel handler (exports only the filtered dataset)
   const handleExportExcel = useCallback(() => {
     try {
       const wsData = [
         ['REVENEW REPORT'],
-        [`Financial Year: ${financialYear} | Month: ${month} | Date: ${selectedDateDisplay}`],
+        [`Financial Year: ${financialYear} | Site: ${siteFilter} | Date: ${selectedDateDisplay}`],
         [],
         [
           'SL NO',
@@ -552,12 +528,12 @@ export default function RevenewTab({
       const ws = XLSX.utils.aoa_to_sheet(wsData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Revenew');
-      const exportFileName = `Revenew_${month}_${financialYear.replace(/\s+/g, '_')}.xlsx`;
+      const exportFileName = `Revenew_${siteFilter}_${financialYear.replace(/\s+/g, '_')}.xlsx`;
       XLSX.writeFile(wb, exportFileName);
     } catch (err) {
       console.error('Excel export error:', err);
     }
-  }, [filteredRecords, totals, financialYear, month, selectedDateDisplay]);
+  }, [filteredRecords, totals, financialYear, siteFilter, selectedDateDisplay]);
 
   return (
     <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: '#f8fafc', p: { xs: 1.5, sm: 2, md: 3 } }}>
@@ -684,13 +660,12 @@ export default function RevenewTab({
             </Select>
           </FormControl>
 
-          {/* Month Selector */}
+          {/* Site Filter Selector (ALL / NVL / NVCL) - Default is ALWAYS ALL */}
           <FormControl size="small">
             <Select
-              value={month}
+              value={siteFilter}
               onChange={(e) => {
-                setMonth(e.target.value);
-                setDate('ALL');
+                setSiteFilter(e.target.value);
               }}
               sx={{
                 borderRadius: '8px',
@@ -698,12 +673,13 @@ export default function RevenewTab({
                 fontWeight: 700,
                 fontSize: { xs: '0.75rem', sm: '0.8rem' },
                 height: 34,
+                minWidth: 80,
                 '& .MuiSelect-select': { py: 0.7, px: 1.2 }
               }}
             >
-              {MONTH_NAMES.map((m) => (
-                <MenuItem key={m} value={m} sx={{ fontSize: '0.8rem', fontWeight: 600 }}>
-                  {m === 'ALL' ? 'ALL (Full FY)' : m}
+              {SITE_OPTIONS.map((site) => (
+                <MenuItem key={site} value={site} sx={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                  {site}
                 </MenuItem>
               ))}
             </Select>
@@ -716,7 +692,6 @@ export default function RevenewTab({
             onClick={handleOpenCalendar}
             startIcon={<CalendarTodayIcon sx={{ fontSize: '15px !important' }} />}
             endIcon={<KeyboardArrowDownIcon sx={{ fontSize: '15px !important' }} />}
-            disabled={month === 'ALL'}
             sx={{
               borderRadius: '8px',
               bgcolor: 'background.default',
@@ -743,7 +718,7 @@ export default function RevenewTab({
           >
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Typography variant="subtitle2" fontWeight={800} color="#0f172a">
-                {month} {displayYear}
+                Select Date
               </Typography>
             </Box>
             <Button
@@ -762,7 +737,7 @@ export default function RevenewTab({
                 '&:hover': { bgcolor: date === 'ALL' ? '#1e293b' : '#f8fafc', borderColor: '#1e293b' }
               }}
             >
-              ALL (Full Month)
+              ALL (Full FY to Date)
             </Button>
             <Grid container spacing={0.8}>
               {dateOptions.map(d => {
