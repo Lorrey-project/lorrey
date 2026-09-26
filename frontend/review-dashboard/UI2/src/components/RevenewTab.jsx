@@ -3,7 +3,7 @@ import {
   Box, Typography, Paper, IconButton,
   FormControl, Select, MenuItem, Button, Tooltip, Tabs, Tab,
   Popover, Grid, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, TextField, InputAdornment, CircularProgress
+  TableHead, TableRow, TextField, InputAdornment, CircularProgress, Chip, Menu
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -13,12 +13,15 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
+import EditIcon from '@mui/icons-material/Edit';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+
+const VALID_BILL_TYPES = ['FREIGHT', 'UNLOADING', 'TOLL'];
 
 const MONTH_NAMES = [
   'ALL', 'April', 'May', 'June', 'July', 'August', 'September',
@@ -114,6 +117,17 @@ function formatDisplayDate(val) {
   return `${d}-${m}-${y}`;
 }
 
+// Business Rule: DUE DATE = INVOICE DATE + 15 CALENDAR DAYS (Pure calendar arithmetic)
+function calculateDueDate(invoiceDateVal) {
+  const cal = parseCalendarDate(invoiceDateVal);
+  if (!cal) return '-';
+  const due = new Date(cal.year, cal.month - 1, cal.day + 15);
+  const d = String(due.getDate()).padStart(2, '0');
+  const m = String(due.getMonth() + 1).padStart(2, '0');
+  const y = String(due.getFullYear());
+  return `${d}-${m}-${y}`;
+}
+
 function getCalNum(cal) {
   if (!cal) return 0;
   return cal.year * 10000 + cal.month * 100 + cal.day;
@@ -135,6 +149,16 @@ function getDisplayMonth(monthVal, invoiceDateVal) {
   return '-';
 }
 
+// Authoritative Bill Type Extraction (Only FREIGHT, UNLOADING, TOLL are valid; else NULL)
+function getAuthoritativeBillType(sourceBillType) {
+  if (!sourceBillType) return '';
+  const clean = String(sourceBillType).trim().toUpperCase();
+  if (VALID_BILL_TYPES.includes(clean)) {
+    return clean;
+  }
+  return '';
+}
+
 export default function RevenewTab({
   onBack,
   mainTab,
@@ -152,6 +176,20 @@ export default function RevenewTab({
   // Authoritative live rows from Bill Register
   const [rawRows, setRawRows] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Local manual overrides for BILL column (persisted in DB and state)
+  const [manualBillOverrides, setManualBillOverrides] = useState(() => {
+    try {
+      const stored = localStorage.getItem('REVENUE_MANUAL_BILL_OVERRIDES');
+      return stored ? JSON.parse(stored) : {};
+    } catch (_) {
+      return {};
+    }
+  });
+
+  // Anchor for BILL editing menu
+  const [billMenuAnchorEl, setBillMenuAnchorEl] = useState(null);
+  const [activeBillRow, setActiveBillRow] = useState(null);
 
   // Fetch authoritative Bill Register data
   const fetchBillRegisterData = useCallback(async () => {
@@ -214,6 +252,42 @@ export default function RevenewTab({
 
   const handleOpenCalendar = (e) => setCalendarAnchorEl(e.currentTarget);
   const handleCloseCalendar = () => setCalendarAnchorEl(null);
+
+  // Handle Manual Bill Type Editing / Override
+  const handleOpenBillMenu = (event, row) => {
+    event.stopPropagation();
+    setBillMenuAnchorEl(event.currentTarget);
+    setActiveBillRow(row);
+  };
+
+  const handleCloseBillMenu = () => {
+    setBillMenuAnchorEl(null);
+    setActiveBillRow(null);
+  };
+
+  const handleSelectBillType = async (selectedType) => {
+    if (!activeBillRow) return;
+    const billNo = activeBillRow.invoiceNumber || activeBillRow.rawInvoiceNumber || activeBillRow._id;
+    const newOverrides = { ...manualBillOverrides, [billNo]: selectedType };
+    setManualBillOverrides(newOverrides);
+    try {
+      localStorage.setItem('REVENUE_MANUAL_BILL_OVERRIDES', JSON.stringify(newOverrides));
+    } catch (_) {}
+
+    // Persist to backend
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      await axios.post(`${API_URL}/fy-details/update-bill-type`, {
+        billNo,
+        billType: selectedType
+      }, { headers });
+    } catch (err) {
+      console.error('Failed to persist billType to backend:', err);
+    }
+
+    handleCloseBillMenu();
+  };
 
   // Compute calendar year for selected FY and Month
   const displayYear = useMemo(() => {
@@ -301,24 +375,39 @@ export default function RevenewTab({
       const totalAmount = r.totalAmount !== undefined && r.totalAmount !== null ? Number(r.totalAmount) : (amt + cgst + sgst);
 
       const siteUpper = String(r.site || '').trim().toUpperCase();
-      const billUpper = String(r.billType || r.bill || 'FREIGHT').trim().toUpperCase();
+      const rawInvNo = r.displayInvoiceNumber || r.invoiceNumber || r.billNo || '-';
 
+      // Bill Type: Check manual override first, then authoritative source (only FREIGHT, UNLOADING, TOLL), else NULL
+      const manualOverride = manualBillOverrides[rawInvNo] ?? manualBillOverrides[r.invoiceNumber] ?? manualBillOverrides[r.billNo];
+      let billUpper = '';
+      if (manualOverride !== undefined) {
+        billUpper = manualOverride ? String(manualOverride).trim().toUpperCase() : '';
+      } else {
+        billUpper = getAuthoritativeBillType(r.billType || r.bill);
+      }
+
+      // TDS Calculation: If NVL + TOLL -> 0, else 2%
       const isTollNvl = siteUpper === 'NVL' && billUpper === 'TOLL';
       const tdsRate = isTollNvl ? 0 : 0.02;
       const tds = r.tds !== undefined && r.tds !== null ? Number(r.tds) : Math.round(amt * tdsRate * 100) / 100;
 
       const receivableAmount = r.receivable !== undefined && r.receivable !== null ? Number(r.receivable) : (totalAmount - tds);
 
+      // Automatic Due Date: Invoice Date + 15 Calendar Days
+      const dueDateFormatted = calculateDueDate(r.invoiceDate);
+
       return {
         _id: r._id || r.id,
         rawInvoiceDate: r.invoiceDate,
+        rawInvoiceNumber: r.invoiceNumber || r.billNo,
         invoiceDate: formatDisplayDate(r.invoiceDate),
         invoiceDateCal: parseCalendarDate(r.invoiceDate),
-        invoiceNumber: r.displayInvoiceNumber || r.invoiceNumber || r.billNo || '-',
+        invoiceNumber: rawInvNo,
         month: getDisplayMonth(r.month, r.invoiceDate),
         site: siteUpper,
         bill: billUpper,
-        dueDate: r.dueDate ? formatDisplayDate(r.dueDate) : (r.editedDueDate ? formatDisplayDate(r.editedDueDate) : '-'),
+        hasManualBillOverride: manualOverride !== undefined,
+        dueDate: dueDateFormatted,
         amount: amt,
         cgst,
         sgst,
@@ -339,7 +428,7 @@ export default function RevenewTab({
     });
 
     return mapped;
-  }, [rawRows, financialYear]);
+  }, [rawRows, financialYear, manualBillOverrides]);
 
   // Filter records based on Month, Date, and Search Term
   const filteredRecords = useMemo(() => {
@@ -432,7 +521,7 @@ export default function RevenewTab({
           r.invoiceNumber || '-',
           r.month || '-',
           r.site || '-',
-          r.bill || '-',
+          r.bill || '',
           r.dueDate || '-',
           r.amount || 0,
           r.cgst || 0,
@@ -822,7 +911,7 @@ export default function RevenewTab({
                 <TableCell align="center" sx={{ bgcolor: '#1e293b', color: '#ffffff', fontWeight: 800, fontSize: '0.75rem', py: 1, px: 1, width: 90 }}>
                   SITE
                 </TableCell>
-                <TableCell align="center" sx={{ bgcolor: '#1e293b', color: '#ffffff', fontWeight: 800, fontSize: '0.75rem', py: 1, px: 1.2, width: 120 }}>
+                <TableCell align="center" sx={{ bgcolor: '#1e293b', color: '#ffffff', fontWeight: 800, fontSize: '0.75rem', py: 1, px: 1.2, width: 130 }}>
                   BILL
                 </TableCell>
                 <TableCell align="center" sx={{ bgcolor: '#1e293b', color: '#ffffff', fontWeight: 800, fontSize: '0.75rem', py: 1, px: 1.2, width: 110 }}>
@@ -860,56 +949,106 @@ export default function RevenewTab({
                   </TableCell>
                 </TableRow>
               ) : filteredRecords.length > 0 ? (
-                filteredRecords.map((row, idx) => (
-                  <TableRow
-                    key={row._id || `${row.invoiceNumber}-${idx}`}
-                    hover
-                    sx={{
-                      '&:nth-of-type(even)': { bgcolor: '#f8fafc' },
-                      '& td': { border: '1px solid #e2e8f0', py: 0.7, px: 1 }
-                    }}
-                  >
-                    <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>
-                      {idx + 1}
-                    </TableCell>
-                    <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#334155', fontWeight: 600 }}>
-                      {row.invoiceDate || '-'}
-                    </TableCell>
-                    <TableCell align="left" sx={{ fontSize: '0.78rem', color: '#0f172a', fontWeight: 700 }}>
-                      {row.invoiceNumber || '-'}
-                    </TableCell>
-                    <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#334155', fontWeight: 500 }}>
-                      {row.month || '-'}
-                    </TableCell>
-                    <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#334155', fontWeight: 700 }}>
-                      {row.site || '-'}
-                    </TableCell>
-                    <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#334155', fontWeight: 600 }}>
-                      {row.bill || '-'}
-                    </TableCell>
-                    <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#334155', fontWeight: 600 }}>
-                      {row.dueDate || '-'}
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#0f172a', fontWeight: 600 }}>
-                      {fmtNumber(row.amount)}
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600 }}>
-                      {fmtNumber(row.cgst)}
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600 }}>
-                      {fmtNumber(row.sgst)}
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#0f172a', fontWeight: 700 }}>
-                      {fmtNumber(row.totalAmount)}
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#b91c1c', fontWeight: 600 }}>
-                      {fmtNumber(row.tds)}
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#047857', fontWeight: 800 }}>
-                      {fmtNumber(row.receivableAmount)}
-                    </TableCell>
-                  </TableRow>
-                ))
+                filteredRecords.map((row, idx) => {
+                  const billVal = row.bill;
+                  return (
+                    <TableRow
+                      key={row._id || `${row.invoiceNumber}-${idx}`}
+                      hover
+                      sx={{
+                        '&:nth-of-type(even)': { bgcolor: '#f8fafc' },
+                        '& td': { border: '1px solid #e2e8f0', py: 0.7, px: 1 }
+                      }}
+                    >
+                      <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>
+                        {idx + 1}
+                      </TableCell>
+                      <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#334155', fontWeight: 600 }}>
+                        {row.invoiceDate || '-'}
+                      </TableCell>
+                      <TableCell align="left" sx={{ fontSize: '0.78rem', color: '#0f172a', fontWeight: 700 }}>
+                        {row.invoiceNumber || '-'}
+                      </TableCell>
+                      <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#334155', fontWeight: 500 }}>
+                        {row.month || '-'}
+                      </TableCell>
+                      <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#334155', fontWeight: 700 }}>
+                        {row.site || '-'}
+                      </TableCell>
+
+                      {/* ── BILL Column: Authoritative 3 Types or Editable Fallback ── */}
+                      <TableCell align="center" sx={{ fontSize: '0.78rem', py: 0.4, px: 0.8 }}>
+                        <Box
+                          onClick={(e) => handleOpenBillMenu(e, row)}
+                          sx={{
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 0.5,
+                            px: 1,
+                            py: 0.3,
+                            borderRadius: '6px',
+                            fontWeight: 800,
+                            fontSize: '0.74rem',
+                            minWidth: '80px',
+                            minHeight: '24px',
+                            bgcolor: billVal === 'FREIGHT' ? '#eff6ff'
+                              : billVal === 'UNLOADING' ? '#f5f3ff'
+                              : billVal === 'TOLL' ? '#ecfdf5'
+                              : '#f8fafc',
+                            color: billVal === 'FREIGHT' ? '#1d4ed8'
+                              : billVal === 'UNLOADING' ? '#6d28d9'
+                              : billVal === 'TOLL' ? '#047857'
+                              : '#94a3b8',
+                            border: billVal ? `1px solid ${
+                              billVal === 'FREIGHT' ? '#bfdbfe'
+                              : billVal === 'UNLOADING' ? '#ddd6fe'
+                              : '#a7f3d0'
+                            }` : '1px dashed #cbd5e1',
+                            transition: 'all 0.15s ease',
+                            '&:hover': {
+                              borderColor: '#94a3b8',
+                              bgcolor: billVal ? undefined : '#f1f5f9'
+                            }
+                          }}
+                          title="Click to select/edit Bill Type"
+                        >
+                          {billVal || (
+                            <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: '0.72rem', fontStyle: 'italic' }}>
+                              Select...
+                            </Typography>
+                          )}
+                          <EditIcon sx={{ fontSize: '0.65rem', opacity: 0.4 }} />
+                        </Box>
+                      </TableCell>
+
+                      {/* ── Due Date Column: Automatically Invoice Date + 15 Days ── */}
+                      <TableCell align="center" sx={{ fontSize: '0.78rem', color: '#1e293b', fontWeight: 700 }}>
+                        {row.dueDate || '-'}
+                      </TableCell>
+
+                      <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#0f172a', fontWeight: 600 }}>
+                        {fmtNumber(row.amount)}
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600 }}>
+                        {fmtNumber(row.cgst)}
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600 }}>
+                        {fmtNumber(row.sgst)}
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#0f172a', fontWeight: 700 }}>
+                        {fmtNumber(row.totalAmount)}
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#b91c1c', fontWeight: 600 }}>
+                        {fmtNumber(row.tds)}
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.78rem', color: '#047857', fontWeight: 800 }}>
+                        {fmtNumber(row.receivableAmount)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               ) : (
                 <TableRow>
                   <TableCell colSpan={13} align="center" sx={{ py: 6, border: '1px solid #e2e8f0' }}>
@@ -968,6 +1107,45 @@ export default function RevenewTab({
           </Table>
         </TableContainer>
       </Paper>
+
+      {/* ── Bill Type Selection / Edit Menu ────────────────────────────────────────── */}
+      <Menu
+        anchorEl={billMenuAnchorEl}
+        open={Boolean(billMenuAnchorEl)}
+        onClose={handleCloseBillMenu}
+        PaperProps={{
+          sx: {
+            borderRadius: '10px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            minWidth: 150
+          }
+        }}
+      >
+        <MenuItem
+          onClick={() => handleSelectBillType('FREIGHT')}
+          sx={{ fontSize: '0.8rem', fontWeight: 700, color: '#1d4ed8' }}
+        >
+          FREIGHT
+        </MenuItem>
+        <MenuItem
+          onClick={() => handleSelectBillType('UNLOADING')}
+          sx={{ fontSize: '0.8rem', fontWeight: 700, color: '#6d28d9' }}
+        >
+          UNLOADING
+        </MenuItem>
+        <MenuItem
+          onClick={() => handleSelectBillType('TOLL')}
+          sx={{ fontSize: '0.8rem', fontWeight: 700, color: '#047857' }}
+        >
+          TOLL
+        </MenuItem>
+        <MenuItem
+          onClick={() => handleSelectBillType('')}
+          sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}
+        >
+          (Clear / Blank)
+        </MenuItem>
+      </Menu>
     </Box>
   );
 }

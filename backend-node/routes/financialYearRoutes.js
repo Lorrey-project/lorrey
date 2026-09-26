@@ -956,6 +956,31 @@ router.post('/save-row', async (req, res) => {
   }
 });
 
+router.post('/update-bill-type', async (req, res) => {
+  try {
+    const { billNo, billType } = req.body;
+    if (!billNo) return res.status(400).json({ error: 'billNo is required' });
+
+    const normalizedBillType = billType ? String(billType).trim().toUpperCase() : '';
+    await FinancialYearRow.findOneAndUpdate(
+      { billNo },
+      { $set: { billType: normalizedBillType } },
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    try {
+      const { getIO } = require('../socket');
+      getIO().emit('billRegisterUpdated', { action: 'billTypeUpdated', billNo, billType: normalizedBillType });
+      getIO().emit('fyDetailsUpdates', { action: 'billTypeUpdated', billNo, billType: normalizedBillType });
+    } catch (_) {}
+
+    res.json({ success: true, billNo, billType: normalizedBillType });
+  } catch (err) {
+    console.error('Update bill type error:', err);
+    res.status(500).json({ error: 'Server error updating bill type' });
+  }
+});
+
 router.get('/documents', async (req, res) => {
   try {
     const docs = await BillRegisterDocument.find({}).sort({ createdAt: -1 });
