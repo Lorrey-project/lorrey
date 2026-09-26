@@ -432,6 +432,7 @@ function DailySummaryTab({
   const [extensionErrors, setExtensionErrors] = useState({});
   const [savingExtensions, setSavingExtensions] = useState(false);
   const [unloadingStatusOpen, setUnloadingStatusOpen] = useState(false);
+  const [unloadingActiveTab, setUnloadingActiveTab] = useState(0); // 0: YESTERDAY UNLOADED, 1: TODAY UNLOADING
   const [unloadingSearchTerm, setUnloadingSearchTerm] = useState('');
 
   // ── Live YTD Alerts Data from Cement Register (01 April to Today) ───────────
@@ -3371,7 +3372,7 @@ function DailySummaryTab({
         </DialogActions>
       </Dialog>
 
-      {/* --- Dedicated Unloading Status Modal / Panel --- */}
+      {/* --- Dedicated Unloading Status Modal / Panel with Exactly 2 Tabs --- */}
       <Dialog
         open={unloadingStatusOpen}
         onClose={() => setUnloadingStatusOpen(false)}
@@ -3379,120 +3380,241 @@ function DailySummaryTab({
         fullWidth
         PaperProps={{ sx: { borderRadius: '16px', bgcolor: 'background.default', maxHeight: '90vh' } }}
       >
-        <DialogTitle sx={{ bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', px: 3, py: 2.2 }}>
+        <DialogTitle sx={{ bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', px: 3, py: 2 }}>
           <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1.5}>
             <Box display="flex" alignItems="center" gap={1.5}>
-              <LocalShippingIcon sx={{ color: '#0284c7', fontSize: 30 }} />
+              <LocalShippingIcon sx={{ color: '#0284c7', fontSize: 28 }} />
               <Box>
                 <Typography variant="h6" fontWeight={800} color="#0f172a">
                   UNLOADING STATUS
                 </Typography>
                 <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                  Yesterday completed unloading &amp; today's pending/due unloading tracking
+                  Authoritative CIM/CIMA Register live unloading tracking
                 </Typography>
               </Box>
             </Box>
-            <Box display="flex" alignItems="center" gap={1.2}>
-              <Chip
-                label={`Yesterday Unloaded: ${unloadingStatusData.yesterdayCount}`}
-                sx={{ bgcolor: '#dcfce7', color: '#15803d', fontWeight: 800, borderRadius: '8px', fontSize: '0.78rem' }}
-              />
-              <Chip
-                label={`Today Unloading: ${unloadingStatusData.todayCount}`}
-                sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 800, borderRadius: '8px', fontSize: '0.78rem' }}
-              />
-              <IconButton onClick={() => setUnloadingStatusOpen(false)} size="small" sx={{ color: '#64748b', ml: 1 }}>
-                <CloseIcon fontSize="small" />
-              </IconButton>
-            </Box>
+            <IconButton onClick={() => setUnloadingStatusOpen(false)} size="small" sx={{ color: '#64748b' }}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
           </Box>
         </DialogTitle>
 
-        <DialogContent sx={{ p: 3 }}>
-          {/* Top Search Controls */}
-          <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-            <TextField
-              size="small"
-              placeholder="Search E-Way Bill No."
-              value={unloadingSearchTerm}
-              onChange={(e) => setUnloadingSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon sx={{ color: '#64748b' }} />
-                  </InputAdornment>
-                ),
-                endAdornment: unloadingSearchTerm ? (
-                  <InputAdornment position="end">
-                    <IconButton size="small" onClick={() => setUnloadingSearchTerm('')}>
-                      <ClearIcon sx={{ fontSize: 18 }} />
-                    </IconButton>
-                  </InputAdornment>
-                ) : null,
-              }}
-              sx={{
-                width: { xs: '100%', sm: 360 },
-                bgcolor: '#ffffff',
-                borderRadius: '8px',
-                '& .MuiOutlinedInput-root': { borderRadius: '8px' }
-              }}
+        {/* --- Two Dedicated Tabs Header --- */}
+        <Box sx={{ px: 3, pt: 1.5, pb: 0, bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+          <Tabs
+            value={unloadingActiveTab}
+            onChange={(e, val) => setUnloadingActiveTab(val)}
+            sx={{
+              minHeight: '40px',
+              '& .MuiTab-root': {
+                textTransform: 'none',
+                fontWeight: 800,
+                fontSize: '0.84rem',
+                minHeight: '38px',
+                py: 0.5,
+                px: 2.2,
+                mr: 1.5,
+                borderRadius: '8px 8px 0 0',
+                color: '#64748b',
+                bgcolor: '#f1f5f9',
+                border: '1px solid #e2e8f0',
+                borderBottom: 'none',
+                transition: 'all 0.2s',
+                '&:hover': { bgcolor: '#e2e8f0', color: '#0f172a' }
+              },
+              '& .Mui-selected': {
+                bgcolor: '#0f172a !important',
+                color: '#ffffff !important',
+                borderColor: '#0f172a !important',
+                boxShadow: '0 2px 8px rgba(15,23,42,0.2)'
+              }
+            }}
+            TabIndicatorProps={{ style: { display: 'none' } }}
+          >
+            <Tab
+              label={
+                <Box display="flex" alignItems="center" gap={1}>
+                  <CheckCircleOutlineIcon sx={{ fontSize: 18 }} />
+                  <span>YESTERDAY UNLOADED — {unloadingStatusData.yesterdayFormatted}</span>
+                  <Chip
+                    size="small"
+                    label={unloadingStatusData.yesterdayCount}
+                    sx={{
+                      height: '20px',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      bgcolor: unloadingActiveTab === 0 ? 'rgba(255,255,255,0.25)' : '#dcfce7',
+                      color: unloadingActiveTab === 0 ? '#ffffff' : '#15803d'
+                    }}
+                  />
+                </Box>
+              }
             />
-            {unloadingSearchTerm.trim() && (
-              <Chip
-                label={`${unloadingSearchMatches.length} matching result(s)`}
-                sx={{ bgcolor: '#f1f5f9', color: '#334155', fontWeight: 700 }}
-              />
-            )}
-          </Box>
+            <Tab
+              label={
+                <Box display="flex" alignItems="center" gap={1}>
+                  <AccessTimeIcon sx={{ fontSize: 18 }} />
+                  <span>TODAY UNLOADING — {unloadingStatusData.todayFormatted}</span>
+                  <Chip
+                    size="small"
+                    label={unloadingStatusData.todayCount}
+                    sx={{
+                      height: '20px',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      bgcolor: unloadingActiveTab === 1 ? 'rgba(255,255,255,0.25)' : '#e0f2fe',
+                      color: unloadingActiveTab === 1 ? '#ffffff' : '#0369a1'
+                    }}
+                  />
+                </Box>
+              }
+            />
+          </Tabs>
 
-          {/* If Search Query is Active: Show Search Results */}
-          {unloadingSearchTerm.trim() ? (
-            <Box sx={{ mb: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-                <Typography variant="subtitle1" fontWeight={800} color="#0f172a" display="flex" alignItems="center" gap={1}>
-                  <SearchIcon sx={{ color: '#2563eb', fontSize: 20 }} />
-                  SEARCH RESULTS FOR "{unloadingSearchTerm.trim()}"
-                </Typography>
-                <Chip
-                  size="small"
-                  label={`${unloadingSearchMatches.length} Records`}
-                  sx={{ bgcolor: '#e0e7ff', color: '#4338ca', fontWeight: 800 }}
-                />
-              </Box>
+          <TextField
+            size="small"
+            placeholder="Search E-Way Bill / Vehicle No."
+            value={unloadingSearchTerm}
+            onChange={(e) => setUnloadingSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: '#64748b', fontSize: 18 }} />
+                </InputAdornment>
+              ),
+              endAdornment: unloadingSearchTerm ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setUnloadingSearchTerm('')}>
+                    <ClearIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+            sx={{
+              width: { xs: '100%', sm: 300 },
+              mb: 1,
+              bgcolor: '#ffffff',
+              '& .MuiOutlinedInput-root': { borderRadius: '8px', height: '36px' }
+            }}
+          />
+        </Box>
 
+        <DialogContent sx={{ p: 3 }}>
+          {unloadingActiveTab === 0 ? (
+            /* TAB 1: YESTERDAY UNLOADED */
+            <Box>
               <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
                 <Table size="small">
                   <TableHead>
-                    <TableRow sx={{ bgcolor: '#f8fafc' }}>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', py: 1.5, whiteSpace: 'nowrap' }}>SL NO</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>SITE</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>E-WAY BILL VALIDITY</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>UNLOADING DATE / STATUS</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>VALIDITY STATUS</TableCell>
+                    <TableRow sx={{ bgcolor: '#f0fdf4' }}>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', py: 1.5, whiteSpace: 'nowrap' }}>SL NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>SITE</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>UNLOADING DATE</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>UNLOADING STATUS</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {unloadingSearchMatches.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={10} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
-                          No matching E-Way Bill found.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      unloadingSearchMatches.map((row, idx) => {
-                        const info = getEWayBillStatus(row);
-                        const unloadingRaw = String(
-                          row["UNLOADING STATUS"] || row["RECEIVING DATE"] || row["UNLOADING DATE"] || row["RECEIVING DT"] || row["UNLOADING DT"] || ""
-                        ).trim();
-                        const isPending = !unloadingRaw || unloadingRaw === "-" || unloadingRaw.toLowerCase() === "null";
+                    {(() => {
+                      const term = unloadingSearchTerm.trim().toLowerCase().replace(/\s+/g, '');
+                      const list = term
+                        ? unloadingStatusData.yesterdayUnloaded.filter(row => {
+                            const eway = String(row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "").toLowerCase().replace(/\s+/g, '');
+                            const veh = String(row["VEHICLE NUMBER"] || row["VEHICLE NO"] || "").toLowerCase().replace(/\s+/g, '');
+                            const inv = String(row["INVOICE NO"] || row["INVOICE NO."] || "").toLowerCase().replace(/\s+/g, '');
+                            return eway.includes(term) || veh.includes(term) || inv.includes(term);
+                          })
+                        : unloadingStatusData.yesterdayUnloaded;
 
+                      if (list.length === 0) {
                         return (
-                          <TableRow key={row._id || idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                          <TableRow>
+                            <TableCell colSpan={9} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
+                              {term
+                                ? `No matching records found for "${unloadingSearchTerm}" in Yesterday Unloaded.`
+                                : `No vehicles unloaded yesterday (${unloadingStatusData.yesterdayFormatted}).`}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      return list.map((row, idx) => (
+                        <TableRow key={row.uniqueKey || idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#64748b' }}>{idx + 1}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["INVOICE NO"] || row["INVOICE NO."] || "-"}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#2563eb' }}>{row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "-"}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#0f172a' }}>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "-"}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["SITE"] || "-"}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["DESTINATION"] || "-"}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["PARTY NAME"] || "-"}</TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#047857' }}>
+                            {row.unloadingDateFormatted || "-"}
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                            <Chip
+                              size="small"
+                              label="UNLOADED"
+                              sx={{ bgcolor: '#dcfce7', color: '#15803d', fontWeight: 800, fontSize: '0.75rem' }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ));
+                    })()}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          ) : (
+            /* TAB 2: TODAY UNLOADING */
+            <Box>
+              <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow sx={{ bgcolor: '#eff6ff' }}>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', py: 1.5, whiteSpace: 'nowrap' }}>SL NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>SITE</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>E-WAY BILL VALIDITY</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>UNLOADING DATE / STATUS</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>STATUS</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {(() => {
+                      const term = unloadingSearchTerm.trim().toLowerCase().replace(/\s+/g, '');
+                      const list = term
+                        ? unloadingStatusData.todayUnloading.filter(row => {
+                            const eway = String(row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "").toLowerCase().replace(/\s+/g, '');
+                            const veh = String(row["VEHICLE NUMBER"] || row["VEHICLE NO"] || "").toLowerCase().replace(/\s+/g, '');
+                            const inv = String(row["INVOICE NO"] || row["INVOICE NO."] || "").toLowerCase().replace(/\s+/g, '');
+                            return eway.includes(term) || veh.includes(term) || inv.includes(term);
+                          })
+                        : unloadingStatusData.todayUnloading;
+
+                      if (list.length === 0) {
+                        return (
+                          <TableRow>
+                            <TableCell colSpan={10} align="center" sx={{ py: 4, color: '#64748b', fontWeight: 600 }}>
+                              {term
+                                ? `No matching records found for "${unloadingSearchTerm}" in Today Unloading.`
+                                : `No vehicles scheduled/due for unloading today (${unloadingStatusData.todayFormatted}).`}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      return list.map((row, idx) => {
+                        const info = row.ewayInfo || getEWayBillStatus(row);
+                        return (
+                          <TableRow key={row.uniqueKey || idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                             <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#64748b' }}>{idx + 1}</TableCell>
                             <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["INVOICE NO"] || row["INVOICE NO."] || "-"}</TableCell>
                             <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#2563eb' }}>{row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "-"}</TableCell>
@@ -3500,19 +3622,19 @@ function DailySummaryTab({
                             <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["SITE"] || "-"}</TableCell>
                             <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["DESTINATION"] || "-"}</TableCell>
                             <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["PARTY NAME"] || "-"}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: info.isExtended ? '#2563eb' : '#0f172a' }}>
+                            <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: info.isExtended ? '#2563eb' : '#dc2626' }}>
                               {info.effectiveValidity || "-"}
                             </TableCell>
                             <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                              {isPending ? (
+                              {row.isPending ? (
                                 <Chip
                                   size="small"
                                   label="UNLOADING PENDING"
-                                  sx={{ bgcolor: '#fef3c7', color: '#b45309', fontWeight: 800, fontSize: '0.72rem' }}
+                                  sx={{ bgcolor: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', fontWeight: 800, fontSize: '0.72rem' }}
                                 />
                               ) : (
                                 <Typography variant="body2" fontWeight={700} color="#047857">
-                                  {unloadingRaw}
+                                  {row.unloadingDisplay || "-"}
                                 </Typography>
                               )}
                             </TableCell>
@@ -3529,166 +3651,11 @@ function DailySummaryTab({
                             </TableCell>
                           </TableRow>
                         );
-                      })
-                    )}
+                      });
+                    })()}
                   </TableBody>
                 </Table>
               </TableContainer>
-            </Box>
-          ) : (
-            <Box display="flex" flexDirection="column" gap={3.5}>
-              {/* SECTION 1: YESTERDAY UNLOADED */}
-              <Box>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5} pb={1} borderBottom="2px solid #86efac">
-                  <Box display="flex" alignItems="center" gap={1.2}>
-                    <CheckCircleOutlineIcon sx={{ color: '#16a34a', fontSize: 24 }} />
-                    <Typography variant="subtitle1" fontWeight={900} color="#14532d">
-                      YESTERDAY UNLOADED — {unloadingStatusData.yesterdayFormatted}
-                    </Typography>
-                  </Box>
-                  <Chip
-                    size="small"
-                    label={`${unloadingStatusData.yesterdayCount} Records`}
-                    sx={{ bgcolor: '#dcfce7', color: '#15803d', fontWeight: 800, fontSize: '0.78rem' }}
-                  />
-                </Box>
-
-                <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: '#f0fdf4' }}>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', py: 1.5, whiteSpace: 'nowrap' }}>SL NO</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>SITE</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>UNLOADING DATE</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#166534', whiteSpace: 'nowrap' }}>VALIDITY STATUS</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {unloadingStatusData.yesterdayUnloaded.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={9} align="center" sx={{ py: 3.5, color: '#64748b', fontWeight: 600 }}>
-                            No vehicles unloaded yesterday ({unloadingStatusData.yesterdayFormatted}).
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        unloadingStatusData.yesterdayUnloaded.map((row, idx) => (
-                          <TableRow key={row.uniqueKey || idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-                            <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#64748b' }}>{idx + 1}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["INVOICE NO"] || row["INVOICE NO."] || "-"}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "-"}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#0f172a' }}>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "-"}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["SITE"] || "-"}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["DESTINATION"] || "-"}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["PARTY NAME"] || "-"}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#047857' }}>
-                              {row.unloadingDateFormatted || "-"}
-                            </TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                              <Chip
-                                size="small"
-                                label="UNLOADED"
-                                sx={{ bgcolor: '#dcfce7', color: '#15803d', fontWeight: 800, fontSize: '0.75rem' }}
-                              />
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Box>
-
-              {/* SECTION 2: TODAY UNLOADING */}
-              <Box>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5} pb={1} borderBottom="2px solid #93c5fd">
-                  <Box display="flex" alignItems="center" gap={1.2}>
-                    <AccessTimeIcon sx={{ color: '#2563eb', fontSize: 24 }} />
-                    <Typography variant="subtitle1" fontWeight={900} color="#1e3a8a">
-                      TODAY UNLOADING — {unloadingStatusData.todayFormatted}
-                    </Typography>
-                  </Box>
-                  <Chip
-                    size="small"
-                    label={`${unloadingStatusData.todayCount} Records`}
-                    sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 800, fontSize: '0.78rem' }}
-                  />
-                </Box>
-
-                <TableContainer component={Paper} sx={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: '#eff6ff' }}>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', py: 1.5, whiteSpace: 'nowrap' }}>SL NO</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>INVOICE NO</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>E-WAY BILL NO</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>VEHICLE NO</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>SITE</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>DESTINATION</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>PARTY NAME</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>E-WAY BILL VALIDITY</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>UNLOADING DATE / STATUS</TableCell>
-                        <TableCell sx={{ fontWeight: 800, color: '#1e40af', whiteSpace: 'nowrap' }}>VALIDITY STATUS</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {unloadingStatusData.todayUnloading.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={10} align="center" sx={{ py: 3.5, color: '#64748b', fontWeight: 600 }}>
-                            No vehicles due for unloading today ({unloadingStatusData.todayFormatted}).
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        unloadingStatusData.todayUnloading.map((row, idx) => {
-                          const info = row.ewayInfo || getEWayBillStatus(row);
-                          return (
-                            <TableRow key={row.uniqueKey || idx} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-                              <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: '#64748b' }}>{idx + 1}</TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["INVOICE NO"] || row["INVOICE NO."] || "-"}</TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{row["E-WAY BILL NO"] || row["E-WAY BILL NUMBER"] || "-"}</TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#0f172a' }}>{row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "-"}</TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["SITE"] || "-"}</TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["DESTINATION"] || "-"}</TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap' }}>{row["PARTY NAME"] || "-"}</TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: info.isExtended ? '#2563eb' : '#dc2626' }}>
-                                {info.effectiveValidity || "-"}
-                              </TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                                {row.isPending ? (
-                                  <Chip
-                                    size="small"
-                                    label="UNLOADING PENDING"
-                                    sx={{ bgcolor: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', fontWeight: 800, fontSize: '0.72rem' }}
-                                  />
-                                ) : (
-                                  <Typography variant="body2" fontWeight={700} color="#047857">
-                                    {row.unloadingDisplay || "-"}
-                                  </Typography>
-                                )}
-                              </TableCell>
-                              <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                                <Box
-                                  sx={{
-                                    px: 1.5, py: 0.5, borderRadius: '20px', display: 'inline-block', fontSize: '0.75rem', fontWeight: 800,
-                                    bgcolor: info.bgColor, color: info.color, border: `1px solid ${info.borderColor}`,
-                                    animation: info.isBlinking ? 'pulseModalChipRed 1.5s infinite ease-in-out' : 'none'
-                                  }}
-                                >
-                                  {info.label}
-                                </Box>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Box>
             </Box>
           )}
         </DialogContent>
