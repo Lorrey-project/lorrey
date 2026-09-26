@@ -86,7 +86,7 @@ export const COLUMNS = [
   { key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.05) },
   {
     key: 'TDS', label: 'TDS', width: 80, type: 'manual', group: 'billing',
-    hint: 'TDS Applicability decimal rate (e.g. 0.01 = 1%, 0 = 0%) from Owner Details MongoDB (Editable)'
+    hint: 'Calculated TDS Money Value (Billing Year 95% Party Payable × Owner Details TDS Rate) (Editable)'
   },
   { key: 'ADVANCE', label: 'LOADING ADVANCE', width: 110, type: 'auto', group: 'billing' },
   { key: 'Site Cash', label: 'SITE CASH ADVANCE', width: 160, type: 'auto', group: 'billing', hasAttach: 'site_cash_auto' },
@@ -174,18 +174,10 @@ export const COLUMNS = [
       const comm = r._freight_commission;
       const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
       const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
-      const rawTds = r['TDS'];
-      const tdsRate = (rawTds !== undefined && rawTds !== null && rawTds !== '')
-        ? num(rawTds)
-        : ((r._tds_percent !== undefined && r._tds_percent !== null && r._tds_percent !== '') ? num(r._tds_percent) : 0);
-      
-      // TDS Amount = Base Amount × TDS Applicability Rate (e.g. 0.01 for 1%, 0 for 0%, 0.02 for 2%)
-      const tdsDeduction = (tdsRate > 0 && tdsRate < 1)
-        ? fmt2(base * tdsRate)
-        : (tdsRate >= 1 && tdsRate <= 10 ? fmt2(base * (tdsRate / 100)) : (tdsRate > 10 ? tdsRate : 0));
+      const finalTds = num(r['TDS']);
       return fmt2(
         base
-        - tdsDeduction
+        - finalTds
         - num(r.ADVANCE)
         - num(r['Site Cash'])
         - num(r['OFFICE CASH'])
@@ -374,12 +366,36 @@ export function formatDateToDDMMYY(dStr) {
 // Calculate all computed fields for a single row
 export function applyCalcs(row) {
   const r = { ...row };
+  const isManual = r.tds_manual === true || r.tds_manual === 'true' || r._tds_manual === true;
+  const comm = r._freight_commission;
+  const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
+  const tdsRate = (r._tds_rate !== undefined && r._tds_rate !== null && r._tds_rate !== '')
+    ? num(r._tds_rate)
+    : ((r._tds_percent !== undefined && r._tds_percent !== null && r._tds_percent !== '') ? num(r._tds_percent) : 0);
+
   // Run calc columns in order (some depend on earlier calcs)
   for (const col of COLUMNS) {
     if (col.type === 'calc' && typeof col.formula === 'function') {
       r[col.key] = col.formula(r);
     }
   }
+
+  // If TDS is not manual override, recalculate TDS money amount from computed base and tdsRate
+  if (!isManual) {
+    const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
+    r['TDS'] = fmt2(base * tdsRate);
+
+    // Re-evaluate NET AMOUNT and GROSS AMOUNT with updated TDS
+    const netCol = COLUMNS.find(c => c.key === 'NET AMOUNT');
+    if (netCol && typeof netCol.formula === 'function') {
+      r['NET AMOUNT'] = netCol.formula(r);
+    }
+    const grossCol = COLUMNS.find(c => c.key === 'GROSS AMOUNT');
+    if (grossCol && typeof grossCol.formula === 'function') {
+      r['GROSS AMOUNT'] = grossCol.formula(r);
+    }
+  }
+
   return r;
 }
 

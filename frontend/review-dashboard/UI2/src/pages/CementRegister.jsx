@@ -707,10 +707,16 @@ export default function CementRegister({ onBack }) {
   };
   // ── Cell edit (local draft) ────────────────────────────────────────────────
   const handleCellEdit = useCallback((rowId, field, value) => {
-    setLocalData(prev => ({
-      ...prev,
-      [rowId]: { ...(prev[rowId] || {}), [field]: value }
-    }));
+    setLocalData(prev => {
+      const rowUpdates = { ...(prev[rowId] || {}), [field]: value };
+      if (field === 'TDS') {
+        rowUpdates.tds_manual = true;
+      }
+      return {
+        ...prev,
+        [rowId]: rowUpdates
+      };
+    });
   }, []);
 
   // ── Bulk Delete selected rows ──────────────────────────────────────────────────
@@ -3254,13 +3260,14 @@ function EditableCell({ value, onChange, style }) {
 
   useEffect(() => {
     if (ref.current && document.activeElement !== ref.current) {
-      ref.current.innerText = value ?? '';
+      ref.current.innerText = (value !== undefined && value !== null) ? String(value) : '';
     }
   }, [value]);
 
   const handleBlur = () => {
     const nv = ref.current?.innerText?.trim() ?? '';
-    if (nv !== (value ?? '').trim()) onChange(nv);
+    const currentStr = (value !== undefined && value !== null) ? String(value).trim() : '';
+    if (nv !== currentStr) onChange(nv);
   };
 
   return (

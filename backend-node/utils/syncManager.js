@@ -379,7 +379,7 @@ async function pushToRegister(invoiceId, overrides) {
     const addonFastag = getAddon("Fastag");
 
     // ── Truck Contact lookup ─────────────────────────────────────────────
-    let wheel = "", ownerName = "", tdsPercent = 1, isATO = false, driverNo = "", hasStO = false;
+    let wheel = "", ownerName = "", tdsPercent = 0, isATO = false, driverNo = "", hasStO = false;
     let basicFreightCommission = 0.05; // default — owner gets 5% deducted (party gets 95%)
     
     if (vehicleNumber) {
@@ -547,7 +547,7 @@ async function pushToRegister(invoiceId, overrides) {
 
     const amount = isStandard95 ? billingEr95 : billingErVar;        // effective payable
     const profit = fmt2(billingAmt * 0.05);
-    const tdsAmount = fmt2(amount * tdsPercent / 100);
+    const tdsAmount = fmt2(amount * tdsPercent);
     const balance = fmt2(hsdLtr - fuelRequired);
     const pctAdv = amount > 0 ? fmt2(((advance + hsdAmount) / amount) * 100) : 0;
     const dedicated = isATO ? fmt2(billingAmt * 0.095) : fmt2(partyRate * mt * 0.085);
@@ -587,7 +587,7 @@ async function pushToRegister(invoiceId, overrides) {
       "BILLING ER VAR": billingErVar !== undefined ? billingErVar : "",
       "AMOUNT": amount || "",
       "PROFIT": profit || "",
-      "TDS": (tdsPercent !== undefined && tdsPercent !== null) ? tdsPercent : "",
+      "TDS": (tdsPercent !== undefined && tdsPercent !== null) ? tdsAmount : 0,
       "_freight_commission": basicFreightCommission,
       "ADVANCE": advance || "",
       "Site Cash": siteCash || "",
@@ -614,6 +614,7 @@ async function pushToRegister(invoiceId, overrides) {
       "FASTAG": addonFastag || "",
       "VERIFICATION STATUS": invoice.is_hsd_verified ? "Verified" : "Not Verified",
       "_tds_percent": tdsPercent,
+      "_tds_rate": tdsPercent,
       "_is_ato": isATO,
       "_source": "auto",
       "_auto_updated_at": new Date(),
@@ -641,6 +642,7 @@ async function pushToRegister(invoiceId, overrides) {
     if (existing && (existing.tds_manual || existing._tds_manual)) {
       clean["TDS"] = existing["TDS"];
       clean["_tds_percent"] = existing["_tds_percent"];
+      clean["_tds_rate"] = existing["_tds_rate"] || existing["_tds_percent"];
       clean["tds_manual"] = true;
     }
 

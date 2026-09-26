@@ -77,6 +77,42 @@ const formatDateToDDMMYY = (dStr) => {
   return `${day}.${month}.${year}`;
 };
 
+function getBilling95PartyPayable(row) {
+  if (!row) return 0;
+  const rawEr95 = row['BILLING @ 95% (PARTY PAYABLE)'] || row['BILLING ER 95%'] || row['BILLING ER 95% (PARTY PAYABLE)'] || row['Billing 95% Party Payable'] || row['PARTY RATE (95%)'];
+  if (rawEr95 !== undefined && rawEr95 !== null && rawEr95 !== '') {
+    const val = parseFloat(String(rawEr95).replace(/,/g, ''));
+    if (!isNaN(val) && val > 0) return val;
+  }
+
+  const comm = row._freight_commission;
+  const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
+
+  if (!isStd) {
+    const rawErVar = row['BILLING ER VAR'] || row['BILLING ER (Variable %)'] || row['PARTY RATE (Variable %)'];
+    if (rawErVar !== undefined && rawErVar !== null && rawErVar !== '') {
+      const val = parseFloat(String(rawErVar).replace(/,/g, ''));
+      if (!isNaN(val) && val > 0) return val;
+    }
+  }
+
+  const billingRate = parseFloat(String(row['BILLING'] || row['BILLING RATE'] || row.billing || row.billingRate || 0).replace(/,/g, '')) || 0;
+  const mt = parseFloat(String(row['MT'] || row.mt || 0).replace(/,/g, '')) || 0;
+  let billingAmt = parseFloat(String(row['Billing Amount'] || row['BILLING AMOUNT'] || row.billingAmount || 0).replace(/,/g, '')) || 0;
+  if (!billingAmt && billingRate && mt) {
+    billingAmt = billingRate * mt;
+  }
+
+  if (billingAmt > 0) {
+    return isStd
+      ? Math.round(billingAmt * 0.95 * 100) / 100
+      : Math.round(billingAmt * (1 - Number(comm)) * 100) / 100;
+  }
+
+  const rawAmt = parseFloat(String(row['AMOUNT'] || row.amount || 0).replace(/,/g, '')) || 0;
+  return isStd ? Math.round(rawAmt * 0.95 * 100) / 100 : rawAmt;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Database  : cement_register  (separate DB on the same Atlas cluster)
 // Collection: entries
@@ -209,17 +245,29 @@ router.get("/", async (req, res) => {
       
       // ── TDS Priority Rule: Owner Details MongoDB (Default) vs User Manual Override ──
       const isManual = entry.tds_manual === true || entry.tds_manual === 'true' || entry._tds_manual === true;
+      const v = normVeh(entry["VEHICLE NUMBER"] || entry["VEHICLE NO"] || entry.vehicleNumber);
+      let matchedTds = vehicleToTdsMap.get(v);
+      if (matchedTds === undefined) {
+        const o = String(entry["OWNER NAME"] || entry["PARTY NAME"] || "").trim().toUpperCase();
+        matchedTds = ownerToTdsMap.get(o);
+      }
+      const tdsRate = (matchedTds !== undefined && matchedTds !== null) ? matchedTds : 0;
+      entry["_tds_percent"] = tdsRate;
+      entry["_tds_rate"] = tdsRate;
+
       if (!isManual) {
-        const v = normVeh(entry["VEHICLE NUMBER"] || entry["VEHICLE NO"] || entry.vehicleNumber);
-        let matchedTds = vehicleToTdsMap.get(v);
-        if (matchedTds === undefined) {
-          const o = String(entry["OWNER NAME"] || entry["PARTY NAME"] || "").trim().toUpperCase();
-          matchedTds = ownerToTdsMap.get(o);
+        const base95 = getBilling95PartyPayable(entry);
+        const calculatedTds = Math.round(base95 * tdsRate * 100) / 100;
+        entry["TDS"] = calculatedTds;
+        entry["tds_manual"] = false;
+      } else {
+        const manualVal = entry["TDS"];
+        if (manualVal !== undefined && manualVal !== null && manualVal !== '') {
+          entry["TDS"] = parseFloat(String(manualVal).replace(/,/g, '')) || 0;
+        } else {
+          entry["TDS"] = "";
         }
-        if (matchedTds !== undefined && matchedTds !== null) {
-          entry["TDS"] = matchedTds;
-          entry["_tds_percent"] = matchedTds;
-        }
+        entry["tds_manual"] = true;
       }
       
       return entry;
@@ -640,25 +688,22 @@ router.put("/bulk-update", auth, async (req, res) => {
           u.changes["tds_manual"] = true;
           const val = u.changes["TDS"];
           if (val !== "" && val !== null && !isNaN(Number(val))) {
-            let numVal = Number(val);
-            if (numVal >= 1 && numVal <= 10) {
-              numVal = numVal / 100;
-            }
+            const numVal = Number(val);
             u.changes["TDS"] = numVal;
-            u.changes["_tds_percent"] = numVal;
           } else {
-            u.changes["_tds_percent"] = 0;
             u.changes["TDS"] = "";
           }
         }
         if (u.changes["VEHICLE NUMBER"]) {
           const truckDetails = await getTruckDetails(u.changes["VEHICLE NUMBER"]);
           if (truckDetails.ownerName) u.changes["OWNER NAME"] = truckDetails.ownerName;
-          if (!u.changes["tds_manual"]) {
-            u.changes["_tds_percent"] = truckDetails.tdsPercent;
-            u.changes["TDS"] = truckDetails.tdsPercent;
-          }
+          u.changes["_tds_percent"] = truckDetails.tdsPercent;
+          u.changes["_tds_rate"] = truckDetails.tdsPercent;
           u.changes["_freight_commission"] = truckDetails.basicFreightCommission;
+          if (!u.changes["tds_manual"]) {
+            const base95 = getBilling95PartyPayable({ ...u.changes, _freight_commission: truckDetails.basicFreightCommission });
+            u.changes["TDS"] = Math.round(base95 * truckDetails.tdsPercent * 100) / 100;
+          }
         }
       }
     }
@@ -888,25 +933,22 @@ router.put("/:id", auth, cementValidationRules, validateCement, async (req, res)
       req.body["tds_manual"] = true;
       const val = req.body["TDS"];
       if (val !== "" && val !== null && !isNaN(Number(val))) {
-        let numVal = Number(val);
-        if (numVal >= 1 && numVal <= 10) {
-          numVal = numVal / 100;
-        }
+        const numVal = Number(val);
         req.body["TDS"] = numVal;
-        req.body["_tds_percent"] = numVal;
       } else {
-        req.body["_tds_percent"] = 0;
         req.body["TDS"] = "";
       }
     }
     if (req.body["VEHICLE NUMBER"]) {
       const truckDetails = await getTruckDetails(req.body["VEHICLE NUMBER"]);
       if (truckDetails.ownerName) req.body["OWNER NAME"] = truckDetails.ownerName;
-      if (!req.body["tds_manual"]) {
-        req.body["_tds_percent"] = truckDetails.tdsPercent;
-        req.body["TDS"] = truckDetails.tdsPercent;
-      }
+      req.body["_tds_percent"] = truckDetails.tdsPercent;
+      req.body["_tds_rate"] = truckDetails.tdsPercent;
       req.body["_freight_commission"] = truckDetails.basicFreightCommission;
+      if (!req.body["tds_manual"]) {
+        const base95 = getBilling95PartyPayable({ ...req.body, _freight_commission: truckDetails.basicFreightCommission });
+        req.body["TDS"] = Math.round(base95 * truckDetails.tdsPercent * 100) / 100;
+      }
     }
 
     const result = await col.findOneAndUpdate(
