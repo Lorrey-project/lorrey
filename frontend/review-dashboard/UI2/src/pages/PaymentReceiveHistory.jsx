@@ -274,7 +274,7 @@ export default function PaymentReceiveHistory({ onBack }) {
       >
         <Grid container spacing={2} alignItems="center">
           {/* FY Filter */}
-          <Grid item xs={12} sm={6} md={2.5}>
+          <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size="small">
               <InputLabel id="fy-select-label" sx={{ fontWeight: 600 }}>Financial Year</InputLabel>
               <Select
@@ -294,7 +294,7 @@ export default function PaymentReceiveHistory({ onBack }) {
           </Grid>
 
           {/* Month Filter */}
-          <Grid item xs={12} sm={6} md={2.5}>
+          <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size="small">
               <InputLabel id="month-select-label" sx={{ fontWeight: 600 }}>Month</InputLabel>
               <Select
@@ -313,31 +313,8 @@ export default function PaymentReceiveHistory({ onBack }) {
             </FormControl>
           </Grid>
 
-          {/* Invoice Filter */}
-          <Grid item xs={12} sm={6} md={3}>
-            <FormControl fullWidth size="small">
-              <InputLabel id="invoice-select-label" sx={{ fontWeight: 600 }}>Invoice Filter</InputLabel>
-              <Select
-                labelId="invoice-select-label"
-                value={selectedInvoice}
-                label="Invoice Filter"
-                onChange={(e) => setSelectedInvoice(e.target.value)}
-                sx={{ borderRadius: '10px', fontWeight: 600 }}
-              >
-                <MenuItem value="ALL" sx={{ fontWeight: 700 }}>
-                  ALL INVOICES
-                </MenuItem>
-                {availableInvoices.map((inv) => (
-                  <MenuItem key={inv} value={inv} sx={{ fontWeight: 500 }}>
-                    Invoice: {inv}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
           {/* Search Input */}
-          <Grid item xs={12} sm={6} md={4}>
+          <Grid item xs={12} sm={12} md={6}>
             <TextField
               fullWidth
               size="small"
@@ -576,7 +553,7 @@ export default function PaymentReceiveHistory({ onBack }) {
                       No Payment Receive Transactions Found
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.5 }}>
-                      Try adjusting the Financial Year, Month, Invoice filter or Search query.
+                      Try adjusting the Financial Year, Month, or Search query.
                     </Typography>
                   </TableCell>
                 </TableRow>
