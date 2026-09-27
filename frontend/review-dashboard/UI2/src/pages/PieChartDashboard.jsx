@@ -378,7 +378,7 @@ const PieChartDashboard = ({ onBack }) => {
             }
           }}
         >
-          <Tab label="Volume Tonnage Growth versus Revenue Growth" value="volumeTonnage" />
+          <Tab label="Tonnage Growth VS Revenue Growth" value="volumeTonnage" />
           <Tab label="PTPK Analysis" value="ptpkAnalysis" />
           <Tab label="Bar Graph" value="barGraph" />
         </Tabs>

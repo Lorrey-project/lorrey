@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Grid, Select, MenuItem, TextField, CircularProgress,
   Button, TableContainer, Table, TableHead, TableRow, TableCell,
-  TableBody, Chip, Alert, Card, CardContent, Divider, Stack
+  TableBody, Chip, Alert, Card, CardContent, Divider, Stack, Dialog,
+  DialogTitle, DialogContent, DialogActions, TablePagination, Tooltip as MuiTooltip
 } from '@mui/material';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
@@ -14,6 +15,11 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import SpeedIcon from '@mui/icons-material/Speed';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   Legend, ResponsiveContainer, Cell, ReferenceLine
@@ -122,6 +128,14 @@ export default function VolumeVsRevenueGrowthTab() {
   // Data Response
   const [data, setData] = useState(null);
 
+  // Source Records Modal State
+  const [recordsModalOpen, setRecordsModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalRecords, setModalRecords] = useState([]);
+  const [modalType, setModalType] = useState('cement'); // 'cement' | 'bills' | 'deductions'
+  const [modalPage, setModalPage] = useState(0);
+  const [modalRowsPerPage, setModalRowsPerPage] = useState(10);
+
   const fetchGrowthData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -166,11 +180,13 @@ export default function VolumeVsRevenueGrowthTab() {
     socket.on('cementUpdates', handleUpdate);
     socket.on('fyDetailsUpdates', handleUpdate);
     socket.on('billUpdates', handleUpdate);
+    socket.on('accountDetailsUpdate', handleUpdate);
 
     return () => {
       socket.off('cementUpdates', handleUpdate);
       socket.off('fyDetailsUpdates', handleUpdate);
       socket.off('billUpdates', handleUpdate);
+      socket.off('accountDetailsUpdate', handleUpdate);
       socket.disconnect();
     };
   }, [fetchGrowthData]);
@@ -192,7 +208,7 @@ export default function VolumeVsRevenueGrowthTab() {
         unit: 'MT'
       },
       {
-        metric: 'Revenue (₹ in Lakhs)',
+        metric: 'Revenue (₹ Lakhs)',
         [pyLabel]: Math.round(((py.revenue || 0) / 100000) * 100) / 100,
         [tyLabel]: Math.round(((ty.revenue || 0) / 100000) * 100) / 100,
         unit: 'Lakhs'
@@ -243,6 +259,14 @@ export default function VolumeVsRevenueGrowthTab() {
     '& .MuiSvgIcon-root': { color: '#AAB4C0' }
   };
 
+  const openSourceModal = (type, title, records) => {
+    setModalType(type);
+    setModalTitle(title);
+    setModalRecords(records || []);
+    setModalPage(0);
+    setRecordsModalOpen(true);
+  };
+
   return (
     <Box sx={{ width: '100%', pb: 6 }}>
       
@@ -256,7 +280,7 @@ export default function VolumeVsRevenueGrowthTab() {
             </Typography>
             <Chip
               size="small"
-              label="Full Project Scope: Cement Register (Tonnage) + Bill Register (Revenue)"
+              label="Full Project Scope: Cement Register (Tonnage) + Bill Register (Revenue) + Bank Book (Realization)"
               sx={{ bgcolor: 'rgba(139, 92, 246, 0.15)', color: '#c084fc', fontSize: '0.7rem', fontWeight: 600, border: '1px solid rgba(139, 92, 246, 0.3)' }}
             />
           </Box>
@@ -324,7 +348,7 @@ export default function VolumeVsRevenueGrowthTab() {
               onChange={(e) => setPeriodType(e.target.value)}
               sx={selectStyle}
             >
-              <MenuItem value="FULL_FY">FULL FY</MenuItem>
+              <MenuItem value="FULL_FY">FULL FINANCIAL YEAR</MenuItem>
               <MenuItem value="MONTH">SPECIFIC MONTH</MenuItem>
               <MenuItem value="DATE">SPECIFIC DATE</MenuItem>
             </Select>
@@ -438,7 +462,7 @@ export default function VolumeVsRevenueGrowthTab() {
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '45vh', gap: 2 }}>
           <CircularProgress sx={{ color: '#8b5cf6' }} />
           <Typography variant="body2" sx={{ color: '#AAB4C0' }}>
-            Aggregating Full Project Cement Register Tonnage and Bill Register Revenue...
+            Aggregating Full Project Cement Register Tonnage, Bill Register Revenue, and Bank Book Realization...
           </Typography>
         </Box>
       ) : (
@@ -452,7 +476,7 @@ export default function VolumeVsRevenueGrowthTab() {
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
                   <Box>
                     <Typography variant="caption" sx={{ color: '#38bdf8', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      TARGET / CURRENT PERIOD
+                      CURRENT / TARGET PERIOD
                     </Typography>
                     <Typography variant="h6" fontWeight={800} sx={{ color: '#FFF' }}>
                       {ty.headerLabel || ty.financialYear || tyFY}
@@ -469,17 +493,17 @@ export default function VolumeVsRevenueGrowthTab() {
                       {formatNumber(ty.tonnage)} <span style={{ fontSize: '0.75rem', fontWeight: 500, color: '#AAB4C0' }}>MT</span>
                     </Typography>
                     <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                      Full Project (Cement Register)
+                      Cement Register TOTAL MT
                     </Typography>
                   </Grid>
 
                   <Grid item xs={6}>
-                    <Typography variant="caption" sx={{ color: '#AAB4C0', display: 'block' }}>TOTAL REVENUE</Typography>
+                    <Typography variant="caption" sx={{ color: '#AAB4C0', display: 'block' }}>BILLED REVENUE</Typography>
                     <Typography variant="h6" fontWeight={800} sx={{ color: '#10b981' }}>
                       {formatCurrency(ty.revenue)}
                     </Typography>
                     <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                      Full Project (Bill Register)
+                      Authoritative Bill Register
                     </Typography>
                   </Grid>
 
@@ -492,11 +516,36 @@ export default function VolumeVsRevenueGrowthTab() {
                         </Typography>
                       </Box>
                       <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="caption" sx={{ color: '#AAB4C0', display: 'block' }}>TRIPS / BILLS</Typography>
+                        <Typography variant="caption" sx={{ color: '#AAB4C0', display: 'block' }}>OPERATIONS</Typography>
                         <Typography variant="caption" fontWeight={700} sx={{ color: '#FFF' }}>
                           {ty.tripCount || 0} Trips • {ty.billCount || 0} Bills
                         </Typography>
                       </Box>
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12}>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        fullWidth
+                        startIcon={<VisibilityIcon fontSize="small" />}
+                        onClick={() => openSourceModal('cement', `Cement Register Records (${ty.headerLabel})`, ty.cementRecords)}
+                        sx={{ color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.3)', textTransform: 'none', fontSize: '0.75rem', '&:hover': { borderColor: '#38bdf8', bgcolor: 'rgba(56, 189, 248, 0.1)' } }}
+                      >
+                        Tonnage Records
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        fullWidth
+                        startIcon={<ReceiptLongIcon fontSize="small" />}
+                        onClick={() => openSourceModal('bills', `Bill Register Invoices (${ty.headerLabel})`, ty.billRecords)}
+                        sx={{ color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.3)', textTransform: 'none', fontSize: '0.75rem', '&:hover': { borderColor: '#10b981', bgcolor: 'rgba(16, 185, 129, 0.1)' } }}
+                      >
+                        Revenue Bills
+                      </Button>
                     </Box>
                   </Grid>
                 </Grid>
@@ -509,7 +558,7 @@ export default function VolumeVsRevenueGrowthTab() {
                 <Box>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                     <Typography variant="caption" sx={{ color: '#c084fc', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      GROWTH & DISPROPORTION ANALYSIS
+                      GROWTH & GAP ANALYSIS
                     </Typography>
                     <CompareArrowsIcon sx={{ color: '#c084fc', fontSize: '1.25rem' }} />
                   </Box>
@@ -524,14 +573,14 @@ export default function VolumeVsRevenueGrowthTab() {
                     </Box>
 
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, bgcolor: 'rgba(16, 185, 129, 0.08)', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                      <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>Revenue Growth</Typography>
+                      <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>Billed Revenue Growth</Typography>
                       <Typography variant="subtitle2" fontWeight={800} sx={{ color: comp.revenueGrowthPct >= 0 ? '#10b981' : '#f43f5e' }}>
                         {formatPct(comp.revenueGrowthPct)}
                       </Typography>
                     </Box>
 
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, bgcolor: 'rgba(168, 85, 247, 0.08)', borderRadius: '6px', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
-                      <Typography variant="body2" sx={{ color: '#c084fc', fontWeight: 600 }}>Revenue / MT Realization Growth</Typography>
+                      <Typography variant="body2" sx={{ color: '#c084fc', fontWeight: 600 }}>Revenue / MT Growth</Typography>
                       <Typography variant="subtitle2" fontWeight={800} sx={{ color: comp.revPerMtGrowthPct >= 0 ? '#c084fc' : '#f43f5e' }}>
                         {formatPct(comp.revPerMtGrowthPct)}
                       </Typography>
@@ -571,7 +620,7 @@ export default function VolumeVsRevenueGrowthTab() {
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
                   <Box>
                     <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      COMPARISON / PREVIOUS PERIOD
+                      PREVIOUS / COMPARISON PERIOD
                     </Typography>
                     <Typography variant="h6" fontWeight={800} sx={{ color: '#FFF' }}>
                       {py.headerLabel || py.financialYear || pyFY}
@@ -588,17 +637,17 @@ export default function VolumeVsRevenueGrowthTab() {
                       {formatNumber(py.tonnage)} <span style={{ fontSize: '0.75rem', fontWeight: 500, color: '#AAB4C0' }}>MT</span>
                     </Typography>
                     <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                      Full Project (Cement Register)
+                      Cement Register TOTAL MT
                     </Typography>
                   </Grid>
 
                   <Grid item xs={6}>
-                    <Typography variant="caption" sx={{ color: '#AAB4C0', display: 'block' }}>TOTAL REVENUE</Typography>
+                    <Typography variant="caption" sx={{ color: '#AAB4C0', display: 'block' }}>BILLED REVENUE</Typography>
                     <Typography variant="h6" fontWeight={800} sx={{ color: '#10b981' }}>
                       {formatCurrency(py.revenue)}
                     </Typography>
                     <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                      Full Project (Bill Register)
+                      Authoritative Bill Register
                     </Typography>
                   </Grid>
 
@@ -611,11 +660,36 @@ export default function VolumeVsRevenueGrowthTab() {
                         </Typography>
                       </Box>
                       <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="caption" sx={{ color: '#AAB4C0', display: 'block' }}>TRIPS / BILLS</Typography>
+                        <Typography variant="caption" sx={{ color: '#AAB4C0', display: 'block' }}>OPERATIONS</Typography>
                         <Typography variant="caption" fontWeight={700} sx={{ color: '#FFF' }}>
                           {py.tripCount || 0} Trips • {py.billCount || 0} Bills
                         </Typography>
                       </Box>
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12}>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        fullWidth
+                        startIcon={<VisibilityIcon fontSize="small" />}
+                        onClick={() => openSourceModal('cement', `Cement Register Records (${py.headerLabel})`, py.cementRecords)}
+                        sx={{ color: '#94a3b8', borderColor: 'rgba(148, 163, 184, 0.3)', textTransform: 'none', fontSize: '0.75rem', '&:hover': { borderColor: '#94a3b8', bgcolor: 'rgba(148, 163, 184, 0.1)' } }}
+                      >
+                        Tonnage Records
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        fullWidth
+                        startIcon={<ReceiptLongIcon fontSize="small" />}
+                        onClick={() => openSourceModal('bills', `Bill Register Invoices (${py.headerLabel})`, py.billRecords)}
+                        sx={{ color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.3)', textTransform: 'none', fontSize: '0.75rem', '&:hover': { borderColor: '#10b981', bgcolor: 'rgba(16, 185, 129, 0.1)' } }}
+                      >
+                        Revenue Bills
+                      </Button>
                     </Box>
                   </Grid>
                 </Grid>
@@ -630,10 +704,10 @@ export default function VolumeVsRevenueGrowthTab() {
             <Grid item xs={12} lg={7}>
               <GlassCard sx={{ p: 2.5, height: '100%' }}>
                 <Typography variant="subtitle1" fontWeight={800} sx={{ color: '#FFF', mb: 0.5 }}>
-                  Comparative Volume & Revenue Bar Graph
+                  Tonnage vs Revenue Bar Graph
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#AAB4C0', mb: 2, display: 'block' }}>
-                  Side-by-side grouped bars comparing {pyLabel} vs {tyLabel} across Tonnage, Revenue, and Realization
+                  Grouped categorical comparison between {pyLabel} and {tyLabel} across Tonnage, Revenue, and Realization
                 </Typography>
 
                 <Box sx={{ width: '100%', height: 320 }}>
@@ -673,10 +747,10 @@ export default function VolumeVsRevenueGrowthTab() {
             <Grid item xs={12} lg={5}>
               <GlassCard sx={{ p: 2.5, height: '100%' }}>
                 <Typography variant="subtitle1" fontWeight={800} sx={{ color: '#FFF', mb: 0.5 }}>
-                  Growth Variance & Disproportion Bar Graph
+                  Growth Comparison Bar Graph
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#AAB4C0', mb: 2, display: 'block' }}>
-                  Relative percentage growth metrics between {pyLabel} and {tyLabel}
+                  Relative percentage growth metrics comparing Volume Growth % vs Revenue Growth %
                 </Typography>
 
                 <Box sx={{ width: '100%', height: 320 }}>
@@ -715,19 +789,19 @@ export default function VolumeVsRevenueGrowthTab() {
             </Grid>
           </Grid>
 
-          {/* ── DATA-DRIVEN REASON FOR DISPROPORTION ───────────────────────────── */}
+          {/* ── DISPROPORTION & SHORTFALL REASONS SECTION ──────────────────────── */}
           <GlassCard sx={{ p: 2.5, mb: 3, borderLeft: '4px solid #8b5cf6' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
               <AssessmentIcon sx={{ color: '#8b5cf6', fontSize: '1.25rem' }} />
               <Typography variant="subtitle1" fontWeight={800} sx={{ color: '#FFF' }}>
-                Reason for Disproportion (Data-Driven Diagnostic Analysis)
+                WHY IS REVENUE GROWTH DIFFERENT FROM TONNAGE GROWTH?
               </Typography>
             </Box>
             <Typography variant="body2" sx={{ color: '#AAB4C0', mb: 2 }}>
-              Mathematical variance analysis explaining the difference between physical lifting volume growth and financial billed revenue growth based on authoritative project records:
+              Mathematical variance decomposition and authoritative financial factor analysis based on verified project records:
             </Typography>
 
-            {/* Quantitative Realization Diagnostics Box */}
+            {/* Diagnostic Realization Breakdown */}
             <Grid container spacing={2} sx={{ mb: 2 }}>
               <Grid item xs={12} sm={6} md={3}>
                 <Box sx={{ p: 1.5, borderRadius: '8px', bgcolor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -761,7 +835,7 @@ export default function VolumeVsRevenueGrowthTab() {
                       ? `${Number(comp.diffRevPerMt) >= 0 ? '+' : ''}₹${formatNumber(comp.diffRevPerMt)} / MT`
                       : 'N/A'}
                   </Typography>
-                  <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>Absolute Realization Delta</Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>Realization Rate Delta</Typography>
                 </Box>
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
@@ -777,7 +851,8 @@ export default function VolumeVsRevenueGrowthTab() {
               </Grid>
             </Grid>
 
-            <Stack spacing={1.5}>
+            {/* Diagnostic explanations */}
+            <Stack spacing={1.5} sx={{ mb: 2 }}>
               {(comp.disproportionReasons || []).map((reason, idx) => (
                 <Box
                   key={`reason-${idx}`}
@@ -807,15 +882,164 @@ export default function VolumeVsRevenueGrowthTab() {
                 </Box>
               ))}
             </Stack>
+
+            {/* REVENUE GROWTH SHORTFALL ANALYSIS (When Revenue Growth < Volume Growth) */}
+            {comp.shortfallContributors && comp.shortfallContributors.length > 0 && (
+              <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed rgba(255,255,255,0.1)' }}>
+                <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#f59e0b', mb: 1.5 }}>
+                  REVENUE GROWTH SHORTFALL CONTRIBUTORS (RANKED BY MEASURABLE IMPACT)
+                </Typography>
+                <Grid container spacing={2}>
+                  {comp.shortfallContributors.map((c) => (
+                    <Grid item xs={12} sm={6} key={`shortfall-${c.rank}`}>
+                      <Box sx={{ p: 1.5, borderRadius: '8px', bgcolor: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                          <Chip size="small" label={`Rank #${c.rank}`} sx={{ bgcolor: '#f59e0b', color: '#000', fontWeight: 800, height: 20, fontSize: '0.7rem' }} />
+                          <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#f43f5e' }}>
+                            {c.impactDisplay}
+                          </Typography>
+                        </Box>
+                        <Typography variant="body2" fontWeight={700} sx={{ color: '#FFF', mb: 0.5 }}>
+                          {c.name}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#cbd5e1', display: 'block', mb: 0.5 }}>
+                          {c.description}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#AAB4C0', fontSize: '0.7rem' }}>
+                          Source: <strong>{c.source}</strong>
+                        </Typography>
+                      </Box>
+                    </Grid>
+                  ))}
+                </Grid>
+              </Box>
+            )}
           </GlassCard>
 
-          {/* ── DETAILED NUMERICAL COMPARISON TABLE ───────────────────────────── */}
+          {/* ── DOCUMENTED DEDUCTIONS & REDUCTIONS TABLE SECTION ──────────────── */}
+          <GlassCard sx={{ p: 2.5, mb: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1.5 }}>
+              <Box>
+                <Typography variant="subtitle1" fontWeight={800} sx={{ color: '#FFF' }}>
+                  Documented Deductions & Reductions Analysis
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#AAB4C0' }}>
+                  Authoritative deductions traced directly to source payment settlements and bill allocations
+                </Typography>
+              </Box>
+              <Chip
+                label={`${(ty.attributableDeductions || []).length} Documented Deductions`}
+                sx={{ bgcolor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', fontWeight: 700 }}
+              />
+            </Box>
+
+            <TableContainer sx={{ borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: 'rgba(255,255,255,0.04)' }}>
+                    <TableCell sx={{ color: '#AAB4C0', fontWeight: 700, fontSize: '0.75rem' }}>REASON / LEDGER</TableCell>
+                    <TableCell sx={{ color: '#AAB4C0', fontWeight: 700, fontSize: '0.75rem' }}>SOURCE</TableCell>
+                    <TableCell sx={{ color: '#AAB4C0', fontWeight: 700, fontSize: '0.75rem' }}>DATE</TableCell>
+                    <TableCell sx={{ color: '#AAB4C0', fontWeight: 700, fontSize: '0.75rem' }}>REFERENCE / INVOICE</TableCell>
+                    <TableCell align="right" sx={{ color: '#AAB4C0', fontWeight: 700, fontSize: '0.75rem' }}>GROSS AMOUNT</TableCell>
+                    <TableCell align="right" sx={{ color: '#f43f5e', fontWeight: 700, fontSize: '0.75rem' }}>DEDUCTION AMOUNT</TableCell>
+                    <TableCell align="right" sx={{ color: '#AAB4C0', fontWeight: 700, fontSize: '0.75rem' }}>REVENUE SHARE %</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(!ty.attributableDeductions || ty.attributableDeductions.length === 0) ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 3, color: '#7F8A96' }}>
+                        No attributable deductions recorded for the current selected period.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    ty.attributableDeductions.map((d, idx) => (
+                      <TableRow key={`deduction-${idx}`} hover sx={{ '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' } }}>
+                        <TableCell sx={{ color: '#FFF', fontWeight: 600 }}>{d.reason}</TableCell>
+                        <TableCell sx={{ color: '#60a5fa' }}>{d.source}</TableCell>
+                        <TableCell sx={{ color: '#AAB4C0', whiteSpace: 'nowrap' }}>{d.date}</TableCell>
+                        <TableCell sx={{ color: '#AAB4C0' }}>{d.invoiceNumber || d.reference}</TableCell>
+                        <TableCell align="right" sx={{ color: '#FFF' }}>{formatCurrency(d.grossAmount)}</TableCell>
+                        <TableCell align="right" sx={{ color: '#f43f5e', fontWeight: 700 }}>
+                          -{formatCurrency(d.deductionAmount)}
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: '#AAB4C0' }}>{d.percentageImpact}%</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </GlassCard>
+
+          {/* ── FINANCIAL REALIZATION & PAYMENT WATERFALL BRIDGE ────────────────── */}
+          <GlassCard sx={{ p: 2.5, mb: 3 }}>
+            <Typography variant="subtitle1" fontWeight={800} sx={{ color: '#FFF', mb: 0.5 }}>
+              Financial Realization & Payment Bridge
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#AAB4C0', mb: 2, display: 'block' }}>
+              Authoritative reconciliation from Billed Revenue → Deductions → Payment Realized → Outstanding Balance
+            </Typography>
+
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, borderRadius: '8px', bgcolor: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                  <Typography variant="caption" sx={{ color: '#38bdf8', display: 'block', fontWeight: 700 }}>
+                    1. BILLED REVENUE
+                  </Typography>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: '#FFF' }}>
+                    {formatCurrency(ty.revenue)}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>Bill Register Gross Billing</Typography>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, borderRadius: '8px', bgcolor: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.2)' }}>
+                  <Typography variant="caption" sx={{ color: '#f43f5e', display: 'block', fontWeight: 700 }}>
+                    2. DOCUMENTED DEDUCTIONS
+                  </Typography>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: '#f43f5e' }}>
+                    -{formatCurrency(ty.totalDocumentedDeductions)}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>Damages, Shortage & TDS</Typography>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, borderRadius: '8px', bgcolor: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <Typography variant="caption" sx={{ color: '#10b981', display: 'block', fontWeight: 700 }}>
+                    3. PAYMENTS REALIZED
+                  </Typography>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: '#10b981' }}>
+                    {formatCurrency(ty.paymentReceived)}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>Bank Book / Settled Receipts</Typography>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, borderRadius: '8px', bgcolor: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                  <Typography variant="caption" sx={{ color: '#f59e0b', display: 'block', fontWeight: 700 }}>
+                    4. UNREALIZED BALANCE
+                  </Typography>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: '#f59e0b' }}>
+                    {formatCurrency(ty.unrealizedBalance)}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>Outstanding / In Settlement</Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </GlassCard>
+
+          {/* ── CONSOLIDATED NUMERICAL COMPARISON TABLE ───────────────────────── */}
           <GlassCard sx={{ p: 2.5 }}>
             <Typography variant="subtitle1" fontWeight={800} sx={{ color: '#FFF', mb: 0.5 }}>
               Consolidated Period Financial & Operational Summary
             </Typography>
             <Typography variant="caption" sx={{ color: '#AAB4C0', mb: 2, display: 'block' }}>
-              Full project analysis across physical volume (Cement Register) and financial revenue (Bill Register)
+              Full project analysis across physical volume (Cement Register), billed revenue (Bill Register), and financial settlements
             </Typography>
 
             <TableContainer sx={{ borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -902,6 +1126,116 @@ export default function VolumeVsRevenueGrowthTab() {
           </GlassCard>
         </>
       )}
+
+      {/* ── SOURCE RECORD INSPECTION MODAL ──────────────────────────────────── */}
+      <Dialog
+        open={recordsModalOpen}
+        onClose={() => setRecordsModalOpen(false)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: '#111315',
+            color: '#F5F7FA',
+            borderRadius: '12px',
+            border: '1px solid rgba(255,255,255,0.1)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.8)'
+          }
+        }}
+      >
+        <DialogTitle sx={{ borderBottom: '1px solid rgba(255,255,255,0.1)', pb: 2 }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between">
+            <Typography variant="h6" fontWeight={800} color="#FFF">
+              {modalTitle}
+            </Typography>
+            <Chip
+              label={`${modalRecords.length} Authoritative Records`}
+              sx={{ bgcolor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', fontWeight: 800 }}
+            />
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ py: 3 }}>
+          <TableContainer sx={{ maxHeight: 450, borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <Table stickyHeader size="small">
+              <TableHead>
+                {modalType === 'cement' ? (
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>DATE</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>TRUCK NO</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>TOTAL MT</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>SITE</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>PARTY NAME</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>BILL / GCN NO</TableCell>
+                  </TableRow>
+                ) : (
+                  <TableRow>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>INVOICE DATE</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>INVOICE NUMBER</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>BILLED AMOUNT</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>BILL TYPE</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>SITE</TableCell>
+                    <TableCell sx={{ bgcolor: '#1a1d21', color: '#AAB4C0', fontWeight: 800 }}>ALLOCATED DEBIT</TableCell>
+                  </TableRow>
+                )}
+              </TableHead>
+              <TableBody>
+                {modalRecords.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#7F8A96' }}>
+                      No source records found for the selected timeframe.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  modalRecords.slice(modalPage * modalRowsPerPage, modalPage * modalRowsPerPage + modalRowsPerPage).map((r, idx) => (
+                    <TableRow key={r.id || idx} hover sx={{ '&:hover': { bgcolor: 'rgba(255,255,255,0.04)' } }}>
+                      {modalType === 'cement' ? (
+                        <>
+                          <TableCell sx={{ color: '#FFF', whiteSpace: 'nowrap' }}>{r.date}</TableCell>
+                          <TableCell sx={{ color: '#38bdf8', fontWeight: 700 }}>{r.truckNo}</TableCell>
+                          <TableCell sx={{ color: '#10b981', fontWeight: 800 }}>{formatNumber(r.mt)} MT</TableCell>
+                          <TableCell sx={{ color: '#AAB4C0' }}>{r.site}</TableCell>
+                          <TableCell sx={{ color: '#FFF' }}>{r.party}</TableCell>
+                          <TableCell sx={{ color: '#AAB4C0' }}>{r.billNo}</TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell sx={{ color: '#FFF', whiteSpace: 'nowrap' }}>{r.invoiceDate}</TableCell>
+                          <TableCell sx={{ color: '#38bdf8', fontWeight: 700 }}>{r.displayInvoiceNumber || r.invoiceNumber}</TableCell>
+                          <TableCell sx={{ color: '#10b981', fontWeight: 800 }}>{formatCurrency(r.amount)}</TableCell>
+                          <TableCell sx={{ color: '#AAB4C0' }}>{r.billType}</TableCell>
+                          <TableCell sx={{ color: '#AAB4C0' }}>{r.site}</TableCell>
+                          <TableCell sx={{ color: r.allocatedDebit > 0 ? '#f43f5e' : '#AAB4C0', fontWeight: r.allocatedDebit > 0 ? 700 : 400 }}>
+                            {r.allocatedDebit > 0 ? `-${formatCurrency(r.allocatedDebit)}` : '₹0'}
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <TablePagination
+            rowsPerPageOptions={[10, 25, 50]}
+            component="div"
+            count={modalRecords.length}
+            rowsPerPage={modalRowsPerPage}
+            page={modalPage}
+            onPageChange={(e, p) => setModalPage(p)}
+            onRowsPerPageChange={(e) => { setModalRowsPerPage(parseInt(e.target.value, 10)); setModalPage(0); }}
+            sx={{ color: '#AAB4C0', borderTop: '1px solid rgba(255,255,255,0.08)' }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+          <Button
+            onClick={() => setRecordsModalOpen(false)}
+            variant="contained"
+            sx={{ bgcolor: '#3b82f6', color: '#FFF', fontWeight: 700, borderRadius: '8px', px: 3, '&:hover': { bgcolor: '#2563eb' } }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

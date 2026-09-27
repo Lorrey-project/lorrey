@@ -437,11 +437,14 @@ function resolvePeriodRange(fyStr, periodType, monthStr, customDate, isTargetYea
   };
 }
 
-// Calculate FULL PROJECT Tonnage from Cement Register & Revenue from Bill Register for a given date range (NO SITE FILTER)
-async function calculatePeriodMetrics(dateRange, allCement, billRows) {
+const FinancialYearPayment = require("../models/FinancialYearPayment");
+
+// Calculate FULL PROJECT Tonnage from Cement Register, Revenue from Bill Register & Realization from Bank Book / Payments (NO SITE FILTER)
+async function calculatePeriodMetrics(dateRange, allCement, billRows, allPayments = [], bankDocs = []) {
   // 1. Full Project Tonnage from Cement Register (No site filtering)
   let totalTonnage = 0;
   let tripCount = 0;
+  const cementRecords = [];
 
   for (const doc of allCement) {
     const rawDate = doc["LOADING DT"] || doc["LOADING DATE"] || doc["BILL DATE"] || doc["RECEIVING DATE"] || doc["DATE"];
@@ -453,11 +456,26 @@ async function calculatePeriodMetrics(dateRange, allCement, billRows) {
       totalTonnage += mt;
     }
     tripCount++;
+
+    if (cementRecords.length < 500) {
+      cementRecords.push({
+        id: String(doc._id),
+        date: rawDate || isoDate,
+        isoDate: isoDate,
+        truckNo: doc["VEHICLE NUMBER"] || doc["VEHICLE NO"] || "-",
+        mt: mt,
+        site: doc["SITE"] || "-",
+        party: doc["PARTY NAME"] || "-",
+        billNo: doc["BILL NO"] || doc["GCN NO"] || "-"
+      });
+    }
   }
 
   // 2. Full Project Revenue from Bill Register (No site filtering)
   let totalRevenue = 0;
   let billCount = 0;
+  const billRecords = [];
+  const periodInvoiceSet = new Set();
 
   for (const b of billRows) {
     const rawDate = b.invoiceDate || b["INVOICE DATE"] || b["BILL DATE"] || b.date;
@@ -469,13 +487,124 @@ async function calculatePeriodMetrics(dateRange, allCement, billRows) {
       totalRevenue += amt;
     }
     billCount++;
+
+    const invNo = String(b.invoiceNumber || b.displayInvoiceNumber || b.billNo || '').trim();
+    if (invNo) periodInvoiceSet.add(invNo);
+
+    billRecords.push({
+      id: String(b.id || b._id || invNo),
+      invoiceNumber: invNo,
+      displayInvoiceNumber: b.displayInvoiceNumber || invNo,
+      invoiceDate: rawDate || isoDate,
+      isoDate: isoDate,
+      amount: amt,
+      site: b.site || "-",
+      billType: b.billType || "FREIGHT",
+      debitReasons: b.debitReasons || (b.debitReason ? [b.debitReason] : []),
+      allocatedDebit: parseFloat(b.totalAllocatedAmount || b.originalDebitAmount || 0) || 0
+    });
   }
 
-  // Rounding
+  // Rounding core metrics
   totalTonnage = Math.round(totalTonnage * 100) / 100;
   totalRevenue = Math.round(totalRevenue * 100) / 100;
-
   const revPerMt = totalTonnage > 0 ? Math.round((totalRevenue / totalTonnage) * 100) / 100 : 0;
+
+  // 3. Attributable Deductions & Payment Realization
+  let paymentReceived = 0;
+  let totalDocumentedDeductions = 0;
+  const attributableDeductions = [];
+  const seenDeductionKeys = new Set();
+
+  // A. From FinancialYearPayment linked to period invoices or payment dates
+  for (const p of allPayments) {
+    const pDate = p.paymentDate || '';
+    const pIso = parseToYYYYMMDD(pDate);
+    const billNos = Array.isArray(p.billNos) ? p.billNos : [];
+    const hasMatchingBill = billNos.some(bNo => periodInvoiceSet.has(String(bNo).trim()));
+    const isInDateRange = pIso && pIso >= dateRange.start && pIso <= dateRange.end;
+
+    if (hasMatchingBill || isInDateRange) {
+      const pAmt = parseFloat(p.paymentAmount) || 0;
+      const dAmt = parseFloat(p.debitAmount) || 0;
+      const tdsAmt = parseFloat(p.tdsProvision) || 0;
+
+      paymentReceived += pAmt;
+
+      if (dAmt > 0) {
+        const dKey = `PAY_DEBIT_${p.id || p._id}_${dAmt}`;
+        if (!seenDeductionKeys.has(dKey)) {
+          seenDeductionKeys.add(dKey);
+          totalDocumentedDeductions += dAmt;
+          attributableDeductions.push({
+            reason: p.remarks || 'Documented Debit Deduction',
+            source: 'Payment Settlement',
+            date: p.paymentDate || '-',
+            reference: p.referenceNo || '-',
+            invoiceNumber: billNos.join(', ') || 'Attributable Payment',
+            grossAmount: pAmt + dAmt + tdsAmt,
+            deductionAmount: dAmt,
+            impact: -dAmt,
+            percentageImpact: totalRevenue > 0 ? Math.round((dAmt / totalRevenue) * 10000) / 100 : 0
+          });
+        }
+      }
+
+      if (tdsAmt > 0) {
+        const tdsKey = `PAY_TDS_${p.id || p._id}_${tdsAmt}`;
+        if (!seenDeductionKeys.has(tdsKey)) {
+          seenDeductionKeys.add(tdsKey);
+          totalDocumentedDeductions += tdsAmt;
+          attributableDeductions.push({
+            reason: 'TDS Provision',
+            source: 'Statutory Tax',
+            date: p.paymentDate || '-',
+            reference: p.referenceNo || '-',
+            invoiceNumber: billNos.join(', ') || 'Attributable Payment',
+            grossAmount: pAmt + dAmt + tdsAmt,
+            deductionAmount: tdsAmt,
+            impact: -tdsAmt,
+            percentageImpact: totalRevenue > 0 ? Math.round((tdsAmt / totalRevenue) * 10000) / 100 : 0
+          });
+        }
+      }
+    }
+  }
+
+  // B. From Bill Register Allocated Debits (Damage, Shortage, etc.)
+  for (const b of billRecords) {
+    if (b.allocatedDebit > 0) {
+      const bKey = `BILL_DEBIT_${b.invoiceNumber}_${b.allocatedDebit}`;
+      if (!seenDeductionKeys.has(bKey)) {
+        seenDeductionKeys.add(bKey);
+        totalDocumentedDeductions += b.allocatedDebit;
+        attributableDeductions.push({
+          reason: b.debitReasons.join(', ') || 'Damage / Shortage Allocation',
+          source: 'Bill Register Allocation',
+          date: b.invoiceDate || '-',
+          reference: b.invoiceNumber,
+          invoiceNumber: b.invoiceNumber,
+          grossAmount: b.amount,
+          deductionAmount: b.allocatedDebit,
+          impact: -b.allocatedDebit,
+          percentageImpact: totalRevenue > 0 ? Math.round((b.allocatedDebit / totalRevenue) * 10000) / 100 : 0
+        });
+      }
+    }
+  }
+
+  // Financial Realization Bridge / Waterfall Flow
+  totalDocumentedDeductions = Math.round(totalDocumentedDeductions * 100) / 100;
+  paymentReceived = Math.round(paymentReceived * 100) / 100;
+  const netRealized = paymentReceived;
+  const unrealizedBalance = Math.max(0, Math.round((totalRevenue - paymentReceived - totalDocumentedDeductions) * 100) / 100);
+
+  const realizationBridge = [
+    { name: 'Billed Revenue', value: totalRevenue, type: 'START' },
+    { name: 'Documented Deductions', value: -totalDocumentedDeductions, type: 'DEDUCTION' },
+    { name: 'Payments Realized', value: paymentReceived, type: 'PAYMENT' },
+    { name: 'Unrealized Balance', value: unrealizedBalance, type: 'BALANCE' }
+  ];
 
   return {
     tonnage: totalTonnage,
@@ -483,12 +612,20 @@ async function calculatePeriodMetrics(dateRange, allCement, billRows) {
     revenue: totalRevenue,
     billCount,
     revPerMt,
+    paymentReceived,
+    totalDocumentedDeductions,
+    netRealized,
+    unrealizedBalance,
+    attributableDeductions,
+    realizationBridge,
+    cementRecords: cementRecords.slice(0, 100),
+    billRecords: billRecords.slice(0, 100),
     dateRange
   };
 }
 
 // ── GET /pie-chart/growth-analysis ──────────────────────────────────────────
-// Volume (Tonnage) Growth vs Revenue Growth comparative analytics engine
+// Tonnage Growth VS Revenue Growth production-grade analytical engine
 // Full project scope (No site filter) + Independent Month / Date Selectors
 router.get("/growth-analysis", async (req, res) => {
   try {
@@ -510,13 +647,15 @@ router.get("/growth-analysis", async (req, res) => {
     const pyRange = resolvePeriodRange(pyFY, periodType, comparisonMonth, pyDate, false);
 
     const cementCol = getCementCol();
-    const [allCement, { rows: allBillRows = [] }] = await Promise.all([
+    const [allCement, { rows: allBillRows = [] }, allPayments = [], bankDocs = []] = await Promise.all([
       cementCol.find({}).toArray(),
-      getBillRegisterData({ fy: 'ALL' })
+      getBillRegisterData({ fy: 'ALL' }),
+      FinancialYearPayment.find({}).lean(),
+      AccountDetail.find({ ledgerName: { $regex: /Payment Received/i } }).lean()
     ]);
 
-    const tyMetrics = await calculatePeriodMetrics(tyRange, allCement, allBillRows);
-    const pyMetrics = await calculatePeriodMetrics(pyRange, allCement, allBillRows);
+    const tyMetrics = await calculatePeriodMetrics(tyRange, allCement, allBillRows, allPayments, bankDocs);
+    const pyMetrics = await calculatePeriodMetrics(pyRange, allCement, allBillRows, allPayments, bankDocs);
 
     // Calculate growth percentages (null if baseline is 0)
     const volumeGrowthPct = pyMetrics.tonnage > 0
@@ -538,16 +677,52 @@ router.get("/growth-analysis", async (req, res) => {
     // Comparative Heading Construction: e.g. "SEPTEMBER 2026 VS AUGUST 2025" or "FY 2026-27 VS FY 2025-26"
     const comparisonHeading = `${tyRange.headerLabel} VS ${pyRange.headerLabel}`;
 
-    // Reason for Disproportion analysis (100% Data-Driven based on Revenue / MT realization)
-    let disproportionReasons = [];
+    // Quantitative Revenue Variance Mathematical Decomposition
+    // Total Revenue Change = Volume Effect + Price/Realization Effect
+    const diffTonnage = Math.round((tyMetrics.tonnage - pyMetrics.tonnage) * 100) / 100;
+    const diffRevenue = Math.round((tyMetrics.revenue - pyMetrics.revenue) * 100) / 100;
+    const diffRevPerMt = Math.round((tyMetrics.revPerMt - pyMetrics.revPerMt) * 100) / 100;
+
+    const volumeEffect = pyMetrics.revPerMt > 0 ? Math.round(diffTonnage * pyMetrics.revPerMt * 100) / 100 : 0;
+    const priceEffect = tyMetrics.tonnage > 0 ? Math.round(tyMetrics.tonnage * diffRevPerMt * 100) / 100 : 0;
+
+    // Reason for Disproportion & Shortfall Contributors Ranking (100% Data-Driven based on actual calculations)
+    const disproportionReasons = [];
+    const shortfallContributors = [];
+
     if (volumeGrowthPct !== null && revenueGrowthPct !== null) {
-      const diffRevPerMt = Math.round((tyMetrics.revPerMt - pyMetrics.revPerMt) * 100) / 100;
       if (Math.abs(growthGap || 0) >= 0.01) {
         if (diffRevPerMt !== 0) {
           disproportionReasons.push({
             factor: "Revenue Realization per MT",
             type: diffRevPerMt > 0 ? "POSITIVE_IMPACT" : "NEGATIVE_IMPACT",
-            detail: `Average realization changed by ${diffRevPerMt > 0 ? '+' : ''}₹${diffRevPerMt.toLocaleString('en-IN')}/MT (from ₹${pyMetrics.revPerMt.toLocaleString('en-IN')}/MT in ${pyRange.headerLabel} to ₹${tyMetrics.revPerMt.toLocaleString('en-IN')}/MT in ${tyRange.headerLabel}, ${revPerMtGrowthPct > 0 ? '+' : ''}${revPerMtGrowthPct}%). This ${diffRevPerMt > 0 ? 'accelerates' : 'reduces'} financial revenue relative to physical tonnage growth.`
+            impactAmount: priceEffect,
+            detail: `Average realization changed by ${diffRevPerMt > 0 ? '+' : ''}₹${diffRevPerMt.toLocaleString('en-IN')}/MT (from ₹${pyMetrics.revPerMt.toLocaleString('en-IN')}/MT in ${pyRange.headerLabel} to ₹${tyMetrics.revPerMt.toLocaleString('en-IN')}/MT in ${tyRange.headerLabel}, ${revPerMtGrowthPct > 0 ? '+' : ''}${revPerMtGrowthPct}%). On current lifting of ${tyMetrics.tonnage.toLocaleString('en-IN')} MT, this accounts for a mathematical revenue ${priceEffect >= 0 ? 'gain' : 'reduction'} of ₹${Math.abs(priceEffect).toLocaleString('en-IN')}.`
+          });
+
+          if (priceEffect < 0) {
+            shortfallContributors.push({
+              rank: 1,
+              name: "Revenue / MT Realization Reduction",
+              source: "Bill Register Billing Rates",
+              impactAmount: Math.abs(priceEffect),
+              impactDisplay: `-₹${Math.abs(priceEffect).toLocaleString('en-IN')}`,
+              percentageOfShortfall: diffRevenue !== 0 ? Math.min(100, Math.round((Math.abs(priceEffect) / Math.abs(diffRevenue)) * 10000) / 100) : 0,
+              description: `Lower average realization per MT reduced revenue by ₹${Math.abs(priceEffect).toLocaleString('en-IN')} across current tonnage.`
+            });
+          }
+        }
+
+        // Check attributable deductions
+        if (tyMetrics.totalDocumentedDeductions > 0) {
+          shortfallContributors.push({
+            rank: shortfallContributors.length + 1,
+            name: "Documented Bill & Settlement Deductions",
+            source: "Bill Register & Payment Allocations",
+            impactAmount: tyMetrics.totalDocumentedDeductions,
+            impactDisplay: `-₹${tyMetrics.totalDocumentedDeductions.toLocaleString('en-IN')}`,
+            percentageOfShortfall: tyMetrics.revenue > 0 ? Math.round((tyMetrics.totalDocumentedDeductions / tyMetrics.revenue) * 10000) / 100 : 0,
+            description: `${tyMetrics.attributableDeductions.length} authoritative deductions/reductions (damages, TDS, debit adjustments) reduce financial realization.`
           });
         }
       } else {
@@ -564,6 +739,10 @@ router.get("/growth-analysis", async (req, res) => {
         detail: "Insufficient source data in the comparison baseline period to determine a specific mathematical contributing factor."
       });
     }
+
+    // Sort shortfall contributors by impact amount descending
+    shortfallContributors.sort((a, b) => b.impactAmount - a.impactAmount);
+    shortfallContributors.forEach((c, idx) => { c.rank = idx + 1; });
 
     res.json({
       success: true,
@@ -594,8 +773,13 @@ router.get("/growth-analysis", async (req, res) => {
         revenueGrowthPct,
         revPerMtGrowthPct,
         growthGap,
-        diffRevPerMt: Math.round((tyMetrics.revPerMt - pyMetrics.revPerMt) * 100) / 100,
-        disproportionReasons
+        diffTonnage,
+        diffRevenue,
+        diffRevPerMt,
+        volumeEffect,
+        priceEffect,
+        disproportionReasons,
+        shortfallContributors
       }
     });
   } catch (err) {
