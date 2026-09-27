@@ -27,7 +27,7 @@ jobs:
             cd ~/lorrey-project/frontend/review-dashboard/UI2
             npm install
             npm run build
-            cp -r dist/* /var/www/lorrey/
+            sudo cp -r dist/* /var/www/lorrey/
 
             # 3. Update and restart Backend
             cd ~/lorrey-project/backend-node
