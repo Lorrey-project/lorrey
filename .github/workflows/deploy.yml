@@ -3,7 +3,7 @@ name: Deploy to AWS EC2
 on:
   push:
     branches:
-      - main  # Change to master if your default branch is 'master'
+      - main
 
 jobs:
   deploy:
@@ -30,7 +30,7 @@ jobs:
             cp -r dist/* /var/www/lorrey/
 
             # 3. Update and restart Backend
-            cd ~/lorrey-project/backend
+            cd ~/lorrey-project/backend-node
             npm install
             pm2 restart all
 
