@@ -16,9 +16,9 @@ const getBillRegisterCol = () => mongoose.connection.useDb("cement_register").co
 const getMainCashCol = () => mongoose.connection.useDb("main_cashbook").collection("entries");
 const getPumpPaymentCol = () => mongoose.connection.useDb("pump_payment_register").collection("records");
 
-// Parse any date string or Date object into YYYY-MM-DD
+// Parse any date string or Date object into YYYY-MM-DD safely without timezone shifts
 function parseToYYYYMMDD(dStr) {
-  if (!dStr) return null;
+  if (!dStr && dStr !== 0) return null;
   if (dStr instanceof Date) {
     if (isNaN(dStr.getTime())) return null;
     const y = dStr.getFullYear();
@@ -26,29 +26,60 @@ function parseToYYYYMMDD(dStr) {
     const d = String(dStr.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
-  const clean = String(dStr).trim();
-  const parts = clean.split(/[-\/\.]/);
-  if (parts.length === 3) {
-    if (parts[0].length === 4) {
-      const y = parseInt(parts[0], 10);
-      const m = String(parseInt(parts[1], 10)).padStart(2, '0');
-      const d = String(parseInt(parts[2], 10)).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    } else {
-      const d = String(parseInt(parts[0], 10)).padStart(2, '0');
-      const m = String(parseInt(parts[1], 10)).padStart(2, '0');
-      let y = parseInt(parts[2], 10);
-      if (parts[2].length === 2) y += (y >= 70 ? 1900 : 2000);
-      return `${y}-${m}-${d}`;
-    }
-  }
-  const iso = new Date(clean);
-  if (!isNaN(iso.getTime())) {
-    const y = iso.getFullYear();
-    const m = String(iso.getMonth() + 1).padStart(2, '0');
-    const d = String(iso.getDate()).padStart(2, '0');
+
+  const rawStr = String(dStr).trim();
+  if (!rawStr) return null;
+  const clean = rawStr.replace(/\s+\d{1,2}:\d{2}(:\d{2})?.*$/, '').replace(/T\d{2}:\d{2}.*$/, '').trim();
+
+  // Excel serial number
+  if (/^\d{5}(\.\d+)?$/.test(clean) || (typeof dStr === 'number' && dStr >= 1000 && dStr <= 100000)) {
+    const excelDays = typeof dStr === 'number' ? dStr : parseFloat(clean);
+    const msPerDay = 86400 * 1000;
+    const epochMs = Date.UTC(1899, 11, 30);
+    const date = new Date(epochMs + Math.round(excelDays * msPerDay));
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
+
+  // DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+  const ddmmyyyy = clean.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (ddmmyyyy) {
+    let d = parseInt(ddmmyyyy[1], 10), m = parseInt(ddmmyyyy[2], 10), y = parseInt(ddmmyyyy[3], 10);
+    if (y < 100) y += 2000;
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // YYYY-MM-DD
+  const yyyymmdd = clean.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  if (yyyymmdd) {
+    let y = parseInt(yyyymmdd[1], 10), m = parseInt(yyyymmdd[2], 10), d = parseInt(yyyymmdd[3], 10);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // DD-MMM-YYYY (e.g., 25-Sep-2026, 1-Aug-2025)
+  const ddmmmyyyy = clean.match(/^(\d{1,2})[\/\-\.\s]([A-Za-z]+)[\/\-\.\s](\d{2,4})$/);
+  if (ddmmmyyyy) {
+    const d = parseInt(ddmmmyyyy[1], 10);
+    const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const mIdx = monthNames.indexOf(ddmmmyyyy[2].toLowerCase().slice(0, 3));
+    let y = parseInt(ddmmmyyyy[3], 10);
+    if (y < 100) y += 2000;
+    if (mIdx >= 0 && d >= 1 && d <= 31) {
+      return `${y}-${String(mIdx + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  const mObj = moment(clean);
+  if (mObj.isValid()) {
+    return mObj.format('YYYY-MM-DD');
+  }
+
   return null;
 }
 
@@ -376,14 +407,16 @@ async function fetchChartData(ledgerName, dateRange, period) {
 }
 
 // Helper function to resolve exact comparison period date bounds
-function resolvePeriodRange(fyStr, periodType, monthStr, customDate, isTargetYear = false) {
+function resolvePeriodRange(fyStr, periodType, monthStr, weekNum, customDate, isTargetYear = false) {
   const { startYear, endYear } = parseFY(fyStr);
   const now = moment();
   const todayStr = now.format('YYYY-MM-DD');
   const currentCalYear = now.year();
   const currentMonthIdx = now.month(); // 0-11
 
-  if (periodType === 'DATE') {
+  const pType = String(periodType || 'MONTHLY').toUpperCase();
+
+  if (pType === 'DAILY' || pType === 'DATE') {
     const raw = customDate ? parseToYYYYMMDD(customDate) : todayStr;
     const resolved = (isTargetYear && raw > todayStr) ? todayStr : (raw || todayStr);
     return {
@@ -394,10 +427,43 @@ function resolvePeriodRange(fyStr, periodType, monthStr, customDate, isTargetYea
     };
   }
 
-  if (periodType === 'MONTH') {
+  if (pType === 'WEEKLY') {
     const mIdx = MONTHS.indexOf(monthStr);
     const targetMonthIdx = mIdx >= 0 ? mIdx : currentMonthIdx;
-    // In FY (Apr-Mar), Months 3..11 (Apr-Dec) are in startYear; Months 0..2 (Jan-Mar) are in endYear
+    const targetCalYear = targetMonthIdx >= 3 ? startYear : endYear;
+    const mPadded = String(targetMonthIdx + 1).padStart(2, '0');
+    const monthStart = moment(`${targetCalYear}-${mPadded}-01`, 'YYYY-MM-DD');
+    const daysInMonth = monthStart.daysInMonth();
+    
+    const w = Math.min(5, Math.max(1, parseInt(weekNum || 1, 10)));
+    const startDay = 1 + (w - 1) * 7;
+    let endDay = Math.min(daysInMonth, w * 7);
+    if (w === 5) {
+      endDay = daysInMonth;
+    }
+
+    const start = `${targetCalYear}-${mPadded}-${String(startDay).padStart(2, '0')}`;
+    let end = `${targetCalYear}-${mPadded}-${String(endDay).padStart(2, '0')}`;
+
+    if (isTargetYear && targetCalYear === currentCalYear && targetMonthIdx === currentMonthIdx) {
+      if (todayStr < end) {
+        end = todayStr < start ? start : todayStr;
+      }
+    }
+
+    const monthName = MONTHS[targetMonthIdx] || monthStr;
+    return {
+      start,
+      end,
+      weekNum: w,
+      display: `${moment(start, 'YYYY-MM-DD').format('DD-MM-YYYY')} to ${moment(end, 'YYYY-MM-DD').format('DD-MM-YYYY')}`,
+      headerLabel: `${monthName.toUpperCase()} ${targetCalYear} (WEEK ${w})`
+    };
+  }
+
+  if (pType === 'MONTHLY' || pType === 'MONTH') {
+    const mIdx = MONTHS.indexOf(monthStr);
+    const targetMonthIdx = mIdx >= 0 ? mIdx : currentMonthIdx;
     const targetCalYear = targetMonthIdx >= 3 ? startYear : endYear;
     const mPadded = String(targetMonthIdx + 1).padStart(2, '0');
     const start = `${targetCalYear}-${mPadded}-01`;
@@ -435,6 +501,137 @@ function resolvePeriodRange(fyStr, periodType, monthStr, customDate, isTargetYea
     display: `${moment(start, 'YYYY-MM-DD').format('DD-MM-YYYY')} to ${moment(end, 'YYYY-MM-DD').format('DD-MM-YYYY')}`,
     headerLabel: `FY ${startYear}-${String(endYear).slice(-2)}`
   };
+}
+
+function calculateTrendSeries(periodType, tyRange, pyRange, tyFY, pyFY, tyMonth, pyMonth, allCement, billRows) {
+  const pType = String(periodType || 'MONTHLY').toUpperCase();
+  const trend = [];
+  
+  if (pType === 'DAILY' || pType === 'DATE') {
+    const centerDate = moment(tyRange.start, 'YYYY-MM-DD');
+    const startWindow = centerDate.clone().subtract(5, 'days');
+    const endWindow = centerDate.clone().add(5, 'days');
+    
+    let curr = startWindow.clone();
+    while (curr.isSameOrBefore(endWindow)) {
+      const dtStr = curr.format('YYYY-MM-DD');
+      let dtTonnage = 0;
+      let dtRevenue = 0;
+      
+      for (const doc of allCement) {
+        const raw = doc["LOADING DT"] || doc["LOADING DATE"] || doc["BILL DATE"] || doc["RECEIVING DATE"] || doc["DATE"];
+        if (parseToYYYYMMDD(raw) === dtStr) {
+          const mt = parseFloat(String(doc["MT"] || doc.mt || doc["TONNAGE"] || doc["TOTAL MT"] || 0).replace(/,/g, '')) || 0;
+          if (mt > 0) dtTonnage += mt;
+        }
+      }
+      for (const b of billRows) {
+        const raw = b.invoiceDate || b["INVOICE DATE"] || b["BILL DATE"] || b.date;
+        if (parseToYYYYMMDD(raw) === dtStr) {
+          const amt = parseFloat(String(b.billAmount || b.amount || b["BILL AMOUNT"] || b["Billing Amount"] || 0).replace(/,/g, '')) || 0;
+          if (amt > 0) dtRevenue += amt;
+        }
+      }
+      
+      trend.push({
+        label: curr.format('DD-MMM'),
+        date: dtStr,
+        isCurrent: dtStr === tyRange.start,
+        tonnage: Math.round(dtTonnage * 100) / 100,
+        revenue: Math.round(dtRevenue * 100) / 100,
+        revenueLakhs: Math.round((dtRevenue / 100000) * 100) / 100
+      });
+      curr.add(1, 'day');
+    }
+  } else if (pType === 'WEEKLY') {
+    for (let w = 1; w <= 5; w++) {
+      const tyWeekRange = resolvePeriodRange(tyFY, 'WEEKLY', tyMonth, w, null, true);
+      const pyWeekRange = resolvePeriodRange(pyFY, 'WEEKLY', pyMonth, w, null, false);
+      
+      let tyTonnage = 0, tyRevenue = 0;
+      let pyTonnage = 0, pyRevenue = 0;
+
+      for (const doc of allCement) {
+        const iso = parseToYYYYMMDD(doc["LOADING DT"] || doc["LOADING DATE"] || doc["BILL DATE"] || doc["RECEIVING DATE"] || doc["DATE"]);
+        if (iso && iso >= tyWeekRange.start && iso <= tyWeekRange.end) {
+          const mt = parseFloat(String(doc["MT"] || doc.mt || doc["TONNAGE"] || doc["TOTAL MT"] || 0).replace(/,/g, '')) || 0;
+          if (mt > 0) tyTonnage += mt;
+        }
+        if (iso && iso >= pyWeekRange.start && iso <= pyWeekRange.end) {
+          const mt = parseFloat(String(doc["MT"] || doc.mt || doc["TONNAGE"] || doc["TOTAL MT"] || 0).replace(/,/g, '')) || 0;
+          if (mt > 0) pyTonnage += mt;
+        }
+      }
+      for (const b of billRows) {
+        const iso = parseToYYYYMMDD(b.invoiceDate || b["INVOICE DATE"] || b["BILL DATE"] || b.date);
+        if (iso && iso >= tyWeekRange.start && iso <= tyWeekRange.end) {
+          const amt = parseFloat(String(b.billAmount || b.amount || b["BILL AMOUNT"] || b["Billing Amount"] || 0).replace(/,/g, '')) || 0;
+          if (amt > 0) tyRevenue += amt;
+        }
+        if (iso && iso >= pyWeekRange.start && iso <= pyWeekRange.end) {
+          const amt = parseFloat(String(b.billAmount || b.amount || b["BILL AMOUNT"] || b["Billing Amount"] || 0).replace(/,/g, '')) || 0;
+          if (amt > 0) pyRevenue += amt;
+        }
+      }
+
+      trend.push({
+        label: `W${w}`,
+        weekLabel: `Week ${w}`,
+        weekNum: w,
+        tyTonnage: Math.round(tyTonnage * 100) / 100,
+        tyRevenue: Math.round(tyRevenue * 100) / 100,
+        tyRevenueLakhs: Math.round((tyRevenue / 100000) * 100) / 100,
+        pyTonnage: Math.round(pyTonnage * 100) / 100,
+        pyRevenue: Math.round(pyRevenue * 100) / 100,
+        pyRevenueLakhs: Math.round((pyRevenue / 100000) * 100) / 100
+      });
+    }
+  } else {
+    const FY_MONTHS = ["April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"];
+    for (const m of FY_MONTHS) {
+      const tyMRange = resolvePeriodRange(tyFY, 'MONTHLY', m, 1, null, true);
+      const pyMRange = resolvePeriodRange(pyFY, 'MONTHLY', m, 1, null, false);
+      
+      let tyTonnage = 0, tyRevenue = 0;
+      let pyTonnage = 0, pyRevenue = 0;
+
+      for (const doc of allCement) {
+        const iso = parseToYYYYMMDD(doc["LOADING DT"] || doc["LOADING DATE"] || doc["BILL DATE"] || doc["RECEIVING DATE"] || doc["DATE"]);
+        if (iso && iso >= tyMRange.start && iso <= tyMRange.end) {
+          const mt = parseFloat(String(doc["MT"] || doc.mt || doc["TONNAGE"] || doc["TOTAL MT"] || 0).replace(/,/g, '')) || 0;
+          if (mt > 0) tyTonnage += mt;
+        }
+        if (iso && iso >= pyMRange.start && iso <= pyMRange.end) {
+          const mt = parseFloat(String(doc["MT"] || doc.mt || doc["TONNAGE"] || doc["TOTAL MT"] || 0).replace(/,/g, '')) || 0;
+          if (mt > 0) pyTonnage += mt;
+        }
+      }
+      for (const b of billRows) {
+        const iso = parseToYYYYMMDD(b.invoiceDate || b["INVOICE DATE"] || b["BILL DATE"] || b.date);
+        if (iso && iso >= tyMRange.start && iso <= tyMRange.end) {
+          const amt = parseFloat(String(b.billAmount || b.amount || b["BILL AMOUNT"] || b["Billing Amount"] || 0).replace(/,/g, '')) || 0;
+          if (amt > 0) tyRevenue += amt;
+        }
+        if (iso && iso >= pyMRange.start && iso <= pyMRange.end) {
+          const amt = parseFloat(String(b.billAmount || b.amount || b["BILL AMOUNT"] || b["Billing Amount"] || 0).replace(/,/g, '')) || 0;
+          if (amt > 0) pyRevenue += amt;
+        }
+      }
+
+      trend.push({
+        label: m.slice(0, 3),
+        month: m,
+        tyTonnage: Math.round(tyTonnage * 100) / 100,
+        tyRevenue: Math.round(tyRevenue * 100) / 100,
+        tyRevenueLakhs: Math.round((tyRevenue / 100000) * 100) / 100,
+        pyTonnage: Math.round(pyTonnage * 100) / 100,
+        pyRevenue: Math.round(pyRevenue * 100) / 100,
+        pyRevenueLakhs: Math.round((pyRevenue / 100000) * 100) / 100
+      });
+    }
+  }
+
+  return trend;
 }
 
 const FinancialYearPayment = require("../models/FinancialYearPayment");
@@ -626,15 +823,17 @@ async function calculatePeriodMetrics(dateRange, allCement, billRows, allPayment
 
 // ── GET /pie-chart/growth-analysis ──────────────────────────────────────────
 // Tonnage Growth VS Revenue Growth production-grade analytical engine
-// Full project scope (No site filter) + Independent Month / Date Selectors
+// Full project scope (No site filter) + Support DAILY, WEEKLY, MONTHLY, FULL_FY
 router.get("/growth-analysis", async (req, res) => {
   try {
     const {
       tyFY = 'FY 2026-27',
       pyFY = 'FY 2025-26',
-      periodType = 'FULL_FY', // 'FULL_FY' | 'MONTH' | 'DATE'
+      periodType = 'MONTHLY', // 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'FULL_FY'
       tyMonth = 'September',
       pyMonth = 'August',
+      tyWeek = '1',
+      pyWeek = '1',
       month, // backwards compat fallback
       tyDate,
       pyDate
@@ -643,8 +842,8 @@ router.get("/growth-analysis", async (req, res) => {
     const targetMonth = tyMonth || month || 'September';
     const comparisonMonth = pyMonth || month || 'August';
 
-    const tyRange = resolvePeriodRange(tyFY, periodType, targetMonth, tyDate, true);
-    const pyRange = resolvePeriodRange(pyFY, periodType, comparisonMonth, pyDate, false);
+    const tyRange = resolvePeriodRange(tyFY, periodType, targetMonth, tyWeek, tyDate, true);
+    const pyRange = resolvePeriodRange(pyFY, periodType, comparisonMonth, pyWeek, pyDate, false);
 
     const cementCol = getCementCol();
     const [allCement, { rows: allBillRows = [] }, allPayments = [], bankDocs = []] = await Promise.all([
@@ -658,18 +857,22 @@ router.get("/growth-analysis", async (req, res) => {
     const pyMetrics = await calculatePeriodMetrics(pyRange, allCement, allBillRows, allPayments, bankDocs);
 
     // Calculate growth percentages (null if baseline is 0)
+    // 1. Primary Tonnage Growth: ((Current MT - Previous MT) / Previous MT) * 100
     const volumeGrowthPct = pyMetrics.tonnage > 0
       ? Math.round(((tyMetrics.tonnage - pyMetrics.tonnage) / pyMetrics.tonnage) * 10000) / 100
       : null;
 
+    // 2. Primary Revenue Growth: ((Current Revenue - Previous Revenue) / Previous Revenue) * 100
     const revenueGrowthPct = pyMetrics.revenue > 0
       ? Math.round(((tyMetrics.revenue - pyMetrics.revenue) / pyMetrics.revenue) * 10000) / 100
       : null;
 
+    // 3. Optional secondary diagnostic: Revenue / MT Growth
     const revPerMtGrowthPct = pyMetrics.revPerMt > 0
       ? Math.round(((tyMetrics.revPerMt - pyMetrics.revPerMt) / pyMetrics.revPerMt) * 10000) / 100
       : null;
 
+    // Growth Gap: Revenue Growth % - Tonnage Growth %
     const growthGap = (revenueGrowthPct !== null && volumeGrowthPct !== null)
       ? Math.round((revenueGrowthPct - volumeGrowthPct) * 100) / 100
       : null;
@@ -678,7 +881,6 @@ router.get("/growth-analysis", async (req, res) => {
     const comparisonHeading = `${tyRange.headerLabel} VS ${pyRange.headerLabel}`;
 
     // Quantitative Revenue Variance Mathematical Decomposition
-    // Total Revenue Change = Volume Effect + Price/Realization Effect
     const diffTonnage = Math.round((tyMetrics.tonnage - pyMetrics.tonnage) * 100) / 100;
     const diffRevenue = Math.round((tyMetrics.revenue - pyMetrics.revenue) * 100) / 100;
     const diffRevPerMt = Math.round((tyMetrics.revPerMt - pyMetrics.revPerMt) * 100) / 100;
@@ -694,7 +896,7 @@ router.get("/growth-analysis", async (req, res) => {
       if (Math.abs(growthGap || 0) >= 0.01) {
         if (diffRevPerMt !== 0) {
           disproportionReasons.push({
-            factor: "Revenue Realization per MT",
+            factor: "Revenue Realization per MT (Billing Rate Changes)",
             type: diffRevPerMt > 0 ? "POSITIVE_IMPACT" : "NEGATIVE_IMPACT",
             impactAmount: priceEffect,
             detail: `Average realization changed by ${diffRevPerMt > 0 ? '+' : ''}₹${diffRevPerMt.toLocaleString('en-IN')}/MT (from ₹${pyMetrics.revPerMt.toLocaleString('en-IN')}/MT in ${pyRange.headerLabel} to ₹${tyMetrics.revPerMt.toLocaleString('en-IN')}/MT in ${tyRange.headerLabel}, ${revPerMtGrowthPct > 0 ? '+' : ''}${revPerMtGrowthPct}%). On current lifting of ${tyMetrics.tonnage.toLocaleString('en-IN')} MT, this accounts for a mathematical revenue ${priceEffect >= 0 ? 'gain' : 'reduction'} of ₹${Math.abs(priceEffect).toLocaleString('en-IN')}.`
@@ -744,6 +946,9 @@ router.get("/growth-analysis", async (req, res) => {
     shortfallContributors.sort((a, b) => b.impactAmount - a.impactAmount);
     shortfallContributors.forEach((c, idx) => { c.rank = idx + 1; });
 
+    // Calculate Trend Series for Visualizations
+    const trend = calculateTrendSeries(periodType, tyRange, pyRange, tyFY, pyFY, targetMonth, comparisonMonth, allCement, allBillRows);
+
     res.json({
       success: true,
       filters: {
@@ -752,6 +957,8 @@ router.get("/growth-analysis", async (req, res) => {
         periodType,
         tyMonth: targetMonth,
         pyMonth: comparisonMonth,
+        tyWeek,
+        pyWeek,
         tyDate: tyRange.start,
         pyDate: pyRange.start
       },
@@ -780,7 +987,8 @@ router.get("/growth-analysis", async (req, res) => {
         priceEffect,
         disproportionReasons,
         shortfallContributors
-      }
+      },
+      trend
     });
   } catch (err) {
     console.error("[GrowthAnalysis] Error:", err);
