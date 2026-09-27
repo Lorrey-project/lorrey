@@ -19,7 +19,7 @@ import IosShareIcon from '@mui/icons-material/IosShare';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import PercentIcon from '@mui/icons-material/Percent';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import DynamicPieChart from '../components/DynamicPieChart';
+import DynamicBarChart from '../components/DynamicBarChart';
 import VolumeVsRevenueGrowthTab from '../components/VolumeVsRevenueGrowthTab';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -325,7 +325,7 @@ const PieChartDashboard = ({ onBack }) => {
           </IconButton>
           <Box>
             <Typography variant="h6" fontWeight={800} sx={{ letterSpacing: '-0.5px', lineHeight: 1.2 }}>
-              FINANCIAL ANALYTICS & BAR GHAPH
+              FINANCIAL ANALYTICS & BAR GRAPH
             </Typography>
             <Typography variant="caption" color="#AAB4C0">
               Real-time multi-source financial control and verification system
@@ -378,7 +378,7 @@ const PieChartDashboard = ({ onBack }) => {
             }
           }}
         >
-          <Tab label="Volume(Tonnage) Growth VS Revenue Growth" value="volumeTonnage" />
+          <Tab label="Volume Tonnage Growth versus Revenue Growth" value="volumeTonnage" />
           <Tab label="PTPK Analysis" value="ptpkAnalysis" />
           <Tab label="Bar Graph" value="barGraph" />
         </Tabs>
@@ -497,7 +497,7 @@ const PieChartDashboard = ({ onBack }) => {
                       <CircularProgress sx={{ color: '#10b981' }} size={30} />
                     </Box>
                   )}
-                  <DynamicPieChart 
+                  <DynamicBarChart 
                     data={leftData?.currentData?.pieData || []} 
                     ledgerName={selectedLedger} 
                     palette="cool" 
@@ -524,7 +524,7 @@ const PieChartDashboard = ({ onBack }) => {
                       <CircularProgress sx={{ color: '#3b82f6' }} size={30} />
                     </Box>
                   )}
-                  <DynamicPieChart 
+                  <DynamicBarChart 
                     data={rightData?.currentData?.pieData || []} 
                     ledgerName={selectedLedger} 
                     palette="warm" 
@@ -766,7 +766,7 @@ const PieChartDashboard = ({ onBack }) => {
             <Box textAlig="right">
               <Chip
                 icon={<CheckCircleOutlineIcon sx={{ color: '#10b981 !important' }} />}
-                label={`SUM OF RECORDS (${formatCurrency(activeSliceInfo?.sumRecords)}) = SLICE TOTAL (${formatCurrency(activeSliceInfo?.sliceAmount)})`}
+                label={`SUM OF RECORDS (${formatCurrency(activeSliceInfo?.sumRecords)}) = BAR TOTAL (${formatCurrency(activeSliceInfo?.sliceAmount)})`}
                 sx={{ bgcolor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 800, border: '1px solid rgba(16, 185, 129, 0.3)' }}
               />
             </Box>
@@ -774,7 +774,7 @@ const PieChartDashboard = ({ onBack }) => {
         </DialogTitle>
         <DialogContent sx={{ py: 3 }}>
           <Alert severity="info" sx={{ mb: 2, bgcolor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', fontWeight: 600 }}>
-            Every individual transaction contributing to this pie chart segment is listed below. All numbers are verified directly from source database records.
+            Every individual transaction contributing to this bar segment is listed below. All numbers are verified directly from source database records.
           </Alert>
 
           <TableContainer sx={{ maxHeight: 450, borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>

@@ -787,7 +787,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                 <Grid container spacing={3}>
                                     <ActionCard title="GST / GSTR-1" subtitle="Tax Portal Ledger" icon={<ReceiptIcon />} accentColor="#d946ef" onClick={onOpenGSTPortalRegister} />
                                     <ActionCard title="TOTAL INCOMING & OUTGOING" subtitle="Payment Reports" icon={<AccountBalanceWalletIcon />} accentColor="#14b8a6" onClick={onOpenTotalPaymentReports} />
-                                    <ActionCard title="FINANCIAL ANALYTICS & BAR GHAPH" subtitle="Financial Analytics & Bar Graph" icon={<BarChartIcon />} accentColor="#8b5cf6" onClick={onOpenPieChart} />
+                                    <ActionCard title="FINANCIAL ANALYTICS & BAR GRAPH" subtitle="Financial Analytics & Bar Graph" icon={<BarChartIcon />} accentColor="#8b5cf6" onClick={onOpenPieChart} />
                                     <ActionCard title="AI EXTRA EXPENSE" subtitle="AI Expense Management" icon={<AutoAwesomeIcon />} accentColor="#6366f1" onClick={onOpenAiExtraExpense} />
                                     <ActionCard title="OWNER & VEHICLES" subtitle="Fleet Directory" icon={<LocalShippingIcon />} accentColor="#f59e0b" onClick={() => setTruckManagerOpen(true)} />
                                     <ActionCard title="VOUCHER HISTORY" subtitle="Approved Payouts" icon={<HistoryIcon />} accentColor="#f43f5e" onClick={() => { setVoucherDialogTab(1); setVoucherDialogOpen(true); }} />
