@@ -1452,46 +1452,111 @@ router.get("/vehicle-not-loaded-alerts", auth, async (req, res) => {
 });
 
 // ── GET /daily-summary/revenue-nvl-nvcl ──────────────────────────────────────────────
-// Live database-driven Financial Year Consolidated Summary for NVL, NVCL, and TOTAL
+// ── GET /daily-summary/revenue-nvl-nvcl ──────────────────────────────────────────────
+// Live database-driven Financial Year, Month & Date Consolidated Summary for NVL, NVCL, and TOTAL
 router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
   try {
-    const { fy } = req.query;
+    const { fy, month, date } = req.query;
 
     // 1. Determine Financial Year bounds
     const now = new Date();
-    const currentMonth = now.getMonth() + 1;
-    const currentYear = now.getFullYear();
+    const currentCalMonth = now.getMonth() + 1; // 1-12
+    const currentCalYear = now.getFullYear();
+    const currentCalDay = now.getDate();
 
     let startYear;
     if (fy && /^FY\s*\d{4}-\d{2}$/i.test(fy)) {
       startYear = parseInt(fy.replace(/\D/g, '').substring(0, 4), 10);
+    } else if (fy && /^\d{4}-\d{4}$/.test(fy)) {
+      startYear = parseInt(fy.split('-')[0], 10);
+    } else if (fy && /^FY\s*\d{2}-\d{2}$/i.test(fy)) {
+      const y2 = parseInt(fy.replace(/\D/g, '').substring(0, 2), 10);
+      startYear = (y2 >= 70 ? 1900 : 2000) + y2;
     } else {
-      startYear = currentMonth < 4 ? currentYear - 1 : currentYear;
+      startYear = currentCalMonth < 4 ? currentCalYear - 1 : currentCalYear;
     }
     const endYear = startYear + 1;
     const fyStr = `${startYear}-${endYear}`;
 
-    // 2. Financial Year date range (01 April -> 31 March)
-    const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0); // 01-04-startYear
-    const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999); // 31-03-endYear
-    const todayEnd = new Date(currentYear, currentMonth - 1, now.getDate(), 23, 59, 59, 999);
+    // 2. Determine Filter Date Range based on fy, month, date
+    let rangeStartMs = 0;
+    let rangeEndMs = 0;
+    let formattedStartDate = '';
+    let formattedEndDate = '';
+    let selectedPeriodDisplay = '';
 
-    // For current/future FY: FY start through TODAY (no future records).
-    // For past/completed FY: full FY (through 31 March).
-    const cutoffDate = todayEnd.getTime() < fyEnd.getTime() ? todayEnd : fyEnd;
-    const fyStartMs = fyStart.getTime();
-    const cutoffMs = cutoffDate.getTime();
+    const isCurrentFY = (currentCalMonth >= 4 && currentCalYear === startYear) || (currentCalMonth < 4 && currentCalYear === endYear);
+    const todayEnd = new Date(currentCalYear, currentCalMonth - 1, currentCalDay, 23, 59, 59, 999);
 
-    const formattedStartDate = `01-04-${startYear}`;
-    const formattedEndDate = `${String(cutoffDate.getDate()).padStart(2, '0')}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${cutoffDate.getFullYear()}`;
-    const selectedPeriodDisplay = `${formattedStartDate} to ${formattedEndDate}`;
+    const monthMap = {
+      'JANUARY': 1, 'FEBRUARY': 2, 'MARCH': 3, 'APRIL': 4, 'MAY': 5, 'JUNE': 6,
+      'JULY': 7, 'AUGUST': 8, 'SEPTEMBER': 9, 'OCTOBER': 10, 'NOVEMBER': 11, 'DECEMBER': 12
+    };
+
+    let selectedMonthNum = null; // 1..12 or null if ALL
+    if (month && String(month).toUpperCase() !== 'ALL') {
+      const mStr = String(month).trim().toUpperCase();
+      if (monthMap[mStr]) {
+        selectedMonthNum = monthMap[mStr];
+      } else if (!isNaN(parseInt(mStr, 10)) && parseInt(mStr, 10) >= 1 && parseInt(mStr, 10) <= 12) {
+        selectedMonthNum = parseInt(mStr, 10);
+      }
+    }
+
+    let selectedDateCalendar = null;
+    if (date && String(date).toUpperCase() !== 'ALL') {
+      selectedDateCalendar = parseDateToCalendar(date);
+    }
+
+    if (selectedDateCalendar) {
+      // Specific date selected
+      const { year: dy, month: dm, day: dd } = selectedDateCalendar;
+      const dStart = new Date(dy, dm - 1, dd, 0, 0, 0, 0);
+      const dEnd = new Date(dy, dm - 1, dd, 23, 59, 59, 999);
+      rangeStartMs = dStart.getTime();
+      rangeEndMs = dEnd.getTime();
+      const ddStr = String(dd).padStart(2, '0');
+      const mmStr = String(dm).padStart(2, '0');
+      selectedPeriodDisplay = `${ddStr}-${mmStr}-${dy}`;
+      formattedStartDate = selectedPeriodDisplay;
+      formattedEndDate = selectedPeriodDisplay;
+    } else if (selectedMonthNum !== null) {
+      // Specific month selected, Date = ALL
+      const mYear = selectedMonthNum >= 4 ? startYear : endYear;
+      const totalDaysInMonth = new Date(mYear, selectedMonthNum, 0).getDate();
+      const mStart = new Date(mYear, selectedMonthNum - 1, 1, 0, 0, 0, 0);
+
+      let mEndDay = totalDaysInMonth;
+      if (mYear === currentCalYear && selectedMonthNum === currentCalMonth) {
+        mEndDay = Math.min(currentCalDay, totalDaysInMonth);
+      } else if (mYear > currentCalYear || (mYear === currentCalYear && selectedMonthNum > currentCalMonth)) {
+        mEndDay = 0; // Future month
+      }
+
+      const mEnd = new Date(mYear, selectedMonthNum - 1, Math.max(1, mEndDay), 23, 59, 59, 999);
+      rangeStartMs = mStart.getTime();
+      rangeEndMs = mEndDay === 0 ? mStart.getTime() - 1 : mEnd.getTime();
+
+      const mmStr = String(selectedMonthNum).padStart(2, '0');
+      formattedStartDate = `01-${mmStr}-${mYear}`;
+      formattedEndDate = `${String(mEndDay).padStart(2, '0')}-${mmStr}-${mYear}`;
+      selectedPeriodDisplay = `${formattedStartDate} to ${formattedEndDate}`;
+    } else {
+      // Month = ALL, Date = ALL
+      const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0);
+      const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999);
+      const cutoff = (isCurrentFY || todayEnd.getTime() < fyEnd.getTime()) ? todayEnd : fyEnd;
+
+      rangeStartMs = fyStart.getTime();
+      rangeEndMs = cutoff.getTime();
+
+      formattedStartDate = `01-04-${startYear}`;
+      formattedEndDate = `${String(cutoff.getDate()).padStart(2, '0')}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${cutoff.getFullYear()}`;
+      selectedPeriodDisplay = `${formattedStartDate} to ${formattedEndDate}`;
+    }
 
     // 3. Fetch Billed Revenue from Bill Register single source of truth
     const { rows: billRows = [], payments = [] } = await getBillRegisterData({ fy: fyStr });
-
-    const gstCol = mongoose.connection.useDb("gst_portal").collection("entries");
-    const submittedGstBills = await gstCol.find({ type: "gstr1" }, { projection: { sourceBillId: 1 } }).toArray();
-    const submittedBillSet = new Set(submittedGstBills.map(g => String(g.sourceBillId)));
 
     // 4. Fetch Unbilled Revenue from Cement Register
     const cementCol = getCementCol();
@@ -1504,9 +1569,6 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       NVL: {
         site: "NVL",
         billedRevenue: 0,
-        billedSubmitted: 0,
-        paymentReceived: 0,
-        revisedBilledRevenue: 0,
         stampNotBilled: 0,
         nonStampNotBilled: 0,
         challanNotReceived: 0,
@@ -1515,9 +1577,6 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       NVCL: {
         site: "NVCL",
         billedRevenue: 0,
-        billedSubmitted: 0,
-        paymentReceived: 0,
-        revisedBilledRevenue: 0,
         stampNotBilled: 0,
         nonStampNotBilled: 0,
         challanNotReceived: 0,
@@ -1526,9 +1585,6 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       TOTAL: {
         site: "TOTAL",
         billedRevenue: 0,
-        billedSubmitted: 0,
-        paymentReceived: 0,
-        revisedBilledRevenue: 0,
         stampNotBilled: 0,
         nonStampNotBilled: 0,
         challanNotReceived: 0,
@@ -1536,103 +1592,110 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       }
     };
 
+    const detailedRecords = {
+      stampNotBilled: {
+        NVL: { all: [], freight: [], unloading: [], total: [] },
+        NVCL: { all: [], freight: [], unloading: [], total: [] },
+        TOTAL: { all: [], freight: [], unloading: [], total: [] }
+      },
+      nonStampNotBilled: {
+        NVL: [],
+        NVCL: [],
+        TOTAL: []
+      },
+      challanNotReceived: {
+        NVL: [],
+        NVCL: [],
+        TOTAL: []
+      }
+    };
+
     // 6. Aggregate billRows by Site
     billRows.forEach(r => {
-      const bDate = parseDate(r.invoiceDate);
-      if (!bDate) return;
-      const t = bDate.getTime();
-      if (t < fyStartMs || t > cutoffMs) return;
+      const bDateObj = parseDateToCalendar(r.invoiceDate || r.billDate || r.date);
+      if (!bDateObj) return;
+      const t = bDateObj.timeMs;
+      if (t < rangeStartMs || t > rangeEndMs) return;
 
       const site = normalizeSite(r.site);
       if (site !== "NVL" && site !== "NVCL") return;
 
       const amt = Number(r.amount) || 0;
-      const debitAmt = Number(r.debitAmount) || 0;
-      const payAmt = Number(r.paymentAmount) || 0;
-
       summary[site].billedRevenue += amt;
-
-      const isSubmitted = r.sentToGST || submittedBillSet.has(String(r.invoiceNumber)) || submittedBillSet.has(String(r.billNo));
-      if (isSubmitted) {
-        summary[site].billedSubmitted += amt;
-      }
-
-      if (payAmt > 0) {
-        summary[site].paymentReceived += payAmt;
-      }
-      summary[site].revisedBilledRevenue += (amt - debitAmt);
     });
 
-    // 7. Aggregate payments by Site
-    payments.forEach(p => {
-      if (!p.paymentDate) return;
-      const pDate = parseDate(p.paymentDate);
-      if (!pDate) return;
-      const t = pDate.getTime();
-      if (t < fyStartMs || t > cutoffMs) return;
-
-      const pAmt = Number(p.paymentAmount) || 0;
-      if (pAmt <= 0) return;
-
-      let site = null;
-      if (p.billNos && p.billNos.length > 0) {
-        const matchingBill = billRows.find(b => p.billNos.includes(String(b.invoiceNumber)) || p.billNos.includes(String(b.billNo)));
-        if (matchingBill) {
-          site = normalizeSite(matchingBill.site);
-        }
-      }
-      if (site === "NVL" || site === "NVCL") {
-        summary[site].paymentReceived += pAmt;
-      }
-    });
-
-    // 8. Aggregate unbilled entries by Site
+    // 7. Aggregate unbilled entries by Site & Exact Daily Summary alert logic
     unbilledEntries.forEach(entry => {
-      const dateVal = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || "";
-      const dObj = parseDate(dateVal);
-      if (!dObj) return;
-      const t = dObj.getTime();
-      if (t < fyStartMs || t > cutoffMs) return;
+      const rawDate = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || entry["DATE"];
+      const dateObj = parseDateToCalendar(rawDate);
+      if (!dateObj) return;
+      const t = dateObj.timeMs;
+      if (t < rangeStartMs || t > rangeEndMs) return;
 
       let site = normalizeSite(entry.SITE);
       if (site !== "NVL" && site !== "NVCL") return;
 
-      const amt = parseNum(entry["BILLING AMOUNT"] || entry["Billing Amount"] || entry["BILLING ER 95%"] || entry["AMOUNT"] || 0);
+      const amt = parseNum(entry["BILLING AMOUNT"] ?? entry["Billing Amount"] ?? entry["BILLING ER 95%"] ?? entry["AMOUNT"] ?? 0);
       const status = String(entry["CHALLAN STATUS"] || "").toUpperCase().trim();
+      const isStamp = status === "STAMP";
+      const isNonStamp = status.includes("NON-STAMP") || status.includes("NON STAMP");
 
-      if (status === "STAMP") {
-        summary[site].stampNotBilled += amt;
-      } else if (status.includes("NON STAMP") || status.includes("NON-STAMP")) {
+      if (isStamp) {
+        const freightBillNo = String(entry["BILL NO"] || entry["BILL NUMBER"] || entry["FREIGHT BILL NO"] || entry["Freight Bill No"] || entry.freightBillNo || "").trim();
+        const hasFreight = freightBillNo !== "" && freightBillNo !== "-" && freightBillNo.toLowerCase() !== "null" && freightBillNo.toLowerCase() !== "undefined";
+
+        const unloadingBillNo = String(entry["UNLOADING BILL NO"] || entry["UNLOADING BILL NUMBER"] || entry["Unloading Bill No"] || entry.unloadingBillNo || "").trim();
+        const hasUnloading = unloadingBillNo !== "" && unloadingBillNo !== "-" && unloadingBillNo.toLowerCase() !== "null" && unloadingBillNo.toLowerCase() !== "undefined";
+
+        if (!hasFreight || !hasUnloading) {
+          summary[site].stampNotBilled += amt;
+
+          detailedRecords.stampNotBilled[site].total.push(entry);
+          detailedRecords.stampNotBilled.TOTAL.total.push(entry);
+
+          if (!hasFreight && !hasUnloading) {
+            detailedRecords.stampNotBilled[site].all.push(entry);
+            detailedRecords.stampNotBilled.TOTAL.all.push(entry);
+          }
+          if (!hasFreight) {
+            detailedRecords.stampNotBilled[site].freight.push(entry);
+            detailedRecords.stampNotBilled.TOTAL.freight.push(entry);
+          }
+          if (!hasUnloading) {
+            detailedRecords.stampNotBilled[site].unloading.push(entry);
+            detailedRecords.stampNotBilled.TOTAL.unloading.push(entry);
+          }
+        }
+      } else if (isNonStamp) {
         summary[site].nonStampNotBilled += amt;
+        detailedRecords.nonStampNotBilled[site].push(entry);
+        detailedRecords.nonStampNotBilled.TOTAL.push(entry);
       } else {
+        // CHALLAN NOT RECEIVED / CHALLAN STATUS PENDING
         summary[site].challanNotReceived += amt;
+        detailedRecords.challanNotReceived[site].push(entry);
+        detailedRecords.challanNotReceived.TOTAL.push(entry);
       }
     });
 
-    // 9. Round numeric values and compute site totals
+    // 8. Round numeric values and compute site totals
     ["NVL", "NVCL"].forEach(site => {
       summary[site].billedRevenue = Math.round(summary[site].billedRevenue);
-      summary[site].billedSubmitted = Math.round(summary[site].billedSubmitted);
-      summary[site].paymentReceived = Math.round(summary[site].paymentReceived);
-      summary[site].revisedBilledRevenue = Math.round(summary[site].revisedBilledRevenue);
       summary[site].stampNotBilled = Math.round(summary[site].stampNotBilled);
       summary[site].nonStampNotBilled = Math.round(summary[site].nonStampNotBilled);
       summary[site].challanNotReceived = Math.round(summary[site].challanNotReceived);
       summary[site].total = Math.round(
-        (summary[site].revisedBilledRevenue || 0) +
-        (summary[site].stampNotBilled || 0) +
-        (summary[site].nonStampNotBilled || 0) +
-        (summary[site].challanNotReceived || 0)
+        summary[site].billedRevenue +
+        summary[site].stampNotBilled +
+        summary[site].nonStampNotBilled +
+        summary[site].challanNotReceived
       );
     });
 
-    // 10. Compute TOTAL = NVL + NVCL
+    // 9. Compute TOTAL = NVL + NVCL
     summary.TOTAL = {
       site: "TOTAL",
       billedRevenue: summary.NVL.billedRevenue + summary.NVCL.billedRevenue,
-      billedSubmitted: summary.NVL.billedSubmitted + summary.NVCL.billedSubmitted,
-      paymentReceived: summary.NVL.paymentReceived + summary.NVCL.paymentReceived,
-      revisedBilledRevenue: summary.NVL.revisedBilledRevenue + summary.NVCL.revisedBilledRevenue,
       stampNotBilled: summary.NVL.stampNotBilled + summary.NVCL.stampNotBilled,
       nonStampNotBilled: summary.NVL.nonStampNotBilled + summary.NVCL.nonStampNotBilled,
       challanNotReceived: summary.NVL.challanNotReceived + summary.NVCL.challanNotReceived,
@@ -1656,6 +1719,7 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       selectedDate: selectedPeriodDisplay,
       summary,
       rows,
+      records: detailedRecords,
       data: summary
     });
 

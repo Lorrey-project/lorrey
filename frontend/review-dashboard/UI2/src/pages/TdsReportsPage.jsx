@@ -174,6 +174,8 @@ export default function TdsReportsPage({ onBack }) {
       socket.on('truckContactsUpdates', handleLiveUpdate);
       socket.on('incentiveStateUpdates', handleLiveUpdate);
       socket.on('billRegisterUpdated', handleLiveUpdate);
+      socket.on('partyTdsUpdated', handleLiveUpdate);
+      socket.on('tdsDifferentialUpdated', handleLiveUpdate);
     } catch (e) {
       console.error('[TdsReports] Socket connection error:', e);
     }
@@ -186,10 +188,223 @@ export default function TdsReportsPage({ onBack }) {
         socket.off('truckContactsUpdates');
         socket.off('incentiveStateUpdates');
         socket.off('billRegisterUpdated');
+        socket.off('partyTdsUpdated');
+        socket.off('tdsDifferentialUpdated');
         socket.disconnect();
       }
     };
   }, [mainTab, partyMonth, partyFy, billingSubTab, selMonth, selYear, searchTerm]);
+
+  // Pending uncommitted DIFFERENTIAL edits: { [rowKey]: { sourceType, selectedMonth, selectedYear, manualAmount } }
+  const [pendingDiffEdits, setPendingDiffEdits] = useState({});
+  const [savingRows, setSavingRows] = useState({}); // { [rowKey]: boolean }
+
+  // Clear pending edits whenever main filters change
+  useEffect(() => {
+    setPendingDiffEdits({});
+  }, [partyMonth, partyFy, mainTab]);
+
+  // Handle dropdown change for DIFFERENTIAL row (Marks as PENDING edit, does NOT auto-save)
+  const handleDifferentialSourceChange = (row, newSelectionVal) => {
+    const oKey = (row.name || '').trim().toUpperCase();
+    const vKey = (row.vehicleNo || '').trim();
+    const rowKey = `${oKey}_${vKey}`;
+    const isOthers = newSelectionVal === 'OTHERS';
+
+    const fyStart = parseInt(partyFy.split('-')[0], 10);
+    const calYear = partyMonth >= 4 ? fyStart : fyStart + 1;
+
+    let sMonth = partyMonth;
+    let sYear = calYear;
+
+    if (!isOthers) {
+      const [mStr, yStr] = newSelectionVal.split('_');
+      sMonth = parseInt(mStr, 10);
+      sYear = parseInt(yStr, 10);
+    }
+
+    const currentPending = pendingDiffEdits[rowKey] || {};
+    const currentManual = currentPending.manualAmount !== undefined
+      ? currentPending.manualAmount
+      : (row.differentialConfig?.manualAmount || '');
+
+    setPendingDiffEdits(prev => ({
+      ...prev,
+      [rowKey]: {
+        sourceType: isOthers ? 'OTHERS' : 'MONTH',
+        selectedMonth: sMonth,
+        selectedYear: sYear,
+        manualAmount: currentManual
+      }
+    }));
+  };
+
+  // Handle manual amount input for OTHERS (Marks as PENDING edit, does NOT auto-save)
+  const handleDifferentialManualAmountChange = (row, rawVal) => {
+    const oKey = (row.name || '').trim().toUpperCase();
+    const vKey = (row.vehicleNo || '').trim();
+    const rowKey = `${oKey}_${vKey}`;
+    const currentPending = pendingDiffEdits[rowKey] || {};
+
+    const fyStart = parseInt(partyFy.split('-')[0], 10);
+    const calYear = partyMonth >= 4 ? fyStart : fyStart + 1;
+
+    setPendingDiffEdits(prev => ({
+      ...prev,
+      [rowKey]: {
+        sourceType: 'OTHERS',
+        selectedMonth: currentPending.selectedMonth || row.differentialConfig?.selectedMonth || partyMonth,
+        selectedYear: currentPending.selectedYear || row.differentialConfig?.selectedYear || calYear,
+        manualAmount: rawVal
+      }
+    }));
+  };
+
+  // Save single DIFFERENTIAL row to MongoDB
+  const handleSaveRow = async (row) => {
+    const oKey = (row.name || '').trim().toUpperCase();
+    const vKey = (row.vehicleNo || '').trim();
+    const rowKey = `${oKey}_${vKey}`;
+    const pending = pendingDiffEdits[rowKey];
+    if (!pending) return;
+
+    setSavingRows(prev => ({ ...prev, [rowKey]: true }));
+
+    const fyStart = parseInt(partyFy.split('-')[0], 10);
+    const calYear = partyMonth >= 4 ? fyStart : fyStart + 1;
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      await axios.post(`${API_URL}/tds-reports/party-tds/differential-override`, {
+        ownerName: row.name,
+        vehicleNo: row.vehicleNo,
+        fy: partyFy,
+        reportMonth: partyMonth,
+        reportYear: calYear,
+        sourceType: pending.sourceType,
+        sourceMonth: pending.selectedMonth,
+        sourceYear: pending.selectedYear,
+        manualAmount: pending.manualAmount
+      }, { headers });
+
+      // Update record in `records` state with newly persisted configuration
+      setRecords(prev => prev.map(item => {
+        if (item.billType === 'DIFFERENTIAL' && (item.name || '').trim().toUpperCase() === oKey && (item.vehicleNo || '').trim() === vKey) {
+          const config = item.differentialConfig || {};
+          const availableMonths = config.availableMonths || [];
+          let newBasic = null;
+          let note = 'AUTO';
+          let autoStatus = 'AUTO';
+          let sourceModule = 'Incentive Entry (Actual - Projected)';
+
+          if (pending.sourceType === 'OTHERS') {
+            note = 'MANUAL';
+            autoStatus = 'MANUAL';
+            sourceModule = 'Manual Others Entry';
+            if (pending.manualAmount !== '' && pending.manualAmount !== null && pending.manualAmount !== undefined && !isNaN(Number(pending.manualAmount))) {
+              newBasic = Number(pending.manualAmount);
+            }
+          } else {
+            const matchedCandidate = availableMonths.find(c => c.month === pending.selectedMonth && c.year === pending.selectedYear);
+            if (matchedCandidate && matchedCandidate.hasData && matchedCandidate.diff !== null) {
+              newBasic = matchedCandidate.diff;
+            }
+          }
+
+          const applicableTds = item.tdsPercent || 0;
+          const calcTds = (amt) => {
+            if (amt === null || amt === undefined || isNaN(amt) || !applicableTds || applicableTds <= 0) return 0;
+            return Math.round((amt * (applicableTds / 100)) * 100) / 100;
+          };
+          const newTdsAmt = newBasic !== null ? calcTds(newBasic) : null;
+
+          return {
+            ...item,
+            basicAmount: newBasic,
+            tdsAmount: newTdsAmt,
+            tdsDeducted: newTdsAmt,
+            note,
+            autoStatus,
+            sourceModule,
+            differentialConfig: {
+              ...config,
+              sourceType: pending.sourceType,
+              selectedMonth: pending.selectedMonth,
+              selectedYear: pending.selectedYear,
+              manualAmount: pending.manualAmount
+            }
+          };
+        }
+        return item;
+      }));
+
+      // Clear from pending state
+      setPendingDiffEdits(prev => {
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      });
+    } catch (err) {
+      console.error('[TdsReports] Failed to persist differential edit:', err);
+    } finally {
+      setSavingRows(prev => ({ ...prev, [rowKey]: false }));
+    }
+  };
+
+  // Discard pending edit for a single row
+  const handleDiscardRow = (row) => {
+    const oKey = (row.name || '').trim().toUpperCase();
+    const vKey = (row.vehicleNo || '').trim();
+    const rowKey = `${oKey}_${vKey}`;
+    setPendingDiffEdits(prev => {
+      const next = { ...prev };
+      delete next[rowKey];
+      return next;
+    });
+  };
+
+  // Discard all pending edits
+  const handleDiscardAllPending = () => {
+    setPendingDiffEdits({});
+  };
+
+  // Save all pending edits in a batch
+  const handleSaveAllPending = async () => {
+    const keys = Object.keys(pendingDiffEdits);
+    if (keys.length === 0) return;
+
+    const token = localStorage.getItem('token');
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const fyStart = parseInt(partyFy.split('-')[0], 10);
+    const calYear = partyMonth >= 4 ? fyStart : fyStart + 1;
+
+    for (const rowKey of keys) {
+      const pending = pendingDiffEdits[rowKey];
+      const matchedRow = records.find(r => r.billType === 'DIFFERENTIAL' && `${(r.name || '').trim().toUpperCase()}_${(r.vehicleNo || '').trim()}` === rowKey);
+      if (matchedRow && pending) {
+        try {
+          await axios.post(`${API_URL}/tds-reports/party-tds/differential-override`, {
+            ownerName: matchedRow.name,
+            vehicleNo: matchedRow.vehicleNo,
+            fy: partyFy,
+            reportMonth: partyMonth,
+            reportYear: calYear,
+            sourceType: pending.sourceType,
+            sourceMonth: pending.selectedMonth,
+            sourceYear: pending.selectedYear,
+            manualAmount: pending.manualAmount
+          }, { headers });
+        } catch (e) {
+          console.error('[TdsReports] Batch save error for', rowKey, e);
+        }
+      }
+    }
+
+    setPendingDiffEdits({});
+    fetchData();
+  };
 
   // Ensure continuous SL NO if filtered locally
   const filteredRecords = useMemo(() => {
@@ -229,12 +444,16 @@ export default function TdsReportsPage({ onBack }) {
       'Wheel': r.wheel || '-',
       'Bill No.': r.billNo,
       'Bill date': r.billDate,
-      'Bill type': r.billType,
-      'Basic Amount (Rs)': r.basicAmount,
+      'Bill type': r.billType === 'DIFFERENTIAL'
+        ? (r.differentialConfig?.sourceType === 'OTHERS'
+            ? 'DIFFERENTIAL (Others)'
+            : `DIFFERENTIAL (${r.differentialConfig?.availableMonths?.find(c => c.month === r.differentialConfig?.selectedMonth && c.year === r.differentialConfig?.selectedYear)?.label || ''})`)
+        : r.billType,
+      'Basic Amount (Rs)': r.basicAmount !== null && r.basicAmount !== undefined ? r.basicAmount : '—',
       'Note': r.note || '-',
       'TDS (%)': `${r.tdsPercent}%`,
-      'TDS Amount (Rs)': r.tdsAmount,
-      'TDS Deducted (Rs)': r.tdsDeducted,
+      'TDS Amount (Rs)': r.tdsAmount !== null && r.tdsAmount !== undefined ? r.tdsAmount : '—',
+      'TDS Deducted (Rs)': r.tdsDeducted !== null && r.tdsDeducted !== undefined ? r.tdsDeducted : '—',
       'PAN CARD NUMBER': r.panCardNumber,
       'AADHAR NO': r.aadharNo,
       'AADHAAR - PAN LINKED': r.aadhaarPanLinked || (r.panCardNumber !== '-' && r.aadharNo !== '-' ? 'YES' : 'NO')
@@ -264,21 +483,31 @@ export default function TdsReportsPage({ onBack }) {
     window.print();
   };
 
+  // Sticky header cell styles with solid opaque background and explicit borders
   const thStyle = {
+    position: 'sticky',
+    top: 0,
+    zIndex: 10,
     backgroundColor: '#0f172a',
     color: '#ffffff',
-    padding: '10px 8px',
-    border: '1px solid #334155',
+    padding: '12px 10px',
+    borderBottom: '2px solid #475569',
+    borderRight: '1px solid #334155',
+    borderTop: '1px solid #334155',
+    borderLeft: '1px solid #334155',
     fontSize: '11px',
     fontWeight: 800,
     textTransform: 'uppercase',
     textAlign: 'center',
-    whiteSpace: 'nowrap'
+    whiteSpace: 'nowrap',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.25)'
   };
 
   const tdStyle = {
     padding: '8px 10px',
-    border: '1px solid #cbd5e1',
+    borderBottom: '1px solid #cbd5e1',
+    borderRight: '1px solid #cbd5e1',
+    borderLeft: '1px solid #cbd5e1',
     fontSize: '12px',
     color: '#0f172a',
     backgroundColor: 'transparent'
@@ -292,9 +521,11 @@ export default function TdsReportsPage({ onBack }) {
         @media print {
           body { background-color: #ffffff !important; color: #000000 !important; }
           .no-print { display: none !important; }
+          .print-only { display: block !important; }
+          .print-only-inline { display: inline !important; }
           .print-only-bg { background-color: #ffffff !important; color: #000000 !important; border: none !important; box-shadow: none !important; p: 0 !important; }
           table { width: 100% !important; border-collapse: collapse !important; color: #000000 !important; }
-          th { background-color: #f1f5f9 !important; color: #000000 !important; border: 1px solid #000000 !important; font-size: 10pt !important; }
+          th { position: static !important; background-color: #f1f5f9 !important; color: #000000 !important; border: 1px solid #000000 !important; font-size: 10pt !important; }
           td { background-color: #ffffff !important; color: #000000 !important; border: 1px solid #000000 !important; font-size: 9pt !important; }
         }
       `}</style>
@@ -506,16 +737,16 @@ export default function TdsReportsPage({ onBack }) {
             className="print-only-bg"
             elevation={4}
             sx={{
-              p: { xs: 2, md: 4 },
+              p: { xs: 2, md: 3 },
               bgcolor: '#ffffff',
               color: '#0f172a',
               borderRadius: 2,
               boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
-              overflow: 'hidden'
+              overflow: 'visible'
             }}
           >
             {/* Header */}
-            <Box sx={{ textAlign: 'center', mb: 3 }}>
+            <Box sx={{ textAlign: 'center', mb: 2.5 }}>
               <Typography variant="h4" fontWeight="900" sx={{ letterSpacing: '1px', color: '#0f172a', textTransform: 'uppercase' }}>
                 DIPALI ASSOCIATES &amp; CO.
               </Typography>
@@ -527,15 +758,107 @@ export default function TdsReportsPage({ onBack }) {
               </Typography>
             </Box>
 
-            {/* Table */}
-            <Box sx={{ overflowX: 'auto', position: 'relative', minHeight: 350 }}>
+            {/* ── Visual Separator & DIFFERENTIAL Controls Info Bar ── */}
+            <Box
+              className="no-print"
+              sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                p: 1.5,
+                mb: 2,
+                bgcolor: Object.keys(pendingDiffEdits).length > 0 ? '#fffbeb' : '#f8fafc',
+                border: '1px solid',
+                borderColor: Object.keys(pendingDiffEdits).length > 0 ? '#fde68a' : '#e2e8f0',
+                borderRadius: 2,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                flexWrap: 'wrap',
+                gap: 1.5
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, color: Object.keys(pendingDiffEdits).length > 0 ? '#b45309' : '#1e293b' }}>
+                  {Object.keys(pendingDiffEdits).length > 0
+                    ? `⚠️ ${Object.keys(pendingDiffEdits).length} Unsaved DIFFERENTIAL Edit(s) Pending`
+                    : '📋 DIFFERENTIAL ENTRY & TDS EDIT CONTROLS'}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                  Select month or enter manual Others amount in the table below, then click SAVE to persist to MongoDB database.
+                </Typography>
+              </Box>
+
+              {Object.keys(pendingDiffEdits).length > 0 && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={handleSaveAllPending}
+                    sx={{
+                      height: 28,
+                      px: 2,
+                      fontWeight: 800,
+                      fontSize: '11px',
+                      bgcolor: '#059669',
+                      color: '#ffffff',
+                      textTransform: 'none',
+                      borderRadius: 1,
+                      '&:hover': { bgcolor: '#047857' }
+                    }}
+                  >
+                    SAVE ALL PENDING ({Object.keys(pendingDiffEdits).length})
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={handleDiscardAllPending}
+                    sx={{
+                      height: 28,
+                      px: 1.5,
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      color: '#64748b',
+                      borderColor: '#cbd5e1',
+                      textTransform: 'none',
+                      borderRadius: 1,
+                      '&:hover': { bgcolor: '#f1f5f9' }
+                    }}
+                  >
+                    Discard All
+                  </Button>
+                </Box>
+              )}
+            </Box>
+
+            {/* Table Container with Continuous Vertical & Horizontal Scroll and Sticky Header */}
+            <Box
+              sx={{
+                overflowX: 'auto',
+                overflowY: 'auto',
+                maxHeight: 'calc(100vh - 270px)',
+                minHeight: 420,
+                position: 'relative',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                '&::-webkit-scrollbar': {
+                  width: '8px',
+                  height: '8px'
+                },
+                '&::-webkit-scrollbar-track': {
+                  backgroundColor: '#f1f5f9'
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  backgroundColor: '#94a3b8',
+                  borderRadius: '4px'
+                }
+              }}
+            >
               {loading && (
-                <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(255,255,255,0.7)', zIndex: 20 }}>
+                <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(255,255,255,0.7)', zIndex: 30 }}>
                   <CircularProgress color="primary" />
                 </Box>
               )}
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Inter, system-ui, sans-serif' }}>
+              <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontFamily: 'Inter, system-ui, sans-serif' }}>
                 <thead>
                   <tr>
                     <th style={{ ...thStyle, width: '55px' }}>SL NO</th>
@@ -544,9 +867,9 @@ export default function TdsReportsPage({ onBack }) {
                     <th style={{ ...thStyle, minWidth: '75px' }}>Wheel</th>
                     <th style={{ ...thStyle, textAlign: 'left', minWidth: '110px' }}>Bill No.</th>
                     <th style={{ ...thStyle, minWidth: '100px' }}>Bill date</th>
-                    <th style={{ ...thStyle, minWidth: '140px' }}>Bill type</th>
-                    <th style={{ ...thStyle, textAlign: 'right', minWidth: '120px' }}>Basic Amount</th>
-                    <th style={{ ...thStyle, minWidth: '90px' }}>Note</th>
+                    <th style={{ ...thStyle, minWidth: '190px' }}>Bill type</th>
+                    <th style={{ ...thStyle, textAlign: 'right', minWidth: '150px' }}>Basic Amount</th>
+                    <th style={{ ...thStyle, minWidth: '120px' }}>Note</th>
                     <th style={{ ...thStyle, width: '75px' }}>TDS (%)</th>
                     <th style={{ ...thStyle, textAlign: 'right', minWidth: '120px' }}>TDS Amount</th>
                     <th style={{ ...thStyle, textAlign: 'right', minWidth: '120px' }}>TDS Deducted</th>
@@ -573,12 +896,54 @@ export default function TdsReportsPage({ onBack }) {
                       }
                       const rowBg = vehicleGroupIdx % 2 === 1 ? '#ffffff' : '#f8fafc';
                       const isGroupEnd = r.isLastOfVehicle || false;
+                      const isDiff = r.billType === 'DIFFERENTIAL';
+
+                      const oKey = (r.name || '').trim().toUpperCase();
+                      const vKey = (r.vehicleNo || '').trim();
+                      const rowKey = `${oKey}_${vKey}`;
+                      const pending = isDiff ? pendingDiffEdits[rowKey] : null;
+                      const isRowDirty = isDiff && !!pending;
+                      const isRowSaving = isDiff && !!savingRows[rowKey];
+
+                      const currentSourceType = pending ? pending.sourceType : (r.differentialConfig?.sourceType || 'MONTH');
+                      const currentSelectedMonth = pending ? pending.selectedMonth : (r.differentialConfig?.selectedMonth || partyMonth);
+                      const currentSelectedYear = pending ? pending.selectedYear : (r.differentialConfig?.selectedYear || (partyMonth >= 4 ? parseInt(partyFy.split('-')[0], 10) : parseInt(partyFy.split('-')[0], 10) + 1));
+                      const currentManualAmount = pending ? pending.manualAmount : (r.differentialConfig?.manualAmount !== undefined ? r.differentialConfig.manualAmount : '');
+
+                      // Calculate effective preview basic amount
+                      let displayBasicAmt = r.basicAmount;
+                      let displayTdsAmt = r.tdsAmount;
+                      let displayTdsDeducted = r.tdsDeducted;
+
+                      if (isDiff && pending) {
+                        const config = r.differentialConfig || {};
+                        const availableMonths = config.availableMonths || [];
+                        let tempBasic = null;
+                        if (currentSourceType === 'OTHERS') {
+                          if (currentManualAmount !== '' && currentManualAmount !== null && !isNaN(Number(currentManualAmount))) {
+                            tempBasic = Number(currentManualAmount);
+                          }
+                        } else {
+                          const matchedCandidate = availableMonths.find(c => c.month === currentSelectedMonth && c.year === currentSelectedYear);
+                          if (matchedCandidate && matchedCandidate.hasData && matchedCandidate.diff !== null) {
+                            tempBasic = matchedCandidate.diff;
+                          }
+                        }
+                        displayBasicAmt = tempBasic;
+                        const applicableTds = r.tdsPercent || 0;
+                        const calcTds = (amt) => {
+                          if (amt === null || amt === undefined || isNaN(amt) || !applicableTds || applicableTds <= 0) return 0;
+                          return Math.round((amt * (applicableTds / 100)) * 100) / 100;
+                        };
+                        displayTdsAmt = tempBasic !== null ? calcTds(tempBasic) : null;
+                        displayTdsDeducted = displayTdsAmt;
+                      }
 
                       return (
                         <tr
                           key={index}
                           style={{
-                            backgroundColor: rowBg,
+                            backgroundColor: isRowDirty ? '#fefce8' : rowBg,
                             borderBottom: isGroupEnd ? '2px solid #94a3b8' : '1px solid #e2e8f0'
                           }}
                         >
@@ -612,19 +977,221 @@ export default function TdsReportsPage({ onBack }) {
                             {r.billDate}
                           </td>
 
-                          {/* 7. Bill type */}
+                          {/* 7. Bill type & Dropdown for DIFFERENTIAL */}
                           <td style={{ ...tdStyle, textAlign: 'center', color: '#475569', fontWeight: 600 }}>
-                            {r.billType}
+                            {isDiff ? (
+                              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5, py: 0.5 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 800, color: '#0f172a', fontSize: '11px', letterSpacing: '0.3px' }}>
+                                    DIFFERENTIAL
+                                  </Typography>
+                                  {isRowDirty && (
+                                    <Chip
+                                      label="UNSAVED"
+                                      size="small"
+                                      sx={{
+                                        height: 16,
+                                        fontSize: '9px',
+                                        fontWeight: 900,
+                                        bgcolor: '#fee2e2',
+                                        color: '#b91c1c',
+                                        border: '1px solid #fca5a5'
+                                      }}
+                                    />
+                                  )}
+                                </Box>
+                                <Box className="no-print" sx={{ width: '100%' }}>
+                                  <Select
+                                    size="small"
+                                    value={
+                                      currentSourceType === 'OTHERS'
+                                        ? 'OTHERS'
+                                        : `${currentSelectedMonth}_${currentSelectedYear}`
+                                    }
+                                    onChange={(e) => handleDifferentialSourceChange(r, e.target.value)}
+                                    sx={{
+                                      height: 26,
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      bgcolor: currentSourceType === 'OTHERS' ? '#fffbeb' : '#f0f9ff',
+                                      color: currentSourceType === 'OTHERS' ? '#b45309' : '#0369a1',
+                                      borderRadius: '6px',
+                                      width: '100%',
+                                      minWidth: 145,
+                                      '.MuiSelect-select': { py: '2px', px: '6px' },
+                                      '.MuiOutlinedInput-notchedOutline': {
+                                        borderColor: isRowDirty ? '#f59e0b' : (currentSourceType === 'OTHERS' ? '#fde68a' : '#bae6fd'),
+                                        borderWidth: isRowDirty ? '2px' : '1px'
+                                      },
+                                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#38bdf8' }
+                                    }}
+                                  >
+                                    {(r.differentialConfig?.availableMonths || []).map((cand) => (
+                                      <MenuItem key={`${cand.month}_${cand.year}`} value={`${cand.month}_${cand.year}`} sx={{ fontSize: '12px', fontWeight: 600 }}>
+                                        {cand.label}
+                                      </MenuItem>
+                                    ))}
+                                    <MenuItem value="OTHERS" sx={{ fontSize: '12px', fontWeight: 700, color: '#b45309' }}>
+                                      Others
+                                    </MenuItem>
+                                  </Select>
+                                </Box>
+                                <Box className="print-only" sx={{ display: 'none', fontSize: '10px', fontWeight: 700, color: '#334155' }}>
+                                  {currentSourceType === 'OTHERS'
+                                    ? '(Others)'
+                                    : `(${r.differentialConfig?.availableMonths?.find(c => c.month === currentSelectedMonth && c.year === currentSelectedYear)?.label || ''})`}
+                                </Box>
+                              </Box>
+                            ) : (
+                              r.billType
+                            )}
                           </td>
 
-                          {/* 8. Basic Amount */}
+                          {/* 8. Basic Amount & Save Action */}
                           <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
-                            ₹{formatAmt(r.basicAmount)}
+                            {isDiff ? (
+                              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+                                {currentSourceType === 'OTHERS' ? (
+                                  <Box className="no-print" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '12px', color: '#b45309' }}>₹</Typography>
+                                    <TextField
+                                      size="small"
+                                      type="number"
+                                      placeholder="0.00"
+                                      value={currentManualAmount !== undefined && currentManualAmount !== null ? currentManualAmount : ''}
+                                      onChange={(e) => handleDifferentialManualAmountChange(r, e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          handleSaveRow(r);
+                                        }
+                                      }}
+                                      sx={{
+                                        width: 105,
+                                        bgcolor: '#ffffff',
+                                        borderRadius: '4px',
+                                        input: {
+                                          py: '2px',
+                                          px: '6px',
+                                          fontSize: '12px',
+                                          fontWeight: 800,
+                                          textAlign: 'right',
+                                          color: '#0f172a'
+                                        },
+                                        '.MuiOutlinedInput-notchedOutline': { borderColor: isRowDirty ? '#f59e0b' : '#cbd5e1' }
+                                      }}
+                                    />
+                                  </Box>
+                                ) : (
+                                  <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '12px', color: '#0f172a' }}>
+                                    {displayBasicAmt !== null && displayBasicAmt !== undefined ? `₹${formatAmt(displayBasicAmt)}` : <span style={{ color: '#94a3b8', fontWeight: 500 }}>—</span>}
+                                  </Typography>
+                                )}
+
+                                {/* Row-Level SAVE Button when dirty / unsaved */}
+                                {isRowDirty && (
+                                  <Box className="no-print" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25 }}>
+                                    <Button
+                                      size="small"
+                                      variant="contained"
+                                      disabled={isRowSaving}
+                                      onClick={() => handleSaveRow(r)}
+                                      sx={{
+                                        height: 22,
+                                        px: 1,
+                                        fontSize: '10px',
+                                        fontWeight: 800,
+                                        bgcolor: '#059669',
+                                        color: '#ffffff',
+                                        borderRadius: '4px',
+                                        textTransform: 'none',
+                                        minWidth: 50,
+                                        '&:hover': { bgcolor: '#047857' }
+                                      }}
+                                    >
+                                      {isRowSaving ? 'Saving...' : 'SAVE'}
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      onClick={() => handleDiscardRow(r)}
+                                      sx={{
+                                        height: 22,
+                                        px: 0.5,
+                                        fontSize: '9px',
+                                        fontWeight: 700,
+                                        color: '#64748b',
+                                        borderColor: '#cbd5e1',
+                                        borderRadius: '4px',
+                                        textTransform: 'none',
+                                        minWidth: 40,
+                                        '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
+                                      }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </Box>
+                                )}
+
+                                <Box className="print-only" sx={{ display: 'none', fontWeight: 800 }}>
+                                  {displayBasicAmt !== null && displayBasicAmt !== undefined ? `₹${formatAmt(displayBasicAmt)}` : '—'}
+                                </Box>
+                              </Box>
+                            ) : (
+                              r.basicAmount !== null && r.basicAmount !== undefined ? (
+                                `₹${formatAmt(r.basicAmount)}`
+                              ) : (
+                                <span style={{ color: '#94a3b8', fontWeight: 500 }}>—</span>
+                              )
+                            )}
                           </td>
 
                           {/* 9. Note / AUTO UPDATED Indicator */}
                           <td style={{ ...tdStyle, textAlign: 'center', whiteSpace: 'nowrap' }}>
-                            {r.autoStatus === 'AUTO UPDATED' || r.note === 'AUTO UPDATED' ? (
+                            {isDiff ? (
+                              currentSourceType === 'OTHERS' ? (
+                                <Chip
+                                  label="MANUAL OTHERS"
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '10px',
+                                    fontWeight: 800,
+                                    bgcolor: '#fef3c7',
+                                    color: '#b45309',
+                                    border: '1px solid #fde68a',
+                                    letterSpacing: '0.3px'
+                                  }}
+                                />
+                              ) : displayBasicAmt !== null ? (
+                                <Chip
+                                  label={currentSelectedMonth === partyMonth ? "AUTO (CURRENT)" : "AUTO (PREV)"}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '10px',
+                                    fontWeight: 800,
+                                    bgcolor: '#e0f2fe',
+                                    color: '#0369a1',
+                                    border: '1px solid #7dd3fc',
+                                    letterSpacing: '0.3px'
+                                  }}
+                                />
+                              ) : (
+                                <Chip
+                                  label="NO DATA"
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    bgcolor: '#f1f5f9',
+                                    color: '#64748b',
+                                    border: '1px solid #e2e8f0',
+                                    letterSpacing: '0.3px'
+                                  }}
+                                />
+                              )
+                            ) : (r.autoStatus === 'AUTO UPDATED' || r.note === 'AUTO UPDATED') ? (
                               <Chip
                                 label="AUTO UPDATED"
                                 size="small"
@@ -638,7 +1205,7 @@ export default function TdsReportsPage({ onBack }) {
                                   letterSpacing: '0.3px'
                                 }}
                               />
-                            ) : (r.autoStatus === 'AUTO CALCULATED' || r.note === 'AUTO CALCULATED' || r.billType === 'DIFFERENTIAL') ? (
+                            ) : (r.autoStatus === 'AUTO CALCULATED' || r.note === 'AUTO CALCULATED') ? (
                               <Chip
                                 label="AUTO"
                                 size="small"
@@ -666,12 +1233,12 @@ export default function TdsReportsPage({ onBack }) {
 
                           {/* 11. TDS Amount */}
                           <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
-                            ₹{formatAmt(r.tdsAmount)}
+                            {displayTdsAmt !== null && displayTdsAmt !== undefined ? `₹${formatAmt(displayTdsAmt)}` : <span style={{ color: '#94a3b8', fontWeight: 500 }}>—</span>}
                           </td>
 
                           {/* 12. TDS Deducted */}
                           <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: '#047857' }}>
-                            ₹{formatAmt(r.tdsDeducted)}
+                            {displayTdsDeducted !== null && displayTdsDeducted !== undefined ? `₹${formatAmt(displayTdsDeducted)}` : <span style={{ color: '#94a3b8', fontWeight: 500 }}>—</span>}
                           </td>
 
                           {/* 13. PAN CARD NUMBER */}

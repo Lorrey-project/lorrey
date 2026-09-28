@@ -23,7 +23,6 @@
     "@simplewebauthn/browser": "^13.3.0",
     "axios": "^1.13.6",
     "html2pdf.js": "^0.14.0",
-    "number-to-words": "^1.2.4",
     "p5": "^2.3.2",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.0",

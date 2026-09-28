@@ -1,42 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, useMediaQuery } from '@mui/material';
 import { ShortcutProvider } from './context/ShortcutContext';
 import GlobalShortcutHandler from './components/GlobalShortcutHandler';
-import InvoiceForm from './components/InvoiceForm';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
-import Dashboard from './components/Dashboard';
-import PumpDashboard from './components/PumpDashboard';
-import LorryHireSlipReview from './components/LorryHireSlipReview';
-import FuelSlipReview from './components/FuelSlipReview';
-import VoucherEntry from './components/VoucherEntry';
-import CementRegister from './pages/CementRegister';
-import TotalPaymentReports from './pages/TotalPaymentReports';
-import PieChartDashboard from './pages/PieChartDashboard';
-import VoucherRegister from './pages/VoucherRegister';
-import GSTPortalRegister from './pages/GSTPortalRegister';
-import MainCashbook from './pages/MainCashbook';
-import FuelRateSettings from './pages/FuelRateSettings';
-import OfficePortal from './portals/office/OfficePortal';
-import SitePortal from './portals/site/SitePortal';
-import PumpPortal from './portals/pump/PumpPortal';
-import BrindaPortal from './portals/brinda/BrindaPortal';
-import JeetPortal from './portals/jeet/JeetPortal';
-import PumpPaymentDetails from './pages/PumpPaymentDetails';
-import PartyPaymentDetails from './pages/PartyPaymentDetails';
-import FinancialYearDetails from './pages/FinancialYearDetails';
-import AccountDetails from './pages/AccountDetails';
-import AccountApprovalsPage from './pages/AccountApprovalsPage';
-import DailySummaryReport from './pages/DailySummaryReport';
-import PumpPaymentRegister from './pages/PumpPaymentRegister';
-import IncentiveCalculationSheet from './pages/IncentiveCalculationSheet';
-import AttendancePanel from './pages/AttendancePanel';
-import AiExtraExpense from './pages/AiExtraExpense';
-import TdsReportsPage from './pages/TdsReportsPage';
-import OthersCreditor from './pages/OthersCreditor';
-import PrintingStationaryRegister from './pages/PrintingStationaryRegister';
-import PaymentReceiveHistory from './pages/PaymentReceiveHistory';
 import VantaTrunkBackground from './components/VantaTrunkBackground';
+
+// Lazy-loaded components for optimal route-level code splitting
+const InvoiceForm = lazy(() => import('./components/InvoiceForm'));
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const PumpDashboard = lazy(() => import('./components/PumpDashboard'));
+const LorryHireSlipReview = lazy(() => import('./components/LorryHireSlipReview'));
+const FuelSlipReview = lazy(() => import('./components/FuelSlipReview'));
+const VoucherEntry = lazy(() => import('./components/VoucherEntry'));
+const CementRegister = lazy(() => import('./pages/CementRegister'));
+const TotalPaymentReports = lazy(() => import('./pages/TotalPaymentReports'));
+const PieChartDashboard = lazy(() => import('./pages/PieChartDashboard'));
+const VoucherRegister = lazy(() => import('./pages/VoucherRegister'));
+const GSTPortalRegister = lazy(() => import('./pages/GSTPortalRegister'));
+const MainCashbook = lazy(() => import('./pages/MainCashbook'));
+const FuelRateSettings = lazy(() => import('./pages/FuelRateSettings'));
+const OfficePortal = lazy(() => import('./portals/office/OfficePortal'));
+const SitePortal = lazy(() => import('./portals/site/SitePortal'));
+const PumpPortal = lazy(() => import('./portals/pump/PumpPortal'));
+const BrindaPortal = lazy(() => import('./portals/brinda/BrindaPortal'));
+const JeetPortal = lazy(() => import('./portals/jeet/JeetPortal'));
+const PumpPaymentDetails = lazy(() => import('./pages/PumpPaymentDetails'));
+const PartyPaymentDetails = lazy(() => import('./pages/PartyPaymentDetails'));
+const FinancialYearDetails = lazy(() => import('./pages/FinancialYearDetails'));
+const AccountDetails = lazy(() => import('./pages/AccountDetails'));
+const AccountApprovalsPage = lazy(() => import('./pages/AccountApprovalsPage'));
+const DailySummaryReport = lazy(() => import('./pages/DailySummaryReport'));
+const PumpPaymentRegister = lazy(() => import('./pages/PumpPaymentRegister'));
+const IncentiveCalculationSheet = lazy(() => import('./pages/IncentiveCalculationSheet'));
+const AttendancePanel = lazy(() => import('./pages/AttendancePanel'));
+const AiExtraExpense = lazy(() => import('./pages/AiExtraExpense'));
+const TdsReportsPage = lazy(() => import('./pages/TdsReportsPage'));
+const FreightCreditorGst = lazy(() => import('./pages/FreightCreditorGst'));
+const OthersCreditor = lazy(() => import('./pages/OthersCreditor'));
+const PrintingStationaryRegister = lazy(() => import('./pages/PrintingStationaryRegister'));
+const PaymentReceiveHistory = lazy(() => import('./pages/PaymentReceiveHistory'));
 
 const theme = createTheme({
   palette: {
@@ -304,6 +307,10 @@ function AppContent() {
       return <TdsReportsPage onBack={() => handleViewChange('dashboard')} />;
     }
 
+    if (currentView === 'freightCreditorGst') {
+      return <FreightCreditorGst onBack={() => handleViewChange('dashboard')} />;
+    }
+
     if (currentView === 'othersCreditor') {
       return (
         <OthersCreditor
@@ -413,6 +420,7 @@ function AppContent() {
           onOpenIncentiveSheet={() => handleViewChange('incentiveCalculationSheet')}
           onOpenAttendancePanel={() => handleViewChange('attendancePanel')}
           onOpenTdsReports={() => handleViewChange('tdsReports')}
+          onOpenFreightCreditorGst={() => handleViewChange('freightCreditorGst')}
           onOpenOthersCreditor={(tabIdx = 0) => { setOthersCreditorInitialTab(tabIdx); handleViewChange('othersCreditor'); }}
           onOpenPrintingStationary={() => handleViewChange('printingStationary')}
           onOpenPaymentReceiveHistory={() => handleViewChange('paymentReceiveHistory')}
@@ -434,7 +442,13 @@ function AppContent() {
         transition: 'opacity 0.3s ease',
         opacity: isTransitioning ? 0 : 1
       }}>
-        {renderView()}
+        <Suspense fallback={
+          <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh" py={8}>
+            <CircularProgress sx={{ color: '#1a73e8' }} />
+          </Box>
+        }>
+          {renderView()}
+        </Suspense>
       </Box>
     </>
   );

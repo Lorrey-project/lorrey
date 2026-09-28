@@ -96,6 +96,7 @@ app.use("/printing-stationary", require("./routes/printingStationaryRoutes"));
 app.use("/road-tax", require("./routes/roadTaxRoutes"));
 app.use("/advance-auth", auth, require("./routes/advanceAuthRoutes"));
 app.use("/freight-adjustments", require("./routes/freightAdjustmentRoutes"));
+app.use("/freight-creditor-gst", require("./routes/freightCreditorGstRoutes"));
 
 
 

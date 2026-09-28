@@ -100,6 +100,191 @@ function parseTdsField(doc) {
   return null;
 }
 
+// Function to get dynamic candidate months (Current Month + 4 previous months)
+function getDifferentialCandidateMonths(targetMonth, targetYear) {
+  const list = [];
+  for (let offset = 0; offset <= 4; offset++) {
+    let m = targetMonth - offset;
+    let y = targetYear;
+    while (m < 1) {
+      m += 12;
+      y -= 1;
+    }
+    const monthName = MONTH_NAMES_LIST[m - 1] || '';
+    const label = offset === 0 ? `${monthName} ${y} (Current Month)` : `${monthName} ${y}`;
+    list.push({
+      offset,
+      month: m,
+      year: y,
+      monthName,
+      label,
+      isCurrent: offset === 0
+    });
+  }
+  return list;
+}
+
+// Compute incentive actual, projected, and differential for all candidate months
+async function computeCandidateIncentives(candidateMonths, cementCol, incStateCol, vehContactMap, vehToOwner, currentCalMonth, currentCalYear, currentCalDay) {
+  const incQueryOr = candidateMonths.flatMap(c => [
+    { year: c.year, month: c.month - 1 },
+    { year: c.year, month: c.month }
+  ]);
+  const incStates = await incStateCol.find({ $or: incQueryOr }).toArray();
+  const cementDocs = await cementCol.find({}).toArray();
+
+  const candidateResults = [];
+
+  for (const cand of candidateMonths) {
+    const cMonth = cand.month;
+    const cYear = cand.year;
+    const isOngoing = (cMonth === currentCalMonth && cYear === currentCalYear);
+
+    const monthDocs = cementDocs.filter(doc => {
+      const dateVal = doc['LOADING DT'] || doc['LOADING DATE'];
+      const p = parseDate(dateVal);
+      if (!p) return false;
+      const m = p.getMonth() + 1;
+      const y = p.getFullYear();
+      if (m === cMonth && y === cYear) {
+        if (isOngoing) {
+          return p.getDate() <= currentCalDay;
+        }
+        return true;
+      }
+      return false;
+    });
+
+    const matchedState = incStates.find(s => s.year === cYear && (s.month === cMonth - 1 || s.month === cMonth));
+    const actualsMap = (matchedState && matchedState.actuals) ? matchedState.actuals : {};
+
+    const byTruck = {};
+    for (const row of monthDocs) {
+      const truck = normVeh(row['VEHICLE NUMBER'] || row['VEHICLE NO']);
+      if (!truck) continue;
+
+      if (!byTruck[truck]) {
+        const contact = vehContactMap[truck];
+        const dbWheel = contact ? (contact['Type of vehicle '] || contact['Type of vehicle'] || contact.type_of_vehicle || '') : '';
+        const owner = contact ? (contact['Owner Name '] || contact['Owner Name'] || contact.owner_name || '') : '';
+        byTruck[truck] = {
+          ownerName: (row['OWNER NAME'] || owner || vehToOwner[truck] || '').trim(),
+          truckNo: truck,
+          wheel: row['WHEEL'] || dbWheel || '',
+          tripsCount: 0,
+          nvl: { amt: 0 },
+          nvcl: { amt: 0 },
+          extra10W: 0,
+          extra6W: 0
+        };
+      }
+
+      const entry = byTruck[truck];
+      const cat = classifyCementRow(row);
+      const mt = num(row['MT']);
+      const billing = num(row['BILLING']);
+      const orgFreight = billing * mt;
+      entry.tripsCount += 1;
+      const baseIncentive = orgFreight * 0.095;
+
+      if (cat === 'NVL') {
+        entry.nvl.amt += baseIncentive;
+      } else {
+        entry.nvcl.amt += baseIncentive;
+      }
+
+      const bType = (row['Bill Type'] || '').toUpperCase();
+      const isSoOrNt = bType === 'SO' || bType === 'NT';
+      const manualW10 = num(row['10W EXTRA 8.5%']);
+      if (manualW10 > 0) {
+        entry.extra10W += manualW10;
+      } else if (isSoOrNt) {
+        const wheelStr = String(entry.wheel).toLowerCase();
+        if (wheelStr.includes('10')) {
+          entry.extra10W += orgFreight * 0.085;
+        }
+      }
+      if (isSoOrNt) {
+        const wheelStr = String(entry.wheel).toLowerCase();
+        if (wheelStr.includes('6')) {
+          entry.extra6W += orgFreight * 0.15;
+        }
+      }
+    }
+
+    const projectedMap = {};
+    Object.values(byTruck).forEach(t => {
+      const metCriteria = t.tripsCount > 6;
+      if (!metCriteria) {
+        t.extra10W = 0;
+        t.extra6W = 0;
+      }
+      const nvlNvclTotal = Math.round(t.nvl.amt) + Math.round(t.nvcl.amt);
+      const totalFinal = nvlNvclTotal + Math.round(t.extra10W) + Math.round(t.extra6W);
+      const tNo = normVeh(t.truckNo);
+      if (tNo) {
+        projectedMap[tNo] = totalFinal;
+      }
+    });
+
+    const truckMap = new Map();
+    const allTrucks = new Set([...Object.keys(projectedMap), ...Object.keys(actualsMap).map(normVeh)]);
+
+    allTrucks.forEach(tKey => {
+      const proj = projectedMap[tKey] !== undefined ? projectedMap[tKey] : null;
+
+      let rawAct = undefined;
+      for (const [k, val] of Object.entries(actualsMap)) {
+        if (normVeh(k) === tKey) {
+          rawAct = val;
+          break;
+        }
+      }
+
+      let act = null;
+      let hasActual = false;
+
+      if (rawAct !== null && rawAct !== undefined && rawAct !== '') {
+        if (typeof rawAct === 'object' && rawAct !== null) {
+          if (rawAct.actual !== undefined) {
+            act = num(rawAct.actual);
+          } else if (rawAct.settled !== undefined) {
+            act = num(rawAct.settled);
+          } else {
+            act = (num(rawAct.nvl) || 0) + (num(rawAct.nvcl) || 0) + (num(rawAct.w10) || 0) + (num(rawAct.w6) || 0);
+          }
+        } else {
+          act = num(rawAct);
+        }
+        hasActual = true;
+      }
+
+      let diff = null;
+      let hasData = false;
+
+      if (hasActual && act !== null) {
+        // EXACT FORMULA: DIFFERENTIAL = ACTUAL - PROJECTED
+        diff = Math.round((act - (proj || 0)) * 100) / 100;
+        hasData = true;
+      } else if (proj !== null && !hasActual) {
+        diff = null;
+        hasData = false;
+      }
+
+      truckMap.set(tKey, {
+        actual: hasActual ? act : null,
+        projected: proj,
+        diff,
+        hasData
+      });
+    });
+
+    candidateResults.push(truckMap);
+  }
+
+  return candidateResults;
+}
+
 // ── GET /api/tds-reports/party-tds ──────────────────────────────────────────
 router.get('/party-tds', async (req, res) => {
   try {
@@ -138,22 +323,24 @@ router.get('/party-tds', async (req, res) => {
     const db = mongoose.connection.useDb('invoice_system');
     const ownerCol = db.collection('owner details');
     const truckCol = db.collection('Truck Contact Number');
+    const diffCol = db.collection('tds_differential_overrides');
     const cementCol = mongoose.connection.useDb('cement_register').collection('entries');
     const incStateCol = mongoose.connection.useDb('cement_register').collection('incentive_states');
 
-    const [ownerDocs, truckDocs, incState] = await Promise.all([
+    // Generate Candidate Months (Current Month + 4 previous months)
+    const candidateMonths = getDifferentialCandidateMonths(targetMonth, targetYear);
+
+    const [ownerDocs, truckDocs, diffOverrides] = await Promise.all([
       ownerCol.find({}).toArray(),
       truckCol.find({}).toArray(),
-      incStateCol.findOne({
-        year: sourceYear,
-        $or: [
-          { month: sourceMonth - 1 },
-          { month: sourceMonth }
-        ]
-      })
+      diffCol.find({ reportMonth: targetMonth, reportYear: targetYear }).toArray().catch(() => [])
     ]);
 
-    const actualsMap = (incState && incState.actuals) ? incState.actuals : {};
+    const overrideMap = new Map();
+    (diffOverrides || []).forEach(doc => {
+      const key = `${doc.ownerName}_${doc.vehicleNo}`;
+      overrideMap.set(key, doc);
+    });
 
     // 1. Truck Contacts mapping (vehicleNo -> owner, wheel, contact)
     const vehToOwner = {};
@@ -166,6 +353,18 @@ router.get('/party-tds', async (req, res) => {
         vehContactMap[v] = c;
       }
     });
+
+    // Compute incentive actuals & projections across all candidate months
+    const candidateIncentiveMaps = await computeCandidateIncentives(
+      candidateMonths,
+      cementCol,
+      incStateCol,
+      vehContactMap,
+      vehToOwner,
+      currentCalMonth,
+      currentCalYear,
+      currentCalDay
+    );
 
     // 2. Unique owners map & TDS maps from Owner Details collection + Truck Contacts
     const uniqueOwnersMap = new Map();
@@ -268,12 +467,10 @@ router.get('/party-tds', async (req, res) => {
         const y = p.getFullYear();
         if (m === sourceMonth && y === sourceYear) {
           if (isCurrentOngoingMonth) {
-            // Ongoing current month: include trips up to today's date
             if (p.getDate() <= currentCalDay) {
               monthDocs.push(doc);
             }
           } else {
-            // Previous completed months: include all trips
             monthDocs.push(doc);
           }
         }
@@ -321,7 +518,6 @@ router.get('/party-tds', async (req, res) => {
         vehicleFreight[v] = (vehicleFreight[v] || 0) + gf;
       }
 
-      // Track actual TDS recorded in cement register if available
       const tdsVal = num(row['TDS@1%']) || num(row['TDS']);
       ownerTdsDeducted[oKey] = (ownerTdsDeducted[oKey] || 0) + tdsVal;
       if (v) {
@@ -384,7 +580,6 @@ router.get('/party-tds', async (req, res) => {
       }
     }
 
-    // Vehicle-wise and Owner-wise Total (Projected) Incentive
     const vehicleIncentives = {};
     const ownerIncentives = {};
     Object.values(byTruck).forEach(t => {
@@ -405,7 +600,7 @@ router.get('/party-tds', async (req, res) => {
 
     let uniqueOwners = Array.from(uniqueOwnersMap.values());
 
-    // Optional Search Filter by Owner Name, PAN, Aadhaar, or Vehicle Number
+    // Optional Search Filter
     if (search && search.trim()) {
       const term = search.toLowerCase().trim();
       uniqueOwners = uniqueOwners.filter(o => {
@@ -421,10 +616,6 @@ router.get('/party-tds', async (req, res) => {
     }
 
     // 6. Generate rows per vehicle (OWNER -> VEHICLE -> WHEEL -> BILL TYPE)
-    // For EVERY registered vehicle under an owner, generate exactly 3 rows:
-    // ROW 1 → FREIGHT / GROSS FREIGHT
-    // ROW 2 → TOTAL INCENTIVE
-    // ROW 3 → DIFFERENTIAL
     const entries = [];
     let slNo = 1;
     let totalVehiclesCount = 0;
@@ -437,7 +628,6 @@ router.get('/party-tds', async (req, res) => {
       }
 
       totalVehiclesCount += vehicles.length;
-
       const isLinked = (ownerObj.panAadharLink.toUpperCase() === 'YES' || (ownerObj.pan !== '-' && ownerObj.aadhar !== '-')) ? 'YES' : 'NO';
 
       vehicles.forEach((veh, vIdx) => {
@@ -445,7 +635,6 @@ router.get('/party-tds', async (req, res) => {
         let vFreight = vKey ? (vehicleFreight[vKey] || 0) : 0;
         let vIncentive = vKey ? (vehicleIncentives[vKey] || 0) : 0;
 
-        // Fallback for single-vehicle owners if vehicle-level keying had slight variation
         if (vehicles.length === 1) {
           if (vFreight === 0 && ownerFreight[oKey]) vFreight = ownerFreight[oKey];
           if (vIncentive === 0 && ownerIncentives[oKey]) vIncentive = ownerIncentives[oKey];
@@ -469,65 +658,64 @@ router.get('/party-tds', async (req, res) => {
           applicableTds = 0;
         }
 
-        // Calculation on Basic Amount:
-        // Formula: TDS AMOUNT = BASIC AMOUNT × TDS%
-        // TDS DEDUCTED = TDS AMOUNT
         const calcTds = (amt) => {
-          if (!amt || amt <= 0 || !applicableTds || applicableTds <= 0) return 0;
+          if (amt === null || amt === undefined || isNaN(amt) || !applicableTds || applicableTds <= 0) return 0;
           return Math.round((amt * (applicableTds / 100)) * 100) / 100;
         };
 
         const freightTds = calcTds(vFreight);
         const incentiveTds = calcTds(vIncentive);
 
-        // Check authoritative SETTLED AMOUNT from Incentive Calculation Sheet (matching FY, Month, Owner, Vehicle)
-        let rawAct = undefined;
-        if (actualsMap) {
-          const candidates = [vKey, veh.vehicleNo, String(veh.vehicleNo || '').trim().toUpperCase()];
-          for (const k of candidates) {
-            if (k && actualsMap[k] !== undefined) {
-              rawAct = actualsMap[k];
-              break;
-            }
-          }
-          if (rawAct === undefined) {
-            for (const [k, v] of Object.entries(actualsMap)) {
-              if (normVeh(k) === vKey) {
-                rawAct = v;
-                break;
-              }
-            }
-          }
+        // Build candidate month details for this specific vehicle
+        const availableMonths = candidateMonths.map((c, idx) => {
+          const mapForMonth = candidateIncentiveMaps[idx];
+          const mData = mapForMonth.get(vKey);
+          return {
+            offset: c.offset,
+            month: c.month,
+            year: c.year,
+            monthName: c.monthName,
+            label: c.label,
+            isCurrent: c.isCurrent,
+            actual: mData ? mData.actual : null,
+            projected: mData ? mData.projected : null,
+            diff: (mData && mData.hasData) ? mData.diff : null,
+            hasData: !!(mData && mData.hasData)
+          };
+        });
+
+        // Determine saved override or default for this Owner + Vehicle
+        const savedOverride = overrideMap.get(ovKey);
+        let sourceType = 'MONTH';
+        let selectedMonth = targetMonth;
+        let selectedYear = targetYear;
+        let manualAmount = '';
+
+        if (savedOverride) {
+          sourceType = savedOverride.sourceType || 'MONTH';
+          selectedMonth = savedOverride.sourceMonth !== undefined ? savedOverride.sourceMonth : targetMonth;
+          selectedYear = savedOverride.sourceYear !== undefined ? savedOverride.sourceYear : targetYear;
+          manualAmount = (savedOverride.manualAmount !== undefined && savedOverride.manualAmount !== null) ? savedOverride.manualAmount : '';
         }
 
-        let act = 0;
-        if (rawAct !== null && rawAct !== undefined && rawAct !== '') {
-          if (typeof rawAct === 'object' && rawAct !== null) {
-            if (rawAct.settled !== undefined) {
-              act = num(rawAct.settled);
-            } else if (rawAct.actual !== undefined) {
-              act = num(rawAct.actual);
-            } else {
-              act = (num(rawAct.nvl) || 0) + (num(rawAct.nvcl) || 0) + (num(rawAct.w10) || 0) + (num(rawAct.w6) || 0);
-            }
-          } else {
-            act = num(rawAct);
-          }
-        }
+        // Compute effective DIFFERENTIAL amount
+        let effectiveDiff = null;
+        let hasDiffValue = false;
 
-        // Settled Amount in Incentive Calculation Sheet:
-        // When actual is entered (act > 0): Settled Amount = act > vIncentive ? vIncentive : act
-        // When actual is 0 or not entered: Settled Amount = 0
-        let settledAmount = 0;
-        if (act > 0) {
-          settledAmount = (vIncentive > 0 && act > vIncentive) ? vIncentive : act;
+        if (sourceType === 'OTHERS') {
+          if (manualAmount !== '' && manualAmount !== null && !isNaN(Number(manualAmount))) {
+            effectiveDiff = Number(manualAmount);
+            hasDiffValue = true;
+          }
         } else {
-          settledAmount = 0;
+          const matchedCandidate = availableMonths.find(c => c.month === selectedMonth && c.year === selectedYear);
+          if (matchedCandidate && matchedCandidate.hasData && matchedCandidate.diff !== null) {
+            effectiveDiff = matchedCandidate.diff;
+            hasDiffValue = true;
+          }
         }
 
-        // DIFFERENTIAL comes DIRECTLY from Incentive Calculation Sheet Settled Amount
-        const vDifferential = Math.round(settledAmount * 100) / 100;
-        const diffTds = calcTds(vDifferential);
+        const diffTds = hasDiffValue ? calcTds(effectiveDiff) : null;
 
         // ROW 1 → FREIGHT / GROSS FREIGHT
         entries.push({
@@ -581,7 +769,7 @@ router.get('/party-tds', async (req, res) => {
           aadhaarPanLinked: isLinked
         });
 
-        // ROW 3 → DIFFERENTIAL (from Incentive Calculation Sheet Settled Amount)
+        // ROW 3 → DIFFERENTIAL
         entries.push({
           slNo: slNo++,
           vehicleIndexRow: 3,
@@ -595,16 +783,28 @@ router.get('/party-tds', async (req, res) => {
           billNo: '-',
           billDate: '-',
           billType: 'DIFFERENTIAL',
-          basicAmount: vDifferential,
-          note: 'AUTO UPDATED',
-          autoStatus: 'AUTO UPDATED',
-          sourceModule: 'Incentive Calculation Sheet (Settled Amount)',
+          basicAmount: hasDiffValue ? effectiveDiff : null,
+          note: sourceType === 'OTHERS' ? 'MANUAL' : 'AUTO',
+          autoStatus: sourceType === 'OTHERS' ? 'MANUAL' : 'AUTO',
+          sourceModule: sourceType === 'OTHERS' ? 'Manual Others Entry' : 'Incentive Entry (Actual - Projected)',
           tdsPercent: applicableTds,
-          tdsAmount: diffTds,
-          tdsDeducted: diffTds,
+          tdsAmount: hasDiffValue ? diffTds : null,
+          tdsDeducted: hasDiffValue ? diffTds : null,
           panCardNumber: ownerObj.pan,
           aadharNo: ownerObj.aadhar,
-          aadhaarPanLinked: isLinked
+          aadhaarPanLinked: isLinked,
+          differentialConfig: {
+            ownerName: ownerObj.name,
+            vehicleNo: veh.vehicleNo || '-',
+            fy: fy || '',
+            reportMonth: targetMonth,
+            reportYear: targetYear,
+            sourceType,
+            selectedMonth,
+            selectedYear,
+            manualAmount,
+            availableMonths
+          }
         });
       });
     });
@@ -625,6 +825,78 @@ router.get('/party-tds', async (req, res) => {
     });
   } catch (err) {
     console.error('[TdsReports] Party TDS fetch error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── POST /api/tds-reports/party-tds/differential-override ────────────────────
+router.post('/party-tds/differential-override', async (req, res) => {
+  try {
+    const {
+      ownerName,
+      vehicleNo,
+      fy,
+      reportMonth,
+      reportYear,
+      sourceType,
+      sourceMonth,
+      sourceYear,
+      manualAmount
+    } = req.body;
+
+    if (!ownerName || !vehicleNo || reportMonth === undefined || reportYear === undefined) {
+      return res.status(400).json({ success: false, error: 'Missing required parameters (ownerName, vehicleNo, reportMonth, reportYear)' });
+    }
+
+    const oKey = String(ownerName).trim().toUpperCase();
+    const vKey = normVeh(vehicleNo);
+    const rMonth = parseInt(reportMonth, 10);
+    const rYear = parseInt(reportYear, 10);
+    const sType = sourceType === 'OTHERS' ? 'OTHERS' : 'MONTH';
+    const sMonth = sourceMonth !== undefined ? parseInt(sourceMonth, 10) : rMonth;
+    const sYear = sourceYear !== undefined ? parseInt(sourceYear, 10) : rYear;
+    const mAmount = (manualAmount !== undefined && manualAmount !== null && manualAmount !== '' && !isNaN(Number(manualAmount))) ? Number(manualAmount) : null;
+
+    const db = mongoose.connection.useDb('invoice_system');
+    const col = db.collection('tds_differential_overrides');
+
+    const updateDoc = {
+      ownerName: oKey,
+      vehicleNo: vKey,
+      fy: String(fy || ''),
+      reportMonth: rMonth,
+      reportYear: rYear,
+      sourceType: sType,
+      sourceMonth: sMonth,
+      sourceYear: sYear,
+      manualAmount: mAmount,
+      updatedAt: new Date()
+    };
+
+    await col.updateOne(
+      {
+        ownerName: oKey,
+        vehicleNo: vKey,
+        reportMonth: rMonth,
+        reportYear: rYear
+      },
+      { $set: updateDoc },
+      { upsert: true }
+    );
+
+    try {
+      const io = req.app.get('io') || global.io;
+      if (io) {
+        io.emit('partyTdsUpdated', { ownerName: oKey, vehicleNo: vKey, reportMonth: rMonth, reportYear: rYear });
+        io.emit('tdsDifferentialUpdated', { ownerName: oKey, vehicleNo: vKey, reportMonth: rMonth, reportYear: rYear });
+      }
+    } catch (e) {
+      console.warn('[TdsReports] Socket emit warning:', e.message);
+    }
+
+    res.json({ success: true, override: updateDoc });
+  } catch (err) {
+    console.error('[TdsReports] Error saving differential override:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

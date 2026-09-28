@@ -12,6 +12,8 @@ export default function GlobalShortcutHandler() {
       const activeEl = document.activeElement;
       const isInput = activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable;
 
+      if (!e || !e.key) return;
+
       let keyCombo = [];
       if (e.ctrlKey || e.metaKey) keyCombo.push('ctrl');
       if (e.shiftKey) keyCombo.push('shift');
@@ -26,7 +28,7 @@ export default function GlobalShortcutHandler() {
         setSearchOpen(true);
         return;
       }
-      
+
       if (comboStr === 'escape' && searchOpen) {
         setSearchOpen(false);
         // We let the event propagate if we want, or stop it here
@@ -35,7 +37,7 @@ export default function GlobalShortcutHandler() {
       // If they are in an input and pressing basic keys (like Delete, or letters), let default happen
       // But allow Ctrl+S, Ctrl+E etc.
       if (isInput && !e.ctrlKey && !e.metaKey && e.key !== 'Escape') {
-        return; 
+        return;
       }
 
       // Check if context has a registered handler for this combo

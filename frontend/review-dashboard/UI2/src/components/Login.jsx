@@ -13,7 +13,6 @@ import { useAuth } from '../context/AuthContext';
 
 // Background aerial logistics winding road image
 import aerialBg from '../assets/dac_aerial_logistics_bg.jpg';
-import heroBgFallback from '../assets/logistics_hero_bg.jpg';
 
 // Transparent Glass Input Styling with High-Contrast White/Cyan Floating Labels
 const transparentGlassInputSx = {
@@ -111,7 +110,7 @@ const Login = () => {
             flexDirection: 'column',
             justify: 'space-between',
             fontFamily: `'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`,
-            backgroundImage: `url(${aerialBg}), url('/dac_aerial_logistics_bg.jpg'), url(${heroBgFallback})`,
+            backgroundImage: `url(${aerialBg}), url('/dac_aerial_logistics_bg.jpg')`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',

@@ -1,50 +1,103 @@
 import React, { useEffect, useRef } from 'react';
-import p5 from 'p5';
-import TRUNK from 'vanta/dist/vanta.trunk.min';
 
 const VantaTrunkBackground = () => {
     const vantaRef = useRef(null);
     const vantaEffectRef = useRef(null);
 
     useEffect(() => {
-        if (!vantaEffectRef.current && vantaRef.current) {
-            vantaEffectRef.current = TRUNK({
-                el: vantaRef.current,
-                p5: p5,
-                mouseControls: true,
-                touchControls: true,
-                gyroControls: false,
-                minHeight: 200.00,
-                minWidth: 200.00,
-                scale: 1.00,
-                scaleMobile: 1.00,
-                color: 0x98465f,       // Reference color
-                backgroundColor: 0x222426, // Reference backgroundColor
-                spacing: 0,
-                chaos: 1
-            });
+        // Skip on mobile / touch or prefers-reduced-motion to keep mobile 100% smooth & save battery
+        const isMobile = window.innerWidth < 768 || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        if (isMobile || prefersReducedMotion) {
+            return;
         }
 
-        // Forward window mousemove events to the vanta container 
-        // so it reacts to mouse movement even when hidden behind AppContent
-        const handleMouseMove = (e) => {
-            if (vantaRef.current) {
-                // Vanta attaches event listeners directly to the element.
-                // We dispatch a cloned event to it.
-                const clonedEvent = new MouseEvent('mousemove', {
-                    clientX: e.clientX,
-                    clientY: e.clientY,
-                    bubbles: false,
-                    cancelable: false
+        let isDestroyed = false;
+        let idleCallbackId = null;
+
+        const initVanta = async () => {
+            if (isDestroyed || !vantaRef.current || vantaEffectRef.current) return;
+            try {
+                const [{ default: p5 }, { default: TRUNK }] = await Promise.all([
+                    import('p5'),
+                    import('vanta/dist/vanta.trunk.min')
+                ]);
+
+                if (isDestroyed || !vantaRef.current || vantaEffectRef.current) return;
+
+                vantaEffectRef.current = TRUNK({
+                    el: vantaRef.current,
+                    p5: p5,
+                    mouseControls: true,
+                    touchControls: false,
+                    gyroControls: false,
+                    minHeight: 200.00,
+                    minWidth: 200.00,
+                    scale: 1.00,
+                    scaleMobile: 1.00,
+                    color: 0x98465f,
+                    backgroundColor: 0x222426,
+                    spacing: 0,
+                    chaos: 1
                 });
-                vantaRef.current.dispatchEvent(clonedEvent);
+            } catch (err) {
+                console.warn('Vanta background failed to load asynchronously:', err);
             }
         };
 
-        window.addEventListener('mousemove', handleMouseMove);
+        // Defer until main thread is idle after first paint
+        if ('requestIdleCallback' in window) {
+            idleCallbackId = window.requestIdleCallback(() => initVanta(), { timeout: 2000 });
+        } else {
+            idleCallbackId = setTimeout(initVanta, 500);
+        }
+
+        // Throttled mousemove forwarder
+        let rafId = null;
+        let lastEvent = null;
+
+        const onMouseMove = (e) => {
+            lastEvent = e;
+            if (!rafId) {
+                rafId = requestAnimationFrame(() => {
+                    if (vantaRef.current && lastEvent) {
+                        const clonedEvent = new MouseEvent('mousemove', {
+                            clientX: lastEvent.clientX,
+                            clientY: lastEvent.clientY,
+                            bubbles: false,
+                            cancelable: false
+                        });
+                        vantaRef.current.dispatchEvent(clonedEvent);
+                    }
+                    rafId = null;
+                });
+            }
+        };
+
+        window.addEventListener('mousemove', onMouseMove, { passive: true });
+
+        const onVisibilityChange = () => {
+            if (document.hidden) {
+                if (vantaEffectRef.current) {
+                    vantaEffectRef.current.destroy();
+                    vantaEffectRef.current = null;
+                }
+            } else {
+                initVanta();
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
 
         return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
+            isDestroyed = true;
+            if (idleCallbackId) {
+                if ('cancelIdleCallback' in window) window.cancelIdleCallback(idleCallbackId);
+                else clearTimeout(idleCallbackId);
+            }
+            if (rafId) cancelAnimationFrame(rafId);
+            window.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
             if (vantaEffectRef.current) {
                 vantaEffectRef.current.destroy();
                 vantaEffectRef.current = null;
@@ -62,11 +115,13 @@ const VantaTrunkBackground = () => {
                 width: '100vw',
                 height: '100vh',
                 zIndex: -1,
-                // pointer-events: none ensures this container NEVER blocks scrolling
-                pointerEvents: 'none'
+                pointerEvents: 'none',
+                willChange: 'transform',
+                transform: 'translateZ(0)'
             }}
         />
     );
 };
 
-export default VantaTrunkBackground;
+export default React.memo(VantaTrunkBackground);
+
