@@ -4,7 +4,8 @@ import {
     Snackbar, Alert, Divider, CircularProgress,
     TextField, Paper, Tabs, Tab, Grid, Select, MenuItem,
     FormControl, InputLabel, Table, TableBody, TableCell,
-    TableContainer, TableHead, TableRow, IconButton, Chip
+    TableContainer, TableHead, TableRow, IconButton, Chip,
+    Dialog, DialogTitle, DialogContent, DialogActions, Tooltip
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -15,6 +16,9 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EvStationIcon from '@mui/icons-material/EvStation';
+import HistoryIcon from '@mui/icons-material/History';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import CloseIcon from '@mui/icons-material/Close';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -484,15 +488,96 @@ function CashDiscountTab({ snackHandler }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // PROJECTED DEDUCTION SETTINGS TAB
 // ─────────────────────────────────────────────────────────────────────────────
+const SETTING_DEFINITIONS = [
+    {
+        key: 'damage',
+        dateKey: 'damageEffectiveDate',
+        type: 'DAMAGE_DEDUCTION',
+        label: 'Damage Deduction',
+        defaultAmt: 476
+    },
+    {
+        key: 'gpsDeviceInstallation',
+        dateKey: 'gpsDeviceInstallationEffectiveDate',
+        type: 'GPS_DEVICE_INSTALLATION',
+        label: 'GPS Device Installation',
+        defaultAmt: 1500
+    },
+    {
+        key: 'rfid',
+        dateKey: 'rfidEffectiveDate',
+        type: 'RFID',
+        label: 'RFID',
+        defaultAmt: 100
+    },
+    {
+        key: 'gpsTripCharge',
+        dateKey: 'gpsTripChargeEffectiveDate',
+        type: 'GPS_MONITORING_TRIP_CHARGE',
+        label: 'GPS Monitoring / Trip Charge',
+        defaultAmt: 145
+    },
+    {
+        key: 'travellingExpense',
+        dateKey: 'travellingExpenseEffectiveDate',
+        type: 'TRAVELLING_EXPENSE',
+        label: 'Travelling Expense',
+        defaultAmt: 0
+    }
+];
+
+const formatSafeDate = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    const clean = String(dateStr).split('T')[0];
+    const parts = clean.split('-');
+    if (parts.length === 3) {
+        const [y, m, d] = parts;
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const mIdx = parseInt(m, 10) - 1;
+        const mName = months[mIdx] || m;
+        return `${d}-${mName}-${y}`;
+    }
+    return dateStr;
+};
+
+const formatSafeDateTime = (isoStr) => {
+    if (!isoStr) return 'N/A';
+    try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return formatSafeDate(isoStr);
+        return d.toLocaleDateString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+        });
+    } catch {
+        return formatSafeDate(isoStr);
+    }
+};
+
 function ProjectedDeductionTab({ snackHandler }) {
+    const todayStr = new Date().toISOString().split('T')[0];
     const [settings, setSettings] = useState({
         damage: '',
+        damageEffectiveDate: todayStr,
         gpsDeviceInstallation: '',
+        gpsDeviceInstallationEffectiveDate: todayStr,
         rfid: '',
-        gpsTripCharge: ''
+        rfidEffectiveDate: todayStr,
+        gpsTripCharge: '',
+        gpsTripChargeEffectiveDate: todayStr,
+        travellingExpense: '',
+        travellingExpenseEffectiveDate: todayStr
     });
+    const [latestVersions, setLatestVersions] = useState({});
     const [saving, setSaving] = useState(false);
     const [loading, setLoading] = useState(true);
+
+    // History Modal State
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [selectedSetting, setSelectedSetting] = useState(null);
+    const [historyData, setHistoryData] = useState([]);
 
     useEffect(() => {
         fetchSettings();
@@ -506,11 +591,25 @@ function ProjectedDeductionTab({ snackHandler }) {
                 headers: { Authorization: `Bearer ${token}` }
             });
             if (res.data.success && res.data.data) {
+                const d = res.data.data;
+                const lv = res.data.latestVersions || {};
+                setLatestVersions(lv);
+
                 setSettings({
-                    damage: String(res.data.data.damage || 476),
-                    gpsDeviceInstallation: String(res.data.data.gpsDeviceInstallation || 1500),
-                    rfid: String(res.data.data.rfid || 100),
-                    gpsTripCharge: String(res.data.data.gpsTripCharge || 145)
+                    damage: String(d.damage ?? 476),
+                    damageEffectiveDate: d.damageEffectiveDate || lv.damage?.effectiveDate || todayStr,
+
+                    gpsDeviceInstallation: String(d.gpsDeviceInstallation ?? 1500),
+                    gpsDeviceInstallationEffectiveDate: d.gpsDeviceInstallationEffectiveDate || lv.gpsDeviceInstallation?.effectiveDate || todayStr,
+
+                    rfid: String(d.rfid ?? 100),
+                    rfidEffectiveDate: d.rfidEffectiveDate || lv.rfid?.effectiveDate || todayStr,
+
+                    gpsTripCharge: String(d.gpsTripCharge ?? 145),
+                    gpsTripChargeEffectiveDate: d.gpsTripChargeEffectiveDate || lv.gpsTripCharge?.effectiveDate || todayStr,
+
+                    travellingExpense: String(d.travellingExpense ?? 0),
+                    travellingExpenseEffectiveDate: d.travellingExpenseEffectiveDate || lv.travellingExpense?.effectiveDate || todayStr
                 });
             }
         } catch (e) {
@@ -524,18 +623,25 @@ function ProjectedDeductionTab({ snackHandler }) {
         setSaving(true);
         try {
             const token = localStorage.getItem('token');
-            const payload = {
-                damage: parseFloat(settings.damage),
-                gpsDeviceInstallation: parseFloat(settings.gpsDeviceInstallation),
-                rfid: parseFloat(settings.rfid),
-                gpsTripCharge: parseFloat(settings.gpsTripCharge)
-            };
+            const payload = {};
 
-            const invalid = Object.values(payload).some(val => isNaN(val) || val < 0);
-            if (invalid) {
-                snackHandler({ msg: 'All fields must be valid positive numbers', sev: 'error' });
-                setSaving(false);
-                return;
+            for (const item of SETTING_DEFINITIONS) {
+                const amtVal = parseFloat(settings[item.key]);
+                const dateVal = settings[item.dateKey];
+
+                if (isNaN(amtVal) || amtVal < 0) {
+                    snackHandler({ msg: `${item.label} must be a valid non-negative amount.`, sev: 'error' });
+                    setSaving(false);
+                    return;
+                }
+                if (!dateVal) {
+                    snackHandler({ msg: `Effective date is required for ${item.label}.`, sev: 'error' });
+                    setSaving(false);
+                    return;
+                }
+
+                payload[item.key] = amtVal;
+                payload[item.dateKey] = dateVal;
             }
 
             const res = await axios.put(`${API_URL}/settings/projected-deductions`,
@@ -544,7 +650,7 @@ function ProjectedDeductionTab({ snackHandler }) {
             );
             
             if (res.data.success) {
-                snackHandler({ msg: 'Projected Deduction Settings updated successfully!', sev: 'success' });
+                snackHandler({ msg: 'Projected Deduction Settings & Version History saved successfully!', sev: 'success' });
                 fetchSettings();
             }
         } catch (error) {
@@ -556,10 +662,31 @@ function ProjectedDeductionTab({ snackHandler }) {
 
     const handleReset = () => {
         fetchSettings();
+        snackHandler({ msg: 'Settings reset to active version values', sev: 'info' });
     };
 
     const handleChange = (field, value) => {
         setSettings(prev => ({ ...prev, [field]: value }));
+    };
+
+    const handleOpenHistory = async (settingItem) => {
+        setSelectedSetting(settingItem);
+        setHistoryOpen(true);
+        setHistoryLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`${API_URL}/settings/projected-deductions/history`, {
+                params: { settingType: settingItem.type },
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.success) {
+                setHistoryData(res.data.data || []);
+            }
+        } catch (err) {
+            snackHandler({ msg: 'Failed to load history for ' + settingItem.label, sev: 'error' });
+        } finally {
+            setHistoryLoading(false);
+        }
     };
 
     if (loading) {
@@ -573,47 +700,139 @@ function ProjectedDeductionTab({ snackHandler }) {
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <Grid container spacing={4} justifyContent="center">
-                <Grid item xs={12} md={8} lg={6}>
-                    <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
+                <Grid item xs={12} md={9} lg={7}>
+                    <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.2)', overflow: 'hidden' }}>
                         <Box sx={{ p: 3, borderBottom: '1px solid rgba(255,255,255,0.05)', bgcolor: 'rgba(255,255,255,0.02)' }}>
-                            <Typography variant="h6" fontWeight={600}>Projected Deduction Settings</Typography>
-                            <Typography variant="body2" color="text.secondary">Configure the default projected deduction amounts used throughout the ERP.</Typography>
+                            <Typography variant="h6" fontWeight={700} sx={{ letterSpacing: -0.3 }}>
+                                Projected Deduction Settings
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                Configure the default projected deduction amounts and their effective dates used throughout the ERP.
+                            </Typography>
                         </Box>
-                        <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                            <TextField 
-                                label="Damage Deduction (₹)" 
-                                type="number" 
-                                value={settings.damage}
-                                onChange={(e) => handleChange('damage', e.target.value)}
-                                fullWidth
-                            />
-                            <TextField 
-                                label="GPS Device Installation (₹)" 
-                                type="number" 
-                                value={settings.gpsDeviceInstallation}
-                                onChange={(e) => handleChange('gpsDeviceInstallation', e.target.value)}
-                                fullWidth
-                            />
-                            <TextField 
-                                label="RFID (₹)" 
-                                type="number" 
-                                value={settings.rfid}
-                                onChange={(e) => handleChange('rfid', e.target.value)}
-                                fullWidth
-                            />
-                            <TextField 
-                                label="GPS Monitoring / Trip Charge (₹)" 
-                                type="number" 
-                                value={settings.gpsTripCharge}
-                                onChange={(e) => handleChange('gpsTripCharge', e.target.value)}
-                                fullWidth
-                            />
+                        
+                        <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3.5 }}>
+                            {SETTING_DEFINITIONS.map((def) => {
+                                const currentEffDate = latestVersions[def.key]?.effectiveDate || settings[def.dateKey];
+                                const currentAmt = latestVersions[def.key]?.amount ?? settings[def.key];
+                                const isFuture = currentEffDate > todayStr;
+
+                                return (
+                                    <Box 
+                                        key={def.key} 
+                                        sx={{ 
+                                            p: 2.5, 
+                                            borderRadius: 2.5, 
+                                            border: '1px solid rgba(255,255,255,0.08)',
+                                            bgcolor: 'rgba(255,255,255,0.015)',
+                                            transition: 'border-color 0.2s ease',
+                                            '&:hover': {
+                                                borderColor: 'rgba(249, 115, 22, 0.4)'
+                                            }
+                                        }}
+                                    >
+                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                                            <Typography variant="subtitle1" fontWeight={600} color="text.primary">
+                                                {def.label} (₹)
+                                            </Typography>
+                                            <Button
+                                                size="small"
+                                                variant="outlined"
+                                                startIcon={<HistoryIcon sx={{ fontSize: 16 }} />}
+                                                onClick={() => handleOpenHistory(def)}
+                                                sx={{
+                                                    borderRadius: 2,
+                                                    textTransform: 'none',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 600,
+                                                    borderColor: 'rgba(255,255,255,0.15)',
+                                                    color: 'text.secondary',
+                                                    '&:hover': {
+                                                        borderColor: 'warning.main',
+                                                        color: 'warning.main',
+                                                        bgcolor: 'rgba(249, 115, 22, 0.08)'
+                                                    }
+                                                }}
+                                            >
+                                                History
+                                            </Button>
+                                        </Box>
+
+                                        <Grid container spacing={2} alignItems="center">
+                                            <Grid item xs={12} sm={6}>
+                                                <TextField 
+                                                    label={`${def.label} (₹)`}
+                                                    type="number" 
+                                                    value={settings[def.key]}
+                                                    onChange={(e) => handleChange(def.key, e.target.value)}
+                                                    fullWidth
+                                                    InputProps={{
+                                                        sx: { borderRadius: 2 }
+                                                    }}
+                                                />
+                                            </Grid>
+                                            <Grid item xs={12} sm={6}>
+                                                <TextField 
+                                                    label="Effective From" 
+                                                    type="date" 
+                                                    value={settings[def.dateKey]}
+                                                    onChange={(e) => handleChange(def.dateKey, e.target.value)}
+                                                    InputLabelProps={{ shrink: true }}
+                                                    fullWidth
+                                                    InputProps={{
+                                                        sx: { borderRadius: 2 }
+                                                    }}
+                                                />
+                                            </Grid>
+                                        </Grid>
+
+                                        {/* Status / Active Info Footer */}
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 1.5, flexWrap: 'wrap' }}>
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                                <CalendarMonthIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
+                                                Active from: <strong style={{ color: '#fff' }}>{formatSafeDate(currentEffDate)}</strong>
+                                            </Typography>
+                                            {isFuture && (
+                                                <Chip 
+                                                    label={`Takes effect on ${formatSafeDate(currentEffDate)}`} 
+                                                    size="small" 
+                                                    color="info" 
+                                                    variant="outlined" 
+                                                    sx={{ fontSize: '0.7rem', height: 20 }} 
+                                                />
+                                            )}
+                                        </Box>
+                                    </Box>
+                                );
+                            })}
+
                             <Divider sx={{ my: 1 }} />
+
                             <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                                <Button variant="contained" color="warning" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ flex: 1, borderRadius: 2 }}>
+                                <Button 
+                                    variant="contained" 
+                                    color="warning" 
+                                    startIcon={<SaveIcon />} 
+                                    onClick={handleSave} 
+                                    disabled={saving} 
+                                    sx={{ 
+                                        flex: 1, 
+                                        borderRadius: 2, 
+                                        py: 1.2, 
+                                        fontWeight: 700,
+                                        bgcolor: '#ea580c',
+                                        '&:hover': { bgcolor: '#c2410c' }
+                                    }}
+                                >
                                     {saving ? 'Saving...' : 'Save'}
                                 </Button>
-                                <Button variant="text" color="inherit" startIcon={<RefreshIcon />} onClick={handleReset} sx={{ flex: 1, borderRadius: 2 }}>
+                                <Button 
+                                    variant="text" 
+                                    color="inherit" 
+                                    startIcon={<RefreshIcon />} 
+                                    onClick={handleReset} 
+                                    sx={{ flex: 1, borderRadius: 2, py: 1.2, fontWeight: 600 }}
+                                >
                                     Reset
                                 </Button>
                             </Box>
@@ -621,6 +840,94 @@ function ProjectedDeductionTab({ snackHandler }) {
                     </Card>
                 </Grid>
             </Grid>
+
+            {/* Version History Modal */}
+            <Dialog
+                open={historyOpen}
+                onClose={() => setHistoryOpen(false)}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 3,
+                        bgcolor: 'background.paper',
+                        backgroundImage: 'none',
+                        border: '1px solid rgba(255,255,255,0.1)'
+                    }
+                }}
+            >
+                <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
+                    <Box>
+                        <Typography variant="h6" fontWeight={700}>
+                            {selectedSetting?.label} History
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            Complete chronological version history and effective dates
+                        </Typography>
+                    </Box>
+                    <IconButton onClick={() => setHistoryOpen(false)} size="small">
+                        <CloseIcon />
+                    </IconButton>
+                </DialogTitle>
+
+                <DialogContent dividers sx={{ p: 0 }}>
+                    {historyLoading ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+                            <CircularProgress size={32} />
+                        </Box>
+                    ) : historyData.length === 0 ? (
+                        <Box sx={{ p: 4, textAlign: 'center', color: 'text.secondary' }}>
+                            <Typography variant="body2">No version history records found.</Typography>
+                        </Box>
+                    ) : (
+                        <TableContainer sx={{ maxHeight: 400 }}>
+                            <Table stickyHeader size="small">
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell sx={{ fontWeight: 700, bgcolor: 'rgba(255,255,255,0.05)' }}>Amount</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, bgcolor: 'rgba(255,255,255,0.05)' }}>Effective From</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, bgcolor: 'rgba(255,255,255,0.05)' }}>Changed On</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, bgcolor: 'rgba(255,255,255,0.05)' }}>Status</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {historyData.map((row, idx) => {
+                                        const isUpcoming = row.effectiveDate > todayStr;
+                                        return (
+                                            <TableRow key={row._id || idx} hover>
+                                                <TableCell sx={{ fontWeight: 700, color: 'warning.light' }}>
+                                                    ₹{row.amount}
+                                                </TableCell>
+                                                <TableCell sx={{ fontWeight: 500 }}>
+                                                    {formatSafeDate(row.effectiveDate)}
+                                                </TableCell>
+                                                <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
+                                                    {formatSafeDateTime(row.createdAt)}
+                                                </TableCell>
+                                                <TableCell>
+                                                    {isUpcoming ? (
+                                                        <Chip label="Upcoming" size="small" color="info" variant="outlined" sx={{ height: 22, fontSize: '0.7rem' }} />
+                                                    ) : idx === (historyData.findIndex(h => h.effectiveDate <= todayStr)) ? (
+                                                        <Chip label="Active" size="small" color="success" variant="outlined" sx={{ height: 22, fontSize: '0.7rem' }} />
+                                                    ) : (
+                                                        <Chip label="Archived" size="small" variant="outlined" sx={{ height: 22, fontSize: '0.7rem', color: 'text.disabled' }} />
+                                                    )}
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    )}
+                </DialogContent>
+
+                <DialogActions sx={{ p: 2 }}>
+                    <Button onClick={() => setHistoryOpen(false)} variant="outlined" color="inherit" sx={{ borderRadius: 2 }}>
+                        Close
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     );
 }

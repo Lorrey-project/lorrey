@@ -6,6 +6,7 @@ const FinancialYearPayment = require('../models/FinancialYearPayment');
 const FinancialYearRow = require('../models/FinancialYearRow');
 const BillRegisterDocument = require('../models/BillRegisterDocument');
 const ProjectedDeductionSetting = require('../models/ProjectedDeductionSetting');
+const { getApplicableProjectedDeduction } = require('../utils/projectedDeductionResolver');
 const paymentProofUpload = require('../middleware/paymentProofUpload');
 const billPdfUpload = require('../middleware/billPdfUpload');
 const multer = require('multer');
@@ -898,19 +899,23 @@ router.post('/save-row', async (req, res) => {
                 let finalAmtToSync = manualAmt;
                 let hasProjectedSetting = false;
                 let projectedSettingVal = 0;
+                const tripRecordDate = t.tripDate || dbTrip['LOADING DT'] || dbTrip['BILL DATE'] || dbTrip['DATE'] || dbTrip['INVOICE DATE'];
 
                 if (reason === 'Damage / Shortage') {
                   hasProjectedSetting = true;
-                  projectedSettingVal = projSettingsDoc.damage || 0;
+                  projectedSettingVal = await getApplicableProjectedDeduction('DAMAGE_DEDUCTION', tripRecordDate);
                 } else if (reason === 'Device Installation Charges' || reason === 'GPS Device Installation') {
                   hasProjectedSetting = true;
-                  projectedSettingVal = projSettingsDoc.gpsDeviceInstallation || 0;
+                  projectedSettingVal = await getApplicableProjectedDeduction('GPS_DEVICE_INSTALLATION', tripRecordDate);
                 } else if (reason === 'RFID Deduction / Charges' || reason === 'RFID') {
                   hasProjectedSetting = true;
-                  projectedSettingVal = projSettingsDoc.rfid || 0;
+                  projectedSettingVal = await getApplicableProjectedDeduction('RFID', tripRecordDate);
                 } else if (reason === 'GPS Monitoring / Trip Charges' || reason === 'GPS Trip Charges' || reason === 'GPS Trip Charge' || reason === 'GPS Monitoring / Trip Charge') {
                   hasProjectedSetting = true;
-                  projectedSettingVal = projSettingsDoc.gpsTripCharge || 0;
+                  projectedSettingVal = await getApplicableProjectedDeduction('GPS_MONITORING_TRIP_CHARGE', tripRecordDate);
+                } else if (reason === 'Travelling Expense' || reason === 'Travelling Expense (₹)' || reason === 'Travel Expense') {
+                  hasProjectedSetting = true;
+                  projectedSettingVal = await getApplicableProjectedDeduction('TRAVELLING_EXPENSE', tripRecordDate);
                 }
 
                 if (hasProjectedSetting) {

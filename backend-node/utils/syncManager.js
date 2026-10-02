@@ -46,31 +46,49 @@ function parseTdsField(doc) {
   return null;
 }
 
-// ─── Shared Truck Contact Lookup ──────────────────────────────────────────────
-async function getTruckDetails(vehicleNumber) {
-  let wheel = "", ownerName = "", tdsPercent = 0, isATO = false, driverNo = "", hasStO = false;
-  let basicFreightCommission = 0.05;
+const { normalizeDate, getEffectivePartyMaster, parseBasicFreightCommission } = require("./partyMasterHelper");
 
-  if (!vehicleNumber) return { wheel, ownerName, tdsPercent, isATO, driverNo, hasStO, basicFreightCommission };
+// ─── Shared Truck Contact Lookup ──────────────────────────────────────────────
+async function getTruckDetails(vehicleNumber, ownerName = "", recordDate = null) {
+  let wheel = "", resolvedOwnerName = "", tdsPercent = 0, isATO = false, driverNo = "", hasStO = false;
+  let basicFreightCommission = null;
+
+  if (!vehicleNumber && !ownerName) return { wheel, ownerName: resolvedOwnerName, tdsPercent, isATO, driverNo, hasStO, basicFreightCommission };
 
   const ownerCol = getInvoiceSystemDb().db.collection("owner details");
   const truckCol = getInvoiceSystemDb().db.collection("Truck Contact Number");
-  const truckRegex = makeSpaceAgnosticRegex(vehicleNumber);
+  const truckRegex = vehicleNumber ? makeSpaceAgnosticRegex(vehicleNumber) : null;
+  const ownerRegex = ownerName ? new RegExp(`^\\s*${ownerName.trim()}\\s*$`, 'i') : null;
 
-  // 1. Check Owner Details first as primary source of truth
-  let truck = await ownerCol.findOne({
-    $or: [
-      { "Truck No": { $regex: truckRegex } },
-      { "Truck No ": { $regex: truckRegex } },
-      { truck_no: { $regex: truckRegex } },
-      { "Contact No.(Truck No.)": { $regex: truckRegex } },
-      { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
-    ]
-  });
+  let rawTruck = null;
 
-  // 2. Fallback to Truck Contact Number
-  if (!truck) {
-    truck = await truckCol.findOne({
+  // 1. Exact Owner + Vehicle in Owner Details
+  if (truckRegex && ownerRegex) {
+    rawTruck = await ownerCol.findOne({
+      $and: [
+        {
+          $or: [
+            { "Truck No": { $regex: truckRegex } },
+            { "Truck No ": { $regex: truckRegex } },
+            { truck_no: { $regex: truckRegex } },
+            { "Contact No.(Truck No.)": { $regex: truckRegex } },
+            { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
+          ]
+        },
+        {
+          $or: [
+            { "Owner Name": { $regex: ownerRegex } },
+            { "Owner Name ": { $regex: ownerRegex } },
+            { owner_name: { $regex: ownerRegex } }
+          ]
+        }
+      ]
+    });
+  }
+
+  // 2. Vehicle alone in Owner Details
+  if (!rawTruck && truckRegex) {
+    rawTruck = await ownerCol.findOne({
       $or: [
         { "Truck No": { $regex: truckRegex } },
         { "Truck No ": { $regex: truckRegex } },
@@ -81,8 +99,65 @@ async function getTruckDetails(vehicleNumber) {
     });
   }
 
+  // 3. Exact Owner + Vehicle in Truck Contact Number
+  if (!rawTruck && truckRegex && ownerRegex) {
+    rawTruck = await truckCol.findOne({
+      $and: [
+        {
+          $or: [
+            { "Truck No": { $regex: truckRegex } },
+            { "Truck No ": { $regex: truckRegex } },
+            { truck_no: { $regex: truckRegex } },
+            { "Contact No.(Truck No.)": { $regex: truckRegex } },
+            { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
+          ]
+        },
+        {
+          $or: [
+            { "Owner Name": { $regex: ownerRegex } },
+            { "Owner Name ": { $regex: ownerRegex } },
+            { owner_name: { $regex: ownerRegex } }
+          ]
+        }
+      ]
+    });
+  }
+
+  // 4. Vehicle alone in Truck Contact Number
+  if (!rawTruck && truckRegex) {
+    rawTruck = await truckCol.findOne({
+      $or: [
+        { "Truck No": { $regex: truckRegex } },
+        { "Truck No ": { $regex: truckRegex } },
+        { truck_no: { $regex: truckRegex } },
+        { "Contact No.(Truck No.)": { $regex: truckRegex } },
+        { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
+      ]
+    });
+  }
+
+  // 5. Owner alone if vehicle wasn't found
+  if (!rawTruck && ownerRegex) {
+    rawTruck = await ownerCol.findOne({
+      $or: [
+        { "Owner Name": { $regex: ownerRegex } },
+        { "Owner Name ": { $regex: ownerRegex } },
+        { owner_name: { $regex: ownerRegex } }
+      ]
+    }) || await truckCol.findOne({
+      $or: [
+        { "Owner Name": { $regex: ownerRegex } },
+        { "Owner Name ": { $regex: ownerRegex } },
+        { owner_name: { $regex: ownerRegex } }
+      ]
+    });
+  }
+
+  // Resolve effective version for recordDate
+  const truck = rawTruck ? getEffectivePartyMaster(rawTruck, recordDate) : null;
+
   if (truck) {
-    let vType = truck["Type of vehicle"] || truck["Type of vehicle "] || truck.type || truck["Vehicle Type"] || truck.type_of_vehicle || truck.vehicle_type || "";
+    let vType = truck["Type of vehicle"] || truck["Type of vehicle "] || truck.type || truck["Vehicle Type"] || truck.type_of_vehicle || truck.vehicle_type || truck.wheel_type || truck.wheelType || "";
     if (!vType) {
       for (let key in truck) {
         const lk = key.toLowerCase();
@@ -95,10 +170,10 @@ async function getTruckDetails(vehicleNumber) {
     }
     const wheelMatch = vType ? vType.toString().match(/(\d+)/) : null;
     wheel = wheelMatch ? `${wheelMatch[1]}W` : vType;
-    ownerName = safe(truck["Owner Name"] || truck["Owner Name "] || truck.owner_name);
+    resolvedOwnerName = safe(truck["Owner Name"] || truck["Owner Name "] || truck.owner_name || truck.ownerName);
     driverNo = safe(truck["DRIVER CONTACT"] || truck["DRIVER CONTACT "] || truck.contact_no || truck["Contact No."] || truck["Contact No. "]);
 
-    const custType = safe(truck["TYPE OF CUSTOMER"] || truck["TYPE OF CUSTOMER "] || truck["type_of_customer"] || "").toUpperCase();
+    const custType = safe(truck["TYPE OF CUSTOMER"] || truck["TYPE OF CUSTOMER "] || truck["type_of_customer"] || truck.relationshipType || truck.custType || "").toUpperCase();
     isATO = custType.includes("ATO");
     hasStO = custType.includes("STO");
 
@@ -112,15 +187,10 @@ async function getTruckDetails(vehicleNumber) {
       tdsPercent = (pan && aadhar) ? 0 : 0.01;
     }
 
-    const rawComm = truck["basic_freight_commission"] || truck["Basic Freight Commission"];
-    let commVal = (rawComm !== null && rawComm !== undefined && rawComm !== '') ? num(rawComm) : 5;
-    if (commVal > 0 && commVal < 1) {
-      commVal = commVal * 100;
-    }
-    basicFreightCommission = commVal / 100;
+    basicFreightCommission = parseBasicFreightCommission(truck);
   }
 
-  return { wheel, ownerName, tdsPercent, isATO, driverNo, hasStO, basicFreightCommission };
+  return { wheel, ownerName: resolvedOwnerName, tdsPercent, isATO, driverNo, hasStO, basicFreightCommission };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -383,7 +453,7 @@ async function pushToRegister(invoiceId, overrides) {
     let basicFreightCommission = 0.05; // default — owner gets 5% deducted (party gets 95%)
     
     if (vehicleNumber) {
-      const truckDetails = await getTruckDetails(vehicleNumber);
+      const truckDetails = await getTruckDetails(vehicleNumber, partyName, loadingDate);
       wheel = truckDetails.wheel;
       ownerName = truckDetails.ownerName;
       tdsPercent = truckDetails.tdsPercent;
@@ -536,11 +606,12 @@ async function pushToRegister(invoiceId, overrides) {
     // Commission-aware rate logic:
     // If basic_freight_commission == 0.05 → standard 95% path
     // Else → variable path (e.g. 0.04 → 96%, 0 → 100%)
-    const isStandard95 = basicFreightCommission === 0.05;
-    const varPartyPct = fmt2(1 - basicFreightCommission); // e.g. 0.96, 1.0
+    const effectiveComm = basicFreightCommission !== null && basicFreightCommission !== undefined ? basicFreightCommission : 0.05;
+    const isStandard95 = effectiveComm === 0.05;
+    const varPartyPct = fmt2(1 - effectiveComm); // e.g. 0.96, 1.0
 
-    const partyRate = isStandard95 ? fmt2(billing * 0.95) : 0;          // PARTY RATE (95%)
-    const partyRateVar = isStandard95 ? 0 : fmt2(billing * varPartyPct);   // PARTY RATE (VAR%)
+    const partyRateVal = billing > 0 ? fmt2(billing * (1 - effectiveComm)) : "";
+
     const billingAmt = fmt2(billing * mt);
     const billingEr95 = isStandard95 ? fmt2(billingAmt * 0.95) : 0;       // BILLING ER 95%
     const billingErVar = isStandard95 ? 0 : fmt2(billingAmt * varPartyPct);// BILLING ER (VAR%)
@@ -550,7 +621,7 @@ async function pushToRegister(invoiceId, overrides) {
     const tdsAmount = fmt2(amount * tdsPercent);
     const balance = fmt2(hsdLtr - fuelRequired);
     const pctAdv = amount > 0 ? fmt2(((advance + hsdAmount) / amount) * 100) : 0;
-    const dedicated = isATO ? fmt2(billingAmt * 0.095) : fmt2(partyRate * mt * 0.085);
+    const dedicated = isATO ? fmt2(billingAmt * 0.095) : fmt2(billing * (1 - effectiveComm) * mt * 0.085);
     const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(billingAmt * 0.085) : 0;
 
     // ── Derive month/year from loadingDate for Cement Register filter ─────
@@ -580,8 +651,9 @@ async function pushToRegister(invoiceId, overrides) {
       "PARTY NAME": partyName,
       "MT": mt || "",
       "BILLING": billing || "",
-      "PARTY RATE": partyRate !== undefined ? partyRate : "",
-      "PARTY RATE VAR": partyRateVar !== undefined ? partyRateVar : "",
+      "PARTY RATE": partyRateVal,
+      "PARTY RATE (95-97%)": partyRateVal,
+      "PARTY RATE VAR": isStandard95 ? "" : partyRateVal,
       "Billing Amount": billingAmt || "",
       "BILLING ER 95%": billingEr95 !== undefined ? billingEr95 : "",
       "BILLING ER VAR": billingErVar !== undefined ? billingErVar : "",

@@ -356,6 +356,8 @@ function DailySummaryTab({
   onOpenCementRegister,
   onOpenPartyPayment,
   onOpenPumpPaymentRegister,
+  onOpenPieChart,
+  onOpenVehicleMktAssoc,
   mainTab,
   setMainTab,
   initialOpenVehicleSummary = false,
@@ -1568,7 +1570,7 @@ function DailySummaryTab({
             <Tab label="ALL PARTY REPORTS" />
             <Tab label="VEHICLE WISE TRIP SUMMARY" />
             <Tab label="SUMMARY REVENUE NVL AND NVCL" />
-            <Tab label="REVENEW" />
+            <Tab label="FORECAST REVENUE" />
           </Tabs>
         </Box>
 
@@ -3770,6 +3772,8 @@ function DailySummaryTab({
           monthOptions={monthOptions}
           isModal={true}
           onCloseModal={() => setVehicleSummaryModalOpen(false)}
+          onOpenPieChart={onOpenPieChart}
+          onOpenVehicleMktAssoc={onOpenVehicleMktAssoc}
         />
       </Dialog>
 
@@ -3935,7 +3939,7 @@ function AllPartyReportsTab({ onBack, mainTab, setMainTab }) {
             <Tab label="ALL PARTY REPORTS" />
             <Tab label="VEHICLE WISE TRIP SUMMARY" />
             <Tab label="SUMMARY REVENUE NVL AND NVCL" />
-            <Tab label="REVENEW" />
+            <Tab label="FORECAST REVENUE" />
           </Tabs>
         </Box>
 

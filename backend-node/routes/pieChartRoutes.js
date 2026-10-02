@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const moment = require("moment");
 const AccountDetail = require("../models/AccountDetail");
 const { getBillRegisterData } = require("../utils/billRegisterHelper");
+const { getEffectivePartyMaster } = require("../utils/partyMasterHelper");
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June", 
@@ -15,6 +16,7 @@ const getCementCol = () => mongoose.connection.useDb("cement_register").collecti
 const getBillRegisterCol = () => mongoose.connection.useDb("cement_register").collection("generated_bills");
 const getMainCashCol = () => mongoose.connection.useDb("main_cashbook").collection("entries");
 const getPumpPaymentCol = () => mongoose.connection.useDb("pump_payment_register").collection("records");
+const getFreightCol = () => mongoose.connection.useDb("invoice_system").collection("freight_data");
 
 // Parse any date string or Date object into YYYY-MM-DD safely without timezone shifts
 function parseToYYYYMMDD(dStr) {
@@ -993,6 +995,803 @@ router.get("/growth-analysis", async (req, res) => {
   } catch (err) {
     console.error("[GrowthAnalysis] Error:", err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── GET /pie-chart/tonnage-revenue-summary ──────────────────────────────────
+// Live database-driven Tonnage (Cement Register TOTAL MT) & Billed Revenue (Bill Register)
+router.get("/tonnage-revenue-summary", async (req, res) => {
+  try {
+    const { financialYear, fy, periodType = 'FULL_FY', month } = req.query;
+    const selectedFY = financialYear || fy || 'FY 2026-27';
+
+    const now = moment();
+    const currentCalMonth = now.month() + 1; // 1-12
+    const currentCalYear = now.year();
+    const currentCalDay = now.date();
+    const todayStr = now.format("YYYY-MM-DD");
+
+    const { startYear, endYear } = parseFY(selectedFY);
+    const isCurrentFY = (currentCalMonth >= 4 && currentCalYear === startYear) || (currentCalMonth < 4 && currentCalYear === endYear);
+
+    // 12 FY months in order: April (04) to March (03)
+    const fyMonths = [
+      { name: "April", short: "Apr", monthNum: 4, year: startYear },
+      { name: "May", short: "May", monthNum: 5, year: startYear },
+      { name: "June", short: "Jun", monthNum: 6, year: startYear },
+      { name: "July", short: "Jul", monthNum: 7, year: startYear },
+      { name: "August", short: "Aug", monthNum: 8, year: startYear },
+      { name: "September", short: "Sep", monthNum: 9, year: startYear },
+      { name: "October", short: "Oct", monthNum: 10, year: startYear },
+      { name: "November", short: "Nov", monthNum: 11, year: startYear },
+      { name: "December", short: "Dec", monthNum: 12, year: startYear },
+      { name: "January", short: "Jan", monthNum: 1, year: endYear },
+      { name: "February", short: "Feb", monthNum: 2, year: endYear },
+      { name: "March", short: "Mar", monthNum: 3, year: endYear },
+    ];
+
+    // Determine target months to compute
+    let activeMonths = fyMonths;
+    const isMonthlyMode = periodType === 'MONTH' || periodType === 'MONTHLY';
+    if (isMonthlyMode && month && month !== 'ALL') {
+      const matchMonth = fyMonths.find(m => m.name.toLowerCase() === month.toLowerCase() || m.short.toLowerCase() === month.toLowerCase());
+      if (matchMonth) {
+        activeMonths = [matchMonth];
+      }
+    }
+
+    // Fetch live Cement Register entries and Bill Register data
+    const cementCol = getCementCol();
+    const [allCement, { rows: allBillRows = [] }] = await Promise.all([
+      cementCol.find({}).toArray(),
+      getBillRegisterData({ fy: `${startYear}-${endYear}` })
+    ]);
+
+    const parseNumVal = (v) => {
+      if (v === null || v === undefined || v === '') return 0;
+      const n = parseFloat(String(v).replace(/,/g, ''));
+      return isNaN(n) ? 0 : n;
+    };
+
+    // Calculate monthly aggregates
+    let grandTotalTonnage = 0;
+    let grandTotalRevenue = 0;
+    let grandTotalTrips = 0;
+    let grandTotalBills = 0;
+
+    const monthlyBreakdown = activeMonths.map(mInfo => {
+      const { name, monthNum, year } = mInfo;
+      const daysInMonth = new Date(year, monthNum, 0).getDate();
+      const mStartStr = `${year}-${String(monthNum).padStart(2, '0')}-01`;
+
+      let lastDay = daysInMonth;
+      const isThisMonthCurrent = (year === currentCalYear && monthNum === currentCalMonth);
+      const isFutureMonth = (year > currentCalYear) || (year === currentCalYear && monthNum > currentCalMonth);
+
+      if (isThisMonthCurrent) {
+        lastDay = Math.min(currentCalDay, daysInMonth);
+      } else if (isFutureMonth) {
+        lastDay = 0; // Future month has 0 data
+      }
+
+      const mEndStr = lastDay > 0
+        ? `${year}-${String(monthNum).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+        : mStartStr;
+
+      let monthTonnage = 0;
+      let monthTrips = 0;
+      let monthRevenue = 0;
+      let monthBills = 0;
+
+      if (lastDay > 0) {
+        // 1. Tonnage from Cement Register
+        const seenCementIds = new Set();
+        allCement.forEach(row => {
+          const rowId = String(row._id);
+          if (seenCementIds.has(rowId)) return;
+          seenCementIds.add(rowId);
+
+          const rawDate = row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || row["DATE"];
+          const isoDate = parseToYYYYMMDD(rawDate);
+          if (!isoDate || isoDate < mStartStr || isoDate > mEndStr) return;
+
+          const mtVal = parseNumVal(row["TOTAL MT"] ?? row["MT"] ?? row["TONNAGE"] ?? row.mt ?? row.totalMt ?? row["TOTAL WEIGHT"] ?? row["LIFTING"] ?? row["QTY"] ?? row["QUANTITY"]);
+          const billAmt = parseNumVal(row["Billing Amount"] ?? row["BILLING AMOUNT"] ?? row["AMOUNT"] ?? row.billingAmount);
+          const invNo = String(row["INVOICE NO"] || row["INVOICE NO."] || row["BILL NO"] || "").trim();
+
+          if (mtVal <= 0 && billAmt <= 0 && !invNo) return;
+          if (mtVal > 0) {
+            monthTonnage += mtVal;
+            monthTrips += 1;
+          }
+        });
+
+        // 2. Revenue from Bill Register
+        const seenBillNos = new Set();
+        allBillRows.forEach(b => {
+          const bDate = b.invoiceDate || b.billDate || b.date;
+          const bIso = parseToYYYYMMDD(bDate);
+          if (!bIso || bIso < mStartStr || bIso > mEndStr) return;
+
+          const bNo = String(b.invoiceNumber || b.billNo || '').trim();
+          const bAmt = parseFloat(b.amount) || 0;
+
+          if (bNo && seenBillNos.has(bNo)) return;
+          if (bNo) seenBillNos.add(bNo);
+
+          if (bAmt > 0) {
+            monthRevenue += bAmt;
+            monthBills += 1;
+          }
+        });
+      }
+
+      monthTonnage = Math.round(monthTonnage * 100) / 100;
+      monthRevenue = Math.round(monthRevenue * 100) / 100;
+
+      grandTotalTonnage += monthTonnage;
+      grandTotalRevenue += monthRevenue;
+      grandTotalTrips += monthTrips;
+      grandTotalBills += monthBills;
+
+      return {
+        month: name,
+        monthShort: mInfo.short,
+        year,
+        startDate: mStartStr,
+        endDate: mEndStr,
+        isFuture: isFutureMonth,
+        tonnage: monthTonnage,
+        revenue: monthRevenue,
+        trips: monthTrips,
+        bills: monthBills,
+        tonnageDisplay: `${monthTonnage.toLocaleString('en-IN')} MT`,
+        revenueDisplay: `₹${monthRevenue.toLocaleString('en-IN')}`
+      };
+    });
+
+    grandTotalTonnage = Math.round(grandTotalTonnage * 100) / 100;
+    grandTotalRevenue = Math.round(grandTotalRevenue * 100) / 100;
+
+    let periodDisplay = '';
+    if (isMonthlyMode && activeMonths.length === 1) {
+      periodDisplay = `${activeMonths[0].name} ${activeMonths[0].year}`;
+    } else {
+      periodDisplay = `${selectedFY} (01-Apr-${startYear} to ${isCurrentFY ? todayStr : `31-Mar-${endYear}`})`;
+    }
+
+    return res.json({
+      success: true,
+      period: {
+        financialYear: selectedFY,
+        periodType: isMonthlyMode ? 'MONTH' : 'FULL_FY',
+        month: isMonthlyMode && activeMonths.length === 1 ? activeMonths[0].name : 'ALL',
+        display: periodDisplay,
+        startYear,
+        endYear
+      },
+      totals: {
+        totalTonnage: grandTotalTonnage,
+        totalRevenue: grandTotalRevenue,
+        totalTrips: grandTotalTrips,
+        totalBills: grandTotalBills,
+        tonnageDisplay: `${grandTotalTonnage.toLocaleString('en-IN')} MT`,
+        revenueDisplay: `₹${grandTotalRevenue.toLocaleString('en-IN')}`
+      },
+      monthlyData: monthlyBreakdown,
+      chartData: monthlyBreakdown.map(m => ({
+        month: m.month,
+        monthShort: m.monthShort,
+        tonnage: m.tonnage,
+        revenue: m.revenue,
+        isFuture: m.isFuture
+      }))
+    });
+  } catch (err) {
+    console.error("[TonnageRevenueSummary] Error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to calculate tonnage and revenue summary" });
+  }
+});
+
+// ── GET /pie-chart/ptpk-summary ──────────────────────────────────────────────
+// Live database-driven PTPK Analysis (Revenue per Ton ÷ Ton per KM = PTPK / Per Ton Per KM)
+// Sources:
+// - TOTAL REVENUE: Bill Register authoritative billed revenue
+// - TOTAL MT: Cement Register actual TOTAL MT
+// - TOTAL KM: Cement Register distance using authoritative NVL/NVCL freight rate-chart (UP+DOWN)
+router.get("/ptpk-summary", async (req, res) => {
+  try {
+    const { financialYear, fy, periodType = 'FULL_FY', month } = req.query;
+    const selectedFY = financialYear || fy || 'FY 2026-27';
+
+    const now = moment();
+    const currentCalMonth = now.month() + 1; // 1-12
+    const currentCalYear = now.year();
+    const currentCalDay = now.date();
+    const todayStr = now.format("YYYY-MM-DD");
+
+    const { startYear, endYear } = parseFY(selectedFY);
+    const isCurrentFY = (currentCalMonth >= 4 && currentCalYear === startYear) || (currentCalMonth < 4 && currentCalYear === endYear);
+
+    // 12 FY months in order: April (04) to March (03)
+    const fyMonths = [
+      { name: "April", short: "Apr", monthNum: 4, year: startYear },
+      { name: "May", short: "May", monthNum: 5, year: startYear },
+      { name: "June", short: "Jun", monthNum: 6, year: startYear },
+      { name: "July", short: "Jul", monthNum: 7, year: startYear },
+      { name: "August", short: "Aug", monthNum: 8, year: startYear },
+      { name: "September", short: "Sep", monthNum: 9, year: startYear },
+      { name: "October", short: "Oct", monthNum: 10, year: startYear },
+      { name: "November", short: "Nov", monthNum: 11, year: startYear },
+      { name: "December", short: "Dec", monthNum: 12, year: startYear },
+      { name: "January", short: "Jan", monthNum: 1, year: endYear },
+      { name: "February", short: "Feb", monthNum: 2, year: endYear },
+      { name: "March", short: "Mar", monthNum: 3, year: endYear },
+    ];
+
+    const isMonthlyMode = periodType === 'MONTH' || periodType === 'MONTHLY';
+    let targetMonthObj = null;
+    if (isMonthlyMode && month && month !== 'ALL') {
+      targetMonthObj = fyMonths.find(m => m.name.toLowerCase() === month.toLowerCase() || m.short.toLowerCase() === month.toLowerCase()) || null;
+    }
+
+    // Fetch live Cement Register entries, Bill Register data, and Freight data
+    const cementCol = getCementCol();
+    const freightCol = getFreightCol();
+    const [allCement, { rows: allBillRows = [] }, allFreight = []] = await Promise.all([
+      cementCol.find({}).toArray(),
+      getBillRegisterData({ fy: `${startYear}-${endYear}` }),
+      freightCol.find({}).toArray()
+    ]);
+
+    const parseNumVal = (v) => {
+      if (v === null || v === undefined || v === '') return 0;
+      const n = parseFloat(String(v).replace(/,/g, ''));
+      return isNaN(n) ? 0 : n;
+    };
+
+    // Authoritative distance resolver using project NVL/NVCL freight rate-chart data
+    const getDistanceForDestination = (destination, site) => {
+      if (!destination) return 0;
+      const destStr = String(destination).trim();
+      if (!destStr) return 0;
+
+      const targetFreights = site ? allFreight.filter(f => f.SOURCE === (site === "NVCL" ? "NVCL" : "NVL")) : allFreight;
+      const searchPool = targetFreights.length > 0 ? targetFreights : allFreight;
+
+      // 1. Pincode match (6 digits)
+      const pinMatch = destStr.match(/\b\d{6}\b/);
+      if (pinMatch) {
+        const pin = pinMatch[0];
+        const match = searchPool.find(f => {
+          const d = String(f["DEST ZONE DESC"] || "");
+          const p = String(f["PINCODE"] || f["Pincode"] || "");
+          return d.includes(pin) || p.includes(pin);
+        });
+        if (match && parseNumVal(match.Distance) > 0) return parseNumVal(match.Distance) * 2;
+      }
+
+      // 2. Exact/regex destination string match
+      const destLower = destStr.toLowerCase();
+      const exactMatch = searchPool.find(f => {
+        const d = String(f["DEST ZONE DESC"] || "").toLowerCase();
+        return d === destLower || d.includes(destLower);
+      });
+      if (exactMatch && parseNumVal(exactMatch.Distance) > 0) return parseNumVal(exactMatch.Distance) * 2;
+
+      // 3. Fallback: first significant word (>= 3 chars)
+      const destText = destStr.replace(/^\d+[-\s]*/, "").replace(/[-\s]*\d+$/, "").trim();
+      const firstWord = destText.split(/[\s,(]/)[0].toLowerCase();
+      if (firstWord && firstWord.length > 2) {
+        const wordMatch = searchPool.find(f => {
+          const d = String(f["DEST ZONE DESC"] || "").toLowerCase();
+          return d.includes(firstWord);
+        });
+        if (wordMatch && parseNumVal(wordMatch.Distance) > 0) return parseNumVal(wordMatch.Distance) * 2;
+      }
+
+      return 0;
+    };
+
+    const unmappedDestinations = new Map();
+
+    const monthlyBreakdown = fyMonths.map(mInfo => {
+      const { name, monthNum, year } = mInfo;
+      const daysInMonth = new Date(year, monthNum, 0).getDate();
+      const mStartStr = `${year}-${String(monthNum).padStart(2, '0')}-01`;
+
+      let lastDay = daysInMonth;
+      const isThisMonthCurrent = (year === currentCalYear && monthNum === currentCalMonth);
+      const isFutureMonth = (year > currentCalYear) || (year === currentCalYear && monthNum > currentCalMonth);
+
+      if (isThisMonthCurrent) {
+        lastDay = Math.min(currentCalDay, daysInMonth);
+      } else if (isFutureMonth) {
+        lastDay = 0; // Future month has 0 data
+      }
+
+      const mEndStr = lastDay > 0
+        ? `${year}-${String(monthNum).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+        : mStartStr;
+
+      let monthTonnage = 0;
+      let monthKM = 0;
+      let monthTrips = 0;
+      let monthRevenue = 0;
+      let monthBills = 0;
+      let monthUnmappedTrips = 0;
+
+      if (lastDay > 0) {
+        // 1. Tonnage & KM from Cement Register (Single count per record _id)
+        const seenCementIds = new Set();
+        allCement.forEach(row => {
+          const rowId = String(row._id);
+          if (seenCementIds.has(rowId)) return;
+          seenCementIds.add(rowId);
+
+          const rawDate = row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || row["DATE"];
+          const isoDate = parseToYYYYMMDD(rawDate);
+          if (!isoDate || isoDate < mStartStr || isoDate > mEndStr) return;
+
+          const mtVal = parseNumVal(row["TOTAL MT"] ?? row["MT"] ?? row["TONNAGE"] ?? row.mt ?? row.totalMt ?? row["TOTAL WEIGHT"] ?? row["LIFTING"] ?? row["QTY"] ?? row["QUANTITY"]);
+          const billAmt = parseNumVal(row["Billing Amount"] ?? row["BILLING AMOUNT"] ?? row["AMOUNT"] ?? row.billingAmount);
+          const invNo = String(row["INVOICE NO"] || row["INVOICE NO."] || row["BILL NO"] || "").trim();
+
+          if (mtVal <= 0 && billAmt <= 0 && !invNo) return;
+
+          if (mtVal > 0) {
+            monthTonnage += mtVal;
+            monthTrips += 1;
+
+            let kmVal = parseNumVal(row["KM AS PER RATE CHART"] ?? row["KM"] ?? row["DISTANCE"]);
+            if (kmVal <= 0) {
+              kmVal = getDistanceForDestination(row["DESTINATION"], row["SITE"]);
+            }
+
+            if (kmVal > 0) {
+              monthKM += kmVal;
+            } else {
+              monthUnmappedTrips += 1;
+              const dest = String(row["DESTINATION"] || "Unknown").trim();
+              unmappedDestinations.set(dest, (unmappedDestinations.get(dest) || 0) + 1);
+            }
+          }
+        });
+
+        // 2. Revenue from Bill Register (Single count per invoiceNumber)
+        const seenBillNos = new Set();
+        allBillRows.forEach(b => {
+          const bDate = b.invoiceDate || b.billDate || b.date;
+          const bIso = parseToYYYYMMDD(bDate);
+          if (!bIso || bIso < mStartStr || bIso > mEndStr) return;
+
+          const bNo = String(b.invoiceNumber || b.billNo || '').trim();
+          const bAmt = parseFloat(b.amount) || 0;
+
+          if (bNo && seenBillNos.has(bNo)) return;
+          if (bNo) seenBillNos.add(bNo);
+
+          if (bAmt > 0) {
+            monthRevenue += bAmt;
+            monthBills += 1;
+          }
+        });
+      }
+
+      monthTonnage = Math.round(monthTonnage * 100) / 100;
+      monthKM = Math.round(monthKM * 100) / 100;
+      monthRevenue = Math.round(monthRevenue * 100) / 100;
+
+      const revPerMT = monthTonnage > 0 ? Math.round((monthRevenue / monthTonnage) * 100) / 100 : null;
+      const tonPerKM = monthKM > 0 ? Math.round((monthTonnage / monthKM) * 10000) / 10000 : null;
+      const ptpk = monthKM > 0 ? Math.round((monthRevenue / monthKM) * 100) / 100 : null;
+
+      return {
+        month: name,
+        monthShort: mInfo.short,
+        year,
+        startDate: mStartStr,
+        endDate: mEndStr,
+        isFuture: isFutureMonth,
+        tonnage: monthTonnage,
+        km: monthKM,
+        revenue: monthRevenue,
+        trips: monthTrips,
+        bills: monthBills,
+        unmappedTrips: monthUnmappedTrips,
+        revenuePerMT: revPerMT,
+        tonPerKM: tonPerKM,
+        ptpk: ptpk
+      };
+    });
+
+    // Calculate selection totals based on periodType
+    let targetMonthsForTotal = monthlyBreakdown;
+    let periodDisplay = '';
+
+    if (isMonthlyMode && targetMonthObj) {
+      const match = monthlyBreakdown.find(m => m.month === targetMonthObj.name);
+      targetMonthsForTotal = match ? [match] : [];
+      periodDisplay = `${targetMonthObj.name} ${targetMonthObj.year}`;
+    } else {
+      periodDisplay = `${selectedFY} (01-Apr-${startYear} to ${isCurrentFY ? todayStr : `31-Mar-${endYear}`})`;
+    }
+
+    let grandTotalTonnage = 0;
+    let grandTotalKM = 0;
+    let grandTotalRevenue = 0;
+    let grandTotalTrips = 0;
+    let grandTotalBills = 0;
+    let grandTotalUnmappedTrips = 0;
+
+    targetMonthsForTotal.forEach(m => {
+      grandTotalTonnage += m.tonnage;
+      grandTotalKM += m.km;
+      grandTotalRevenue += m.revenue;
+      grandTotalTrips += m.trips;
+      grandTotalBills += m.bills;
+      grandTotalUnmappedTrips += m.unmappedTrips;
+    });
+
+    grandTotalTonnage = Math.round(grandTotalTonnage * 100) / 100;
+    grandTotalKM = Math.round(grandTotalKM * 100) / 100;
+    grandTotalRevenue = Math.round(grandTotalRevenue * 100) / 100;
+
+    const grandRevenuePerMT = grandTotalTonnage > 0 ? Math.round((grandTotalRevenue / grandTotalTonnage) * 100) / 100 : null;
+    const grandTonPerKM = grandTotalKM > 0 ? Math.round((grandTotalTonnage / grandTotalKM) * 10000) / 10000 : null;
+    const grandPtpk = grandTotalKM > 0 ? Math.round((grandTotalRevenue / grandTotalKM) * 100) / 100 : null;
+
+    return res.json({
+      success: true,
+      period: {
+        financialYear: selectedFY,
+        periodType: isMonthlyMode ? 'MONTH' : 'FULL_FY',
+        month: isMonthlyMode && targetMonthObj ? targetMonthObj.name : 'ALL',
+        display: periodDisplay,
+        startYear,
+        endYear
+      },
+      totals: {
+        totalRevenue: grandTotalRevenue,
+        totalTonnage: grandTotalTonnage,
+        totalKM: grandTotalKM,
+        revenuePerMT: grandRevenuePerMT,
+        tonPerKM: grandTonPerKM,
+        ptpk: grandPtpk,
+        totalTrips: grandTotalTrips,
+        totalBills: grandTotalBills,
+        unmappedTrips: grandTotalUnmappedTrips,
+        revenueDisplay: `₹${grandTotalRevenue.toLocaleString('en-IN')}`,
+        tonnageDisplay: `${grandTotalTonnage.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MT`,
+        kmDisplay: `${grandTotalKM.toLocaleString('en-IN')} KM`,
+        revenuePerMTDisplay: grandRevenuePerMT !== null ? `₹${grandRevenuePerMT.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / MT` : 'N/A',
+        tonPerKMDisplay: grandTonPerKM !== null ? `${grandTonPerKM.toFixed(4)}` : 'N/A',
+        ptpkDisplay: grandPtpk !== null ? `₹${grandPtpk.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / TON / KM` : 'N/A'
+      },
+      formula: {
+        step1: "TOTAL REVENUE ÷ TOTAL MT = REVENUE / MT",
+        step2: "TOTAL MT ÷ TOTAL KM = TON / KM",
+        step3: "PTPK = TOTAL REVENUE ÷ TOTAL KM",
+        label: "PTPK (PER TON PER KILOMETRE)"
+      },
+      monthlyData: monthlyBreakdown,
+      chartData: monthlyBreakdown.map(m => ({
+        month: m.month,
+        monthShort: m.monthShort,
+        tonnage: m.tonnage,
+        km: m.km,
+        revenue: m.revenue,
+        revenuePerMT: m.revenuePerMT,
+        tonPerKM: m.tonPerKM,
+        ptpk: m.ptpk,
+        isFuture: m.isFuture
+      })),
+      unmappedDestinations: Array.from(unmappedDestinations.entries()).map(([dest, count]) => ({ destination: dest, count }))
+    });
+  } catch (err) {
+    console.error("[PtpkSummary] Error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to calculate PTPK summary" });
+  }
+});
+
+// ── GET /pie-chart/vehicle-mkt-association ───────────────────────────────────────
+// Live database-driven report: Market vs Association Total MT by Vehicle Type (6W, 10WH, 12WH, 14WH)
+router.get("/vehicle-mkt-association", async (req, res) => {
+  try {
+    const { financialYear, fy, month, date, period } = req.query;
+    const selectedFY = financialYear || fy;
+
+    // 1. Determine date range using existing parseFY and date logic with current month/FY ceiling
+    const now = moment();
+    const currentCalMonth = now.month() + 1; // 1-12
+    const currentCalYear = now.year();
+    const currentCalDay = now.date();
+    const todayStr = now.format("YYYY-MM-DD");
+
+    const { startYear, endYear } = parseFY(selectedFY);
+    const isCurrentFY = (currentCalMonth >= 4 && currentCalYear === startYear) || (currentCalMonth < 4 && currentCalYear === endYear);
+
+    let startDateStr = '';
+    let endDateStr = '';
+    let displayStr = '';
+
+    const monthMap = {
+      'JANUARY': 1, 'FEBRUARY': 2, 'MARCH': 3, 'APRIL': 4, 'MAY': 5, 'JUNE': 6,
+      'JULY': 7, 'AUGUST': 8, 'SEPTEMBER': 9, 'OCTOBER': 10, 'NOVEMBER': 11, 'DECEMBER': 12
+    };
+
+    let selectedMonthNum = null;
+    if (month && String(month).toUpperCase() !== 'ALL') {
+      const mUpper = String(month).trim().toUpperCase();
+      if (monthMap[mUpper]) {
+        selectedMonthNum = monthMap[mUpper];
+      } else if (!isNaN(parseInt(mUpper, 10)) && parseInt(mUpper, 10) >= 1 && parseInt(mUpper, 10) <= 12) {
+        selectedMonthNum = parseInt(mUpper, 10);
+      }
+    }
+
+    if (period === 'TODAY') {
+      startDateStr = todayStr;
+      endDateStr = todayStr;
+      displayStr = todayStr;
+    } else if (date && String(date).toUpperCase() !== 'ALL') {
+      // Specific day or date
+      const dNum = parseInt(date, 10);
+      if (!isNaN(dNum) && selectedMonthNum !== null) {
+        const mYear = selectedMonthNum >= 4 ? startYear : endYear;
+        const dStr = `${mYear}-${String(selectedMonthNum).padStart(2, '0')}-${String(dNum).padStart(2, '0')}`;
+        startDateStr = dStr;
+        endDateStr = dStr;
+        displayStr = `${String(dNum).padStart(2, '0')}-${String(selectedMonthNum).padStart(2, '0')}-${mYear}`;
+      } else {
+        const parsed = parseToYYYYMMDD(date);
+        if (parsed) {
+          startDateStr = parsed;
+          endDateStr = parsed;
+          displayStr = parsed;
+        }
+      }
+    } else if (selectedMonthNum !== null) {
+      // Full selected month
+      const mYear = selectedMonthNum >= 4 ? startYear : endYear;
+      const totalDays = new Date(mYear, selectedMonthNum, 0).getDate();
+      let lastDay = totalDays;
+
+      if (mYear === currentCalYear && selectedMonthNum === currentCalMonth) {
+        lastDay = Math.min(currentCalDay, totalDays);
+      } else if (mYear > currentCalYear || (mYear === currentCalYear && selectedMonthNum > currentCalMonth)) {
+        lastDay = 0; // Future month
+      }
+
+      startDateStr = `${mYear}-${String(selectedMonthNum).padStart(2, '0')}-01`;
+      endDateStr = lastDay > 0
+        ? `${mYear}-${String(selectedMonthNum).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+        : `${mYear}-${String(selectedMonthNum).padStart(2, '0')}-01`;
+
+      const mmStr = String(selectedMonthNum).padStart(2, '0');
+      displayStr = lastDay > 0
+        ? `01-${mmStr}-${mYear} to ${String(lastDay).padStart(2, '0')}-${mmStr}-${mYear}`
+        : `01-${mmStr}-${mYear} (No records - future)`;
+    } else {
+      // Entire Financial Year (or YEARLY)
+      const fyStart = `${startYear}-04-01`;
+      let fyEnd = `${endYear}-03-31`;
+      if (isCurrentFY && todayStr < fyEnd) {
+        fyEnd = todayStr;
+      }
+      startDateStr = fyStart;
+      endDateStr = fyEnd;
+      displayStr = `${fyStart} to ${fyEnd}`;
+    }
+
+    // 2. Fetch authoritative registered vehicles from Party Master (owner details & Truck Contact Number)
+    const ownerCol = mongoose.connection.useDb("invoice_system").collection("owner details");
+    const truckCol = mongoose.connection.useDb("invoice_system").collection("Truck Contact Number");
+    const cementCol = getCementCol();
+
+    const [ownerDocs, truckDocs, cementDocs] = await Promise.all([
+      ownerCol.find({}).toArray(),
+      truckCol.find({}).toArray(),
+      cementCol.find({}).toArray()
+    ]);
+
+    const partyMasterMap = new Map();
+    // Primary: owner details
+    for (const doc of ownerDocs) {
+      const rawNo = (doc["Truck No"] || doc["Truck No "] || doc.truck_no || doc._id.toString()).toString().trim().toUpperCase();
+      const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
+      if (normKey && normKey.length >= 5) {
+        partyMasterMap.set(normKey, doc);
+      }
+    }
+    // Secondary: Truck Contact Number
+    for (const doc of truckDocs) {
+      const rawNo = (doc.truck_no || doc["Truck No "] || doc["Truck No"] || doc._id.toString()).toString().trim().toUpperCase();
+      const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
+      if (normKey && normKey.length >= 5 && !partyMasterMap.has(normKey)) {
+        partyMasterMap.set(normKey, doc);
+      }
+    }
+
+    // 3. Initialize metrics for the 4 vehicle types
+    const vehicleTypeData = {
+      '6W': { vehicleType: '6W', label: '6-Wheeler (6W)', totalLifting: 0, market: 0, association: 0, other: 0, recordCount: 0, vehicles: new Set() },
+      '10WH': { vehicleType: '10WH', label: '10-Wheeler (10WH)', totalLifting: 0, market: 0, association: 0, other: 0, recordCount: 0, vehicles: new Set() },
+      '12WH': { vehicleType: '12WH', label: '12-Wheeler (12WH)', totalLifting: 0, market: 0, association: 0, other: 0, recordCount: 0, vehicles: new Set() },
+      '14WH': { vehicleType: '14WH', label: '14-Wheeler (14WH)', totalLifting: 0, market: 0, association: 0, other: 0, recordCount: 0, vehicles: new Set() }
+    };
+
+    let unclassifiedRecordsCount = 0;
+    let unclassifiedMT = 0;
+    let totalRecordsMatched = 0;
+
+    const parseNumVal = (v) => {
+      if (v === null || v === undefined || v === '') return 0;
+      const n = parseFloat(String(v).replace(/,/g, ''));
+      return isNaN(n) ? 0 : n;
+    };
+
+    // 4. Process each Cement Register record
+    const seenIds = new Set();
+    cementDocs.forEach(row => {
+      const rowId = String(row._id);
+      if (seenIds.has(rowId)) return;
+      seenIds.add(rowId);
+
+      const rawDate = row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || row["DATE"];
+      const isoDate = parseToYYYYMMDD(rawDate);
+      if (!isoDate) return;
+
+      // Filter by period bounds
+      if (isoDate < startDateStr || isoDate > endDateStr) return;
+
+      const rawVeh = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "";
+      const normKey = String(rawVeh).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!normKey || normKey.length < 5) return;
+
+      const mtVal = parseNumVal(row["MT"] ?? row["TONNAGE"] ?? row["TOTAL MT"]);
+      const billAmt = parseNumVal(row["Billing Amount"] ?? row["BILLING AMOUNT"] ?? row["AMOUNT"]);
+      const invNo = String(row["INVOICE NO"] || row["INVOICE NO."] || "").trim();
+
+      // Exclude zero MT adjustment rows
+      if (mtVal <= 0 && billAmt <= 0 && !invNo) return;
+      if (mtVal <= 0) return;
+
+      // Match Party Master with effective date resolution
+      const rawContact = partyMasterMap.get(normKey);
+      let effectiveContact = rawContact;
+      if (rawContact && typeof getEffectivePartyMaster === 'function') {
+        effectiveContact = getEffectivePartyMaster(rawContact, isoDate) || rawContact;
+      }
+
+      // Determine Relationship Classification:
+      // Priority: Party Master Relationship Type -> Fallback: Cement Register TYPE
+      const rawRel = effectiveContact
+        ? (effectiveContact["TYPE OF CUSTOMER "] || effectiveContact["TYPE OF CUSTOMER"] || effectiveContact.custType || effectiveContact.relationshipType || effectiveContact.relationship_type || effectiveContact.type || "")
+        : (row["TYPE"] || "");
+
+      const cleanRel = String(rawRel).trim().toUpperCase();
+      const isMarket = cleanRel === "MKT" || cleanRel === "MARKET";
+      const isAssoc = cleanRel === "ATOA" || cleanRel === "ATO" || cleanRel === "ASSOCIATION";
+
+      // Determine Wheel Type:
+      // Priority: Cement Register WHEEL -> Fallback: Party Master contact wheel
+      const rawWheel = (row["WHEEL"] || (effectiveContact ? (effectiveContact["Type of vehicle"] || effectiveContact["Type of vehicle "] || effectiveContact.wheel_type || effectiveContact.veh_type) : "") || "").toString().toUpperCase();
+
+      let wheelKey = null;
+      if (rawWheel.includes("14")) wheelKey = "14WH";
+      else if (rawWheel.includes("12")) wheelKey = "12WH";
+      else if (rawWheel.includes("10")) wheelKey = "10WH";
+      else if (rawWheel.includes("6") && !rawWheel.includes("16") && !rawWheel.includes("26")) wheelKey = "6W";
+
+      if (!wheelKey || !vehicleTypeData[wheelKey]) {
+        unclassifiedRecordsCount++;
+        unclassifiedMT += mtVal;
+        return;
+      }
+
+      totalRecordsMatched++;
+      const targetGroup = vehicleTypeData[wheelKey];
+      targetGroup.totalLifting += mtVal;
+      targetGroup.recordCount += 1;
+      targetGroup.vehicles.add(normKey);
+
+      if (isMarket) {
+        targetGroup.market += mtVal;
+      } else if (isAssoc) {
+        targetGroup.association += mtVal;
+      } else {
+        targetGroup.other += mtVal;
+      }
+    });
+
+    // 5. Build final output table and chart dataset
+    const vehicleOrder = ['6W', '10WH', '12WH', '14WH'];
+    let grandTotalLifting = 0;
+    let grandMarket = 0;
+    let grandAssociation = 0;
+    let grandOther = 0;
+
+    const tableRows = vehicleOrder.map(key => {
+      const g = vehicleTypeData[key];
+      const lifting = Math.round(g.totalLifting * 100) / 100;
+      const mkt = Math.round(g.market * 100) / 100;
+      const assoc = Math.round(g.association * 100) / 100;
+      const oth = Math.round(g.other * 100) / 100;
+
+      grandTotalLifting += lifting;
+      grandMarket += mkt;
+      grandAssociation += assoc;
+      grandOther += oth;
+
+      return {
+        vehicleType: key,
+        label: g.label,
+        totalLifting: lifting,
+        market: mkt,
+        association: assoc,
+        other: oth,
+        vehicleCount: g.vehicles.size,
+        recordCount: g.recordCount
+      };
+    });
+
+    const totalRow = {
+      vehicleType: 'TOTAL',
+      label: 'TOTAL',
+      totalLifting: Math.round(grandTotalLifting * 100) / 100,
+      market: Math.round(grandMarket * 100) / 100,
+      association: Math.round(grandAssociation * 100) / 100,
+      other: Math.round(grandOther * 100) / 100,
+      vehicleCount: new Set([
+        ...vehicleTypeData['6W'].vehicles,
+        ...vehicleTypeData['10WH'].vehicles,
+        ...vehicleTypeData['12WH'].vehicles,
+        ...vehicleTypeData['14WH'].vehicles
+      ]).size,
+      recordCount: totalRecordsMatched
+    };
+
+    // Chart dataset (exactly matches table rows 6W, 10WH, 12WH, 14WH)
+    const chartData = tableRows.map(r => ({
+      vehicleType: r.vehicleType,
+      market: r.market,
+      association: r.association,
+      totalLifting: r.totalLifting
+    }));
+
+    const completeTable = [...tableRows, totalRow];
+
+    const marketPct = grandTotalLifting > 0 ? Math.round((grandMarket / grandTotalLifting) * 10000) / 100 : 0;
+    const assocPct = grandTotalLifting > 0 ? Math.round((grandAssociation / grandTotalLifting) * 10000) / 100 : 0;
+
+    return res.json({
+      success: true,
+      period: {
+        financialYear: selectedFY || `FY ${startYear}-${String(endYear).slice(-2)}`,
+        month: month || 'ALL',
+        date: date || 'ALL',
+        startDate: startDateStr,
+        endDate: endDateStr,
+        display: displayStr
+      },
+      table: completeTable,
+      chartData,
+      summary: {
+        totalLifting: totalRow.totalLifting,
+        marketTotal: totalRow.market,
+        associationTotal: totalRow.association,
+        marketPercentage: marketPct,
+        associationPercentage: assocPct
+      },
+      unclassified: {
+        count: unclassifiedRecordsCount,
+        totalMT: Math.round(unclassifiedMT * 100) / 100
+      }
+    });
+  } catch (err) {
+    console.error("[VehicleMktAssoc] Error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to generate vehicle market & association analytics" });
   }
 });
 

@@ -22,6 +22,7 @@ import {
   COLUMNS, HIDDEN_KEYS, num, fmt2, parseToDate, formatDateToDDMMYY,
   applyCalcs, GROUP_COLORS, VISIBLE_COLS, NUMERIC_KEYS, formatTotalValue
 } from '../utils/cementCalculations';
+import { findContactForRecord, parseContactCommission } from '../utils/partyMasterHelper';
 
 import { exportToCsv } from '../utils/exportCsv';
 import { useShortcut } from '../context/ShortcutContext';
@@ -120,11 +121,11 @@ const RAW_EXCEL_HEADER_MAP = {
   'shipment no': 'SHIPMENT NO', 'shipment number': 'SHIPMENT NO', 'shipment no.': 'SHIPMENT NO',
   'challan status': 'CHALLAN STATUS', 'challan': 'CHALLAN STATUS',
   'bill type': 'Bill Type',
-  // Billing
   'destination': 'DESTINATION', 'dest': 'DESTINATION',
   'party name': 'PARTY NAME', 'party': 'PARTY NAME', 'consignee': 'PARTY NAME',
   'billing': 'BILLING', 'freight': 'BILLING', 'rate': 'BILLING', 'billing rate': 'BILLING',
-  'mt': 'MT', 'metric ton': 'MT', 'tonnes': 'MT', 'qty': 'MT', 'quantity': 'MT', 'wt': 'MT', 'party rate': 'PARTY RATE',
+  'mt': 'MT', 'metric ton': 'MT', 'tonnes': 'MT', 'qty': 'MT', 'quantity': 'MT', 'wt': 'MT',
+  'party rate': 'PARTY RATE (95-97%)', 'party rate (95%)': 'PARTY RATE (95-97%)', 'party rate 95%': 'PARTY RATE (95-97%)', 'party rate (95-97%)': 'PARTY RATE (95-97%)', 'party rate 95-97%': 'PARTY RATE (95-97%)', 'party rate %': 'PARTY RATE (95-97%)',
   'advance': 'ADVANCE', 'loading advance': 'ADVANCE', 'adv': 'ADVANCE', 'advance ': 'ADVANCE',
   'site cash': 'Site Cash', 'site cash advance': 'Site Cash',
   'office cash': 'OFFICE CASH', 'office cash advance': 'OFFICE CASH',
@@ -358,13 +359,24 @@ const validateImportData = (rows, existingEntries) => {
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function CementRegister({ onBack }) {
   const [entries, setEntries] = useState([]);
+  const [contacts, setContacts] = useState([]);
   const [pendingEntries, setPendingEntries] = useState([]);
   const [localData, setLocalData] = useState({});   // { rowId: { field: val } }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
+
+  useEffect(() => {
+    axios.get(`${API_URL}/truck-contacts`).then(res => {
+      if (res.data && res.data.contacts) {
+        setContacts(res.data.contacts);
+      }
+    }).catch(() => {});
+  }, []);
 
 
   const now = useMemo(() => new Date(), []);
@@ -608,11 +620,31 @@ export default function CementRegister({ onBack }) {
 
     let dbRows = entries.filter(isRecordInSelectedPeriod).map(row => {
       const merged = { ...row, ...(localData[row._id] || {}) };
+      if (merged._freight_commission === undefined && contacts.length > 0) {
+        const veh = merged['VEHICLE NUMBER'] || merged['VEHICLE NO'];
+        const owner = merged['OWNER NAME'] || merged['PARTY NAME'];
+        const rowDate = merged['LOADING DT'] || merged['LOADING DATE'] || merged['BILL DATE'] || merged['RECEIVING DATE'] || merged['INVOICE DATE'] || merged.date;
+        const contact = findContactForRecord(owner, veh, contacts, rowDate);
+        if (contact) {
+          const comm = parseContactCommission(contact, rowDate);
+          if (comm !== null) merged._freight_commission = comm;
+        }
+      }
       return applyCalcs(merged);
     });
 
     let previewRows = unsavedImportRows.filter(isRecordInSelectedPeriod).map(row => {
       const merged = { ...row, ...(localData[row._id] || {}) };
+      if (merged._freight_commission === undefined && contacts.length > 0) {
+        const veh = merged['VEHICLE NUMBER'] || merged['VEHICLE NO'];
+        const owner = merged['OWNER NAME'] || merged['PARTY NAME'];
+        const rowDate = merged['LOADING DT'] || merged['LOADING DATE'] || merged['BILL DATE'] || merged['RECEIVING DATE'] || merged['INVOICE DATE'] || merged.date;
+        const contact = findContactForRecord(owner, veh, contacts, rowDate);
+        if (contact) {
+          const comm = parseContactCommission(contact, rowDate);
+          if (comm !== null) merged._freight_commission = comm;
+        }
+      }
       return applyCalcs(merged);
     });
 
@@ -636,7 +668,7 @@ export default function CementRegister({ onBack }) {
       'SL NO': String(index + 1),
       'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
     }));
-  }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear]);
+  }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear, contacts]);
 
   // ── Pending merged rows with calcs ─────────────────────────────────────────
   const pendingComputedRows = useMemo(() => {
@@ -712,12 +744,41 @@ export default function CementRegister({ onBack }) {
       if (field === 'TDS') {
         rowUpdates.tds_manual = true;
       }
+      if (field === 'VEHICLE NUMBER' || field === 'OWNER NAME' || field === 'BILLING' || field === 'LOADING DT' || field === 'LOADING DATE') {
+        const originalRow = entries.find(r => r._id === rowId) || unsavedImportRows.find(r => r._id === rowId) || {};
+        const veh = field === 'VEHICLE NUMBER' ? value : (rowUpdates['VEHICLE NUMBER'] || originalRow['VEHICLE NUMBER']);
+        const owner = field === 'OWNER NAME' ? value : (rowUpdates['OWNER NAME'] || originalRow['OWNER NAME']);
+        const billingVal = parseFloat(String(field === 'BILLING' ? value : (rowUpdates['BILLING'] || originalRow['BILLING'] || 0)).replace(/,/g, '')) || 0;
+        const rowDate = (field === 'LOADING DT' || field === 'LOADING DATE') ? value : (rowUpdates['LOADING DT'] || rowUpdates['LOADING DATE'] || originalRow['LOADING DT'] || originalRow['LOADING DATE'] || originalRow['BILL DATE'] || originalRow.date);
+        const contact = findContactForRecord(owner, veh, contacts, rowDate);
+        if (contact) {
+          const comm = parseContactCommission(contact, rowDate);
+          if (comm !== null) {
+            rowUpdates._freight_commission = comm;
+            const rateVal = Math.round(billingVal * (1 - comm) * 100) / 100;
+            rowUpdates['PARTY RATE (95-97%)'] = rateVal;
+            rowUpdates['PARTY RATE'] = rateVal;
+          } else {
+            rowUpdates._freight_commission = null;
+            rowUpdates['PARTY RATE (95-97%)'] = '';
+            rowUpdates['PARTY RATE'] = '';
+          }
+          const cOwner = contact["Owner Name"] || contact["Owner Name "] || contact.owner_name || contact.ownerName;
+          if (cOwner && !rowUpdates['OWNER NAME'] && !originalRow['OWNER NAME']) {
+            rowUpdates['OWNER NAME'] = cOwner;
+          }
+        } else {
+          rowUpdates._freight_commission = null;
+          rowUpdates['PARTY RATE (95-97%)'] = '';
+          rowUpdates['PARTY RATE'] = '';
+        }
+      }
       return {
         ...prev,
         [rowId]: rowUpdates
       };
     });
-  }, []);
+  }, [entries, unsavedImportRows, contacts]);
 
   // ── Bulk Delete selected rows ──────────────────────────────────────────────────
   const handleBulkDelete = async () => {
@@ -864,7 +925,17 @@ export default function CementRegister({ onBack }) {
   };
 
   // ── CSV Export ─────────────────────────────────────────────────────────────
-  const handleExport = () => exportToCsv('cement_register.xls', computedRows);
+  const handleExport = () => {
+    const visibleKeys = VISIBLE_COLS.map(c => c.key);
+    const exportRows = computedRows.map(row => {
+      const filtered = {};
+      visibleKeys.forEach(k => {
+        filtered[k] = row[k] !== undefined && row[k] !== null ? row[k] : '';
+      });
+      return filtered;
+    });
+    exportToCsv('cement_register.xls', exportRows);
+  };
 
   // ── Apply Bulk Bill to selected rows ─────────────────────────
   const handlePreviewBatchBill = () => {
@@ -1053,6 +1124,33 @@ export default function CementRegister({ onBack }) {
             // A valid row must contain at least a date or a vehicle number.
             // If it only contains auto-generated SL NO or BILL NO, it's likely a trailing empty row.
             if (rowObj['LOADING DT'] || rowObj['VEHICLE NUMBER']) {
+              // Real-time authoritative lookup from Party Master
+              const veh = rowObj['VEHICLE NUMBER'] || rowObj['VEHICLE NO'];
+              const owner = rowObj['OWNER NAME'] || rowObj['PARTY NAME'];
+              const billingVal = parseFloat(String(rowObj['BILLING'] || 0).replace(/,/g, '')) || 0;
+              const rowDate = rowObj['LOADING DT'] || rowObj['LOADING DATE'] || rowObj['BILL DATE'] || rowObj.date;
+              const contact = findContactForRecord(owner, veh, contacts, rowDate);
+              if (contact) {
+                const comm = parseContactCommission(contact, rowDate);
+                if (comm !== null) {
+                  rowObj._freight_commission = comm;
+                  const rateVal = Math.round(billingVal * (1 - comm) * 100) / 100;
+                  rowObj['PARTY RATE (95-97%)'] = rateVal;
+                  rowObj['PARTY RATE'] = rateVal;
+                } else {
+                  rowObj._freight_commission = null;
+                  rowObj['PARTY RATE (95-97%)'] = '';
+                  rowObj['PARTY RATE'] = '';
+                }
+                const cOwner = contact["Owner Name"] || contact["Owner Name "] || contact.owner_name || contact.ownerName;
+                if (cOwner && !rowObj['OWNER NAME']) {
+                  rowObj['OWNER NAME'] = cOwner;
+                }
+              } else {
+                rowObj._freight_commission = null;
+                rowObj['PARTY RATE (95-97%)'] = '';
+                rowObj['PARTY RATE'] = '';
+              }
               mappedRows.push(rowObj);
             }
           }

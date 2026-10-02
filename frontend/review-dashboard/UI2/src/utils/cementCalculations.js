@@ -47,17 +47,33 @@ export const COLUMNS = [
   { key: 'BILLING', label: 'BILLING', width: 80, type: 'auto', group: 'billing', hint: 'From freight dataset' },
   { key: 'MT', label: 'MT', width: 60, type: 'auto', group: 'billing' },
   {
-    key: 'PARTY RATE', label: 'PARTY RATE\n(95%)', width: 95, type: 'calc', group: 'billing',
-    hint: 'Billing × 95%. Shows 0 when owner has a variable commission rate.',
+    key: 'PARTY RATE (95-97%)', label: 'PARTY RATE\n(95-97%)', width: 110, type: 'calc', group: 'billing',
+    hint: 'Party Rate (Freight / MT) = Billing × (1 - Basic Freight Commission)',
     formula: r => {
       const comm = r._freight_commission;
-      const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
-      return isStd ? fmt2(num(r.BILLING) * 0.95) : 0;
+      const billingRate = num(r.BILLING);
+      if (comm !== undefined && comm !== null && comm !== '' && !isNaN(Number(comm))) {
+        const ratePct = 1 - Number(comm);
+        return billingRate > 0 ? fmt2(billingRate * ratePct) : '';
+      }
+      const existing = r['PARTY RATE (95-97%)'] || r['PARTY RATE (95%)'] || r['PARTY RATE'];
+      if (existing !== undefined && existing !== null && existing !== '') {
+        const str = String(existing).trim();
+        if (!str.endsWith('%')) {
+          const n = num(str);
+          if (n > 0) return fmt2(n);
+        }
+      }
+      if (billingRate > 0) {
+        return fmt2(billingRate * 0.95);
+      }
+      return '';
     }
   },
   {
     key: 'PARTY RATE VAR', label: 'PARTY RATE\n(Variable %)', width: 120, type: 'calc', group: 'billing',
     hint: 'Billing × (1 - variable commission). Shows 0 for standard 95% owners.',
+    hidden: true,
     formula: r => {
       const comm = r._freight_commission;
       if (comm === undefined || comm === null || Number(comm) === 0.05) return 0;
@@ -77,6 +93,7 @@ export const COLUMNS = [
   {
     key: 'BILLING ER VAR', label: 'BILLING ER\n(Variable %)', width: 130, type: 'calc', group: 'billing',
     hint: 'Billing Amount × (1 - variable commission). Shows 0 for standard 95% owners.',
+    hidden: true,
     formula: r => {
       const comm = r._freight_commission;
       if (comm === undefined || comm === null || Number(comm) === 0.05) return 0;
@@ -108,16 +125,17 @@ export const COLUMNS = [
   { key: 'PUMP NAME', label: 'PUMP NAME', width: 130, type: 'auto', group: 'hsd' },
   { key: 'HSD SLIP NO', label: 'HSD SLIP NO', width: 120, type: 'auto', group: 'hsd' },
   { key: 'HSD BILL NO', label: 'HSD BILL NO\n(Pump/FY/Serial)', width: 175, type: 'auto', group: 'hsd' },
-  { key: 'KM AS PER RATE CHART', label: 'KM AS PER RATE\nCHART (UP+DOWN)', width: 155, type: 'auto', group: 'hsd', hint: 'Distance × 2 from freight data' },
-  { key: 'FUEL REQUIRED', label: 'FUEL REQUIRED', width: 120, type: 'auto', group: 'hsd' },
+  { key: 'KM AS PER RATE CHART', label: 'KM AS PER RATE\nCHART (UP+DOWN)', width: 155, type: 'auto', group: 'hsd', hint: 'Distance × 2 from freight data', hidden: true },
+  { key: 'FUEL REQUIRED', label: 'FUEL REQUIRED', width: 120, type: 'auto', group: 'hsd', hidden: true },
   { key: 'HSD (LTR)', label: 'HSD (LTR)', width: 100, type: 'auto', group: 'hsd' },
-  { key: 'EXTRA ALLOWED', label: 'EXTRA ALLOWED', width: 120, type: 'manual', group: 'hsd' },
+  { key: 'EXTRA ALLOWED', label: 'EXTRA ALLOWED', width: 120, type: 'manual', group: 'hsd', hidden: true },
   {
     key: 'ACTUAL EXTRA',
     label: 'ACTUAL EXTRA',
     width: 110,
     type: 'calc',
     group: 'hsd',
+    hidden: true,
     formula: r => {
       const hsd = num(r['HSD (LTR)']);
       const fuel = num(r['FUEL REQUIRED']);
@@ -142,7 +160,7 @@ export const COLUMNS = [
   },
   { key: 'HSD RATE', label: 'HSD RATE', width: 100, type: 'auto', group: 'hsd' },
   { key: 'HSD AMOUNT', label: 'HSD AMOUNT', width: 110, type: 'auto', group: 'hsd' },
-  { key: 'CASH DISCOUNT', label: 'CASH DISCOUNT', width: 130, type: 'auto', group: 'hsd' },
+  { key: 'CASH DISCOUNT', label: 'CASH DISCOUNT', width: 130, type: 'auto', group: 'hsd', hidden: true },
   {
     key: '% OF ADV', label: '% OF ADV', width: 100, type: 'calc', group: 'hsd',
     formula: r => {
@@ -200,8 +218,8 @@ export const COLUMNS = [
   { key: 'UP TOLL', label: 'UP TOLL', width: 100, type: 'manual', group: 'net' },
   { key: 'DOWN TOLL', label: 'DOWN TOLL', width: 110, type: 'manual', group: 'net' },
   { key: 'EXTRA UNLOADING', label: 'EXTRA UNLOADING', width: 140, type: 'manual', group: 'net' },
-  { key: 'DEDICATED', label: 'DEDICATED', width: 120, type: 'dropdown', options: ['Project', 'Actual', ''], group: 'net', hint: '9.5% billing (ATO) or 8.5% party rate (non-ATO)' },
-  { key: '10W EXTRA 8.5%', label: '10W EXTRA 8.5%', width: 130, type: 'auto', group: 'net', hint: 'Non-STO only' },
+  { key: 'DEDICATED', label: 'DEDICATED', width: 120, type: 'dropdown', options: ['Project', 'Actual', ''], group: 'net', hint: '9.5% billing (ATO) or 8.5% party rate (non-ATO)', hidden: true },
+  { key: '10W EXTRA 8.5%', label: '10W EXTRA 8.5%', width: 130, type: 'auto', group: 'net', hint: 'Non-STO only', hidden: true },
 
   {
     key: 'GROSS AMOUNT', label: 'GROSS\nAMOUNT', width: 100, type: 'calc', group: 'net',
@@ -219,6 +237,7 @@ export const COLUMNS = [
   { key: 'OWNER NAME', label: 'OWNER NAME', width: 160, type: 'auto', group: 'owner' },
   {
     key: 'Duration', label: 'DURATION (Days)', width: 110, type: 'calc', group: 'owner',
+    hidden: true,
     formula: r => {
       const loadStr = r['LOADING DT'];
       const unlStr = r['UNLOADING STATUS'];
@@ -231,19 +250,21 @@ export const COLUMNS = [
   },
   {
     key: 'Detention', label: 'DETENTION', width: 110, type: 'calc', group: 'owner',
+    hidden: true,
     formula: r => {
       const d = num(r['Duration']);
       return d > 0 ? 'D ' + (d - 1) : '';
     }
   },
-  { key: 'Transporting Coast', label: 'TRANSPORTING COAST', width: 160, type: 'manual', group: 'owner' },
+  { key: 'Transporting Coast', label: 'TRANSPORTING COAST', width: 160, type: 'manual', group: 'owner', hidden: true },
   {
     key: 'PAYMENT STATUS',
     label: 'PAYMENT\nSTATUS',
     width: 110,
     type: 'auto',
     group: 'payment',
-    hint: 'Auto-filled when Bank Book deposit is mapped to this bill'
+    hint: 'Auto-filled when Bank Book deposit is mapped to this bill',
+    hidden: true
   },
   {
     key: 'PAYMENT DATE',
@@ -251,7 +272,8 @@ export const COLUMNS = [
     width: 120,
     type: 'auto',
     group: 'payment',
-    hint: 'Transaction date of the mapped payment'
+    hint: 'Transaction date of the mapped payment',
+    hidden: true
   },
   {
     key: 'PAYMENT REF',
@@ -259,7 +281,8 @@ export const COLUMNS = [
     width: 150,
     type: 'auto',
     group: 'payment',
-    hint: 'Reference No / Cheque No from Bank Book'
+    hint: 'Reference No / Cheque No from Bank Book',
+    hidden: true
   },
   {
     key: 'DIFFERENCE',
@@ -268,6 +291,7 @@ export const COLUMNS = [
     type: 'calc',
     group: 'payment',
     hint: 'Payment Received (Bank TF) - Bill Amount',
+    hidden: true,
     formula: r => {
       const bankTf = num(r['Bank TF']);
       const billAmt = num(r['GROSS AMOUNT']) || num(r['NET AMOUNT']);
@@ -378,6 +402,10 @@ export function applyCalcs(row) {
     if (col.type === 'calc' && typeof col.formula === 'function') {
       r[col.key] = col.formula(r);
     }
+  }
+
+  if (r['PARTY RATE (95-97%)'] !== undefined) {
+    r['PARTY RATE'] = r['PARTY RATE (95-97%)'];
   }
 
   // If TDS is not manual override, recalculate TDS money amount from computed base and tdsRate

@@ -6,7 +6,8 @@ const SitePortal = ({
     onOpenLorrySlip, 
     onOpenFuelSlip, 
     onOpenRegisters,
-    onOpenVouchers
+    onOpenVouchers,
+    onOpenFingerprintManager
 }) => {
     return (
         <MobileDashboard 
@@ -15,7 +16,7 @@ const SitePortal = ({
             onOpenFuelSlip={onOpenFuelSlip}
             onOpenRegisters={onOpenRegisters}
             onOpenVouchers={onOpenVouchers}
-            // onOpenFuelRateSettings is null for Site Admin
+            onOpenFingerprintManager={onOpenFingerprintManager}
         />
     );
 };

@@ -9,6 +9,7 @@ const OfficePortal = ({
     onOpenVouchers,
     onOpenContacts,
     onOpenAccountApprovals,
+    onOpenFingerprintManager
 }) => {
     return (
         <MobileDashboard 
@@ -19,6 +20,7 @@ const OfficePortal = ({
             onOpenVouchers={onOpenVouchers}
             onOpenContacts={onOpenContacts}
             onOpenAccountApprovals={onOpenAccountApprovals}
+            onOpenFingerprintManager={onOpenFingerprintManager}
         />
     );
 };

@@ -708,7 +708,7 @@ export default function MainCashbook({ onBack }) {
   if (loading) return (
     <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
       <CircularProgress size={48} thickness={4} sx={{ color: '#7c3aed' }} />
-      <Typography color="text.secondary" fontWeight={600}>Loading Main Cashbook...</Typography>
+      <Typography color="text.secondary" fontWeight={600}>Loading Cash Book...</Typography>
     </Box>
   );
 
@@ -769,7 +769,7 @@ export default function MainCashbook({ onBack }) {
               <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
             </IconButton>
             <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-              Main Cashbook
+              Cash Book
             </Typography>
             <Chip label={`${MONTH_NAMES[selMonth - 1]} ${selMonth >= 4 ? selYear.split('-')[0] : parseInt(selYear.split('-')[0], 10) + 1}`}
               size="small" sx={{ fontWeight: 800, bgcolor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }} />

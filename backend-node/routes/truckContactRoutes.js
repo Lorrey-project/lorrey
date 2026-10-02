@@ -52,6 +52,8 @@ async function fetchAllContacts() {
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
+const { normalizeDate, parseBasicFreightCommission, getEffectivePartyMaster, applyEffectiveEdit } = require("../utils/partyMasterHelper");
+
 // POST /truck-contacts/upload-document — Upload a document to S3
 router.post("/upload-document", truckContactUpload.single("document"), async (req, res) => {
   try {
@@ -79,8 +81,12 @@ router.get("/approvals", async (req, res) => {
 router.post("/request", async (req, res) => {
   try {
     const col = getApprovalCollection();
+    const normRegDate = normalizeDate(req.body.registration_date || req.body.registrationDate || req.body.effective_date || req.body.effectiveDate) || normalizeDate(new Date());
     const request = {
       ...req.body,
+      registration_date: normRegDate,
+      effective_date: normRegDate,
+      effectiveDate: normRegDate,
       status: "pending",
       requestedAt: new Date(),
       requestType: req.body["Truck No "] || req.body["Truck No"] ? "New Registration" : "Temp Driver Update"
@@ -112,15 +118,46 @@ router.put("/approvals/:id", async (req, res) => {
       // 2. Check if it's an update or new registration
       const truckNo = mainData["Truck No "] || mainData["Truck No"] || mainData.truck_no;
       if (truckNo) {
-        // New Registration: UPSERT in both collections
+        const normRegDate = normalizeDate(mainData.registration_date || mainData.effective_date || mainData.effectiveDate) || normalizeDate(new Date());
+        mainData.registration_date = normRegDate;
+        mainData.effective_date = normRegDate;
+        mainData.effectiveDate = normRegDate;
+
+        let existingDoc = await mainCol.findOne({ $or: [{ "Truck No ": truckNo }, { "Truck No": truckNo }, { truck_no: truckNo }] });
+        if (!existingDoc) {
+          existingDoc = await ownerCol.findOne({ $or: [{ "Truck No ": truckNo }, { "Truck No": truckNo }, { truck_no: truckNo }] });
+        }
+
+        let finalDocToSave;
+        if (existingDoc) {
+          finalDocToSave = applyEffectiveEdit(existingDoc, mainData, normRegDate, actionBy || "Approver");
+        } else {
+          finalDocToSave = {
+            ...mainData,
+            history: [
+              {
+                effectiveDate: normRegDate,
+                changedFields: { note: "Initial Registration via Approval" },
+                previousValues: {},
+                snapshot: { ...mainData },
+                changeSummary: "Initial Registration (Approved)",
+                changedBy: actionBy || "Approver",
+                changedAt: new Date().toISOString()
+              }
+            ]
+          };
+        }
+
+        const { _id: dropId, ...savePayload } = finalDocToSave;
+        // Upsert in both collections
         await mainCol.updateOne(
           { $or: [{ "Truck No ": truckNo }, { "Truck No": truckNo }, { truck_no: truckNo }] },
-          { $set: mainData },
+          { $set: savePayload },
           { upsert: true }
         );
         await ownerCol.updateOne(
           { $or: [{ "Truck No": truckNo }, { "Truck No ": truckNo }, { truck_no: truckNo }] },
-          { $set: mainData },
+          { $set: savePayload },
           { upsert: true }
         );
       } else {
@@ -275,13 +312,15 @@ router.get("/search/:truckNo", async (req, res) => {
   try {
     const contacts = await fetchAllContacts();
     const truckNo = req.params.truckNo.trim().toUpperCase();
+    const recordDate = req.query.date || req.query.recordDate || null;
     const contact = contacts.find(c => {
       const tNo = (c["Truck No"] || c["Truck No "] || c.truck_no || "").trim().toUpperCase();
       return tNo === truckNo;
     });
     
     if (contact) {
-      res.json({ success: true, contact });
+      const effectiveData = recordDate ? getEffectivePartyMaster(contact, recordDate) : contact;
+      res.json({ success: true, contact: effectiveData });
     } else {
       res.json({ success: false, message: 'Truck not found' });
     }
@@ -294,6 +333,33 @@ router.get("/", async (req, res) => {
   try {
     const contacts = await fetchAllContacts();
     res.json({ success: true, contacts });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /truck-contacts/:id/history — Fetch change history for a contact
+router.get("/:id/history", async (req, res) => {
+  try {
+    const col = getCollection();
+    const ownerCol = getOwnerDetailsCollection();
+    let targetId = req.params.id;
+
+    let doc = null;
+    if (ObjectId.isValid(targetId)) {
+      doc = await ownerCol.findOne({ _id: new ObjectId(targetId) });
+      if (!doc) doc = await col.findOne({ _id: new ObjectId(targetId) });
+    }
+
+    if (!doc) {
+      doc = await ownerCol.findOne({ $or: [{ "Truck No": targetId }, { "Truck No ": targetId }, { truck_no: targetId }] });
+      if (!doc) doc = await col.findOne({ $or: [{ "Truck No": targetId }, { "Truck No ": targetId }, { truck_no: targetId }] });
+    }
+
+    if (!doc) return res.status(404).json({ success: false, error: "Contact not found." });
+
+    const history = doc.history || [];
+    res.json({ success: true, truckNo: doc["Truck No"] || doc["Truck No "] || doc.truck_no, history });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -314,38 +380,64 @@ router.post("/", async (req, res) => {
       }
     }
 
-    const result = await col.insertOne(req.body);
-    await ownerCol.insertOne({ ...req.body }).catch(() => {});
-    res.status(201).json({ success: true, contact: { _id: result.insertedId, ...req.body } });
+    const normRegDate = normalizeDate(req.body.registration_date || req.body.registrationDate || req.body.effective_date || req.body.effectiveDate) || normalizeDate(new Date());
+    const bodyData = {
+      ...req.body,
+      registration_date: normRegDate,
+      effective_date: normRegDate,
+      effectiveDate: normRegDate,
+      history: req.body.history && req.body.history.length > 0 ? req.body.history : [
+        {
+          effectiveDate: normRegDate,
+          changedFields: { note: "Initial Registration" },
+          previousValues: {},
+          snapshot: { ...req.body, registration_date: normRegDate, effective_date: normRegDate, effectiveDate: normRegDate },
+          changeSummary: "Initial Registration Profile",
+          changedBy: req.body.changedBy || req.body.actionBy || "User",
+          changedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    const result = await col.insertOne(bodyData);
+    await ownerCol.insertOne({ ...bodyData }).catch(() => {});
+    res.status(201).json({ success: true, contact: { _id: result.insertedId, ...bodyData } });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
 });
 
-// PUT /truck-contacts/:id — Update an existing contact
+// PUT /truck-contacts/:id — Update an existing contact with effective date
 router.put("/:id", async (req, res) => {
   try {
     const col = getCollection();
     const ownerCol = getOwnerDetailsCollection();
 
     let targetId = req.params.id;
-    let query = { _id: new ObjectId(targetId) };
+    let query = ObjectId.isValid(targetId) ? { _id: new ObjectId(targetId) } : { $or: [{ "Truck No": targetId }, { "Truck No ": targetId }, { truck_no: targetId }] };
 
-    let doc = await col.findOne(query);
+    let doc = await ownerCol.findOne(query);
     if (!doc) {
-      doc = await ownerCol.findOne(query);
+      doc = await col.findOne(query);
     }
 
     if (doc) {
       const truckNo = doc["Truck No"] || doc["Truck No "] || doc.truck_no;
+      const effectiveDateStr = req.body.effectiveDate || req.body.effective_date || req.body.registration_date || new Date();
+      const changedBy = req.body.changedBy || req.body.actionBy || "User";
+
+      // Apply date-versioned edit into history
+      const updatedDoc = applyEffectiveEdit(doc, req.body, effectiveDateStr, changedBy);
+      const { _id, ...setPayload } = updatedDoc;
+
       if (truckNo) {
-        await col.updateOne({ $or: [{ "Truck No": truckNo }, { "Truck No ": truckNo }, { truck_no: truckNo }] }, { $set: req.body });
-        await ownerCol.updateOne({ $or: [{ "Truck No": truckNo }, { "Truck No ": truckNo }, { truck_no: truckNo }] }, { $set: req.body });
+        await col.updateOne({ $or: [{ "Truck No": truckNo }, { "Truck No ": truckNo }, { truck_no: truckNo }] }, { $set: setPayload });
+        await ownerCol.updateOne({ $or: [{ "Truck No": truckNo }, { "Truck No ": truckNo }, { truck_no: truckNo }] }, { $set: setPayload });
       } else {
-        await col.updateOne(query, { $set: req.body });
-        await ownerCol.updateOne(query, { $set: req.body });
+        await col.updateOne(query, { $set: setPayload });
+        await ownerCol.updateOne(query, { $set: setPayload });
       }
-      return res.json({ success: true, contact: { ...doc, ...req.body } });
+      return res.json({ success: true, contact: { _id: doc._id, ...setPayload } });
     }
 
     return res.status(404).json({ success: false, error: "Contact not found." });

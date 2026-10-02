@@ -470,7 +470,7 @@ export default function RevenewTab({
   const handleExportExcel = useCallback(() => {
     try {
       const wsData = [
-        ['REVENEW REPORT'],
+        ['FORECAST REVENUE REPORT'],
         [`Financial Year: ${financialYear} | Site: ${siteFilter} | Date: ${selectedDateDisplay}`],
         [],
         [
@@ -564,7 +564,7 @@ export default function RevenewTab({
           </Box>
           <Box>
             <Typography variant="subtitle1" fontWeight={900} sx={{ letterSpacing: '-0.3px', color: '#0f172a', lineHeight: 1.2, fontSize: { xs: '0.95rem', md: '1.05rem', xl: '1.15rem' }, whiteSpace: 'nowrap' }}>
-              REVENEW
+              FORECAST REVENUE
             </Typography>
             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, display: { xs: 'none', '2xl': 'block' }, lineHeight: 1 }}>
               Revenue & Invoice Statement • {selectedDateDisplay}
@@ -620,7 +620,7 @@ export default function RevenewTab({
               <Tab label="ALL PARTY REPORTS" />
               <Tab label="VEHICLE WISE TRIP SUMMARY" />
               <Tab label="SUMMARY REVENUE NVL AND NVCL" />
-              <Tab label="REVENEW" />
+              <Tab label="FORECAST REVENUE" />
             </Tabs>
           </Box>
         )}

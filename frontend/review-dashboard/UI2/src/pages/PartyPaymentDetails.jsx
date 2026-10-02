@@ -14,12 +14,14 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingActionsIcon from '@mui/icons-material/PendingActions';
 import TodayIcon from '@mui/icons-material/Today';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 import { useShortcut } from '../context/ShortcutContext';
 import { useTableNavigation } from '../hooks/useTableNavigation';
 import { buildIncentiveData } from '../components/IncentiveAnalysis';
+import PartyFullYear from './PartyFullYear';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -69,6 +71,36 @@ function parseTdsField(doc) {
   return null;
 }
 
+// Authoritative Creditor to Party Payment mapping configuration
+const PARTY_TO_CREDITOR_CONFIG = [
+  {
+    creditorKey: 'DIPALI_ASSOCIATES',
+    creditorTitle: 'DIPALI ASSOCIATES',
+    partyOwners: ['DIPALI ASSOCIATES', 'DIPALI ASSOCIATE', 'DIPALI ASSOCIAT', 'DIPALI NAYEK', 'DIPALI ASSOCIATES & CO', 'DIPALI ASSOCIATES & CO.', 'DIPALI ASSOCIATES(DIPALI NAYEK)']
+  },
+  {
+    creditorKey: 'GKR_ENTERPRISE',
+    creditorTitle: 'G.K.R. ENTERPRISE',
+    partyOwners: ['GOUTAM ROY', 'GOUTAM  ROY', 'G.K.R. ENTERPRISE', 'GKR ENTERPRISE']
+  },
+  {
+    creditorKey: 'SUBHENDU_SEKHAR_GHOSWAMI',
+    creditorTitle: 'SUBHENDU SEKHAR GHOSWAMI',
+    partyOwners: ['SUBENDU SEKHAR GOSWAMI', 'SUBHENDU SEKHAR GHOSWAMI', 'SUBENDU SEKHAR GHOSWAMI', 'SUBHENDU SEKHAR GOSWAMI', 'SUBENDU GOSWAMI', 'SUBHENDU GHOSWAMI']
+  }
+];
+
+function getCreditorKeyForPartyOwner(ownerName) {
+  if (!ownerName) return null;
+  const upper = String(ownerName).trim().toUpperCase();
+  for (const item of PARTY_TO_CREDITOR_CONFIG) {
+    if (item.partyOwners.some(target => target.toUpperCase() === upper || upper.startsWith(target.toUpperCase()) || target.toUpperCase().startsWith(upper))) {
+      return item.creditorKey;
+    }
+  }
+  return null;
+}
+
 // ─── Column definitions ───────────────────────────────────────────────────────
 // calc   = auto-calculated (read-only, purple header)
 // editable = manual entry (red header)
@@ -102,8 +134,9 @@ const COLUMNS = [
   { key: 'TDS ON INCENTIVE', label: 'TDS on\nIncentive/UL', width: 90, calc: true, bg: '#bbf7d0' },
   // ㉑ Total Freight (calculated)
   { key: 'TOTAL FREIGHT', label: 'Total Freight', width: 100, calc: true, highlight: '#f3e8ff' },
+  // GST FCM — Authoritative 100% Automatic from Freight Creditor GST TOTAL (read-only)
+  { key: 'GST FCM', label: 'GST FCM', width: 105, calc: true, bg: '#f0f9ff' },
   // Manual entries
-  { key: 'GST FCM', label: 'GST FCM', width: 90, editable: true, bg: '#fee2e2' },
   { key: 'WITHHOLD AMOUNT', label: 'Withhold\nAmount', width: 90, editable: true, bg: '#fee2e2' },
   { key: 'WITHHOLD REASON', label: 'Withhold\nReason', width: 120, editable: true, bg: '#fee2e2' },
   { key: 'PREV MONTH DUE', label: 'Prev Month\nDue', width: 100, editable: true, bg: '#fee2e2' },
@@ -121,7 +154,8 @@ const COLUMNS = [
   { key: 'REMARKS', label: 'Remarks', width: 500, editable: true, bg: '#f8fafc' },
 ];
 
-export default function PartyPaymentDetails({ onBack }) {
+export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
+  const [viewMode, setViewMode] = useState('monthly'); // 'monthly' | 'fullYear'
   const now = new Date();
   const currentFyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
@@ -140,6 +174,10 @@ export default function PartyPaymentDetails({ onBack }) {
   const yearOptions = [];
   for (let y = currentFyStart - 2; y <= currentFyStart + 1; y++) yearOptions.push(`${y}-${y + 1}`);
 
+  if (viewMode === 'fullYear') {
+    return <PartyFullYear onBack={() => setViewMode('monthly')} initialFy={`FY ${selYear}`} />;
+  }
+
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchData = async () => {
     setLoading(true);
@@ -147,21 +185,28 @@ export default function PartyPaymentDetails({ onBack }) {
     setDebugInfo('');
     const fyStartYear = parseInt(selYear.split('-')[0], 10);
     const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
+    const fyStr = `${String(selMonth >= 4 ? calendarYear : calendarYear - 1).slice(-2)}-${String(selMonth >= 4 ? calendarYear + 1 : calendarYear).slice(-2)}`;
+
     try {
       const token = localStorage.getItem('token');
       const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
       // ── High Performance: Fetch all independent data in parallel via Promise.all ──
-      const [truckRes, deductionRes, cementRes, manualRes] = await Promise.all([
+      const [truckRes, deductionRes, cementRes, manualRes, freightCreditorGstRes] = await Promise.all([
         axios.get(`${API_URL}/truck-contacts`),
         axios.get(`${API_URL}/settings/projected-deductions`, { headers: authHeaders }).catch(() => ({ data: {} })),
         axios.get(`${API_URL}/party-payment/cement-data`, { params: { month: selMonth, year: calendarYear } }),
-        axios.get(`${API_URL}/party-payment`, { params: { month: selMonth, year: calendarYear } })
+        axios.get(`${API_URL}/party-payment`, { params: { month: selMonth, year: calendarYear } }),
+        axios.get(`${API_URL}/freight-creditor-gst/all-totals`, { params: { month: selMonth, year: calendarYear, fy: fyStr } }).catch(err => {
+          console.warn('[PartyPaymentDetails] Error fetching Freight Creditor GST totals:', err.message);
+          return { data: { vehicleTotals: {} } };
+        })
       ]);
 
       const trucksData = truckRes.data?.contacts || [];
       const entries = cementRes.data?.entries || [];
       const manuals = manualRes.data || [];
+      const gstVehicleTotals = freightCreditorGstRes.data?.vehicleTotals || {};
       const gpsTripChargeSetting = (deductionRes.data?.success && deductionRes.data?.data)
         ? num(deductionRes.data.data.gpsTripCharge)
         : 0;
@@ -301,10 +346,27 @@ export default function PartyPaymentDetails({ onBack }) {
         a['TOLL DOWN'] += getF('DOWN TOLL', 'TOLL DOWN', 'TOLL_DOWN', 'TOLL DOWN ');
       });
 
-      // 5. Build final rows merging aggregated + vehicle-wise Incentive Sheet TOTAL (Projected) + saved manuals
+      // 5. Build final rows merging aggregated + vehicle-wise Incentive Sheet TOTAL (Projected) + saved manuals + Freight Creditor GST TOTAL
       const finalRows = Object.values(agg).map(ag => {
         const vKey = normVeh(ag['VEHICLE NO']);
         const saved = manualMap[vKey] || {};
+        const rowOwnerName = (ag['OWNER NAME'] || '').trim().toUpperCase();
+        const expectedCreditorKey = getCreditorKeyForPartyOwner(rowOwnerName);
+
+        // ── Authoritative 100% Automatic Resolution from Freight Creditor GST TOTAL ──
+        const gstRecord = gstVehicleTotals[vKey];
+        let authoritativeGstFcm = null;
+
+        if (gstRecord && gstRecord.total !== null && gstRecord.total !== undefined) {
+          if (expectedCreditorKey) {
+            if (gstRecord.creditorKey === expectedCreditorKey) {
+              authoritativeGstFcm = Number(gstRecord.total);
+            }
+          } else {
+            // Direct vehicle total if matched to one of the 3 authoritative creditors
+            authoritativeGstFcm = Number(gstRecord.total);
+          }
+        }
 
         // Matched TDS rate from Owner Details (vehicle-specific first, then owner)
         let matchedTdsRate = vehicleToTdsRateMap[vKey];
@@ -335,7 +397,7 @@ export default function PartyPaymentDetails({ onBack }) {
           '_tds_rate': tdsRate,
           'DEDICATED INCENTIVE': dedicatedIncentiveVal,
           'dedicatedIncentive_manual': isDedicatedIncentiveManual,
-          'GST FCM': num(saved.gstFcm),
+          'GST FCM': (authoritativeGstFcm !== null && !isNaN(authoritativeGstFcm)) ? authoritativeGstFcm : null,
           'WITHHOLD AMOUNT': num(saved.withholdAmount),
           'WITHHOLD REASON': saved.withholdReason || '',
           'OTHER REASON': saved.otherReason || '',
@@ -385,6 +447,9 @@ export default function PartyPaymentDetails({ onBack }) {
 
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socket.on('partyPaymentUpdate', () => {
+      fetchData();
+    });
+    socket.on('freightCreditorGstUpdate', () => {
       fetchData();
     });
     socket.on('cementUpdates', () => {
@@ -631,7 +696,25 @@ export default function PartyPaymentDetails({ onBack }) {
           <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ fontWeight: 700, bgcolor: '#fef08a', color: '#854d0e' }} />
         )}
 
-        <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<CalendarMonthIcon />}
+            onClick={() => onOpenPartyFullYear ? onOpenPartyFullYear() : setViewMode('fullYear')}
+            sx={{
+              fontWeight: 800,
+              borderRadius: 2,
+              bgcolor: '#6d28d9',
+              color: '#ffffff',
+              '&:hover': { bgcolor: '#5b21b6' },
+              boxShadow: '0 2px 6px rgba(109,40,217,0.3)',
+              px: 2,
+              textTransform: 'none'
+            }}
+          >
+            PARTY FULL YEAR
+          </Button>
           <Tooltip title="Reload from Cement Register & database">
             <IconButton size="small" onClick={fetchData} sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
@@ -781,13 +864,18 @@ export default function PartyPaymentDetails({ onBack }) {
                           display = String(val);
                         } else {
                           const n = num(val);
-                          display = n !== 0 ? n.toLocaleString('en-IN') : '0';
+                          display = n !== 0 ? n.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : (col.key === 'GST FCM' ? '0' : '0');
+                        }
+                      } else {
+                        if (col.key === 'GST FCM') {
+                          display = '—';
                         }
                       }
 
                       // Adjust text colors for ERP
                       let txtColor = isDirty ? '#92400e' : '#334155';
                       if (!isDirty) {
+                        if (col.key === 'GST FCM') txtColor = (val !== null && val !== undefined && val !== '') ? '#0369a1' : '#94a3b8';
                         if (col.key === 'NET PAYABLE') txtColor = '#1d4ed8';
                         if (col.key === 'PAID TO PARTY') txtColor = '#047857';
                         if (col.key === 'BALANCE DUE') txtColor = '#b91c1c';

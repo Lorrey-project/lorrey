@@ -2049,13 +2049,15 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
 
   // ── Styles ─────────────────────────────────────────────────────────────────
   const thBase = {
-    padding: '6px 8px',
+    padding: '5px 6px',
     fontSize: '11px',
     fontWeight: 700,
     textAlign: 'center',
     border: '1px solid #94a3b8',
     whiteSpace: 'pre-line',
-    lineHeight: 1.3,
+    lineHeight: 1.2,
+    position: 'sticky',
+    boxSizing: 'border-box',
   };
   const tdBase = {
     padding: '5px 8px',
@@ -2629,12 +2631,12 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
       </Popover>
 
       {/* ── Main Table Area ──────────────────────────────────────────────── */}
-      <Box sx={{ flex: 1, overflow: 'auto', p: 2, position: 'relative' }}>
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', p: 2, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
         {(loadingState || fetchingRows) && (
           <Box sx={{
             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
             bgcolor: 'rgba(255,255,255,0.7)', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', zIndex: 10, gap: 2
+            alignItems: 'center', justifyContent: 'center', zIndex: 50, gap: 2
           }}>
             <CircularProgress sx={{ color: '#7c3aed' }} />
             <Typography variant="body2" fontWeight={700} color="text.secondary">
@@ -2650,6 +2652,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           borderRadius: 1,
           py: 0.8, px: 2, mb: 1.5,
           textAlign: 'center',
+          flexShrink: 0,
         }}>
           <Typography sx={{
             fontSize: '13px', fontWeight: 800, color: '#713f12',
@@ -2659,48 +2662,60 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           </Typography>
         </Box>
 
-        {/* ── Table ──────────────────────────────────────────────────────── */}
-        <Box sx={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', minWidth: 900, fontFamily: 'inherit', fontSize: 12 }}>
+        {/* ── Table Container ──────────────────────────────────────────────── */}
+        <Box sx={{
+          flex: 1,
+          overflow: 'auto',
+          minHeight: 0,
+          bgcolor: '#fff',
+          border: '1px solid #cbd5e1',
+          borderRadius: 1,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          position: 'relative',
+          '&::-webkit-scrollbar': { width: 8, height: 8 },
+          '&::-webkit-scrollbar-thumb': { bgcolor: '#cbd5e1', borderRadius: 4 },
+          '&::-webkit-scrollbar-thumb:hover': { bgcolor: '#94a3b8' }
+        }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 1200, width: '100%', fontFamily: 'inherit', fontSize: 12 }}>
             <thead>
-              {/* Row 1: Top Level group headers */}
-              <tr>
-                <th rowSpan={3} style={{ ...thBase, bgcolor: '#bfdbfe', background: '#bfdbfe', minWidth: 60 }}>TYPE</th>
-                <th rowSpan={3} style={{ ...thBase, background: '#bfdbfe', minWidth: 180 }}>Owner Name</th>
-                <th rowSpan={3} style={{ ...thBase, background: '#bfdbfe', minWidth: 120 }}>Truck No</th>
-                <th rowSpan={3} style={{ ...thBase, background: '#bfdbfe', minWidth: 70 }}>Wheel</th>
-                <th rowSpan={3} style={{ ...thBase, background: '#bfdbfe', minWidth: 60 }}>Trips</th>
-                <th colSpan={10} style={{ ...thBase, background: '#e2e8f0', color: '#1e293b', letterSpacing: '1px' }}>PROJECTED / DEDICATED</th>
-                <th colSpan={4} style={{ ...thBase, background: '#fed7aa', color: '#9a3412', letterSpacing: '1px' }}>ACTUAL / DEDICATED</th>
-                <th rowSpan={3} style={{ ...thBase, background: '#fbcfe8', minWidth: 90 }}>DIFFERENCE<br />(ACTUAL-PROJECTED)</th>
-                <th rowSpan={3} style={{ ...thBase, background: '#e0e7ff', minWidth: 90 }}>SETTLED AMOUNT</th>
+              {/* Row 1: Top Level group headers (Height ~28px, Top: 0) */}
+              <tr style={{ height: 28 }}>
+                <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#bfdbfe', minWidth: 60 }}>TYPE</th>
+                <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#bfdbfe', minWidth: 180 }}>Owner Name</th>
+                <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#bfdbfe', minWidth: 120 }}>Truck No</th>
+                <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#bfdbfe', minWidth: 70 }}>Wheel</th>
+                <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#bfdbfe', minWidth: 60 }}>Trips</th>
+                <th colSpan={10} style={{ ...thBase, top: 0, zIndex: 20, height: 28, background: '#e2e8f0', color: '#1e293b', letterSpacing: '1px' }}>PROJECTED / DEDICATED</th>
+                <th colSpan={4} style={{ ...thBase, top: 0, zIndex: 20, height: 28, background: '#fed7aa', color: '#9a3412', letterSpacing: '1px' }}>ACTUAL / DEDICATED</th>
+                <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#fbcfe8', minWidth: 90 }}>DIFFERENCE<br />(ACTUAL-PROJECTED)</th>
+                <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#e0e7ff', minWidth: 90 }}>SETTLED AMOUNT</th>
               </tr>
 
-              {/* Row 2: Sub-Level group headers */}
-              <tr>
+              {/* Row 2: Sub-Level group headers (Height ~26px, Top: 28px) */}
+              <tr style={{ height: 26 }}>
                 {/* Under PROJECTED / DEDICATED */}
-                <th colSpan={3} style={{ ...thBase, background: '#ddd6fe', color: '#4c1d95' }}>NVL</th>
-                <th colSpan={3} style={{ ...thBase, background: '#bbf7d0', color: '#14532d' }}>NVCL</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#fef9c3', minWidth: 80 }}>Total</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#fef9c3', minWidth: 90 }}>10WH extra 8.5% incentive</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#fef9c3', minWidth: 90 }}>6WH extra 15% incentive</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#fef9c3', minWidth: 80 }}>Total (Projected)</th>
+                <th colSpan={3} style={{ ...thBase, top: 28, zIndex: 20, height: 26, background: '#ddd6fe', color: '#4c1d95' }}>NVL</th>
+                <th colSpan={3} style={{ ...thBase, top: 28, zIndex: 20, height: 26, background: '#bbf7d0', color: '#14532d' }}>NVCL</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fef9c3', minWidth: 80 }}>Total</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fef9c3', minWidth: 90 }}>10WH extra 8.5% incentive</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fef9c3', minWidth: 90 }}>6WH extra 15% incentive</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fef9c3', minWidth: 80 }}>Total (Projected)</th>
 
                 {/* Under ACTUAL / DEDICATED */}
-                <th rowSpan={2} style={{ ...thBase, background: '#ffedd5', color: '#4c1d95', minWidth: 70 }}>NVL</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#ffedd5', color: '#14532d', minWidth: 70 }}>NVCL</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#ffedd5', color: '#b91c1c', minWidth: 70 }}>10WH</th>
-                <th rowSpan={2} style={{ ...thBase, background: '#ffedd5', color: '#b91c1c', minWidth: 70 }}>6WH</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#4c1d95', minWidth: 70 }}>NVL</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#14532d', minWidth: 70 }}>NVCL</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#b91c1c', minWidth: 70 }}>10WH</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#b91c1c', minWidth: 70 }}>6WH</th>
               </tr>
 
-              {/* Row 3: Third-Level headers */}
-              <tr>
-                <th style={{ ...thBase, background: '#ede9fe', fontSize: 10 }}>Sum of{'\n'}Inv Qty</th>
-                <th style={{ ...thBase, background: '#ede9fe', fontSize: 10 }}>Sum of{'\n'}ORG{'\n'}FREIGHT</th>
-                <th style={{ ...thBase, background: '#ede9fe', fontSize: 10 }}>Sum of{'\n'}Amt</th>
-                <th style={{ ...thBase, background: '#dcfce7', fontSize: 10 }}>Sum of{'\n'}Inv Qty</th>
-                <th style={{ ...thBase, background: '#dcfce7', fontSize: 10 }}>Sum of{'\n'}ORG{'\n'}FREIGHT</th>
-                <th style={{ ...thBase, background: '#dcfce7', fontSize: 10 }}>Sum Amt</th>
+              {/* Row 3: Third-Level headers (Height ~38px, Top: 54px) */}
+              <tr style={{ height: 38 }}>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ede9fe', fontSize: 10, minWidth: 65 }}>Sum of{'\n'}Inv Qty</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ede9fe', fontSize: 10, minWidth: 75 }}>Sum of{'\n'}ORG{'\n'}FREIGHT</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ede9fe', fontSize: 10, minWidth: 70 }}>Sum of{'\n'}Amt</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#dcfce7', fontSize: 10, minWidth: 65 }}>Sum of{'\n'}Inv Qty</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#dcfce7', fontSize: 10, minWidth: 75 }}>Sum of{'\n'}ORG{'\n'}FREIGHT</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#dcfce7', fontSize: 10, minWidth: 70 }}>Sum Amt</th>
               </tr>
             </thead>
 
@@ -2801,27 +2816,27 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                   totalSettled += (totalAct > t.totalFinal ? t.totalFinal : totalAct);
                 });
                 return (
-                  <tr style={{ background: '#e2e8f0', borderTop: '2px solid #475569' }}>
-                    <td colSpan={5} style={{ ...tdBase, textAlign: 'center', fontWeight: 900, color: '#0f172a', background: '#e2e8f0' }}>TOTALS</td>
+                  <tr style={{ background: '#e2e8f0', borderTop: '2px solid #475569', position: 'sticky', bottom: 0, zIndex: 15 }}>
+                    <td colSpan={5} style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, textAlign: 'center', fontWeight: 900, color: '#0f172a', background: '#e2e8f0' }}>TOTALS</td>
                     {/* NVL totals */}
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(237,233,254,0.7)' }}>{Math.round(totals.nvlQty).toLocaleString('en-IN')}</td>
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(237,233,254,0.7)' }}>{fmt(totals.nvlFreight)}</td>
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(237,233,254,0.7)' }}>{fmt(totals.nvlAmt)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#ede9fe' }}>{Math.round(totals.nvlQty).toLocaleString('en-IN')}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#ede9fe' }}>{fmt(totals.nvlFreight)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#ede9fe' }}>{fmt(totals.nvlAmt)}</td>
                     {/* NVCL totals */}
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(220,252,231,0.7)' }}>{Math.round(totals.nvclQty).toLocaleString('en-IN')}</td>
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(220,252,231,0.7)' }}>{fmt(totals.nvclFreight)}</td>
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(220,252,231,0.7)' }}>{fmt(totals.nvclAmt)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#dcfce7' }}>{Math.round(totals.nvclQty).toLocaleString('en-IN')}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#dcfce7' }}>{fmt(totals.nvclFreight)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#dcfce7' }}>{fmt(totals.nvclAmt)}</td>
                     {/* Grand totals */}
-                    <td style={{ ...tdBase, fontWeight: 900, background: 'rgba(254,249,195,0.8)', color: '#713f12' }}>{fmt(totals.total)}</td>
-                    <td style={{ ...tdBase, fontWeight: 800 }}>{fmt(totals.extra10W)}</td>
-                    <td style={{ ...tdBase, fontWeight: 800 }}>{fmt(totals.extra6W)}</td>
-                    <td style={{ ...tdBase, fontWeight: 900, fontSize: 13, color: '#0f172a', background: 'rgba(254,249,195,0.9)' }}>{fmt(totals.grand)}</td>
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,237,213,0.7)', color: '#9a3412' }}>{fmt(totalActualNVL)}</td>
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,237,213,0.7)', color: '#9a3412' }}>{fmt(totalActualNVCL)}</td>
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,237,213,0.7)', color: '#9a3412' }}>{fmt(totalActual10WH)}</td>
-                    <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,237,213,0.7)', color: '#9a3412' }}>{fmt(totalActual6WH)}</td>
-                    <td style={{ ...tdBase, fontWeight: 900, fontSize: 13, color: totalDiff < 0 ? '#b91c1c' : '#047857', background: 'rgba(251,207,232,0.8)' }}>{fmt(totalDiff)}</td>
-                    <td style={{ ...tdBase, fontWeight: 900, fontSize: 13, color: '#312e81', background: 'rgba(224,231,255,0.8)' }}>{fmt(totalSettled)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, background: '#fef08a', color: '#713f12' }}>{fmt(totals.total)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#f1f5f9' }}>{fmt(totals.extra10W)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#f1f5f9' }}>{fmt(totals.extra6W)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, fontSize: 13, color: '#0f172a', background: '#fef9c3' }}>{fmt(totals.grand)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActualNVL)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActualNVCL)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActual10WH)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActual6WH)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, fontSize: 13, color: totalDiff < 0 ? '#b91c1c' : '#047857', background: '#fbcfe8' }}>{fmt(totalDiff)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, fontSize: 13, color: '#312e81', background: '#e0e7ff' }}>{fmt(totalSettled)}</td>
                   </tr>
                 );
               })()}

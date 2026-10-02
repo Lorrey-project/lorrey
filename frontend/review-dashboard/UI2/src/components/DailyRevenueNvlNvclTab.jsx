@@ -454,7 +454,7 @@ export default function DailyRevenueNvlNvclTab({
               <Tab label="ALL PARTY REPORTS" />
               <Tab label="VEHICLE WISE TRIP SUMMARY" />
               <Tab label="SUMMARY REVENUE NVL AND NVCL" />
-              <Tab label="REVENEW" />
+              <Tab label="FORECAST REVENUE" />
             </Tabs>
           </Box>
         )}

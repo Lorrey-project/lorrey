@@ -15,6 +15,7 @@ import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import BarChartIcon from '@mui/icons-material/BarChart';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
@@ -67,7 +68,9 @@ export default function VehicleWiseTripSummaryTab({
   setMainTab,
   onBack,
   isModal = false,
-  onCloseModal = null
+  onCloseModal = null,
+  onOpenPieChart = null,
+  onOpenVehicleMktAssoc = null
 }) {
   const [internalDate, setInternalDate] = useState('ALL');
   const date = propDate !== undefined ? propDate : internalDate;
@@ -81,6 +84,22 @@ export default function VehicleWiseTripSummaryTab({
   const [viewMode, setViewMode] = useState('COMBINED'); // 'COMBINED' | 'SPREADSHEET' | 'REFERENCE_STRIP'
   const [selectedDayTripDetail, setSelectedDayTripDetail] = useState(null); // { vehNo, day, trips }
   const [selectedVehicleModal, setSelectedVehicleModal] = useState(null); // Full trip inspection for vehicle
+
+  // Direct Navigation Handler to VEHICLE ( MKT & ASSOCIATION ) in Financial Analytics
+  const handleOpenVehicleMktAssoc = useCallback(() => {
+    if (isModal && onCloseModal) {
+      onCloseModal();
+    }
+    if (onOpenVehicleMktAssoc) {
+      onOpenVehicleMktAssoc();
+    } else if (onOpenPieChart) {
+      onOpenPieChart('vehicleMktAssoc');
+    } else {
+      window.dispatchEvent(new CustomEvent('NAVIGATE_TO_VIEW', {
+        detail: { view: 'pieChart', subTab: 'vehicleMktAssoc' }
+      }));
+    }
+  }, [isModal, onCloseModal, onOpenVehicleMktAssoc, onOpenPieChart]);
 
   // Calendar popover anchor
   const [calendarAnchorEl, setCalendarAnchorEl] = useState(null);
@@ -264,6 +283,46 @@ export default function VehicleWiseTripSummaryTab({
       dayTotals
     };
   }, [filteredVehicles, daysArray]);
+
+  // Top Overall KPI Values (Month-specific & Authoritative Party Master Directory)
+  const totalRegisteredVehiclesCount = useMemo(() => {
+    if (serverData?.totalRegisteredVehicles !== undefined) {
+      return serverData.totalRegisteredVehicles;
+    }
+    if (serverData?.totals?.totalRegisteredVehicles !== undefined) {
+      return serverData.totals.totalRegisteredVehicles;
+    }
+    if (serverData?.totals?.totalVehicles !== undefined) {
+      return serverData.totals.totalVehicles;
+    }
+    return rawVehicles.length;
+  }, [serverData, rawVehicles]);
+
+  const overallTotalTrips = useMemo(() => {
+    if (serverData?.totals?.totalTrips !== undefined) {
+      return serverData.totals.totalTrips;
+    }
+    let sum = 0;
+    rawVehicles.forEach(v => { sum += (v.totalTrips || 0); });
+    return Math.round(sum * 100) / 100;
+  }, [serverData, rawVehicles]);
+
+  const overallTotalMT = useMemo(() => {
+    if (serverData?.totals?.totalMT !== undefined) {
+      return serverData.totals.totalMT;
+    }
+    let sum = 0;
+    rawVehicles.forEach(v => { sum += (v.totalMT || 0); });
+    return Math.round(sum * 100) / 100;
+  }, [serverData, rawVehicles]);
+
+  const overallDedicatedCount = useMemo(() => {
+    return rawVehicles.filter(v => v.isDedicated).length;
+  }, [rawVehicles]);
+
+  const overallSingleCount = useMemo(() => {
+    return rawVehicles.filter(v => !v.isDedicated).length;
+  }, [rawVehicles]);
 
   // Pattern configuration with exact reference headers & standard capacities
   const patternConfigs = [
@@ -534,7 +593,7 @@ export default function VehicleWiseTripSummaryTab({
               <Tab label="ALL PARTY REPORTS" />
               <Tab label="VEHICLE WISE TRIP SUMMARY" />
               <Tab label="SUMMARY REVENUE NVL AND NVCL" />
-              <Tab label="REVENEW" />
+              <Tab label="FORECAST REVENUE" />
             </Tabs>
           </Box>
         )}
@@ -806,44 +865,44 @@ export default function VehicleWiseTripSummaryTab({
       </Box>
 
       {/* =========================================================================
-          KPI SUMMARY CARDS STRIP
+          KPI SUMMARY CARDS STRIP & DIRECT ACCESS BUTTON
          ========================================================================= */}
-      <Grid container spacing={1.5} sx={{ mb: 2.5 }}>
-        <Grid item xs={6} sm={4} md={2.4}>
-          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.5, bgcolor: '#ffffff' }}>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-              Total Vehicles
+      <Grid container spacing={1.5} sx={{ mb: 2.5 }} alignItems="stretch">
+        <Grid item xs={12} sm={6} md={4} lg={2.4}>
+          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.8, bgcolor: '#ffffff', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              TOTAL VEHICLES
             </Typography>
-            <Typography variant="h5" fontWeight={900} color="#0284c7">
-              {computedTotals.totalVehicles}
+            <Typography variant="h5" fontWeight={900} color="#0284c7" sx={{ my: 0.5 }}>
+              {totalRegisteredVehiclesCount}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Active in {date === 'ALL' ? month : date}
+              Unique registered in Party Master
             </Typography>
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={4} md={2.4}>
-          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.5, bgcolor: '#ffffff' }}>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-              Total Trips
+        <Grid item xs={12} sm={6} md={4} lg={2.4}>
+          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.8, bgcolor: '#ffffff', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              TOTAL TRIPS
             </Typography>
-            <Typography variant="h5" fontWeight={900} color="#059669">
-              {computedTotals.totalTrips}
+            <Typography variant="h5" fontWeight={900} color="#059669" sx={{ my: 0.5 }}>
+              {overallTotalTrips}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Cement Register count
+              All wheel types in {month}
             </Typography>
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={4} md={2.4}>
-          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.5, bgcolor: '#ffffff' }}>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-              Total Cement Load
+        <Grid item xs={12} sm={6} md={4} lg={2.4}>
+          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.8, bgcolor: '#ffffff', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              TOTAL CEMENT LOAD
             </Typography>
-            <Typography variant="h5" fontWeight={900} color="#d97706">
-              {computedTotals.totalMT} <span style={{ fontSize: '13px', fontWeight: 700 }}>MT</span>
+            <Typography variant="h5" fontWeight={900} color="#d97706" sx={{ my: 0.5 }}>
+              {overallTotalMT.toLocaleString('en-IN')} <span style={{ fontSize: '13px', fontWeight: 700 }}>MT</span>
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Recorded in register
@@ -851,37 +910,87 @@ export default function VehicleWiseTripSummaryTab({
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={4} md={2.4}>
-          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.5, bgcolor: '#ffffff' }}>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-              Total Advance
+        <Grid item xs={12} sm={6} md={4} lg={2.4}>
+          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.8, bgcolor: '#ffffff', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              DEDICATED / NON-DEDICATED
             </Typography>
-            <Typography variant="h5" fontWeight={900} color="#dc2626">
-              ₹{Number(computedTotals.totalAdvance || 0).toLocaleString()}
-            </Typography>
+            <Box display="flex" gap={1} mt={0.8} mb={0.5}>
+              <Chip
+                label={`Dedicated: ${overallDedicatedCount}`}
+                size="small"
+                sx={{ height: 22, fontSize: '11px', fontWeight: 800, bgcolor: '#e0e7ff', color: '#3730a3' }}
+              />
+              <Chip
+                label={`Single: ${overallSingleCount}`}
+                size="small"
+                sx={{ height: 22, fontSize: '11px', fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}
+              />
+            </Box>
             <Typography variant="caption" color="text.secondary">
-              Trip advance paid
+              Active vehicles breakdown
             </Typography>
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={4} md={2.4}>
-          <Card sx={{ borderRadius: '12px', border: '1px solid #e2e8f0', p: 1.5, bgcolor: '#ffffff' }}>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-              Dedicated / Non-Dedicated
-            </Typography>
-            <Box display="flex" gap={1} mt={0.5}>
-              <Chip
-                label={`Dedicated: ${filteredVehicles.filter(v => v.isDedicated).length}`}
-                size="small"
-                sx={{ height: 20, fontSize: '10px', fontWeight: 800, bgcolor: '#e0e7ff', color: '#3730a3' }}
-              />
-              <Chip
-                label={`Single: ${filteredVehicles.filter(v => !v.isDedicated).length}`}
-                size="small"
-                sx={{ height: 20, fontSize: '10px', fontWeight: 800, bgcolor: '#f1f5f9', color: '#475569' }}
-              />
+        {/* 5th SLOT: DIRECT ACCESS BUTTON */}
+        <Grid item xs={12} sm={12} md={8} lg={2.4}>
+          <Card
+            onClick={handleOpenVehicleMktAssoc}
+            sx={{
+              borderRadius: '12px',
+              border: '1.5px solid #8b5cf6',
+              p: 1.5,
+              bgcolor: 'rgba(139, 92, 246, 0.04)',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 2px 8px rgba(139, 92, 246, 0.1)',
+              '&:hover': {
+                bgcolor: 'rgba(139, 92, 246, 0.1)',
+                borderColor: '#7c3aed',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 18px rgba(139, 92, 246, 0.2)'
+              }
+            }}
+          >
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.5}>
+              <Typography variant="caption" sx={{ color: '#6d28d9', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                DIRECT ACCESS
+              </Typography>
+              <BarChartIcon sx={{ color: '#8b5cf6', fontSize: '1.2rem' }} />
             </Box>
+
+            <Button
+              variant="contained"
+              fullWidth
+              onClick={handleOpenVehicleMktAssoc}
+              startIcon={<BarChartIcon sx={{ fontSize: '1.05rem !important' }} />}
+              sx={{
+                my: 0.4,
+                bgcolor: '#5a45cf',
+                color: '#ffffff',
+                fontWeight: 800,
+                fontSize: { xs: '0.74rem', xl: '0.78rem' },
+                py: 0.9,
+                px: 1,
+                borderRadius: '8px',
+                textTransform: 'none',
+                lineHeight: 1.25,
+                textAlign: 'center',
+                boxShadow: '0 3px 10px rgba(90, 69, 207, 0.35)',
+                '&:hover': { bgcolor: '#4c39b8' }
+              }}
+            >
+              VIEW TO BAR GRAPH FOR VEHICLE, MKT AND ASSOCIATION
+            </Button>
+
+            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem', textAlign: 'center', display: 'block' }}>
+              Financial Analytics & Bar Graph
+            </Typography>
           </Card>
         </Grid>
       </Grid>

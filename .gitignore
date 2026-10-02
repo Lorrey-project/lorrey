@@ -16,3 +16,4 @@ token.txt
 *.pem
 backend-node/request_log.txt
 request_log.txt
+scratch/

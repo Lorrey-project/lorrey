@@ -504,7 +504,7 @@ export default function RoadTaxRegisterSection({
 
           <Chip
             icon={<CheckCircleOutlineIcon sx={{ color: '#16a3a0 !important' }} />}
-            label="Live Sync with Owner & Vehicle Directory"
+            label="Live Sync with Party Master"
             sx={{ bgcolor: '#f0fdf4', color: '#15803d', fontWeight: 800, border: '1px solid #bbf7d0' }}
           />
         </Box>

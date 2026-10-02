@@ -53,7 +53,7 @@ const _dashSocket = io(SOCKET_URL, {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenFreightCreditorGst, onOpenOthersCreditor, onOpenPrintingStationary, onOpenPaymentReceiveHistory }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenFreightCreditorGst, onOpenOthersCreditor, onOpenPrintingStationary, onOpenPaymentReceiveHistory, onOpenFingerprintManager }) => {
 
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
@@ -544,14 +544,14 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                     </Box>
                     <Box display="flex" gap={2}
                         sx={{ width: { xs: '100%', md: 'auto' }, justifyContent: { xs: 'center', md: 'flex-end' } }}>
-                        <Button variant="outlined" startIcon={<FingerprintIcon />} onClick={handleRegisterBiometrics}
+                        <Button variant="outlined" startIcon={<FingerprintIcon />} onClick={onOpenFingerprintManager || handleRegisterBiometrics}
                             sx={{
                                 borderRadius: '8px', px: { xs: 2.5, sm: 3 }, fontWeight: 700, flex: { xs: 1, md: 'none' },
-                                color: '#F5F7FA', borderColor: 'rgba(255,255,255,0.2)', bgcolor: 'rgba(20,24,28,0.5)',
+                                color: '#F5F7FA', borderColor: 'rgba(56, 189, 248, 0.4)', bgcolor: 'rgba(20,24,28,0.5)',
                                 backdropFilter: 'blur(10px)',
-                                '&:hover': { borderColor: 'rgba(255,255,255,0.4)', bgcolor: 'rgba(20,24,28,0.7)', boxShadow: '0 0 10px rgba(255,255,255,0.1)' }
+                                '&:hover': { borderColor: '#38bdf8', bgcolor: 'rgba(56, 189, 248, 0.15)', boxShadow: '0 0 15px rgba(56, 189, 248, 0.3)' }
                             }}>
-                            Register Biometrics
+                            Fingerprint Portal
                         </Button>
 
                         {/* ── Pending Approvals Bell (HEAD_OFFICE only) ── */}
@@ -774,7 +774,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <ActionCard title="BANK BOOK" subtitle="Transactions & Balances" icon={<AccountBalanceWalletIcon />} accentColor="#10b981" onClick={onOpenAccountDetails} />
                                     <ActionCard title="PAYMENT RECEIVE HISTORY" subtitle="Payment Receive History" icon={<ReceiptLongIcon />} accentColor="#10b981" onClick={onOpenPaymentReceiveHistory} />
                                     <ActionCard title="PRINTING & STATIONARY OR OTHERS NON_GST" subtitle="Printing & Stationary / Others Non_GST" icon={<PrintIcon />} accentColor="#f43f5e" onClick={onOpenPrintingStationary} />
-                                    <ActionCard title="MAIN CASH BOOK" subtitle="Daily Cash Flow" icon={<DescriptionIcon />} accentColor="#06b6d4" onClick={onOpenMainCashbook} />
+                                    <ActionCard title="CASH BOOK" subtitle="Daily Cash Flow" icon={<DescriptionIcon />} accentColor="#06b6d4" onClick={onOpenMainCashbook} />
                                     <ActionCard title="PUMP PAYMENT DETAILS" subtitle="Clear Pump Dues" icon={<LocalGasStationIcon />} accentColor="#0ea5e9" onClick={onOpenPumpPayment} />
                                     <ActionCard title="PUMP PAYMENT REGISTER" subtitle="Payment Register" icon={<ReceiptLongIcon />} accentColor="#38bdf8" onClick={onOpenPumpPaymentRegister} />
                                     <ActionCard title="INCENTIVE ENTRY" subtitle="Complete/Manage Incentives" icon={<PersonIcon />} accentColor="#d946ef" onClick={onOpenIncentiveSheet} />
@@ -789,13 +789,14 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <ActionCard title="TOTAL INCOMING & OUTGOING" subtitle="Payment Reports" icon={<AccountBalanceWalletIcon />} accentColor="#14b8a6" onClick={onOpenTotalPaymentReports} />
                                     <ActionCard title="FINANCIAL ANALYTICS & BAR GRAPH" subtitle="Financial Analytics & Bar Graph" icon={<BarChartIcon />} accentColor="#8b5cf6" onClick={onOpenPieChart} />
                                     <ActionCard title="AI EXTRA EXPENSE" subtitle="AI Expense Management" icon={<AutoAwesomeIcon />} accentColor="#6366f1" onClick={onOpenAiExtraExpense} />
-                                    <ActionCard title="OWNER & VEHICLES" subtitle="Fleet Directory" icon={<LocalShippingIcon />} accentColor="#f59e0b" onClick={() => setTruckManagerOpen(true)} />
+                                    <ActionCard title="PARTY MASTER" subtitle="Fleet Directory" icon={<LocalShippingIcon />} accentColor="#f59e0b" onClick={() => setTruckManagerOpen(true)} />
                                     <ActionCard title="VOUCHER HISTORY" subtitle="Approved Payouts" icon={<HistoryIcon />} accentColor="#f43f5e" onClick={() => { setVoucherDialogTab(1); setVoucherDialogOpen(true); }} />
                                     <ActionCard title="FUEL & DEDUCTION SETTINGS" subtitle="Fuel Pricing & Deductions" icon={<LocalGasStationIcon />} accentColor="#ef4444" onClick={onOpenFuelRateSettings} />
                                     {user?.role === 'HEAD_OFFICE' && (
                                         <ActionCard title="ACCOUNT APPROVALS" subtitle="Manage Staff Requests" icon={<PersonAddAlt1Icon />} accentColor="#10b981" onClick={onOpenAccountApprovals} />
                                     )}
                                     <ActionCard title="ATTENDANCE PANEL" subtitle="Daily Clock Ins" icon={<PersonIcon />} accentColor="#3b82f6" onClick={onOpenAttendancePanel} />
+                                    <ActionCard title="FINGERPRINT BIOMETRIC SYSTEM" subtitle="Drivers, Office, Site & Devs" icon={<FingerprintIcon />} accentColor="#38bdf8" onClick={onOpenFingerprintManager} />
                                     <ActionCard title="TDS REPORTS" subtitle="TDS Ledger & Deductions" icon={<ReceiptLongIcon />} accentColor="#06b6d4" onClick={onOpenTdsReports} />
                                     <ActionCard title="FREIGHT CREDITOR GST" subtitle="Creditor GST Ledger" icon={<ReceiptIcon />} accentColor="#ec4899" onClick={onOpenFreightCreditorGst} />
                                 </Grid>

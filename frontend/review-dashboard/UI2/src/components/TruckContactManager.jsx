@@ -11,6 +11,8 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import HistoryIcon from '@mui/icons-material/History';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonIcon from '@mui/icons-material/Person';
 import BadgeIcon from '@mui/icons-material/Badge';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
@@ -26,6 +28,7 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import axios from 'axios';
 import { API_URL } from '../config';
+import { normalizeDate, formatDateToDDMMYYYY, getEffectivePartyMaster } from '../utils/partyMasterHelper';
 
 function TabPanel({ value, index, children }) {
   return value === index ? <Box>{children}</Box> : null;
@@ -59,6 +62,9 @@ const DB_KEYS = {
   truckNo: 'Truck No ',
   vehType: 'Type of vehicle ',
   custType: 'TYPE OF CUSTOMER ',
+  dedicatedType: 'dedicated_type',
+  registrationDate: 'registration_date',
+  effectiveDate: 'effective_date',
   ownerName: 'Owner Name ',
   panNo: 'PAN No. ',
   aadharNo: 'Aadhar No. ',
@@ -129,6 +135,9 @@ export default function TruckContactManager({ open, onClose }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [approvals, setApprovals] = useState([]);
   const [approvalLoading, setApprovalLoading] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyContact, setHistoryContact] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const userRole = localStorage.getItem('role') || 'Site';
   const [docs, setDocs] = useState([
     { id: 'pan', label: 'PAN Card Copy', status: 'Pending' },
@@ -215,17 +224,39 @@ export default function TruckContactManager({ open, onClose }) {
     const errs = {};
     if (!form.truckNo?.trim()) errs.truckNo = 'Truck Number is required';
     if (!form.ownerName?.trim()) errs.ownerName = 'Owner Name is required';
+    if (!form.wheelType?.trim()) errs.wheelType = 'Wheel Type is required';
+    if (!form.custType?.trim()) errs.custType = 'Relationship Type is required';
+    if (!form.dedicatedType?.trim()) errs.dedicatedType = 'Dedicated Type is required';
+    if (!editId && !form.registrationDate?.trim()) {
+      errs.registrationDate = 'Registration Date is required';
+    }
+    if (editId && !form.effectiveDate?.trim()) {
+      errs.effectiveDate = 'Effective Date is required';
+    }
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
     setSaving(true);
     try {
+      const normRegDate = normalizeDate(form.registrationDate) || normalizeDate(new Date());
+      const normEffDate = normalizeDate(form.effectiveDate) || (editId ? normalizeDate(new Date()) : normRegDate);
+
       // Build payload using EXACT legacy column names already in MongoDB
-      // These string keys must stay exactly as-is (including trailing spaces)
-      const payload = {};
+      const payload = {
+        dedicated_type: form.dedicatedType || 'Non-Dedicated',
+        dedicatedType: form.dedicatedType || 'Non-Dedicated',
+        wheel_type: form.wheelType || '10WH',
+        wheelType: form.wheelType || '10WH',
+        registration_date: normRegDate,
+        registrationDate: normRegDate,
+        effective_date: normEffDate,
+        effectiveDate: normEffDate,
+        changedBy: localStorage.getItem('username') || 'User'
+      };
+
       const formToKey = {
         truckNo: form.truckNo,
-        vehType: form.vehType,
+        vehType: form.wheelType || form.vehType,
         custType: form.custType,
         ownerName: form.ownerName,
         panNo: form.panNo,
@@ -263,6 +294,9 @@ export default function TruckContactManager({ open, onClose }) {
         basicFreightComm: form.basicFreightComm,
         incentiveCommVal: form.incentiveCommVal,
         wheelType: form.wheelType,
+        dedicatedType: form.dedicatedType,
+        registrationDate: normRegDate,
+        effectiveDate: normEffDate,
         gstDocs: form.gstDocs,
       };
 
@@ -293,10 +327,10 @@ export default function TruckContactManager({ open, onClose }) {
         // Head Office User: Save Directly
         if (editId) {
           const res = await axios.put(`${API_URL}/truck-contacts/${editId}`, payload);
-          if (res.data.success) setSnack({ type: 'success', message: 'Profile updated!' });
+          if (res.data.success) setSnack({ type: 'success', message: 'Effective version saved successfully!' });
         } else {
           const res = await axios.post(`${API_URL}/truck-contacts`, payload);
-          if (res.data.success) setSnack({ type: 'success', message: 'Profile saved!' });
+          if (res.data.success) setSnack({ type: 'success', message: 'New Profile registered successfully!' });
         }
       }
 
@@ -304,7 +338,7 @@ export default function TruckContactManager({ open, onClose }) {
       setEditId(null);
       fetchContacts();
       if (userRole === 'Head-office') fetchApprovals();
-      setTab(userRole === 'Head-office' ? 3 : 0); // Open contacts for HO, or stay for Site
+      setTab(userRole === 'Head-office' ? 2 : 0); // Open existing contacts for HO, or stay for Site
     } catch {
       setSnack({ type: 'error', message: 'Failed to save.' });
     } finally {
@@ -330,9 +364,16 @@ export default function TruckContactManager({ open, onClose }) {
   };
 
   const handleEdit = (c) => {
-    // Read from legacy DB column names first (that's where real data lives)
+    const regDate = normalizeDate(c.registration_date || c.registrationDate || c.effective_date || c.effectiveDate) || '';
+    const todayStr = normalizeDate(new Date());
+
     setForm({
       truckNo: getStr(c["Truck No "], c["Truck No"], c.truck_no),
+      wheelType: getStr(c.wheel_type, c.wheelType, c["Wheel Type "], c["Type of vehicle "], c["Type of vehicle"]) || '10WH',
+      custType: getStr(c["TYPE OF CUSTOMER "], c["TYPE OF CUSTOMER"], c.type_of_customer, c.relationshipType, c.custType, c.type) || 'MKT',
+      dedicatedType: getStr(c.dedicated_type, c.dedicatedType, c["Dedicated Type"], c["Dedicated Type "]) || 'Non-Dedicated',
+      registrationDate: regDate,
+      effectiveDate: todayStr,
       ownerName: getStr(c["Owner Name "], c["Owner Name"], c.owner_name),
       driverName: getStr(c["Driver Name "], c["Driver Name"], c.driver_name),
       contactNo: getStr(c["Contact No. "], c["Contact No."], c.contact_no),
@@ -340,8 +381,6 @@ export default function TruckContactManager({ open, onClose }) {
       panNo: getStr(c["PAN No. "], c["PAN No."], c.pan_no),
       aadharNo: getStr(c["Aadhar No. "], c["Aadhar No."], c.aadhar_no),
       panAadharLink: getStr(c["PAN Addahar Link "], c.pan_aadhar_link),
-      vehType: getStr(c["Type of vehicle "], c.type),
-      custType: getStr(c["TYPE OF CUSTOMER "], c.type),
       nilTds: getStr(c["NIL TDS Declaration "], c.nil_tds_declaration),
       tdsApp: getStr(c["TDS Applicability "], c.tds_applicability),
       basicFreight: getStr(c["Basic Freight Comission Applicability "], c.basic_freight_commission_applicability),
@@ -370,7 +409,6 @@ export default function TruckContactManager({ open, onClose }) {
       driverPanAadharLink: getStr(c["Driver PAN Aadhar Link "], c.driver_pan_aadhar_link),
       basicFreightComm: getStr(c.basic_freight_commission, c["basic_freight_commission "]),
       incentiveCommVal: getStr(c.incentive_commission, c["incentive_commission "]),
-      wheelType: getStr(c.wheel_type, c["Wheel Type "]),
       gstDocs: Array.isArray(c.gst_documents) ? c.gst_documents : [],
     });
     setEditId(c._id);
@@ -385,6 +423,31 @@ export default function TruckContactManager({ open, onClose }) {
       }
       return { ...d, status: 'Pending', url: undefined, fileName: undefined };
     }));
+  };
+
+  const handleViewHistory = async (c) => {
+    setHistoryContact({
+      truckNo: getStr(c["Truck No"], c["Truck No "], c.truck_no),
+      ownerName: getStr(c["Owner Name"], c["Owner Name "], c.owner_name),
+      history: c.history || []
+    });
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const idOrTruck = c._id || getStr(c["Truck No"], c["Truck No "], c.truck_no);
+      const res = await axios.get(`${API_URL}/truck-contacts/${idOrTruck}/history`);
+      if (res.data.success) {
+        setHistoryContact(prev => ({
+          ...prev,
+          truckNo: res.data.truckNo || prev.truckNo,
+          history: res.data.history || []
+        }));
+      }
+    } catch {
+      // Fallback to local contact.history
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const handleDelete = async (id) => {
@@ -755,7 +818,7 @@ export default function TruckContactManager({ open, onClose }) {
             <LocalShippingIcon sx={{ color: '#475569' }} />
           </Box>
           <Box flex={1}>
-            <Typography variant="h6" fontWeight={800} color="#0f172a">Owner & Vehicle Directory</Typography>
+            <Typography variant="h6" fontWeight={800} color="#0f172a">Party Master</Typography>
             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>DIPALI ASSOCIATES & CO.</Typography>
           </Box>
           <IconButton onClick={onClose} sx={{ color: '#64748b' }}><CloseIcon /></IconButton>
@@ -816,29 +879,31 @@ export default function TruckContactManager({ open, onClose }) {
 
                 {/* ─── FIXED PRIMARY HEADER ─── */}
                 <Box sx={{ bgcolor: 'background.default', p: 2.5, borderRadius: '20px', mb: 3, border: '1px solid #e2e8f0', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
-                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr 1fr' }, gap: 3, alignItems: 'center' }}>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1fr 1fr 1.1fr 1.2fr' }, gap: 2.5, alignItems: 'center' }}>
                     <Box>
-                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
-                        Vehicle Primary ID
+                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 0.5, textTransform: 'uppercase', mb: 0.75, display: 'block', fontSize: '11px' }}>
+                        Vehicle Primary ID *
                       </Typography>
                       {tf('Truck Number *', 'truckNo', LocalShippingIcon)}
                     </Box>
                     <Box>
-                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
-                        Wheel Type
+                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 0.5, textTransform: 'uppercase', mb: 0.75, display: 'block', fontSize: '11px' }}>
+                        Wheel Type *
                       </Typography>
                       <TextField
                         select
                         fullWidth
-                        label="Wheel Type"
+                        label="Wheel Type *"
                         value={form.wheelType || ''}
                         onChange={(e) => handleChange('wheelType', e.target.value)}
                         variant="outlined"
+                        error={!!errors.wheelType}
+                        helperText={errors.wheelType}
                         InputProps={{
                           sx: inputSx,
                         }}
                       >
-                        <MenuItem value=""><em>None</em></MenuItem>
+                        <MenuItem value=""><em>Select Wheel</em></MenuItem>
                         <MenuItem value="6WH">6WH</MenuItem>
                         <MenuItem value="10WH">10WH</MenuItem>
                         <MenuItem value="12WH">12WH</MenuItem>
@@ -846,10 +911,76 @@ export default function TruckContactManager({ open, onClose }) {
                       </TextField>
                     </Box>
                     <Box>
-                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 1, textTransform: 'uppercase', mb: 1, display: 'block' }}>
-                        Relationship Type
+                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 0.5, textTransform: 'uppercase', mb: 0.75, display: 'block', fontSize: '11px' }}>
+                        Relationship Type *
                       </Typography>
-                      {tf('ATOA / MKT / Site', 'custType', ArticleIcon)}
+                      <TextField
+                        select
+                        fullWidth
+                        label="Relationship Type *"
+                        value={form.custType || ''}
+                        onChange={(e) => handleChange('custType', e.target.value)}
+                        variant="outlined"
+                        error={!!errors.custType}
+                        helperText={errors.custType}
+                        InputProps={{
+                          sx: inputSx,
+                        }}
+                      >
+                        <MenuItem value=""><em>Select Relationship</em></MenuItem>
+                        <MenuItem value="ATOA">ATOA</MenuItem>
+                        <MenuItem value="MKT">MKT</MenuItem>
+                        <MenuItem value="Site">Site</MenuItem>
+                      </TextField>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 0.5, textTransform: 'uppercase', mb: 0.75, display: 'block', fontSize: '11px' }}>
+                        Dedicated Type *
+                      </Typography>
+                      <TextField
+                        select
+                        fullWidth
+                        label="Dedicated Type *"
+                        value={form.dedicatedType || ''}
+                        onChange={(e) => handleChange('dedicatedType', e.target.value)}
+                        variant="outlined"
+                        error={!!errors.dedicatedType}
+                        helperText={errors.dedicatedType}
+                        InputProps={{
+                          sx: inputSx,
+                        }}
+                      >
+                        <MenuItem value=""><em>Select Dedicated</em></MenuItem>
+                        <MenuItem value="Dedicated">Dedicated</MenuItem>
+                        <MenuItem value="Non-Dedicated">Non-Dedicated</MenuItem>
+                      </TextField>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" fontWeight={900} color="#475569" sx={{ letterSpacing: 0.5, textTransform: 'uppercase', mb: 0.75, display: 'block', fontSize: '11px' }}>
+                        {editId ? 'Effective Date *' : 'Registration Date *'}
+                      </Typography>
+                      <TextField
+                        fullWidth
+                        type="date"
+                        label={editId ? 'Effective From Date *' : 'Registration Date *'}
+                        value={editId ? (form.effectiveDate || '') : (form.registrationDate || '')}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (editId) {
+                            handleChange('effectiveDate', val);
+                          } else {
+                            handleChange('registrationDate', val);
+                            handleChange('effectiveDate', val);
+                          }
+                        }}
+                        InputLabelProps={{ shrink: true }}
+                        error={!!(editId ? errors.effectiveDate : errors.registrationDate)}
+                        helperText={(editId ? errors.effectiveDate : errors.registrationDate) || (editId ? 'Active from this date onward' : 'Profile active from this date')}
+                        InputProps={{
+                          sx: inputSx,
+                          startAdornment: <EventIcon sx={{ color: '#64748b', mr: 1, fontSize: 18 }} />
+                        }}
+                      />
                     </Box>
                   </Box>
                 </Box>
@@ -1222,10 +1353,12 @@ export default function TruckContactManager({ open, onClose }) {
                         <TableRow sx={{ '& th': { borderRight: '1px solid #e2e8f0', whiteSpace: 'nowrap', fontSize: '11px', fontWeight: 800, bgcolor: 'background.default', color: '#475569' } }}>
                           <TableCell sx={{ minWidth: 50, textAlign: 'center' }}>#</TableCell>
                           <TableCell sx={{ minWidth: 140 }}>TRUCK / VEHICLE NO</TableCell>
-                          <TableCell sx={{ minWidth: 140 }}>TYPE OF VEHICLE</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>WHEEL / VEHICLE TYPE</TableCell>
                           <TableCell sx={{ minWidth: 160 }}>OWNER NAME</TableCell>
                           <TableCell sx={{ minWidth: 160 }}>DRIVER NAME</TableCell>
-                          <TableCell sx={{ minWidth: 140 }}>TYPE OF CUSTOMER</TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>RELATIONSHIP TYPE</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>DEDICATED TYPE</TableCell>
+                          <TableCell sx={{ minWidth: 130 }}>REGISTRATION DATE</TableCell>
                           <TableCell sx={{ minWidth: 130 }}>PAN NO</TableCell>
                           <TableCell sx={{ minWidth: 130 }}>AADHAAR NO</TableCell>
                           <TableCell sx={{ minWidth: 140 }}>PAN-AADHAAR LINK</TableCell>
@@ -1245,7 +1378,7 @@ export default function TruckContactManager({ open, onClose }) {
                           <TableCell sx={{ minWidth: 130 }}>LICENSE NO</TableCell>
                           <TableCell sx={{ minWidth: 140 }}>LICENSE VALIDITY</TableCell>
                           <TableCell sx={{ minWidth: 180 }}>DRIVER AUTHORISE VALIDITY</TableCell>
-                          <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 10, bgcolor: '#f8fafc !important', borderLeft: '2px solid #cbd5e1', minWidth: 90 }}>ACTIONS</TableCell>
+                          <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 10, bgcolor: '#f8fafc !important', borderLeft: '2px solid #cbd5e1', minWidth: 130 }}>ACTIONS</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -1261,10 +1394,12 @@ export default function TruckContactManager({ open, onClose }) {
                           })
                           .map((c, idx) => {
                             const tNo = getStr(c["Truck No"], c["Truck No "], c.truck_no);
-                            const vehType = getStr(c["Type of vehicle"], c["Type of vehicle "], c.type_of_vehicle, c.type, c.vehType, c.wheel_type, c.wheelType);
+                            const vehType = getStr(c.wheel_type, c.wheelType, c["Wheel Type "], c["Type of vehicle"], c["Type of vehicle "], c.type_of_vehicle, c.type, c.vehType);
                             const oName = getStr(c["Owner Name"], c["Owner Name "], c.owner_name);
                             const dName = getStr(c["Driver Name"], c["Driver Name "], c.driver_name);
-                            const custType = getStr(c["TYPE OF CUSTOMER"], c["TYPE OF CUSTOMER "], c.type_of_customer, c.customer_type, c.custType, c.type);
+                            const custType = getStr(c["TYPE OF CUSTOMER"], c["TYPE OF CUSTOMER "], c.type_of_customer, c.relationshipType, c.customer_type, c.custType, c.type);
+                            const dedicatedType = getStr(c.dedicated_type, c.dedicatedType, c["Dedicated Type"], c["Dedicated Type "]) || 'Non-Dedicated';
+                            const regDate = formatDateToDDMMYYYY(c.registration_date || c.registrationDate || c.effective_date || c.effectiveDate) || '-';
                             const pan = getStr(c["PAN No."], c["PAN No. "], c["PAN No"], c.pan_no);
                             const aadhar = getStr(c["Aadhar No."], c["Aadhar No. "], c["Aadhaar No."], c["Aadhaar No"], c.aadhar_no);
                             const panAadharLink = getStr(c["PAN Addahar Link"], c["PAN Addahar Link "], c["PAN Aadhar Link"], c.pan_aadhar_link);
@@ -1289,17 +1424,19 @@ export default function TruckContactManager({ open, onClose }) {
                               <TableRow key={c._id} hover sx={{ '&:nth-of-type(even)': { bgcolor: '#fbfbff' }, '& td': { borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', fontSize: '12px' } }}>
                                 <TableCell sx={{ color: '#64748b', textAlign: 'center' }}>{idx + 1}</TableCell>
                                 <TableCell sx={{ fontWeight: 700, color: '#0f172a' }}>{tNo}</TableCell>
-                                <TableCell>{vehType}</TableCell>
+                                <TableCell><Chip label={vehType || '10WH'} size="small" sx={{ fontWeight: 700, fontSize: '11px' }} /></TableCell>
                                 <TableCell sx={{ fontWeight: 600 }}>{oName}</TableCell>
                                 <TableCell>{dName}</TableCell>
-                                <TableCell>{custType}</TableCell>
+                                <TableCell><Chip label={custType || 'MKT'} size="small" sx={{ fontWeight: 700, fontSize: '11px', bgcolor: custType === 'ATOA' ? '#e0e7ff' : custType === 'Site' ? '#ecfdf5' : '#f1f5f9', color: custType === 'ATOA' ? '#3730a3' : custType === 'Site' ? '#065f46' : '#334155' }} /></TableCell>
+                                <TableCell><Chip label={dedicatedType} size="small" sx={{ fontWeight: 700, fontSize: '11px', bgcolor: dedicatedType === 'Dedicated' ? '#fef3c7' : '#f1f5f9', color: dedicatedType === 'Dedicated' ? '#92400e' : '#475569' }} /></TableCell>
+                                <TableCell sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{regDate}</TableCell>
                                 <TableCell>{pan}</TableCell>
                                 <TableCell>{aadhar}</TableCell>
                                 <TableCell>{panAadharLink}</TableCell>
                                 <TableCell>{contactNo}</TableCell>
                                 <TableCell>{driverContactNo}</TableCell>
                                 <TableCell>{tds}</TableCell>
-                                <TableCell>{basicFreightComm}</TableCell>
+                                <TableCell sx={{ fontWeight: 700, color: '#166534' }}>{basicFreightComm}</TableCell>
                                 <TableCell>{incentiveComm}</TableCell>
                                 <TableCell>{gstNo}</TableCell>
                                 <TableCell>{rcValidity}</TableCell>
@@ -1313,10 +1450,13 @@ export default function TruckContactManager({ open, onClose }) {
                                 <TableCell>{licenseValidity}</TableCell>
                                 <TableCell>{driverAuthValidity}</TableCell>
                                 <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 5, bgcolor: idx % 2 === 1 ? '#fbfbff' : '#ffffff', borderLeft: '2px solid #cbd5e1' }}>
-                                  <IconButton size="small" onClick={() => handleEdit(c)} sx={{ color: '#1a73e8' }}>
+                                  <IconButton title="Change History" size="small" onClick={() => handleViewHistory(c)} sx={{ color: '#0f172a', mr: 0.5 }}>
+                                    <HistoryIcon fontSize="small" />
+                                  </IconButton>
+                                  <IconButton title="Edit Contact" size="small" onClick={() => handleEdit(c)} sx={{ color: '#1a73e8', mr: 0.5 }}>
                                     <EditIcon fontSize="small" />
                                   </IconButton>
-                                  <IconButton size="small" onClick={() => handleDelete(c._id)} sx={{ color: '#d32f2f' }}>
+                                  <IconButton title="Delete Contact" size="small" onClick={() => handleDelete(c._id)} sx={{ color: '#d32f2f' }}>
                                     <DeleteIcon fontSize="small" />
                                   </IconButton>
                                 </TableCell>
@@ -1389,6 +1529,115 @@ export default function TruckContactManager({ open, onClose }) {
             )}
 
           </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── CHANGE HISTORY DIALOG ── */}
+      <Dialog
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: '16px', overflow: 'hidden' }
+        }}
+      >
+        <Box sx={{ p: 2.5, bgcolor: '#0f172a', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <HistoryIcon sx={{ color: '#38bdf8' }} />
+            <Box>
+              <Typography variant="subtitle1" fontWeight={800}>
+                Effective Version History — {historyContact?.truckNo || 'Vehicle'}
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                Owner: {historyContact?.ownerName || 'N/A'} • Chronological Effective-Dated Audit Log
+              </Typography>
+            </Box>
+          </Box>
+          <IconButton onClick={() => setHistoryOpen(false)} sx={{ color: '#94a3b8', '&:hover': { color: '#fff' } }}>
+            <CloseIcon />
+          </IconButton>
+        </Box>
+
+        <DialogContent sx={{ p: 3, bgcolor: '#f8fafc' }}>
+          {historyLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+              <CircularProgress size={32} />
+            </Box>
+          ) : !historyContact?.history || historyContact.history.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 6, bgcolor: '#fff', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
+              <HistoryIcon sx={{ fontSize: 40, color: '#94a3b8', mb: 1, opacity: 0.6 }} />
+              <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                No past edit versions recorded yet. This vehicle operates on its initial registration version.
+              </Typography>
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {historyContact.history.map((ver, vIdx) => {
+                const effDateFormatted = formatDateToDDMMYYYY(ver.effectiveDate) || ver.effectiveDate;
+                const changedFields = ver.changedFields || [];
+                const prevVals = ver.previousValues || {};
+                const newSnap = ver.snapshot || {};
+
+                return (
+                  <Box key={vIdx} sx={{ bgcolor: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', p: 2.5, boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5, pb: 1.5, borderBottom: '1px solid #f1f5f9' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <Chip
+                          label={`Version ${vIdx + 1}`}
+                          size="small"
+                          sx={{ fontWeight: 800, bgcolor: '#0f172a', color: '#fff', fontSize: '11px' }}
+                        />
+                        <Typography variant="body2" fontWeight={800} color="#0f172a">
+                          Effective From: <span style={{ color: '#1a73e8' }}>{effDateFormatted}</span>
+                        </Typography>
+                      </Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Changed By: <b>{ver.changedBy || 'System'}</b> on {ver.changedAt ? new Date(ver.changedAt).toLocaleString() : 'N/A'}
+                      </Typography>
+                    </Box>
+
+                    {ver.changeSummary && (
+                      <Typography variant="caption" sx={{ display: 'block', mb: 1.5, color: '#475569', fontWeight: 600 }}>
+                        Summary: {ver.changeSummary}
+                      </Typography>
+                    )}
+
+                    {changedFields.length > 0 ? (
+                      <Table size="small" sx={{ border: '1px solid #f1f5f9', borderRadius: '8px', overflow: 'hidden' }}>
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                            <TableCell sx={{ fontWeight: 800, fontSize: '11px', color: '#475569' }}>Changed Field</TableCell>
+                            <TableCell sx={{ fontWeight: 800, fontSize: '11px', color: '#dc2626' }}>Previous Value</TableCell>
+                            <TableCell sx={{ fontWeight: 800, fontSize: '11px', color: '#16a34a' }}>New Effective Value</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {changedFields.map((fieldKey, fIdx) => (
+                            <TableRow key={fIdx}>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '11px', color: '#0f172a' }}>{fieldKey}</TableCell>
+                              <TableCell sx={{ fontSize: '11px', color: '#dc2626', fontFamily: 'monospace' }}>
+                                {String(prevVals[fieldKey] !== undefined ? prevVals[fieldKey] : '—')}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '11px', color: '#16a34a', fontWeight: 700, fontFamily: 'monospace' }}>
+                                {String(newSnap[fieldKey] !== undefined ? newSnap[fieldKey] : '—')}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <Box sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: '6px' }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Initial profile baseline established for effective date <b>{effDateFormatted}</b>.
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
         </DialogContent>
       </Dialog>
 

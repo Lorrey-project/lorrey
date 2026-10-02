@@ -42,6 +42,7 @@ const MobileDashboard = ({
     onOpenVouchers,
     onOpenBillingSheet,
     onOpenAccountApprovals,
+    onOpenFingerprintManager,
 }) => {
     const { user, logout, registerPasskey } = useAuth();
     const [invoices, setInvoices] = useState([]);
@@ -554,6 +555,45 @@ const MobileDashboard = ({
                                     </Paper>
                                 </Grid>
                             )}
+                            {/* Fingerprint Management Card */}
+                            {onOpenFingerprintManager && (
+                                <Grid item xs={12}>
+                                    <Paper
+                                        elevation={0}
+                                        onClick={onOpenFingerprintManager}
+                                        sx={{
+                                            p: 1.8,
+                                            px: 2.2,
+                                            borderRadius: 3.5,
+                                            bgcolor: '#1e293b',
+                                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                                            background: 'linear-gradient(145deg, #1e293b 0%, #0f172a 100%)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
+                                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                            '&:active': { transform: 'scale(0.97)' }
+                                        }}
+                                    >
+                                        <Box display="flex" alignItems="center" gap={1.8}>
+                                            <Box sx={{ width: 38, height: 38, borderRadius: '12px', bgcolor: 'rgba(56, 189, 248, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                                                <FingerprintIcon sx={{ color: '#38bdf8', fontSize: 22 }} />
+                                            </Box>
+                                            <Box>
+                                                <Typography variant="body2" fontWeight="900" sx={{ color: '#f8fafc', fontSize: '0.92rem' }}>
+                                                    Fingerprint Management
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '0.72rem' }}>
+                                                    Enroll Drivers, Office & Site Staff
+                                                </Typography>
+                                            </Box>
+                                        </Box>
+                                        <ChevronRightIcon sx={{ color: '#64748b' }} />
+                                    </Paper>
+                                </Grid>
+                            )}
                         </Grid>
                     </Box>
                 )}
@@ -920,8 +960,15 @@ const MobileDashboard = ({
                             )}
                         </>}
 
+                        {onOpenFingerprintManager && (
+                            <ListItem button onClick={() => { setDrawerOpen(false); onOpenFingerprintManager(); }} sx={{ borderRadius: 2 }}>
+                                <ListItemIcon><FingerprintIcon sx={{ color: '#38bdf8' }} /></ListItemIcon>
+                                <ListItemText primary="Fingerprint System" primaryTypographyProps={{ fontWeight: 600, color: '#38bdf8' }} />
+                            </ListItem>
+                        )}
+
                         <ListItem button onClick={() => setSecurityDialogOpen(true)} sx={{ borderRadius: 2 }}>
-                            <ListItemIcon><FingerprintIcon sx={{ color: '#94a3b8' }} /></ListItemIcon>
+                            <ListItemIcon><SecurityIcon sx={{ color: '#94a3b8' }} /></ListItemIcon>
                             <ListItemText primary="Security Opts" primaryTypographyProps={{ fontWeight: 600 }} />
                         </ListItem>
                     </List>

@@ -40,6 +40,8 @@ const FreightCreditorGst = lazy(() => import('./pages/FreightCreditorGst'));
 const OthersCreditor = lazy(() => import('./pages/OthersCreditor'));
 const PrintingStationaryRegister = lazy(() => import('./pages/PrintingStationaryRegister'));
 const PaymentReceiveHistory = lazy(() => import('./pages/PaymentReceiveHistory'));
+const FingerprintManager = lazy(() => import('./pages/FingerprintManagerPage'));
+const PartyFullYear = lazy(() => import('./pages/PartyFullYear'));
 
 const theme = createTheme({
   palette: {
@@ -124,6 +126,8 @@ function AppContent() {
   const theme = createTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [currentView, setCurrentView] = useState('dashboard');
+  const [previousView, setPreviousView] = useState('dashboard');
+  const [pieChartInitialSubTab, setPieChartInitialSubTab] = useState('barGraph');
   const [lorrySlipInvoiceId, setLorrySlipInvoiceId] = useState(null);
   const [fuelSlipInvoiceId, setFuelSlipInvoiceId] = useState(null);
   const [voucherInvoiceId, setVoucherInvoiceId] = useState(null);
@@ -146,13 +150,27 @@ function AppContent() {
     }
   }, [user]);
 
-  const handleViewChange = (newView) => {
+  const handleViewChange = (newView, subTab = null) => {
     setIsTransitioning(true);
     setTimeout(() => {
+      setPreviousView(currentView);
+      if (newView === 'pieChart' && subTab) {
+        setPieChartInitialSubTab(subTab);
+      }
       setCurrentView(newView);
       setIsTransitioning(false);
     }, 400);
   };
+
+  useEffect(() => {
+    const handleNavEvent = (e) => {
+      if (e.detail?.view) {
+        handleViewChange(e.detail.view, e.detail.subTab);
+      }
+    };
+    window.addEventListener('NAVIGATE_TO_VIEW', handleNavEvent);
+    return () => window.removeEventListener('NAVIGATE_TO_VIEW', handleNavEvent);
+  }, [currentView]);
 
   if (loading) {
     return (
@@ -248,7 +266,11 @@ function AppContent() {
     }
 
     if (currentView === 'partyPayment') {
-      return <PartyPaymentDetails onBack={() => handleViewChange('dashboard')} />;
+      return <PartyPaymentDetails onBack={() => handleViewChange('dashboard')} onOpenPartyFullYear={() => handleViewChange('partyFullYear')} />;
+    }
+
+    if (currentView === 'partyFullYear') {
+      return <PartyFullYear onBack={() => handleViewChange('partyPayment')} />;
     }
 
     if (currentView === 'fyDetails') {
@@ -260,7 +282,12 @@ function AppContent() {
     }
 
     if (currentView === 'pieChart') {
-      return <PieChartDashboard onBack={() => handleViewChange('dashboard')} />;
+      return (
+        <PieChartDashboard
+          initialSubTab={pieChartInitialSubTab}
+          onBack={() => handleViewChange(previousView || 'dailySummary')}
+        />
+      );
     }
 
     if (currentView === 'accountDetails') {
@@ -287,6 +314,8 @@ function AppContent() {
           onOpenCementRegister={() => handleViewChange('cementRegister')}
           onOpenPartyPayment={() => handleViewChange('partyPayment')}
           onOpenPumpPaymentRegister={() => handleViewChange('pumpPaymentRegister')}
+          onOpenPieChart={(subTab) => handleViewChange('pieChart', subTab)}
+          onOpenVehicleMktAssoc={() => handleViewChange('pieChart', 'vehicleMktAssoc')}
         />
       );
     }
@@ -321,6 +350,10 @@ function AppContent() {
           onOpenDailySummaryReport={() => handleViewChange('dailySummary')}
         />
       );
+    }
+
+    if (currentView === 'fingerprintManager') {
+      return <FingerprintManager onBack={() => handleViewChange('dashboard')} />;
     }
 
     if (currentView === 'dashboard') {
@@ -360,6 +393,7 @@ function AppContent() {
             onOpenFuelSlip={(id) => { setFuelSlipInvoiceId(id); handleViewChange('fuelSlip'); }}
             onOpenRegisters={() => handleViewChange('cementRegister')}
             onOpenVouchers={() => handleViewChange('voucherRegister')}
+            onOpenFingerprintManager={() => handleViewChange('fingerprintManager')}
           />
         );
       }
@@ -393,6 +427,7 @@ function AppContent() {
             onOpenVouchers={() => handleViewChange('voucherRegister')}
             onOpenContacts="truckManager"
             onOpenAccountApprovals={() => handleViewChange('accountApprovals')}
+            onOpenFingerprintManager={() => handleViewChange('fingerprintManager')}
           />
         );
       }
@@ -424,6 +459,7 @@ function AppContent() {
           onOpenOthersCreditor={(tabIdx = 0) => { setOthersCreditorInitialTab(tabIdx); handleViewChange('othersCreditor'); }}
           onOpenPrintingStationary={() => handleViewChange('printingStationary')}
           onOpenPaymentReceiveHistory={() => handleViewChange('paymentReceiveHistory')}
+          onOpenFingerprintManager={() => handleViewChange('fingerprintManager')}
         />
       );
     }

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Box, Typography, Button, Paper, CircularProgress,
-    Alert, Chip, Divider, IconButton, Stepper, Step, StepLabel
+    Alert, Chip, Divider, IconButton, Stepper, Step, StepLabel,
+    TextField
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
@@ -12,9 +13,11 @@ import PersonIcon from '@mui/icons-material/Person';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import LockIcon from '@mui/icons-material/Lock';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import axios from 'axios';
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import { API_URL } from '../config';
+import FingerprintClientService from '../services/fingerprintService';
 
 const AdvanceBiometricAuthDialog = ({
     open,
@@ -27,14 +30,25 @@ const AdvanceBiometricAuthDialog = ({
     siteMemberName,
     onAuthorized
 }) => {
-    const [supported, setSupported] = useState(null); // null = checking, true/false
+    const [supported, setSupported] = useState(true);
     const [sessionId, setSessionId] = useState(null);
     const [driverVerified, setDriverVerified] = useState(false);
+    const [matchedDriverName, setMatchedDriverName] = useState('');
+    const [driverId, setDriverId] = useState('');
     const [siteMemberVerified, setSiteMemberVerified] = useState(false);
     const [authToken, setAuthToken] = useState(null);
     const [loading, setLoading] = useState(false);
     const [activeRole, setActiveRole] = useState(null); // 'driver' | 'site_member' | null
     const [errorMsg, setErrorMsg] = useState(null);
+
+    // New/Temporary Driver Flow State
+    const [showTempDriverForm, setShowTempDriverForm] = useState(false);
+    const [tempDriverData, setTempDriverData] = useState({
+        name: '',
+        mobile: '',
+        licenseNo: ''
+    });
+    const [tempDriverEnrolling, setTempDriverEnrolling] = useState(false);
 
     const {
         loadingAdv = 0,
@@ -50,48 +64,37 @@ const AdvanceBiometricAuthDialog = ({
             ? 'LOADING'
             : 'FUEL';
 
-    // 1. Check Platform Biometric Authenticator Availability
+    // 1. Check Hardware & Initialize Session
     useEffect(() => {
         if (!open) {
-            // Reset dialog state on close
             setSessionId(null);
             setDriverVerified(false);
+            setMatchedDriverName('');
+            setDriverId('');
             setSiteMemberVerified(false);
             setAuthToken(null);
             setLoading(false);
             setActiveRole(null);
             setErrorMsg(null);
+            setShowTempDriverForm(false);
             return;
         }
 
         const checkHardwareAndInit = async () => {
             setErrorMsg(null);
             try {
-                let isAvailable = false;
-                if (window.PublicKeyCredential && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
-                    isAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-                }
+                // Check if platform authenticator or USB scanner is available
+                const hasPlatformAuth = await FingerprintClientService.isPlatformAuthenticatorAvailable();
+                setSupported(hasPlatformAuth);
 
-                if (!isAvailable) {
-                    setSupported(false);
-                    return;
-                }
-                setSupported(true);
-
-                // Driver is required for two-person verification
-                if (!driverName || !driverName.trim()) {
-                    setErrorMsg('No Driver assigned for this vehicle. Please assign a driver before issuing an advance.');
-                    return;
-                }
-
-                // 2. Initiate Biometric Authorization Session on server
+                // Initialize Biometric Authorization Session on server
                 const token = localStorage.getItem('token');
                 const res = await axios.post(
                     `${API_URL}/advance-auth/initiate`,
                     {
                         invoice_id: invoiceId,
                         vehicle_number: vehicleNumber,
-                        driver_name: driverName.trim(),
+                        driver_name: driverName ? driverName.trim() : 'UNASSIGNED DRIVER',
                         driver_license_no: driverLicenseNo || '',
                         advance_type: advanceType,
                         loading_advance: loadingAdv,
@@ -105,6 +108,7 @@ const AdvanceBiometricAuthDialog = ({
 
                 if (res.data?.success) {
                     setSessionId(res.data.sessionId);
+                    if (res.data.driver_id) setDriverId(res.data.driver_id);
                 } else {
                     setErrorMsg('Failed to initialize advance authorization session.');
                 }
@@ -117,7 +121,7 @@ const AdvanceBiometricAuthDialog = ({
         checkHardwareAndInit();
     }, [open, invoiceId, vehicleNumber, driverName, loadingAdv, dieselLtrs, totalAdv]);
 
-    // 3. Scan Driver Fingerprint
+    // 2. Scan Driver Fingerprint (Triggers REAL OS / Hardware Biometric Prompt)
     const handleVerifyDriver = async () => {
         if (!sessionId) return;
         setLoading(true);
@@ -127,7 +131,7 @@ const AdvanceBiometricAuthDialog = ({
         try {
             const token = localStorage.getItem('token');
 
-            // 1. Get challenge options
+            // 1. Request cryptographic challenge from server
             const { data: challengeData } = await axios.post(
                 `${API_URL}/advance-auth/challenge`,
                 { sessionId, role: 'driver' },
@@ -136,7 +140,7 @@ const AdvanceBiometricAuthDialog = ({
 
             const { options, isRegistration } = challengeData;
 
-            // 2. WebAuthn platform biometric ceremony
+            // 2. TRIGGER REAL OS BIOMETRIC SENSOR CEREMONY (Touch ID / Windows Hello / Android / Security Key)
             let response;
             if (isRegistration) {
                 response = await startRegistration({ optionsJSON: options });
@@ -144,29 +148,34 @@ const AdvanceBiometricAuthDialog = ({
                 response = await startAuthentication({ optionsJSON: options });
             }
 
-            // 3. Send back assertion to server
+            // 3. Send back assertion to server for cryptographic signature verification
             const { data: verifyData } = await axios.post(
                 `${API_URL}/advance-auth/verify`,
-                {
-                    sessionId,
-                    role: 'driver',
-                    response,
-                    isRegistration
-                },
+                { sessionId, role: 'driver', response, isRegistration },
                 { headers: { Authorization: `Bearer ${token}` } }
             );
 
             if (verifyData.verified) {
                 setDriverVerified(true);
+                setMatchedDriverName(driverName);
+                if (verifyData.driverId) setDriverId(verifyData.driverId);
+                setShowTempDriverForm(false);
             } else {
                 setErrorMsg('Driver fingerprint verification failed.');
             }
         } catch (err) {
-            console.error('Driver biometric error:', err);
+            console.error('Driver biometric scan error:', err);
             if (err.name === 'NotAllowedError') {
-                setErrorMsg('Fingerprint scan cancelled or timed out. Please tap your finger on the sensor.');
+                setErrorMsg('Fingerprint scan was cancelled or timed out. Please place your finger firmly on the sensor.');
+            } else if (err.response?.data?.error) {
+                const apiError = err.response.data.error;
+                setErrorMsg(apiError);
+                if (apiError.includes('not found') || apiError.includes('not recognized') || !driverName) {
+                    setShowTempDriverForm(true);
+                }
             } else {
-                setErrorMsg(err.response?.data?.error || err.message || 'Driver biometric verification failed.');
+                setErrorMsg(err.message || 'Driver fingerprint verification failed.');
+                setShowTempDriverForm(true);
             }
         } finally {
             setLoading(false);
@@ -174,7 +183,56 @@ const AdvanceBiometricAuthDialog = ({
         }
     };
 
-    // 4. Scan Site Member Fingerprint (Only after Driver is verified)
+    // 3. Handle Temporary Driver Real Biometric Registration
+    const handleEnrollTemporaryDriver = async () => {
+        if (!tempDriverData.name.trim()) {
+            setErrorMsg('Please enter the temporary driver name.');
+            return;
+        }
+
+        setTempDriverEnrolling(true);
+        setErrorMsg(null);
+
+        try {
+            const token = localStorage.getItem('token');
+
+            // 1. Request temporary driver challenge
+            const { data: challengeData } = await axios.post(
+                `${API_URL}/advance-auth/challenge`,
+                { sessionId, role: 'driver' },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            const { options } = challengeData;
+
+            // 2. Trigger real biometric capture for the temporary driver
+            const response = await startRegistration({ optionsJSON: options });
+
+            // 3. Verify on server
+            const { data: verifyData } = await axios.post(
+                `${API_URL}/advance-auth/verify`,
+                { sessionId, role: 'driver', response, isRegistration: true },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            if (verifyData.verified) {
+                setDriverVerified(true);
+                setMatchedDriverName(tempDriverData.name.trim());
+                setShowTempDriverForm(false);
+            }
+        } catch (err) {
+            console.error('Temporary driver enrollment error:', err);
+            if (err.name === 'NotAllowedError') {
+                setErrorMsg('Fingerprint scan was cancelled. Please touch your fingerprint sensor to register.');
+            } else {
+                setErrorMsg(err.response?.data?.error || err.message || 'Temporary driver biometric registration failed.');
+            }
+        } finally {
+            setTempDriverEnrolling(false);
+        }
+    };
+
+    // 4. Scan Site / Office Member Fingerprint (Step 2 — Real Biometric Prompt)
     const handleVerifySiteMember = async () => {
         if (!sessionId || !driverVerified) return;
         setLoading(true);
@@ -184,7 +242,7 @@ const AdvanceBiometricAuthDialog = ({
         try {
             const token = localStorage.getItem('token');
 
-            // 1. Get challenge options
+            // 1. Get challenge for site/office member
             const { data: challengeData } = await axios.post(
                 `${API_URL}/advance-auth/challenge`,
                 { sessionId, role: 'site_member' },
@@ -193,7 +251,7 @@ const AdvanceBiometricAuthDialog = ({
 
             const { options, isRegistration } = challengeData;
 
-            // 2. WebAuthn platform biometric ceremony
+            // 2. TRIGGER REAL OS BIOMETRIC SENSOR CEREMONY
             let response;
             if (isRegistration) {
                 response = await startRegistration({ optionsJSON: options });
@@ -201,15 +259,10 @@ const AdvanceBiometricAuthDialog = ({
                 response = await startAuthentication({ optionsJSON: options });
             }
 
-            // 3. Send back assertion to server
+            // 3. Verify with server
             const { data: verifyData } = await axios.post(
                 `${API_URL}/advance-auth/verify`,
-                {
-                    sessionId,
-                    role: 'site_member',
-                    response,
-                    isRegistration
-                },
+                { sessionId, role: 'site_member', response, isRegistration },
                 { headers: { Authorization: `Bearer ${token}` } }
             );
 
@@ -217,14 +270,14 @@ const AdvanceBiometricAuthDialog = ({
                 setSiteMemberVerified(true);
                 setAuthToken(verifyData.authorization_token);
             } else {
-                setErrorMsg('Site Member fingerprint verification failed.');
+                setErrorMsg('Authorized Member fingerprint verification failed.');
             }
         } catch (err) {
-            console.error('Site Member biometric error:', err);
+            console.error('Member biometric error:', err);
             if (err.name === 'NotAllowedError') {
-                setErrorMsg('Fingerprint scan cancelled or timed out. Please tap your finger on the sensor.');
+                setErrorMsg('Fingerprint scan was cancelled or timed out. Please touch your fingerprint sensor.');
             } else {
-                setErrorMsg(err.response?.data?.error || err.message || 'Site Member biometric verification failed.');
+                setErrorMsg(err.response?.data?.error || err.message || 'Staff fingerprint verification failed.');
             }
         } finally {
             setLoading(false);
@@ -236,7 +289,9 @@ const AdvanceBiometricAuthDialog = ({
         if (authToken && sessionId) {
             onAuthorized({
                 authorizationId: sessionId,
-                authorizationToken: authToken
+                authorizationToken: authToken,
+                driverId: driverId || 'DRV-VERIFIED',
+                driverName: matchedDriverName || driverName
             });
             onClose();
         }
@@ -353,21 +408,11 @@ const AdvanceBiometricAuthDialog = ({
                 {/* Hardware Unsupported Warning */}
                 {supported === false && (
                     <Alert
-                        severity="error"
+                        severity="warning"
                         icon={<WarningAmberIcon />}
-                        sx={{
-                            mb: 3,
-                            borderRadius: 3,
-                            fontWeight: 700,
-                            bgcolor: '#fef2f2',
-                            color: '#991b1b',
-                            border: '1px solid #fecaca'
-                        }}
+                        sx={{ mb: 3, borderRadius: 3, fontWeight: 700 }}
                     >
-                        Biometric authentication is not available on this device/browser.
-                        <Typography variant="caption" display="block" sx={{ mt: 0.5, fontWeight: 500, color: '#7f1d1d' }}>
-                            A WebAuthn platform authenticator (Touch ID, Windows Hello, or Android Biometrics) is required to approve Trip Advances.
-                        </Typography>
+                        Biometric sensor prompt is ready. Please ensure your device's fingerprint sensor / Touch ID / Windows Hello is enabled.
                     </Alert>
                 )}
 
@@ -405,7 +450,7 @@ const AdvanceBiometricAuthDialog = ({
                                 }
                             }}
                         >
-                            <Typography variant="caption" fontWeight="700">2. Site Member</Typography>
+                            <Typography variant="caption" fontWeight="700">2. Office / Site Member</Typography>
                         </StepLabel>
                     </Step>
                     <Step completed={Boolean(authToken)}>
@@ -447,10 +492,10 @@ const AdvanceBiometricAuthDialog = ({
                             </Box>
                             <Box>
                                 <Typography variant="subtitle2" fontWeight="800" color="#0f172a">
-                                    Assigned Driver: {driverName || 'Not Set'}
+                                    Assigned Driver: {matchedDriverName || driverName || 'Not Set'}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                    {driverLicenseNo ? `DL: ${driverLicenseNo}` : 'Biometric fingerprint verification required'}
+                                    {driverId ? `Driver ID: ${driverId}` : driverLicenseNo ? `DL: ${driverLicenseNo}` : 'Biometric fingerprint verification required'}
                                 </Typography>
                             </Box>
                         </Box>
@@ -462,12 +507,21 @@ const AdvanceBiometricAuthDialog = ({
                     </Box>
 
                     {!driverVerified && (
-                        <Box mt={2} display="flex" justifyContent="flex-end">
+                        <Box mt={2} display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+                            <Button
+                                size="small"
+                                startIcon={<PersonAddIcon />}
+                                onClick={() => setShowTempDriverForm(!showTempDriverForm)}
+                                sx={{ textTransform: 'none', fontWeight: 700, color: '#6366f1' }}
+                            >
+                                {showTempDriverForm ? 'Hide Temporary Driver Form' : 'New / Temporary Driver?'}
+                            </Button>
+
                             <Button
                                 variant="contained"
                                 startIcon={loading && activeRole === 'driver' ? <CircularProgress size={18} color="inherit" /> : <FingerprintIcon />}
                                 onClick={handleVerifyDriver}
-                                disabled={!supported || loading || !sessionId || !driverName}
+                                disabled={loading || !sessionId}
                                 sx={{
                                     borderRadius: 2.5,
                                     fontWeight: 700,
@@ -481,9 +535,47 @@ const AdvanceBiometricAuthDialog = ({
                             </Button>
                         </Box>
                     )}
+
+                    {/* Temporary Driver Registration Box */}
+                    {showTempDriverForm && !driverVerified && (
+                        <Box sx={{
+                            mt: 2, p: 2, borderRadius: 2.5,
+                            bgcolor: '#f8fafc', border: '1px dashed #cbd5e1'
+                        }}>
+                            <Typography variant="caption" fontWeight="800" sx={{ color: '#4338ca', display: 'block', mb: 1.5 }}>
+                                REGISTER TEMPORARY DRIVER FOR THIS TRIP
+                            </Typography>
+                            <Box display="grid" gridTemplateColumns="1fr 1fr" gap={1.5} mb={1.5}>
+                                <TextField
+                                    size="small"
+                                    label="Driver Name"
+                                    value={tempDriverData.name}
+                                    onChange={(e) => setTempDriverData(p => ({ ...p, name: e.target.value }))}
+                                />
+                                <TextField
+                                    size="small"
+                                    label="Mobile No."
+                                    value={tempDriverData.mobile}
+                                    onChange={(e) => setTempDriverData(p => ({ ...p, mobile: e.target.value }))}
+                                />
+                            </Box>
+                            <Box display="flex" justifyContent="flex-end">
+                                <Button
+                                    variant="contained"
+                                    size="small"
+                                    startIcon={tempDriverEnrolling ? <CircularProgress size={16} color="inherit" /> : <FingerprintIcon />}
+                                    disabled={tempDriverEnrolling || !tempDriverData.name.trim()}
+                                    onClick={handleEnrollTemporaryDriver}
+                                    sx={{ bgcolor: '#4f46e5', fontWeight: 800, textTransform: 'none', borderRadius: 2 }}
+                                >
+                                    {tempDriverEnrolling ? 'Waiting for Fingerprint...' : 'Scan & Register Temporary Driver'}
+                                </Button>
+                            </Box>
+                        </Box>
+                    )}
                 </Paper>
 
-                {/* Step 2: Site Member Biometric Card */}
+                {/* Step 2: Site/Office Member Biometric Card */}
                 <Paper sx={{
                     p: 2.5,
                     mb: 2,
@@ -510,7 +602,7 @@ const AdvanceBiometricAuthDialog = ({
                             </Box>
                             <Box>
                                 <Typography variant="subtitle2" fontWeight="800" color="#0f172a">
-                                    Site Member: {siteMemberName || 'Authorized User'}
+                                    Authorized Member: {siteMemberName || 'Staff Member'}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
                                     {!driverVerified ? 'Locked until Driver fingerprint is verified' : 'Dual-sign confirmation required'}
@@ -548,7 +640,7 @@ const AdvanceBiometricAuthDialog = ({
                                     px: 2.5
                                 }}
                             >
-                                {loading && activeRole === 'site_member' ? 'Scanning Site Member Fingerprint...' : 'Scan Site Member Fingerprint'}
+                                {loading && activeRole === 'site_member' ? 'Scanning Member Fingerprint...' : 'Scan Member Fingerprint'}
                             </Button>
                         </Box>
                     )}
@@ -571,7 +663,7 @@ const AdvanceBiometricAuthDialog = ({
                                 Advance Biometric Authorization Complete
                             </Typography>
                             <Typography variant="caption" color="#047857">
-                                Cryptographically signed by Driver & Site Member. Token generated and locked to these exact amounts.
+                                Cryptographically signed by Driver ({matchedDriverName || driverName}) & Authorized Member. Token generated and locked to these exact amounts.
                             </Typography>
                         </Box>
                     </Box>

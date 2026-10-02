@@ -21,6 +21,8 @@ import PercentIcon from '@mui/icons-material/Percent';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import DynamicBarChart from '../components/DynamicBarChart';
 import VolumeVsRevenueGrowthTab from '../components/VolumeVsRevenueGrowthTab';
+import VehicleMktAssociationTab from '../components/VehicleMktAssociationTab';
+import PtpkAnalysisTab from '../components/PtpkAnalysisTab';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
@@ -97,8 +99,15 @@ const GlassBox = ({ children, sx = {}, onClick }) => (
   </Box>
 );
 
-const PieChartDashboard = ({ onBack }) => {
-  const [activeSubTab, setActiveSubTab] = useState('barGraph');
+const PieChartDashboard = ({ onBack, initialSubTab = 'barGraph' }) => {
+  const [activeSubTab, setActiveSubTab] = useState(initialSubTab || 'barGraph');
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLedger, setSelectedLedger] = useState('Freight Payment');
   
@@ -378,9 +387,10 @@ const PieChartDashboard = ({ onBack }) => {
             }
           }}
         >
-          <Tab label="Tonnage Growth VS Revenue Growth" value="volumeTonnage" />
+          <Tab label="TONNAGE & REVENUE" value="volumeTonnage" />
           <Tab label="PTPK Analysis" value="ptpkAnalysis" />
           <Tab label="Bar Graph" value="barGraph" />
+          <Tab label="VEHICLE ( MKT & ASSOCIATION)" value="vehicleMktAssoc" />
         </Tabs>
       </Box>
 
@@ -389,21 +399,17 @@ const PieChartDashboard = ({ onBack }) => {
         <VolumeVsRevenueGrowthTab />
       )}
 
-      {/* TAB 2 — PTPK Analysis (EMPTY / NULL STATE) */}
+      {/* TAB 2 — PTPK Analysis */}
       {activeSubTab === 'ptpkAnalysis' && (
-        <Box sx={{
-          p: 8,
-          minHeight: '65vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: '12px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
-          bgcolor: 'rgba(20, 24, 28, 0.3)',
-        }} />
+        <PtpkAnalysisTab />
       )}
 
-      {/* TAB 3 — Bar Graph (COMPLETE EXISTING FINANCIAL ANALYTICS PROCESS) */}
+      {/* TAB 3 — VEHICLE ( MKT & ASSOCIATION) */}
+      {activeSubTab === 'vehicleMktAssoc' && (
+        <VehicleMktAssociationTab />
+      )}
+
+      {/* TAB 4 — Bar Graph (COMPLETE EXISTING FINANCIAL ANALYTICS PROCESS) */}
       {activeSubTab === 'barGraph' && (
         <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', md: 'row' } }}>
         

@@ -19,10 +19,19 @@ const advanceBiometricAuthorizationSchema = new mongoose.Schema({
         trim: true,
         uppercase: true
     },
+    driver_id: {
+        type: String,
+        default: ""
+    },
     driver_name: {
         type: String,
         required: true,
         trim: true
+    },
+    driver_type: {
+        type: String,
+        enum: ["PERMANENT", "TEMPORARY"],
+        default: "PERMANENT"
     },
     driver_license_no: {
         type: String,
@@ -34,6 +43,20 @@ const advanceBiometricAuthorizationSchema = new mongoose.Schema({
     },
     driver_verified_at: {
         type: Date
+    },
+    driver_device_id: {
+        type: String,
+        default: ""
+    },
+    panel_source: {
+        type: String,
+        enum: ["OFFICE", "SITE"],
+        default: "OFFICE"
+    },
+    second_auth_type: {
+        type: String,
+        enum: ["OFFICE_MEMBER", "SITE_MEMBER", "DEVELOPER"],
+        default: "OFFICE_MEMBER"
     },
     site_member_id: {
         type: mongoose.Schema.Types.ObjectId,
@@ -50,6 +73,10 @@ const advanceBiometricAuthorizationSchema = new mongoose.Schema({
     },
     site_member_verified_at: {
         type: Date
+    },
+    site_member_device_id: {
+        type: String,
+        default: ""
     },
     advance_type: {
         type: String,
@@ -78,7 +105,7 @@ const advanceBiometricAuthorizationSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["PENDING", "AUTHORIZED", "CONSUMED", "REJECTED", "EXPIRED"],
+        enum: ["PENDING", "DRIVER_VERIFIED", "AUTHORIZED", "CONSUMED", "REJECTED", "EXPIRED"],
         default: "PENDING",
         index: true
     },

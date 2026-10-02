@@ -724,27 +724,24 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
     const col = getCementCol();
     const rawDocs = await col.find(cementFilter).toArray();
 
-    // 3. Truck Contacts Master lookup for owner/type fallback
-    let truckContactMap = {};
-    try {
-      const contactsCol = mongoose.connection.useDb("lorrey").collection("truck_contacts");
-      const contacts = await contactsCol.find({}).toArray();
-      contacts.forEach(c => {
-        const rawNo = c["Truck No "] || c["Truck No"] || c.truck_no || "";
-        const key = String(rawNo).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-        if (key) {
-          truckContactMap[key] = {
-            vehType: (c["Type of vehicle "] || c["Type of vehicle"] || c.veh_type || "").trim(),
-            custType: (c["TYPE OF CUSTOMER "] || c.cust_type || "").trim(),
-            owner: (c["Owner Name "] || c["Owner Name"] || c.owner_name || "").trim()
-          };
-        }
-      });
-    } catch (e) {
-      console.warn("[dailySummary] truck_contacts lookup error:", e.message);
-    }
+    // 3. Authoritative Party Master Registered Vehicles Directory
+    const registeredVehicles = await getAllRegisteredVehicles();
+    const totalRegisteredVehicles = registeredVehicles.length;
+
+    const truckContactMap = {};
+    registeredVehicles.forEach(c => {
+      truckContactMap[c.normKey] = {
+        vehType: c.wheel || "",
+        custType: c.custType || "",
+        owner: c.ownerName || ""
+      };
+    });
 
     // 4. Process and deduplicate records strictly by unique MongoDB _id
+    const now = new Date();
+    const isCurrentMonth = (targetYear === now.getFullYear() && monthInt === (now.getMonth() + 1));
+    const maxDayAllowed = isCurrentMonth ? now.getDate() : daysInMonth;
+
     const seenTripIds = new Set();
     const vehMap = {};
     const daysArray = [];
@@ -763,16 +760,6 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
       // Skip empty or dummy rows (e.g. non-vehicle strings < 5 characters)
       if (!normKey || normKey.length < 5) return;
 
-      const mtVal = parseNum(row["MT"]);
-      const billAmt = parseNum(row["Billing Amount"] || row["BILLING AMOUNT"] || row["AMOUNT"]);
-      const invNo = String(row["INVOICE NO"] || row["INVOICE NO."] || "").trim();
-      const advVal = parseNum(row["ADVANCE"] || row["LOADING ADVANCE"]);
-      const hsdLtr = parseNum(row["HSD (LTR)"] || row["QTY (LTR)"]);
-      const hsdAmt = parseNum(row["HSD AMOUNT"]);
-
-      // Exclude pure adjustment / diesel deduction rows with no MT, no amount, and no invoice
-      if (mtVal === 0 && billAmt === 0 && !invNo) return;
-
       const loadDateRaw = row["LOADING DT"] || row["LOADING DATE"] || "";
       let dayNum = null;
       if (loadDateRaw) {
@@ -785,6 +772,19 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
           }
         }
       }
+
+      // If current month, do not include future days
+      if (isCurrentMonth && dayNum !== null && dayNum > maxDayAllowed) return;
+
+      const mtVal = parseNum(row["MT"]);
+      const billAmt = parseNum(row["Billing Amount"] || row["BILLING AMOUNT"] || row["AMOUNT"]);
+      const invNo = String(row["INVOICE NO"] || row["INVOICE NO."] || "").trim();
+      const advVal = parseNum(row["ADVANCE"] || row["LOADING ADVANCE"]);
+      const hsdLtr = parseNum(row["HSD (LTR)"] || row["QTY (LTR)"]);
+      const hsdAmt = parseNum(row["HSD AMOUNT"]);
+
+      // Exclude pure adjustment / diesel deduction rows with no MT, no amount, and no invoice
+      if (mtVal === 0 && billAmt === 0 && !invNo) return;
 
       if (!vehMap[normKey]) {
         const contact = truckContactMap[normKey] || {};
@@ -977,7 +977,9 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
       vehicles: vehicleList,
       byPattern,
       totals: {
-        totalVehicles: vehicleList.length,
+        totalVehicles: totalRegisteredVehicles,
+        totalRegisteredVehicles,
+        activeVehiclesCount: vehicleList.length,
         totalTrips: Math.round(grandTotalTrips * 100) / 100,
         totalMT: Math.round(grandTotalMT * 100) / 100,
         totalAdvance: Math.round(grandTotalAdvance * 100) / 100,
