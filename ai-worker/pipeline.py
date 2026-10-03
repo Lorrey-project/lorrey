@@ -87,7 +87,7 @@ def download_file_from_s3(s3_url: str) -> str:
 
     aws_access_key = os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY")
     aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_KEY")
-    aws_region = os.getenv("AWS_REGION", "ap-south-1")
+    aws_region = os.getenv("AWS_REGION", "eu-north-1")
     s3_client = boto3.client(
         "s3",
         region_name=aws_region,

@@ -603,7 +603,7 @@ async function processScanFile(scanOutputPath, io) {
         const s3Url = `https://lorreyproject.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
         await s3.send(new PutObjectCommand({
-            Bucket: "lorreyproject",
+            Bucket: process.env.S3_BUCKET || "lorrey-data-bucket",
             Key: key,
             Body: fileBuffer,
             ContentType: "image/jpeg"
@@ -1250,7 +1250,7 @@ router.delete("/:id", async (req, res) => {
                 const urlObj = new URL(url);
                 const key = decodeURIComponent(urlObj.pathname.slice(1));
                 await s3.send(new DeleteObjectCommand({
-                    Bucket: process.env.AWS_BUCKET_NAME || "lorreyproject",
+                    Bucket: process.env.AWS_BUCKET_NAME || process.env.S3_BUCKET || "lorrey-data-bucket",
                     Key: key,
                 }));
             } catch (e) {
@@ -1285,7 +1285,7 @@ router.post("/bulk-delete", async (req, res) => {
                 const urlObj = new URL(url);
                 const key = decodeURIComponent(urlObj.pathname.slice(1));
                 await s3.send(new DeleteObjectCommand({
-                    Bucket: process.env.AWS_BUCKET_NAME || "lorreyproject",
+                    Bucket: process.env.AWS_BUCKET_NAME || process.env.S3_BUCKET || "lorrey-data-bucket",
                     Key: key,
                 }));
             } catch (e) {

@@ -10,7 +10,7 @@ const ALLOWED_MIME = [
 const remittanceUpload = multer({
   storage: multerS3({
     s3,
-    bucket: 'lorreyproject',
+    bucket: process.env.S3_BUCKET || 'lorrey-data-bucket',
     contentType: multerS3.AUTO_CONTENT_TYPE,
     key: (req, file, cb) => {
       const safeName = file.originalname.replace(/\s+/g, '_');

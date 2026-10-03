@@ -54,7 +54,7 @@ function startWatcher() {
             const s3Url = `https://lorreyproject.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
             await s3.send(new PutObjectCommand({
-                Bucket: "lorreyproject",
+                Bucket: process.env.S3_BUCKET || "lorrey-data-bucket",
                 Key: key,
                 Body: fileBuffer,
                 ContentType: mimeType
