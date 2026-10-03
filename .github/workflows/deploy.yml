@@ -17,6 +17,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
             echo "Starting deployment on EC2..."
             
             # 1. Pull latest code
@@ -27,8 +28,11 @@ jobs:
             # 2. Build and update Frontend
             cd ~/lorrey-project/frontend/review-dashboard/UI2
             npm install
+            rm -rf dist
             npm run build
+            sudo rm -rf /var/www/lorrey/*
             sudo cp -r dist/* /var/www/lorrey/
+            sudo chown -R www-data:www-data /var/www/lorrey
 
             # 3. Update and restart Backend
             cd ~/lorrey-project/backend-node
