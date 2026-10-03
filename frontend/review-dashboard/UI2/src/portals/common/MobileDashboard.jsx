@@ -33,6 +33,7 @@ import HourglassTopIcon from '@mui/icons-material/HourglassTop';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import DeleteIcon from '@mui/icons-material/Delete';
+import SecurityIcon from '@mui/icons-material/Security';
 
 const MobileDashboard = ({
     onUploadNew,
