@@ -6,7 +6,9 @@ const bucket = s3.BUCKET_NAME || process.env.AWS_S3_BUCKET || process.env.S3_BUC
 
 const remittanceUpload = multer({
   storage: multerS3({
-bucket: bucket,
+s3: s3,
+    s3: s3,
+    bucket: bucket,
     contentType: multerS3.AUTO_CONTENT_TYPE,
     key: function (req, file, cb) {
       cb(null, `remittances/${Date.now()}_${file.originalname}`);
