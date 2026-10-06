@@ -20,23 +20,32 @@ jobs:
             set -e
             echo "Starting deployment on EC2..."
             
-            # 1. Pull latest code
+            # 1. Load Node, npm, and PM2 into PATH for non-interactive SSH
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            export PATH=$PATH:/usr/local/bin:/usr/bin:~/.nvm/versions/node/$(ls ~/.nvm/versions/node 2>/dev/null | tail -n 1)/bin
+
+            # Log versions for verification
+            node -v
+            npm -v
+
+            # 2. Pull latest code
             cd ~/lorrey-project
             git fetch origin main
             git reset --hard origin/main
 
-            # 2. Build and update Frontend
+            # 3. Build and update Frontend
             cd ~/lorrey-project/frontend/review-dashboard/UI2
             npm install
             rm -rf dist
             npm run build
-            sudo rm -rf /var/www/lorrey/*
+            sudo rm -rf /var/www/lorrey/* 2>/dev/null || true
             sudo cp -r dist/* /var/www/lorrey/
             sudo chown -R www-data:www-data /var/www/lorrey
 
-            # 3. Update and restart Backend
+            # 4. Update and restart Backend
             cd ~/lorrey-project/backend-node
             npm install
-            pm2 restart all
+            pm2 restart all --update-env
 
             echo "Deployment completed successfully!"
