@@ -69,25 +69,43 @@ def download_file_from_s3(s3_url: str) -> str:
     # Extract bucket name and key from the S3 URL
     # Formats supported:
     #   https://<bucket>.s3.<region>.amazonaws.com/<key>
+    #   https://<bucket>.s3.amazonaws.com/<key>
+    #   https://<bucket>.s3-<region>.amazonaws.com/<key>
     #   https://s3.<region>.amazonaws.com/<bucket>/<key>
-    hostname = parsed.netloc  # e.g. lorreyproject.s3.ap-south-1.amazonaws.com
-    path = unquote(parsed.path.lstrip("/"))  # e.g. upload-invoice/1234_file.jpg
+    hostname = parsed.netloc.lower()
+    path = unquote(parsed.path.lstrip("/"))
 
+    extracted_region = None
     if ".s3." in hostname and hostname.endswith(".amazonaws.com"):
-        # Virtual-hosted style: bucket.s3.region.amazonaws.com/key
         bucket = hostname.split(".s3.")[0]
+        remainder = hostname.split(".s3.")[1].replace(".amazonaws.com", "")
+        if remainder and remainder != "amazonaws.com":
+            extracted_region = remainder
+        key = path
+    elif ".s3-" in hostname and hostname.endswith(".amazonaws.com"):
+        bucket = hostname.split(".s3-")[0]
+        remainder = hostname.split(".s3-")[1].replace(".amazonaws.com", "")
+        if remainder:
+            extracted_region = remainder
+        key = path
+    elif hostname.endswith(".s3.amazonaws.com"):
+        bucket = hostname[:-len(".s3.amazonaws.com")]
         key = path
     elif hostname.startswith("s3.") and hostname.endswith(".amazonaws.com"):
-        # Path-style: s3.region.amazonaws.com/bucket/key
         parts = path.split("/", 1)
         bucket = parts[0]
         key = parts[1] if len(parts) > 1 else ""
+        remainder = hostname[3:].replace(".amazonaws.com", "")
+        if remainder:
+            extracted_region = remainder
     else:
-        raise ValueError(f"Cannot parse S3 URL: {s3_url}")
+        bucket = (os.getenv("AWS_S3_BUCKET") or os.getenv("AWS_BUCKET_NAME") or "lorrey-data-bucket").strip()
+        key = path
 
-    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY")
-    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_KEY")
-    aws_region = os.getenv("AWS_REGION", "eu-north-1")
+    aws_access_key = (os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY") or "").strip()
+    aws_secret_key = (os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_KEY") or "").strip()
+    aws_region = extracted_region or (os.getenv("AWS_REGION") or "eu-north-1").strip()
+
     s3_client = boto3.client(
         "s3",
         region_name=aws_region,
@@ -95,7 +113,7 @@ def download_file_from_s3(s3_url: str) -> str:
         aws_secret_access_key=aws_secret_key,
     )
 
-    print(f"Downloading from S3: bucket={bucket}, key={key}")
+    print(f"Downloading from S3: bucket={bucket}, key={key}, region={aws_region}")
 
     import time
     max_retries = 3

@@ -20,7 +20,7 @@ import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
 import {
   COLUMNS, HIDDEN_KEYS, num, fmt2, parseToDate, formatDateToDDMMYY,
-  applyCalcs, GROUP_COLORS, VISIBLE_COLS, NUMERIC_KEYS, formatTotalValue
+  applyCalcs, GROUP_COLORS, VISIBLE_COLS, NUMERIC_KEYS, formatTotalValue, isDummyRow
 } from '../utils/cementCalculations';
 import { findContactForRecord, parseContactCommission } from '../utils/partyMasterHelper';
 
@@ -136,16 +136,17 @@ const RAW_EXCEL_HEADER_MAP = {
   'profit': 'PROFIT',
   'tds': 'TDS', 'tds1%': 'TDS', 'tds@1%': 'TDS',
   // Deductions
-  'others deduction': 'Others deduction', 'other deduction': 'Others deduction', 'deduction': 'Others deduction',
-  'other': 'Other',
+  'others deduction reason': 'Other', 'other deduction reason': 'Other', 'others deduction': 'Others deduction', 'other deduction': 'Others deduction', 'deduction': 'Others deduction',
+  'other': 'Other', 'others': 'Other',
   'gps monitoring charge': 'GPS Monitoring Charge', 'gps monitoring / trip charge': 'GPS Monitoring Charge', 'gps monitoring/trip charge': 'GPS Monitoring Charge', 'gps charge': 'GPS Monitoring Charge', 'gps': 'GPS Monitoring Charge', 'gps monitaring charge': 'GPS Monitoring Charge',
   'gps device': 'Give GPS DEVICE',
   'gps deviation charges': 'GPS Deviation Charges', 'gps deviation': 'GPS Deviation Charges',
   'gps trip charges': 'GPS Monitoring Charge', 'gps trip charge': 'GPS Monitoring Charge', 'gps trip': 'GPS Monitoring Charge',
   'suspense': 'Suspense',
-  'rfid tag': 'Give RFID TAG', 'rfid': 'Give RFID TAG',
-
   'fastag': 'FASTAG', 'fas tag': 'FASTAG',
+  'sum of rfid & fastag & deviation & suspense & others deduction': 'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
+  'sum of rfid & fastag & deviation & suspense & other deduction': 'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
+  'sum of rfid fastag deviation suspense others deduction': 'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
   // HSD / Fuel
   'pump name': 'PUMP NAME', 'pump': 'PUMP NAME',
   'hsd slip no': 'HSD SLIP NO', 'hsd slip': 'HSD SLIP NO',
@@ -431,10 +432,10 @@ export default function CementRegister({ onBack }) {
   const [showPreviousScreen, setShowPreviousScreen] = useState(false);
   const [activeRowId, setActiveRowId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [siteFilter, setSiteFilter] = useState('ALL'); // 'ALL' | 'NVL' | 'NVCL'
   const [filterBillingStatus, setFilterBillingStatus] = useState('All');
   const [filterChallanStatus, setFilterChallanStatus] = useState('All');
-
-
+  const [damageDeductionRate, setDamageDeductionRate] = useState(476);
 
   const [errorMsg, setErrorMsg] = useState('');
   const [showUnbilledView, setShowUnbilledView] = useState(false);
@@ -466,6 +467,7 @@ export default function CementRegister({ onBack }) {
     });
 
     pendingEntries.forEach(row => {
+      if (row.isDummy || row._isDummy) return;
       const merged = { ...row, ...(localData[row._id] || {}) };
       const comp = applyCalcs(merged);
 
@@ -536,7 +538,12 @@ export default function CementRegister({ onBack }) {
 
       // Fetch normal data first!
       const res = await axios.get(`${API_URL}/cement-register`, {
-        params: { month: selectedMonth, year: calendarYear, _t: Date.now() }
+        params: {
+          month: selectedMonth,
+          year: calendarYear,
+          site: siteFilter !== 'ALL' ? siteFilter : undefined,
+          _t: Date.now()
+        }
       });
 
       if (res.data && res.data.success) {
@@ -553,14 +560,29 @@ export default function CementRegister({ onBack }) {
 
       // STEP 2 & 3: Fetch pending bills asynchronously without blocking
       axios.get(`${API_URL}/cement-register/pending-bills`, {
-        params: { month: selectedMonth, year: calendarYear, _t: Date.now() }
+        params: {
+          month: selectedMonth,
+          year: calendarYear,
+          site: siteFilter !== 'ALL' ? siteFilter : undefined,
+          _t: Date.now()
+        }
       }).then(pendingRes => {
         if (pendingRes.data && pendingRes.data.success) {
           setPendingEntries(pendingRes.data.entries || []);
         }
       }).catch(err => {
-        console.error('Failed to fetch pending bills:', err);
-        // Do not crash the main page
+        console.warn('Could not fetch pending bills:', err);
+      });
+
+      // Fetch projected deductions settings to get active damage deduction rate
+      axios.get(`${API_URL}/settings/projected-deductions`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      }).then(setRes => {
+        if (setRes.data?.success && setRes.data?.data?.damage !== undefined) {
+          setDamageDeductionRate(Number(setRes.data.data.damage));
+        }
+      }).catch(err => {
+        console.warn('Could not fetch projected deductions:', err);
       });
 
     } catch (e) {
@@ -569,7 +591,7 @@ export default function CementRegister({ onBack }) {
     } finally {
       setLoading(false);
     }
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, siteFilter]);
 
   const [liveMsg, setLiveMsg] = useState(null);
 
@@ -630,7 +652,7 @@ export default function CementRegister({ onBack }) {
           if (comm !== null) merged._freight_commission = comm;
         }
       }
-      return applyCalcs(merged);
+      return applyCalcs(merged, damageDeductionRate);
     });
 
     let previewRows = unsavedImportRows.filter(isRecordInSelectedPeriod).map(row => {
@@ -645,7 +667,7 @@ export default function CementRegister({ onBack }) {
           if (comm !== null) merged._freight_commission = comm;
         }
       }
-      return applyCalcs(merged);
+      return applyCalcs(merged, damageDeductionRate);
     });
 
     let rows = [...dbRows, ...previewRows];
@@ -668,7 +690,7 @@ export default function CementRegister({ onBack }) {
       'SL NO': String(index + 1),
       'LOADING DT': formatDateToDDMMYY(r['LOADING DT'] || r['LOADING DATE'] || '')
     }));
-  }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear, contacts]);
+  }, [entries, unsavedImportRows, localData, selectedMonth, selectedYear, contacts, damageDeductionRate]);
 
   // ── Pending merged rows with calcs ─────────────────────────────────────────
   const pendingComputedRows = useMemo(() => {
@@ -678,6 +700,13 @@ export default function CementRegister({ onBack }) {
   const filteredRows = useMemo(() => {
     const applyFilters = (rowsArray) => {
       let result = rowsArray;
+      if (siteFilter !== 'ALL') {
+        const sf = siteFilter.toUpperCase().trim();
+        result = result.filter(r => {
+          const s = String(r['SITE'] || r['site'] || r['Site'] || r['SITE NAME'] || '').trim().toUpperCase();
+          return s === sf;
+        });
+      }
       if (filterBillingStatus !== 'All') {
         if (filterBillingStatus === 'Billed') result = result.filter(r => r['Billing Completed'] === 'Yes');
         if (filterBillingStatus === 'Pending') result = result.filter(r => r['Billing Completed'] !== 'Yes');
@@ -697,7 +726,7 @@ export default function CementRegister({ onBack }) {
       normal: applyFilters(computedRows),
       pending: []
     };
-  }, [computedRows, searchQuery, filterBillingStatus, filterChallanStatus]);
+  }, [computedRows, searchQuery, siteFilter, filterBillingStatus, filterChallanStatus]);
 
   const allRecords = useMemo(() => {
     return filteredRows.normal.map(r => ({ ...r, _isPending: false }));
@@ -767,18 +796,22 @@ export default function CementRegister({ onBack }) {
           if (cOwner && !rowUpdates['OWNER NAME'] && !originalRow['OWNER NAME']) {
             rowUpdates['OWNER NAME'] = cOwner;
           }
-        } else {
-          rowUpdates._freight_commission = null;
-          rowUpdates['PARTY RATE (95-97%)'] = '';
-          rowUpdates['PARTY RATE'] = '';
         }
+      }
+      if (field === 'SHORTAGE (BAG)') {
+        const originalRow = entries.find(r => r._id === rowId) || unsavedImportRows.find(r => r._id === rowId) || pendingEntries.find(r => r._id === rowId) || {};
+        const bags = parseFloat(String(value || '0').replace(/,/g, '')) || 0;
+        const currentRate = parseFloat(String(rowUpdates['SHORTAGE (RATE)'] || originalRow['SHORTAGE (RATE)'] || originalRow._damage_deduction_rate || damageDeductionRate || 476).replace(/,/g, '')) || damageDeductionRate || 476;
+
+        rowUpdates['SHORTAGE (RATE)'] = currentRate;
+        rowUpdates['SHORTAGE (AMOUNT)'] = bags > 0 ? Math.round(bags * currentRate * 100) / 100 : 0;
       }
       return {
         ...prev,
         [rowId]: rowUpdates
       };
     });
-  }, [entries, unsavedImportRows, contacts]);
+  }, [entries, unsavedImportRows, pendingEntries, contacts, damageDeductionRate]);
 
   // ── Bulk Delete selected rows ──────────────────────────────────────────────────
   const handleBulkDelete = async () => {
@@ -971,7 +1004,7 @@ export default function CementRegister({ onBack }) {
 
   const handleFinalGenerateBatchBill = async () => {
     const { billDate, billType } = bulkBillInput;
-    const ids = [...selectedIds];
+    const ids = Array.from(new Set([...selectedIds]));
 
     try {
       setSnack({ severity: 'info', msg: `Generating batch bills...` });
@@ -986,7 +1019,7 @@ export default function CementRegister({ onBack }) {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      if (res.data.success) {
+      if (res.data && res.data.success) {
         setBulkBillInput({ billDate: '', billType: '' });
         setSelectedIds(new Set());
         setShowPreviousScreen(false);
@@ -1002,7 +1035,8 @@ export default function CementRegister({ onBack }) {
           setGeneratedBillsPreview(generatedBillNumbers);
           setShowPreviousScreen(true);
         }
-        setSnack({ severity: 'error', msg: res.data.error || 'Failed to generate batch bills.' });
+      } else {
+        setSnack({ severity: 'error', msg: res.data?.error || 'Failed to generate batch bills.' });
       }
     } catch (err) {
       console.error(err);
@@ -1265,18 +1299,39 @@ export default function CementRegister({ onBack }) {
 
   const previewRows = useMemo(() => {
     if (selectedIds.size === 0) return [];
-    const pendingCalcs = pendingEntries.map(r => {
-      const merged = { ...r, ...(localData[r._id] || {}) };
-      return applyCalcs(merged);
+
+    // Map to guarantee strictly unique records by unique record ID
+    const uniqueMap = new Map();
+
+    // 1. Add current month computed rows
+    computedRows.forEach(r => {
+      if (r && r._id && selectedIds.has(r._id)) {
+        uniqueMap.set(String(r._id), r);
+      }
     });
 
-    const allAvailable = [...computedRows, ...pendingCalcs];
+    // 2. Add pending entries if selected and not already in map
+    pendingEntries.forEach(r => {
+      if (r && r._id && selectedIds.has(r._id)) {
+        if (!uniqueMap.has(String(r._id))) {
+          const merged = { ...r, ...(localData[r._id] || {}) };
+          uniqueMap.set(String(r._id), applyCalcs(merged));
+        }
+      }
+    });
 
-    return allAvailable.filter(r => selectedIds.has(r._id)).map(r => {
-      const amt = parseFloat(String(r['BILLING AMOUNT'] || '').replace(/,/g, '')) ||
-        parseFloat(String(r['Billing Amount'] || '').replace(/,/g, '')) ||
-        parseFloat(String(r['BILLING ER 95%'] || '').replace(/,/g, '')) ||
-        parseFloat(String(r['AMOUNT'] || '').replace(/,/g, '')) || 0;
+    const isUnloading = bulkBillInput.billType === 'Unloading';
+
+    return Array.from(uniqueMap.values()).map(r => {
+      let amt = 0;
+      if (isUnloading) {
+        amt = parseFloat(String(r['EXTRA UNLOADING'] !== undefined && r['EXTRA UNLOADING'] !== null ? r['EXTRA UNLOADING'] : (r['Extra Unloading'] || 0)).replace(/,/g, '')) || 0;
+      } else {
+        amt = parseFloat(String(r['BILLING AMOUNT'] !== undefined && r['BILLING AMOUNT'] !== null ? r['BILLING AMOUNT'] : (r['Billing Amount'] || '')).replace(/,/g, '')) ||
+          (parseFloat(String(r.MT || 0).replace(/,/g, '')) * parseFloat(String(r['BILLING'] || r['PARTY RATE'] || 0).replace(/,/g, ''))) ||
+          parseFloat(String(r['BILLING ER 95%'] || '').replace(/,/g, '')) ||
+          parseFloat(String(r['AMOUNT'] || '').replace(/,/g, '')) || 0;
+      }
       return { ...r, _previewAmt: amt };
     });
   }, [showPreviousScreen, selectedIds, computedRows, pendingEntries, localData, bulkBillInput.billType]);
@@ -1321,6 +1376,9 @@ export default function CementRegister({ onBack }) {
     });
 
     const isRecordUnbilledCheck = (comp) => {
+      if (comp.isDummy || comp._isDummy) {
+        return false;
+      }
       const rawDateStr = comp['LOADING DT'] || comp['LOADING DATE'] || comp['BILL DATE'] || comp['RECEIVING DATE'] || comp['INVOICE DATE'] || comp.date;
       const invNoStr = comp['INVOICE NO'] || comp['Invoice No'] || comp['SHIPMENT NO'] || '';
       if (!rawDateStr && !invNoStr) {
@@ -1837,7 +1895,7 @@ export default function CementRegister({ onBack }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1000px' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                 <tr>
-                  {['Shipment Number', 'Vehicle Number', 'Invoice Number', 'Trip Date', 'Party Name', 'Destination', 'MT', 'BILLING AMOUNT'].map((h, i) => (
+                  {['Shipment Number', 'Vehicle Number', 'Invoice Number', 'Trip Date', 'Party Name', 'Destination', 'MT', bulkBillInput.billType === 'Unloading' ? 'EXTRA UNLOADING' : 'BILLING AMOUNT'].map((h, i) => (
                     <th key={h} style={{
                       padding: '12px 16px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0',
                       textAlign: i >= 6 ? 'right' : 'left',
@@ -1903,7 +1961,7 @@ export default function CementRegister({ onBack }) {
               <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 800 }}>{Math.round(previewTotals.totalMT * 100) / 100} MT</Typography>
             </Box>
             <Box>
-              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Billing Amount</Typography>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{bulkBillInput.billType === 'Unloading' ? 'Total Extra Unloading' : 'Total Billing Amount'}</Typography>
               <Typography variant="h6" sx={{ color: '#15803d', fontWeight: 800 }}>₹{previewTotals.totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
             </Box>
           </Box>
@@ -1941,6 +1999,29 @@ export default function CementRegister({ onBack }) {
         </Box>
 
         <Box display="flex" alignItems="center" gap={1.5}>
+          <SearchableSelect
+            value={siteFilter}
+            onChange={(e) => {
+              setSiteFilter(e.target.value);
+              setUnsavedImportRows([]);
+            }}
+            size="small"
+            sx={{
+              borderRadius: '10px', fontSize: '12px', fontWeight: 700,
+              color: '#fff', bgcolor: 'rgba(255,255,255,0.05)',
+              '& .MuiInputBase-input': { color: '#fff' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#a78bfa' },
+              '.MuiSvgIcon-root': { color: '#94a3b8' },
+              minWidth: 100,
+            }}
+          >
+            <MenuItem value="ALL" sx={{ fontSize: '12px', fontWeight: 700 }}>ALL</MenuItem>
+            <MenuItem value="NVL" sx={{ fontSize: '12px', fontWeight: 700 }}>NVL</MenuItem>
+            <MenuItem value="NVCL" sx={{ fontSize: '12px', fontWeight: 700 }}>NVCL</MenuItem>
+          </SearchableSelect>
+
           <SearchableSelect
             value={selectedMonth}
             onChange={(e) => {
@@ -2258,13 +2339,19 @@ export default function CementRegister({ onBack }) {
               const hasDraft = !!localData[row._id];
               const isMatch = !!searchQuery;
               const isLocked = row['Billing Completed'] === 'Yes';
+              
+              // Dynamic authoritative rule: isDummy = !invoiceNumber && !shipmentNumber
+              const mergedRow = { ...row, ...(localData[row._id] || {}) };
+              const isDummy = isDummyRow(mergedRow);
 
               // Styles
-              const background = row._isPending
-                ? (isRowSelected ? '#e0f2fe' : hasDraft ? '#fef3c7' : '#fafafa')
-                : (isLocked ? '#f8fafc' : isMatch ? '#f1f5f9' : isRowSelected ? '#f5f3ff' : row.isUnsavedImport ? '#fdf4ff' : hasDraft ? '#fffbeb' : ((page * rowsPerPage + index) % 2 === 0 ? '#ffffff' : '#fafafa'));
+              const background = isDummy
+                ? (isRowSelected ? '#fed7aa' : hasDraft ? '#ffedd5' : '#ffe8d6')
+                : (row._isPending
+                  ? (isRowSelected ? '#e0f2fe' : hasDraft ? '#fef3c7' : '#fafafa')
+                  : (isLocked ? '#f8fafc' : isMatch ? '#f1f5f9' : isRowSelected ? '#f5f3ff' : row.isUnsavedImport ? '#fdf4ff' : hasDraft ? '#fffbeb' : ((page * rowsPerPage + index) % 2 === 0 ? '#ffffff' : '#fafafa')));
 
-              const outline = row._isPending ? 'none' : (isMatch ? '2px solid #cbd5e1' : (isRowSelected ? '2px solid rgba(124,58,237,0.4)' : 'none'));
+              const outline = row._isPending ? 'none' : (isMatch ? '2px solid #cbd5e1' : (isRowSelected ? '2px solid rgba(124,58,237,0.4)' : (isDummy ? '1px dashed #fdba74' : 'none')));
               const opacity = row._isPending ? 1 : (isLocked ? 0.85 : 1);
               const boxShadow = row._isPending ? 'none' : (isLocked ? 'inset 0 0 0 9999px rgba(226,232,240,0.3)' : 'none');
 
@@ -2333,7 +2420,7 @@ export default function CementRegister({ onBack }) {
                           value={displayVal}
                           isDirty={isDirty}
                           rowIndex={row._isPending ? index : (page * rowsPerPage + index)}
-                          row={row}
+                          row={mergedRow}
                           onChange={row._isPending ? () => { } : ((val) => handleCellEdit(row._id, col.key, val))}
                           onAttachSaved={row._isPending ? () => { } : ((field, url) => {
                             const billNo = row['BILL NO'];
@@ -2869,7 +2956,7 @@ export default function CementRegister({ onBack }) {
                   <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Party Name</th>
                   <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>Destination</th>
                   <th style={{ padding: '8px', borderRight: '1px solid #e2e8f0' }}>MT</th>
-                  <th style={{ padding: '8px' }}>BILLING AMOUNT</th>
+                  <th style={{ padding: '8px' }}>{bulkBillInput.billType === 'Unloading' ? 'EXTRA UNLOADING' : 'BILLING AMOUNT'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -2999,6 +3086,7 @@ export default function CementRegister({ onBack }) {
 
 // ─── Cell Renderer: decides how to render based on column type ────────────────
 function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSaved }) {
+  const isDummy = isDummyRow(row);
   const cellStyle = {
     padding: '6px 8px',
     border: '1px solid #e2e8f0',
@@ -3007,7 +3095,7 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
     whiteSpace: 'nowrap',
     lineHeight: 1.4,
     borderRight: isDirty ? '2px solid #f59e0b' : '1px solid #e2e8f0',
-    background: isDirty ? 'rgba(254,243,199,0.6)' : 'inherit',
+    background: isDirty ? 'rgba(254,243,199,0.6)' : (isDummy ? 'inherit' : 'inherit'),
     minWidth: col.width,
   };
 
@@ -3016,9 +3104,35 @@ function CellRenderer({ col, value, isDirty, rowIndex, row, onChange, onAttachSa
 
   // ── Auto / Calc (may have hasAttach for Site Cash or Bill PDF) ────────────────
   if (col.type === 'auto' || col.type === 'calc') {
-    const bg = cellColor ? cellColor : (col.type === 'auto'
-      ? (isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(241,245,249,0.7)') // Premium Light Sky Blue/Slate for Auto
-      : (isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(220,252,231,0.5)')); // Premium Light Emerald for Calc
+    const bg = cellColor ? cellColor : (isDummy
+      ? 'inherit'
+      : (col.type === 'auto'
+        ? (isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(241,245,249,0.7)') // Premium Light Sky Blue/Slate for Auto
+        : (isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(220,252,231,0.5)'))); // Premium Light Emerald for Calc
+
+    if (col.key === 'SL NO' && isDummy) {
+      return (
+        <td style={{
+          ...cellStyle, background: bg,
+          color: '#c2410c',
+          fontWeight: 700, cursor: 'default',
+        }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span>{value || '—'}</span>
+            <span style={{
+              fontSize: '8.5px',
+              fontWeight: 800,
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: '#ea580c',
+              color: '#ffffff',
+              letterSpacing: '0.4px',
+              lineHeight: '1.2'
+            }}>DUMMY</span>
+          </div>
+        </td>
+      );
+    }
 
     if (col.hasAttach === 'bill_pdf_auto') {
       const attachUrl = row?.['BILL_PDF_URL'];

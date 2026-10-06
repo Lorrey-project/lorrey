@@ -42,6 +42,36 @@ const round2 = (n) => Math.round(n);
 // Normalise a vehicle number: uppercase + strip all whitespace
 const normVeh = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, '');
 
+// Robust date parser
+function parseDate(val) {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  const str = String(val).trim();
+
+  // Detect DD-MM-YYYY / DD/MM/YYYY
+  const ddmmyyyy = str.match(/^(\d{1,2})[\-\/](\d{1,2})[\-\/](\d{4})/);
+  if (ddmmyyyy) {
+    const d = parseInt(ddmmyyyy[1], 10), m = parseInt(ddmmyyyy[2], 10), y = parseInt(ddmmyyyy[3], 10);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d);
+    }
+  }
+
+  // Detect YYYY-MM-DD
+  const yyyymmdd = str.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})/);
+  if (yyyymmdd) {
+    const y = parseInt(yyyymmdd[1], 10), m = parseInt(yyyymmdd[2], 10), d = parseInt(yyyymmdd[3], 10);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d);
+    }
+  }
+
+  const iso = new Date(str);
+  if (!isNaN(iso.getTime())) return iso;
+
+  return null;
+}
+
 function parseTdsField(doc) {
   if (!doc || typeof doc !== 'object') return null;
   const candidates = [
@@ -100,6 +130,39 @@ function getCreditorKeyForPartyOwner(ownerName) {
   }
   return null;
 }
+function isRealInvoiceOrShipment(val) {
+  if (val === null || val === undefined) return false;
+  const str = String(val).trim();
+  if (!str) return false;
+  const upper = str.toUpperCase();
+  if (
+    upper === 'CASH VOUCHER' ||
+    upper === 'VOUCHER' ||
+    upper === 'DUMMY' ||
+    upper === 'NO SLIP' ||
+    upper === '—' ||
+    upper === '-' ||
+    upper === 'N/A' ||
+    upper === 'NA' ||
+    upper.includes('VOUCHER') ||
+    upper.includes('DUMMY')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isDummyRow(row) {
+  if (!row) return false;
+  const rawInvoice = row['INVOICE NO'] || row['INVOICE NUMBER'] || row['Invoice No'] || row['invoiceNo'] || row['invoice_number'] || '';
+  const rawShipment = row['SHIPMENT NO'] || row['SHIPMENT NUMBER'] || row['Shipment No'] || row['shipmentNo'] || row['shipment_number'] || '';
+  const hasRealInvoice = isRealInvoiceOrShipment(rawInvoice);
+  const hasRealShipment = isRealInvoiceOrShipment(rawShipment);
+  if (row.isDummy === true || row._isDummy === true || row._source === 'auto_dummy') {
+    return !hasRealInvoice && !hasRealShipment;
+  }
+  return !hasRealInvoice && !hasRealShipment;
+}
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 // calc   = auto-calculated (read-only, purple header)
@@ -139,14 +202,14 @@ const COLUMNS = [
   // Manual entries
   { key: 'WITHHOLD AMOUNT', label: 'Withhold\nAmount', width: 90, editable: true, bg: '#fee2e2' },
   { key: 'WITHHOLD REASON', label: 'Withhold\nReason', width: 120, editable: true, bg: '#fee2e2' },
-  { key: 'PREV MONTH DUE', label: 'Prev Month\nDue', width: 100, editable: true, bg: '#fee2e2' },
+  { key: 'PREV MONTH DUE', label: 'Prev Month\nDue', width: 100, calc: true, highlight: '#fef3c7' },
   // Net Payable (calculated)
   { key: 'NET PAYABLE', label: 'Net Payable\n(after deduct)', width: 120, calc: true, highlight: '#e0e7ff' },
   // ㉙ Manual
   { key: 'RECOVERED TO DAC', label: 'Recovered\nto DAC', width: 100, editable: true, bg: '#fce7f3' },
-  // ㉚ Amount Paid (manual)
-  { key: 'CREDIT REFUND', label: 'Credit\nRefund', width: 90, editable: true, bg: '#d1fae5' },
-  { key: 'PAID TO PARTY', label: 'Paid to\nParty', width: 90, editable: true, bg: '#d1fae5' },
+  // ㉚ Amount Paid (auto from Bank Book)
+  { key: 'CREDIT REFUND', label: 'Credit\nRefund', width: 90, calc: true, highlight: '#d1fae5' },
+  { key: 'PAID TO PARTY', label: 'Paid to\nParty', width: 90, calc: true, highlight: '#d1fae5' },
   // ㉛ Balance Due (calculated)
   { key: 'BALANCE DUE', label: 'Balance Due', width: 100, calc: true, highlight: '#fee2e2' },
   // ㉜–㉝ Manual
@@ -192,7 +255,7 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
       const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
       // ── High Performance: Fetch all independent data in parallel via Promise.all ──
-      const [truckRes, deductionRes, cementRes, manualRes, freightCreditorGstRes] = await Promise.all([
+      const [truckRes, deductionRes, cementRes, manualRes, freightCreditorGstRes, voucherRes, prevDuesRes] = await Promise.all([
         axios.get(`${API_URL}/truck-contacts`),
         axios.get(`${API_URL}/settings/projected-deductions`, { headers: authHeaders }).catch(() => ({ data: {} })),
         axios.get(`${API_URL}/party-payment/cement-data`, { params: { month: selMonth, year: calendarYear } }),
@@ -200,22 +263,35 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         axios.get(`${API_URL}/freight-creditor-gst/all-totals`, { params: { month: selMonth, year: calendarYear, fy: fyStr } }).catch(err => {
           console.warn('[PartyPaymentDetails] Error fetching Freight Creditor GST totals:', err.message);
           return { data: { vehicleTotals: {} } };
-        })
+        }),
+        axios.get(`${API_URL}/voucher`, { params: { voucherType: 'CREDIT' } }).catch(() => ({ data: { vouchers: [] } })),
+        axios.get(`${API_URL}/party-payment/previous-month-dues`, { params: { month: selMonth, year: calendarYear } }).catch(() => ({ data: { previousMonthDues: {} } }))
       ]);
 
       const trucksData = truckRes.data?.contacts || [];
       const entries = cementRes.data?.entries || [];
       const manuals = manualRes.data || [];
       const gstVehicleTotals = freightCreditorGstRes.data?.vehicleTotals || {};
+      const allVouchers = voucherRes.data?.vouchers || [];
+      const prevMonthDuesByVeh = prevDuesRes.data?.previousMonthDues || {};
       const gpsTripChargeSetting = (deductionRes.data?.success && deductionRes.data?.data)
         ? num(deductionRes.data.data.gpsTripCharge)
         : 0;
 
+      // Filter Credit Vouchers specifically for the selected month and calendar year
+      const creditVouchers = allVouchers.filter(v => {
+        if (v.voucherType !== 'CREDIT') return false;
+        const d = parseDate(v.date);
+        if (!d) return false;
+        return (d.getMonth() + 1 === selMonth) && (d.getFullYear() === calendarYear);
+      });
+
       setDebugInfo(`Cement entries for month: ${entries.length}`);
 
-      // 1. Truck contacts → vehicle→owner map & vehicle/owner→TDS rate map
+      // 1. Truck contacts → vehicle→owner map, vehicleId→vehicle map & vehicle/owner→TDS rate map
       const truckMap = {}; // normVeh → owner name
       const truckOwnerIdMap = {}; // normVeh → ownerId / unique key
+      const vehicleIdToVehMap = {}; // vehicleId / _id → normVeh
       const vehicleToTdsRateMap = {}; // normVeh → decimal TDS rate from Owner Details
       const ownerToTdsRateMap = {}; // OWNER NAME → decimal TDS rate
 
@@ -227,13 +303,28 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         const parsedTds = parseTdsField(t);
         if (key) {
           truckMap[key] = owner;
-          if (ownerId) truckOwnerIdMap[key] = String(ownerId);
+          if (ownerId) {
+            truckOwnerIdMap[key] = String(ownerId);
+            vehicleIdToVehMap[String(ownerId)] = key;
+          }
+          if (t._id) vehicleIdToVehMap[String(t._id)] = key;
+          if (t.vehicleId) vehicleIdToVehMap[String(t.vehicleId)] = key;
           if (parsedTds !== null) {
             vehicleToTdsRateMap[key] = parsedTds;
           }
         }
         if (owner && parsedTds !== null && ownerToTdsRateMap[owner.toUpperCase()] === undefined) {
           ownerToTdsRateMap[owner.toUpperCase()] = parsedTds;
+        }
+      });
+
+      // Sum Credit Vouchers per vehicle key (using vehicleNumber or vehicleId)
+      const creditRefundByVeh = {};
+      creditVouchers.forEach(v => {
+        const vKey = normVeh(v.vehicleNumber) || (v.vehicleId ? vehicleIdToVehMap[String(v.vehicleId)] : '');
+        const amt = num(v.amount);
+        if (vKey && amt > 0) {
+          creditRefundByVeh[vKey] = (creditRefundByVeh[vKey] || 0) + amt;
         }
       });
 
@@ -255,14 +346,14 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
       const agg = {}; // normVeh → accumulated row
 
       entries.forEach(row => {
-        const rawVeh = row['VEHICLE NUMBER'] || '';
+        const rawVeh = row['VEHICLE NUMBER'] || row['VEHICLE NO'] || row['VEHICLE NO.'] || row['vehicleNumber'] || row['Truck No'] || row['TRUCK NO'] || row['truck_no'] || '';
         const vKey = normVeh(rawVeh);
         if (!vKey) return;
 
         if (!agg[vKey]) {
           agg[vKey] = {
             'VEHICLE NO': rawVeh.trim().toUpperCase(),
-            'OWNER NAME': truckMap[vKey] || (row['OWNER NAME'] || '').trim() || 'Unknown',
+            'OWNER NAME': truckMap[vKey] || (row['OWNER NAME'] || row['PARTY NAME'] || '').trim() || 'Unknown',
             'GROSS FREIGHT': 0,   // = SUM of "BILLING @ 95% (PARTY PAYABLE)"
             'LOADING ADVANCE': 0,   // = SUM of "ADVANCE"
             'FUEL': 0,   // = SUM of "HSD AMOUNT"
@@ -281,6 +372,7 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         }
 
         const a = agg[vKey];
+        const isDummy = isDummyRow(row);
 
         // Multi-variant field reader — tries multiple possible key names
         const getF = (...keys) => {
@@ -296,57 +388,128 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
           return 0;
         };
 
-        // ③ Gross Freight (95% Party Payable)
-        a['GROSS FREIGHT'] += getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT');
+        if (!isDummy) {
+          // ③ Gross Freight (95% Party Payable)
+          a['GROSS FREIGHT'] += getF('BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT', 'Billing Amount');
+
+          // ⑭ 8.5% NVCL Incentive
+          const ncvl85 = row['10W EXTRA 8.5%'] !== undefined
+            ? num(row['10W EXTRA 8.5%'])
+            : row['10W EXTRA 8'] !== undefined
+              ? (typeof row['10W EXTRA 8'] === 'object'
+                ? Object.values(row['10W EXTRA 8']).reduce((s, x) => s + num(x), 0)
+                : num(row['10W EXTRA 8']))
+              : 0;
+          a['8.5% NVCL'] += ncvl85;
+
+          // ⑯ Rafter
+          a['RAFTER'] += getF('RAFTER', 'RAFTER CHARGES');
+
+          // ⑰ Extra U/L
+          a['EXTRA U/L'] += getF('EXTRA UNLOADING', 'EXTRA  UNLOADING', 'EXTRA UL', 'EXTRA U/L');
+
+          // ⑱ Toll UP
+          a['TOLL UP'] += getF('UP TOLL', 'TOLL UP', 'TOLL_UP', 'TOLL UP ');
+
+          // ⑲ Toll Down
+          a['TOLL DOWN'] += getF('DOWN TOLL', 'TOLL DOWN', 'TOLL_DOWN', 'TOLL DOWN ');
+        }
 
         // ④ Loading Advance
-        a['LOADING ADVANCE'] += getF('ADVANCE');
+        a['LOADING ADVANCE'] += getF('ADVANCE', 'LOADING ADVANCE', 'ADV', 'Advance');
 
         // ⑤ Fuel (HSD Amount)
-        a['FUEL'] += getF('HSD AMOUNT');
+        a['FUEL'] += getF('HSD AMOUNT', 'HSD_AMOUNT', 'DIESEL AMOUNT');
 
         // ⑦ Travelling Expense
-        a['TRAVELLING EXP'] += getF('TRAVELLING EXP', 'TRAVELLING  EXP', 'TRAVEL EXP');
+        a['TRAVELLING EXP'] += getF('TRAVELLING EXP', 'TRAVELLING  EXP', 'TRAVEL EXP', 'TRAVELLING');
 
         // ⑧ Damage Recovery
-        const shortageAmt = getF('SHORTAGE (AMOUNT)', 'SHORTAGE AMOUNT');
+        const shortageAmt = getF('SHORTAGE (AMOUNT)', 'SHORTAGE AMOUNT', 'DAMAGE RECOVERY');
         const shortageBags = getF('SHORTAGE (BAG)', 'SHORTAGE BAG');
         const shortageRate = getF('SHORTAGE (RATE)', 'SHORTAGE RATE');
         a['DAMAGE RECOVERY'] += shortageAmt || (shortageBags * shortageRate);
 
         // ⑨ Cash/Bank TF/Others
-        a['CASH_BANK_OTHERS'] += getF('BANK TF', 'BANK TF ', 'Bank TF') + getF('Site Cash', 'SITE CASH', 'SITE_CASH') + getF('OFFICE CASH', 'Office Cash', 'OFFICE_CASH');
+        a['CASH_BANK_OTHERS'] += getF('BANK TF', 'BANK TF ', 'Bank TF', 'BANK_TF') + getF('Site Cash', 'SITE CASH', 'SITE_CASH') + getF('OFFICE CASH', 'Office Cash', 'OFFICE_CASH');
 
-        // ⑩ Other Deduction
-        a['OTHER DEDUCTION'] += getF('OTHERS DEDUCTION', 'OTHERS  DEDUCTION', 'OTHER DEDUCTION', 'OTHERS', 'Others deduction', 'Other');
+        // ⑩ Other Deduction = Sum of RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION from Cement Register
+        const directSum = getF(
+          'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
+          'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHER DEDUCTION',
+          'sum of rfid & fastag & deviation & suspense & others deduction',
+          'sum of rfid & fastag & deviation & suspense & other deduction'
+        );
+        const rfid = getF('Give RFID TAG', 'GIVE RFID TAG', 'Give RFID Tag', 'GIVE RFID', 'Give R', 'GIVE R', 'RFID TAG', 'RFID');
+        const fastag = getF('FASTAG', 'Fastag', 'FASTAG ', 'Fastag ');
+        const gpsDev = getF('GPS Deviation Charges', 'GPS DEVIATION CHARGES', 'GPS DEVIATION', 'GPS Deviation');
+        const suspense = getF('Suspense', 'SUSPENSE');
+        const others = getF('Others deduction', 'OTHERS DEDUCTION', 'OTHER DEDUCTION', 'OTHERS', 'Others Deduction', 'Other deduction');
+        const cementTripSum = directSum > 0 ? directSum : (rfid + fastag + gpsDev + suspense + others);
+
+        a['OTHER DEDUCTION'] += cementTripSum;
+        a['cementOtherDeduction'] = (a['cementOtherDeduction'] || 0) + cementTripSum;
 
         // ⑫ GPS Device
-        a['GPS DEVICE'] += getF('GPS DEVICE', 'GPS  DEVICE');
-
-        // ⑭ 8.5% NVCL Incentive
-        const ncvl85 = row['10W EXTRA 8.5%'] !== undefined
-          ? num(row['10W EXTRA 8.5%'])
-          : row['10W EXTRA 8'] !== undefined
-            ? (typeof row['10W EXTRA 8'] === 'object'
-              ? Object.values(row['10W EXTRA 8']).reduce((s, x) => s + num(x), 0)
-              : num(row['10W EXTRA 8']))
-            : 0;
-        a['8.5% NVCL'] += ncvl85;
-
-        // ⑯ Rafter
-        a['RAFTER'] += getF('RAFTER');
-
-        // ⑰ Extra U/L
-        a['EXTRA U/L'] += getF('EXTRA UNLOADING', 'EXTRA  UNLOADING', 'EXTRA UL');
-
-        // ⑱ Toll UP
-        a['TOLL UP'] += getF('UP TOLL', 'TOLL UP', 'TOLL_UP', 'TOLL UP ');
-
-        // ⑲ Toll Down
-        a['TOLL DOWN'] += getF('DOWN TOLL', 'TOLL DOWN', 'TOLL_DOWN', 'TOLL DOWN ');
+        a['GPS DEVICE'] += getF('GPS DEVICE', 'GPS  DEVICE', 'GPS_DEVICE');
       });
 
-      // 5. Build final rows merging aggregated + vehicle-wise Incentive Sheet TOTAL (Projected) + saved manuals + Freight Creditor GST TOTAL
+      // Ensure all vehicles with Credit Vouchers in this month are in agg
+      creditVouchers.forEach(cv => {
+        const rawVeh = cv.vehicleNumber || '';
+        const vKey = normVeh(rawVeh);
+        if (!vKey) return;
+        if (!agg[vKey]) {
+          const ownerName = cv.ownerName || cv.name || truckMap[vKey] || 'Unknown';
+          agg[vKey] = {
+            'VEHICLE NO': rawVeh.trim().toUpperCase(),
+            'OWNER NAME': ownerName,
+            'GROSS FREIGHT': 0,
+            'LOADING ADVANCE': 0,
+            'FUEL': 0,
+            'TRAVELLING EXP': 0,
+            'DAMAGE RECOVERY': 0,
+            'CASH_BANK_OTHERS': 0,
+            'OTHER DEDUCTION': 0,
+            'GPS TRIP CHARGE': 0,
+            'GPS DEVICE': 0,
+            '8.5% NVCL': 0,
+            'RAFTER': 0,
+            'EXTRA U/L': 0,
+            'TOLL UP': 0,
+            'TOLL DOWN': 0,
+          };
+        }
+      });
+
+      // Ensure all vehicles with saved manuals are in agg
+      manuals.forEach(m => {
+        const rawVeh = m.vehicleNo || '';
+        const vKey = normVeh(rawVeh);
+        if (!vKey) return;
+        if (!agg[vKey]) {
+          agg[vKey] = {
+            'VEHICLE NO': rawVeh.trim().toUpperCase(),
+            'OWNER NAME': truckMap[vKey] || 'Unknown',
+            'GROSS FREIGHT': 0,
+            'LOADING ADVANCE': 0,
+            'FUEL': 0,
+            'TRAVELLING EXP': 0,
+            'DAMAGE RECOVERY': 0,
+            'CASH_BANK_OTHERS': 0,
+            'OTHER DEDUCTION': 0,
+            'GPS TRIP CHARGE': 0,
+            'GPS DEVICE': 0,
+            '8.5% NVCL': 0,
+            'RAFTER': 0,
+            'EXTRA U/L': 0,
+            'TOLL UP': 0,
+            'TOLL DOWN': 0,
+          };
+        }
+      });
+
+      // 5. Build final rows merging aggregated + vehicle-wise Incentive Sheet TOTAL (Projected) + saved manuals + Freight Creditor GST TOTAL + Credit Vouchers
       const finalRows = Object.values(agg).map(ag => {
         const vKey = normVeh(ag['VEHICLE NO']);
         const saved = manualMap[vKey] || {};
@@ -390,8 +553,18 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
           ? num(saved.dedicatedIncentive)
           : vehicleProjectedIncentive;
 
+        // Authoritative Credit Refund from Credit Vouchers (falls back to saved manual if no vouchers)
+        const authCreditRefund = creditRefundByVeh[vKey] !== undefined ? creditRefundByVeh[vKey] : (saved.creditRefund !== undefined ? num(saved.creditRefund) : 0);
+
+        // Other Deduction = Cement Register SUM + Manual Other Deduction
+        const manualOtherDeduction = num(saved.manualOtherDeduction || (saved.otherDeduction_manual ? saved.otherDeduction : 0));
+        const totalOtherDeduction = Math.round(((ag['OTHER DEDUCTION'] || 0) + manualOtherDeduction) * 100) / 100;
+
         return {
           ...ag,
+          'OTHER DEDUCTION': totalOtherDeduction,
+          'manualOtherDeduction': manualOtherDeduction,
+          'cementOtherDeduction': ag['cementOtherDeduction'] || ag['OTHER DEDUCTION'] || 0,
           'TDS': tdsVal,
           'tds_manual': isTdsManual,
           '_tds_rate': tdsRate,
@@ -401,9 +574,9 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
           'WITHHOLD AMOUNT': num(saved.withholdAmount),
           'WITHHOLD REASON': saved.withholdReason || '',
           'OTHER REASON': saved.otherReason || '',
-          'PREV MONTH DUE': num(saved.prevMonthDue),
+          'PREV MONTH DUE': prevMonthDuesByVeh[vKey] !== undefined ? prevMonthDuesByVeh[vKey] : (saved.prevMonthDue !== undefined ? num(saved.prevMonthDue) : 0),
           'RECOVERED TO DAC': num(saved.recoveredToDac),
-          'CREDIT REFUND': num(saved.creditRefund),
+          'CREDIT REFUND': authCreditRefund,
           'PAID TO PARTY': num(saved.paidToParty),
           'PAYMENT DATE': saved.paymentDate || '',
           'REMARKS': saved.remarks || '',
@@ -447,6 +620,15 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
 
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socket.on('partyPaymentUpdate', () => {
+      fetchData();
+    });
+    socket.on('voucherCreated', () => {
+      fetchData();
+    });
+    socket.on('voucherUpdate', () => {
+      fetchData();
+    });
+    socket.on('voucherDeleted', () => {
       fetchData();
     });
     socket.on('freightCreditorGstUpdate', () => {
@@ -519,8 +701,13 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         num(r['WITHHOLD AMOUNT'])
       );
 
-      // ㉛ Balance Due = Net Payable − Paid to Party
-      r['BALANCE DUE'] = round2(r['NET PAYABLE'] - num(r['PAID TO PARTY']));
+      // ㉛ Balance Due = Net Payable − Paid to Party − Recovered to DAC + Credit Refund
+      r['BALANCE DUE'] = round2(
+        num(r['NET PAYABLE']) -
+        num(r['PAID TO PARTY']) -
+        num(r['RECOVERED TO DAC']) +
+        num(r['CREDIT REFUND'])
+      );
 
       return r;
     });
@@ -589,10 +776,14 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         const edits = localEdits[ri] || {};
         const item = {
           vehicleNo: cr['VEHICLE NO'],
+          netPayable: num(cr['NET PAYABLE']),
+          balanceDue: num(cr['BALANCE DUE']),
           gstFcm: num(cr['GST FCM']),
           withholdAmount: num(cr['WITHHOLD AMOUNT']),
           withholdReason: cr['WITHHOLD REASON'] || '',
           otherReason: cr['OTHER REASON'] || '',
+          manualOtherDeduction: num(cr['manualOtherDeduction'] || 0),
+          otherDeduction: num(cr['OTHER DEDUCTION']),
           prevMonthDue: num(cr['PREV MONTH DUE']),
           recoveredToDac: num(cr['RECOVERED TO DAC']),
           creditRefund: num(cr['CREDIT REFUND']),

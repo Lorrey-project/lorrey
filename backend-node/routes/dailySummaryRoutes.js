@@ -456,19 +456,24 @@ router.get("/data", auth, async (req, res) => {
       const sOpen = (e.S_OPENING !== undefined && e.S_OPENING !== '') ? parseNum(e.S_OPENING) : prevSClosing;
       const oOpen = (e.O_OPENING !== undefined && e.O_OPENING !== '') ? parseNum(e.O_OPENING) : prevOClosing;
 
-      const pWith = parseNum(e.P_WITHDRAW);
+      const pRecvBB = parseNum(e.P_CASH_RECV_BB);
+      const pLoan = parseNum(e.P_LOAN || e.P_WITHDRAW);
       const pDac = parseNum(e.P_GIVEN_DAC);
       const pOff = parseNum(e.P_GIVEN_OFFICE);
+      const pLoanRepay = parseNum(e.P_LOAN_REPAY);
       const pOth = parseNum(e.P_OTHERS);
-      const pClose = (pOpen + pWith) - pDac - pOff - pOth;
+      const pClose = (pOpen + pRecvBB + pLoan) - pDac - pOff - pLoanRepay - pOth;
 
       const sTransOff = parseNum(e.S_TRANS_OFFICE);
       const sExp = parseNum(e.S_EXPENSE);
-      const sClose = (sOpen + pDac + sTransOff) - sExp;
-
       const sTransToOff = parseNum(e.S_TRANS_TO_OFFICE);
+      const sClose = (sOpen + pDac + sTransOff) - sExp - sTransToOff;
+
+      const oRecvHfs = (e.O_RECV_HFS !== undefined && e.O_RECV_HFS !== '') ? parseNum(e.O_RECV_HFS) : pOff;
+      const oRecvSite = (e.O_RECV_SITE !== undefined && e.O_RECV_SITE !== '') ? parseNum(e.O_RECV_SITE) : sTransToOff;
       const oExp = parseNum(e.O_EXPENSE);
-      const oClose = (oOpen + pOff + sTransToOff) - oExp;
+      const oTransSite = parseNum(e.O_TRANS_SITE);
+      const oClose = (oOpen + oRecvHfs + oRecvSite) - oExp - oTransSite;
 
       computedCashbookRows.push({
         DATE: e.DATE,

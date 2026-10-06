@@ -222,10 +222,17 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
     const incentiveM2 = (saved.incentiveM2 !== undefined && saved.incentiveM2 !== null) ? Number(saved.incentiveM2) : null;
     const incentiveM1 = (saved.incentiveM1 !== undefined && saved.incentiveM1 !== null) ? Number(saved.incentiveM1) : null;
 
+    let taxableValue = null;
+    let cgst = null;
+    let sgst = null;
     let total = null;
+
     if (incentiveM2 !== null || incentiveM1 !== null || basicCurrM !== null) {
-      total = (incentiveM2 || 0) + (incentiveM1 || 0) + (basicCurrM || 0);
-      total = Math.round(total * 100) / 100;
+      taxableValue = Math.round(((incentiveM2 || 0) + (incentiveM1 || 0) + (basicCurrM || 0)) * 100) / 100;
+      cgst = Math.round((taxableValue * 0.09) * 100) / 100;
+      sgst = Math.round((taxableValue * 0.09) * 100) / 100;
+      // Authoritative GST FCM Amount: TOTAL AMOUNT = TOTAL TAXABLE VALUE + CGST 9% + SGST 9%
+      total = Math.round((taxableValue + cgst + sgst) * 100) / 100;
     }
 
     return {
@@ -240,6 +247,9 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
       incentiveM2,
       incentiveM1,
       basicCurrM,
+      taxableValue,
+      cgst,
+      sgst,
       total,
       hasCementEntries: hasEntries,
       updatedAt: saved.updatedAt || null
@@ -253,6 +263,12 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
   let hasM1 = false;
   let totalBasicCurrM = 0;
   let hasBasic = false;
+  let totalTaxableValue = 0;
+  let hasTaxableValue = false;
+  let totalCgst = 0;
+  let hasCgst = false;
+  let totalSgst = 0;
+  let hasSgst = false;
   let grandTotal = 0;
   let hasGrandTotal = false;
 
@@ -268,6 +284,18 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
     if (r.basicCurrM !== null) {
       totalBasicCurrM += r.basicCurrM;
       hasBasic = true;
+    }
+    if (r.taxableValue !== null) {
+      totalTaxableValue += r.taxableValue;
+      hasTaxableValue = true;
+    }
+    if (r.cgst !== null) {
+      totalCgst += r.cgst;
+      hasCgst = true;
+    }
+    if (r.sgst !== null) {
+      totalSgst += r.sgst;
+      hasSgst = true;
     }
     if (r.total !== null) {
       grandTotal += r.total;
@@ -288,6 +316,9 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
       incentiveM2: hasM2 ? Math.round(totalIncentiveM2 * 100) / 100 : null,
       incentiveM1: hasM1 ? Math.round(totalIncentiveM1 * 100) / 100 : null,
       basicCurrM: hasBasic ? Math.round(totalBasicCurrM * 100) / 100 : null,
+      taxableValue: hasTaxableValue ? Math.round(totalTaxableValue * 100) / 100 : null,
+      cgst: hasCgst ? Math.round(totalCgst * 100) / 100 : null,
+      sgst: hasSgst ? Math.round(totalSgst * 100) / 100 : null,
       grandTotal: hasGrandTotal ? Math.round(grandTotal * 100) / 100 : null
     }
   };
@@ -467,4 +498,34 @@ router.post('/save', async (req, res) => {
   }
 });
 
+// Authoritative helper to determine if a vehicle or owner belongs to a Freight Creditor
+async function getCreditorKeyForVehicleOrParty(vehicleNo, partyOwnerName) {
+  const normVeh = String(vehicleNo || '').trim().toUpperCase().replace(/\s+/g, '');
+  const normParty = String(partyOwnerName || '').trim().toUpperCase();
+
+  const creditorKeys = Object.keys(CREDITOR_MAPPINGS);
+  for (const cKey of creditorKeys) {
+    const config = CREDITOR_MAPPINGS[cKey];
+    if (normParty) {
+      if (config.sourcePartyOwners.some(target => {
+        const t = target.toUpperCase();
+        return t === normParty || normParty.startsWith(t) || t.startsWith(normParty) || normParty.includes(t) || t.includes(normParty);
+      })) {
+        return cKey;
+      }
+    }
+    const vehicles = await getVehiclesForCreditor(cKey);
+    if (vehicles.map(v => String(v).trim().toUpperCase().replace(/\s+/g, '')).includes(normVeh)) {
+      return cKey;
+    }
+  }
+  return null;
+}
+
 module.exports = router;
+module.exports.CREDITOR_MAPPINGS = CREDITOR_MAPPINGS;
+module.exports.normalizeCreditorKey = normalizeCreditorKey;
+module.exports.getVehiclesForCreditor = getVehiclesForCreditor;
+module.exports.computeCreditorBreakdown = computeCreditorBreakdown;
+module.exports.getCreditorKeyForVehicleOrParty = getCreditorKeyForVehicleOrParty;
+

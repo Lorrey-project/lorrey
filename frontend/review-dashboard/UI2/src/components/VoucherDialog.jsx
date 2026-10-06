@@ -4,7 +4,7 @@ import {
   Button, Grid, IconButton, CircularProgress, Chip, Autocomplete,
   Snackbar, Alert, Backdrop, Fade, List, ListItem, ListItemText,
   ListItemButton, Divider, Tabs, Tab, Badge, InputAdornment,
-  useTheme, useMediaQuery, MenuItem
+  useTheme, useMediaQuery, MenuItem, Stack
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
@@ -16,6 +16,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonIcon from '@mui/icons-material/Person';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import FilterListIcon from '@mui/icons-material/FilterList';
 import axios from 'axios';
 import html2pdf from 'html2pdf.js';
 import { API_URL } from '../config';
@@ -37,6 +38,10 @@ function amountInWords(num) {
 
 // ── Printable Slip Document ───────────────────────────────────────────────────
 const VoucherSlipDoc = forwardRef(({ voucher }, ref) => {
+  const isCredit = voucher.voucherType === 'CREDIT';
+  const headerBg = isCredit ? '#059669' : '#1a237e';
+  const headerTitle = isCredit ? 'CREDIT VOUCHER' : 'DEBIT VOUCHER';
+
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '—';
   const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : '—';
   const fmtAmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
@@ -52,38 +57,52 @@ const VoucherSlipDoc = forwardRef(({ voucher }, ref) => {
       <div style={{
         position: 'absolute', top: '50%', left: '50%',
         transform: 'translate(-50%,-50%) rotate(-30deg)',
-        fontSize: '80px', color: 'rgba(26,35,126,0.04)',
+        fontSize: '70px', color: isCredit ? 'rgba(5,150,105,0.05)' : 'rgba(26,35,126,0.04)',
         fontWeight: 900, whiteSpace: 'nowrap', pointerEvents: 'none',
         zIndex: 0, userSelect: 'none', letterSpacing: '8px',
-      }}>VOUCHER</div>
+      }}>{headerTitle}</div>
 
       <div style={{ position: 'relative', zIndex: 1 }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
           <div>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: '#1a237e' }}>{COMPANY.name}</div>
+            <div style={{ fontSize: '18px', fontWeight: 700, color: headerBg }}>{COMPANY.name}</div>
             <div style={{ fontSize: '9px', color: '#555', marginTop: '2px' }}>{COMPANY.address}</div>
             <div style={{ fontSize: '9px', color: '#555' }}>Ph: {COMPANY.phone} | GST: {COMPANY.gst}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ display: 'inline-block', background: '#1a237e', color: '#fff', padding: '4px 16px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, letterSpacing: '2px', marginBottom: '6px' }}>VOUCHER</div>
+            <div style={{
+              display: 'inline-block',
+              background: headerBg,
+              color: '#fff',
+              padding: '4px 16px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontWeight: 700,
+              letterSpacing: '2px',
+              marginBottom: '6px'
+            }}>{headerTitle}</div>
             <div style={{ fontSize: '10px' }}>No: <strong style={{ fontFamily: 'monospace' }}>{voucher.voucherNumber}</strong></div>
             <div style={{ fontSize: '10px' }}>Date: <strong>{fmtDate(voucher.date)}</strong></div>
             <div style={{ fontSize: '9px', color: '#777' }}>Time: {fmtTime(voucher.createdAt || new Date())}</div>
           </div>
         </div>
 
-        <div style={{ borderTop: '3px solid #1a237e', marginBottom: '12px' }} />
+        <div style={{ borderTop: `3px solid ${headerBg}`, marginBottom: '12px' }} />
 
         {/* Data table */}
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', marginBottom: '12px' }}>
           <tbody>
             {[
-              { label: 'Name', value: voucher.name || '—', bold: true },
-              ...(voucher.expenseType === 'Direct Expense' ? [] : [
+              { label: 'Voucher Type', value: headerTitle, bold: true },
+              { label: isCredit ? 'Owner Name' : 'Name', value: voucher.ownerName || voucher.name || '—', bold: true },
+              ...(voucher.expenseType === 'Direct Expense' && !isCredit ? [] : [
                 { label: 'Vehicle Number', value: voucher.vehicleNumber || '—', mono: true }
               ]),
-              { label: voucher.expenseType === 'Direct Expense' ? 'Expense Category' : 'Reason / Purpose', value: voucher.expenseType === 'Direct Expense' ? `${voucher.purpose} - ${voucher.reason || ''}` : voucher.reason || '—' },
+              {
+                label: isCredit ? 'Reason' : (voucher.expenseType === 'Direct Expense' ? 'Expense Category' : 'Reason / Purpose'),
+                value: isCredit ? (voucher.reason || '—') : (voucher.expenseType === 'Direct Expense' ? `${voucher.purpose || ''} - ${voucher.reason || ''}` : voucher.reason || voucher.purpose || '—')
+              },
               { label: 'Date & Time', value: `${fmtDate(voucher.date)}  |  ${fmtTime(voucher.createdAt || new Date())}` },
             ].map(({ label, value, bold, mono }, i) => (
               <tr key={label} style={{ background: i % 2 === 1 ? '#f8f9fa' : '#fff' }}>
@@ -95,14 +114,23 @@ const VoucherSlipDoc = forwardRef(({ voucher }, ref) => {
         </table>
 
         {/* Amount box */}
-        <div style={{ border: '2px solid #1a237e', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', marginBottom: '16px', background: '#f0f4ff' }}>
+        <div style={{
+          border: `2px solid ${headerBg}`,
+          borderRadius: '6px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '10px 16px',
+          marginBottom: '16px',
+          background: isCredit ? '#ecfdf5' : '#f0f4ff'
+        }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: '9px', color: '#777', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '3px' }}>Amount in Words</div>
-            <div style={{ fontSize: '10.5px', fontStyle: 'italic', fontWeight: 600, color: '#1a237e' }}>{amountInWords(voucher.amount)}</div>
+            <div style={{ fontSize: '10.5px', fontStyle: 'italic', fontWeight: 600, color: headerBg }}>{amountInWords(voucher.amount)}</div>
           </div>
           <div style={{ textAlign: 'right', marginLeft: '16px' }}>
             <div style={{ fontSize: '9px', color: '#777', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Amount (₹)</div>
-            <div style={{ fontSize: '26px', fontWeight: 900, color: '#1a237e', letterSpacing: '-1px' }}>₹{fmtAmt(voucher.amount)}</div>
+            <div style={{ fontSize: '26px', fontWeight: 900, color: headerBg, letterSpacing: '-1px' }}>₹{fmtAmt(voucher.amount)}</div>
           </div>
         </div>
 
@@ -136,11 +164,13 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { user } = useAuth();
-  const isSite = String(user?.role || '').toUpperCase().includes('SITE');
+  const isSite = String(user?.role || '').toUpperCase().includes('SITE') ||
+                 (user?.email || '').toLowerCase() === 'site@nuvoco.com' ||
+                 import.meta.env.VITE_PORTAL === 'site';
 
   const slipRef = useRef();
   const [tab, setTab] = useState(initialTab);          // 0=New, 1=Previous, 2=Download
-  const [contacts, setContacts] = useState({ names: [], vehicles: [], ownerMap: {} });
+  const [contacts, setContacts] = useState({ names: [], vehicles: [], ownerMap: {}, ownerIdMap: {}, vehicleIdMap: {}, ownerDetails: {} });
   const [contactsLoading, setContactsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [slipStep, setSlipStep] = useState(false);   // show slip preview
@@ -149,13 +179,24 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
   const [snack, setSnack] = useState(null);
   const [now, setNow] = useState(new Date());
 
+  // Filters for Previous / Download tabs
+  const [typeFilter, setTypeFilter] = useState('ALL'); // 'ALL' | 'DEBIT' | 'CREDIT'
+
   // Voucher list (for Previous/Download tabs)
   const [vouchers, setVouchers] = useState([]);
   const [vouchersLoading, setVouchersLoading] = useState(false);
   const [selectedVoucher, setSelectedVoucher] = useState(null);  // for Download tab
 
   // Form
-  const [form, setForm] = useState({ expenseType: 'Indirect Expense', name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
+  const [form, setForm] = useState({
+    voucherType: 'DEBIT',
+    expenseType: 'Indirect Expense',
+    name: null,
+    vehicleNumber: null,
+    reasonCategory: null,
+    reason: '',
+    amount: ''
+  });
   const [errors, setErrors] = useState({});
 
   // Live clock
@@ -167,7 +208,7 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
   // Load contacts + vouchers when dialog opens
   useEffect(() => {
     if (!open) return;
-    setTab(initialTab);   // jump to the correct tab based on which button was clicked
+    setTab(initialTab);
     setContactsLoading(true);
     axios.get(`${API_URL}/voucher/contacts`)
       .then(res => { if (res.data.success) setContacts(res.data); })
@@ -177,14 +218,23 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
     fetchVouchers();
 
     // Reset form
-    setTab(0);
+    setTab(initialTab || 0);
     setSlipStep(false);
     setSavedVoucher(null);
     setSlipUrl(null);
     setSelectedVoucher(null);
-    setForm({ expenseType: 'Indirect Expense', name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
+    setTypeFilter('ALL');
+    setForm({
+      voucherType: 'DEBIT',
+      expenseType: 'Indirect Expense',
+      name: null,
+      vehicleNumber: null,
+      reasonCategory: null,
+      reason: '',
+      amount: ''
+    });
     setErrors({});
-  }, [open]);
+  }, [open, initialTab]);
 
   const fetchVouchers = () => {
     setVouchersLoading(true);
@@ -195,16 +245,16 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
   };
 
   // Vehicles filtered by selected owner
-  const filteredVehicles = form.name && contacts.ownerMap?.[form.name]
-    ? contacts.ownerMap[form.name]
-    : contacts.vehicles;
+  const isCredit = form.voucherType === 'CREDIT';
+  const filteredVehicles = isCredit
+    ? (form.name ? (contacts.ownerMap?.[form.name] || []) : [])
+    : (form.name && contacts.ownerMap?.[form.name] ? contacts.ownerMap[form.name] : contacts.vehicles);
 
-  // When vehicle is selected → auto-fill owner name
+  // When vehicle is selected → auto-fill owner name (for debit)
   const handleVehicleChange = (_, val) => {
     setForm(p => {
       let ownerName = p.name;
       if (val && !p.name) {
-        // Find which owner has this truck
         const found = Object.entries(contacts.ownerMap || {}).find(([, trucks]) => trucks.includes(val));
         if (found) ownerName = found[0];
       }
@@ -213,45 +263,79 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
     if (errors.vehicleNumber) setErrors(p => ({ ...p, vehicleNumber: '' }));
   };
 
-  // When owner is selected → clear vehicle if not owned by this owner
+  // When owner is selected → for credit voucher, clear vehicle; for debit, validate match
   const handleOwnerChange = (_, val) => {
     setForm(p => {
       let vehicle = p.vehicleNumber;
-      if (val && p.vehicleNumber) {
+      if (p.voucherType === 'CREDIT') {
+        vehicle = null; // Clear previously selected vehicle on owner change
+      } else if (val && p.vehicleNumber) {
         const owned = contacts.ownerMap?.[val] || [];
         if (!owned.includes(p.vehicleNumber)) vehicle = null;
       }
       return { ...p, name: val, vehicleNumber: vehicle };
     });
     if (errors.name) setErrors(p => ({ ...p, name: '' }));
+    if (errors.vehicleNumber) setErrors(p => ({ ...p, vehicleNumber: '' }));
+  };
+
+  const handleVoucherTypeChange = (e) => {
+    const nextType = e.target.value;
+    setForm({
+      voucherType: nextType,
+      expenseType: 'Indirect Expense',
+      name: null,
+      vehicleNumber: null,
+      reasonCategory: null,
+      reason: '',
+      amount: ''
+    });
+    setErrors({});
   };
 
   const validate = () => {
     const errs = {};
-    if (form.expenseType === 'Indirect Expense') {
-      if (!form.name) errs.name = 'Select a truck owner';
-      if (!form.vehicleNumber) errs.vehicleNumber = 'Select a vehicle';
+    if (form.voucherType === 'CREDIT') {
+      if (!form.name) errs.name = 'Owner name is required';
+      if (!form.vehicleNumber) errs.vehicleNumber = 'Vehicle number is required';
+      if (!form.reason || !form.reason.trim()) errs.reason = 'Reason is required';
+      if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Enter a positive numeric amount';
+    } else {
+      if (form.expenseType === 'Indirect Expense') {
+        if (!form.name) errs.name = 'Select a truck owner';
+        if (!form.vehicleNumber) errs.vehicleNumber = 'Select a vehicle';
+      }
+      if (form.expenseType === 'Direct Expense' && !form.reasonCategory) errs.reasonCategory = 'Select an expense category';
+      if (!form.reason.trim()) errs.reason = 'Reason is required';
+      if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Enter a positive amount';
     }
-    if (form.expenseType === 'Direct Expense' && !form.reasonCategory) errs.reasonCategory = 'Select an expense category';
-    if (!form.reason.trim()) errs.reason = 'Reason is required';
-    if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Enter a positive amount';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
   const handleSave = async () => {
+    if (saving) return; // Prevent duplicate clicks
     if (!validate()) return;
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
+      const ownerId = contacts.ownerIdMap?.[form.name] || contacts.ownerDetails?.[form.name]?.ownerId || null;
+      const vehicleId = contacts.vehicleIdMap?.[form.vehicleNumber] || null;
+
       const payload = {
-        expenseType: form.expenseType,
+        voucherType: form.voucherType,
+        ownerId,
+        ownerName: form.name || '',
+        vehicleId,
         vehicleNumber: form.vehicleNumber ? String(form.vehicleNumber).trim().toUpperCase() : undefined,
         date: new Date().toISOString(),
         amount: parseFloat(form.amount),
-        purpose: form.expenseType === 'Direct Expense' ? (form.reasonCategory || 'Direct Expense') : (form.reasonCategory || 'Others'),
+        purpose: form.voucherType === 'CREDIT'
+          ? 'Credit Voucher'
+          : (form.expenseType === 'Direct Expense' ? (form.reasonCategory || 'Direct Expense') : (form.reasonCategory || 'Others')),
         name: form.name || (form.expenseType === 'Indirect Expense' ? '' : 'Dipali Associates & Co.'),
         reason: form.reason,
+        expenseType: form.voucherType === 'CREDIT' ? 'Credit Voucher' : form.expenseType,
         panelSource: isSite ? 'SITE' : 'OFFICE',
       };
 
@@ -286,8 +370,10 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
         setSlipUrl(uploadRes.data.slip_url);
         setSavedVoucher(uploadRes.data.voucher);
       }
-      
-      if (createRes.data.cementSyncResult?.notFound) {
+
+      if (form.voucherType === 'CREDIT') {
+        setSnack({ type: 'success', message: `✅ Credit Voucher ${voucher.voucherNumber} saved successfully!` });
+      } else if (createRes.data.cementSyncResult?.notFound) {
         setSnack({ type: 'warning', message: '⚠️ No uploaded Cement Register invoice found for this vehicle. Voucher could not be linked.' });
       } else if (createRes.data.cementSyncResult?.success && !createRes.data.cementSyncResult?.skipped) {
         setSnack({ type: 'success', message: `✅ Voucher saved & ₹${form.amount} added to Cement Register (${createRes.data.cementSyncResult.field})!` });
@@ -323,7 +409,6 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
       window.URL.revokeObjectURL(url);
       setSnack({ type: 'success', message: '✅ Download started!' });
     } catch (err) {
-      // Fallback: direct link
       window.open(voucher.slip_url, '_blank');
     }
   };
@@ -349,15 +434,25 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
 
   const previewVoucher = {
     voucherNumber: savedVoucher?.voucherNumber || '—',
-    expenseType: form.expenseType,
-    vehicleNumber: form.expenseType === 'Indirect Expense' ? form.vehicleNumber || '' : undefined,
+    voucherType: form.voucherType,
+    ownerName: form.name || '',
+    expenseType: form.voucherType === 'CREDIT' ? 'Credit Voucher' : form.expenseType,
+    vehicleNumber: form.expenseType === 'Direct Expense' && form.voucherType !== 'CREDIT' ? undefined : (form.vehicleNumber || ''),
     date: new Date(),
-    name: form.expenseType === 'Indirect Expense' ? form.name || '' : 'Dipali Associates & Co.',
-    purpose: form.expenseType === 'Direct Expense' ? form.reasonCategory : 'Others',
+    name: form.name || (form.expenseType === 'Indirect Expense' ? '' : 'Dipali Associates & Co.'),
+    purpose: form.voucherType === 'CREDIT' ? 'Credit Voucher' : (form.expenseType === 'Direct Expense' ? form.reasonCategory : 'Others'),
     reason: form.reason,
     amount: parseFloat(form.amount) || 0,
     createdAt: new Date().toISOString(),
   };
+
+  // Filtered list for Previous & Download tabs
+  const displayedVouchers = vouchers.filter(v => {
+    if (typeFilter === 'ALL') return true;
+    if (typeFilter === 'CREDIT') return v.voucherType === 'CREDIT';
+    if (typeFilter === 'DEBIT') return v.voucherType !== 'CREDIT';
+    return true;
+  });
 
   return (
     <>
@@ -466,7 +561,15 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                 <Button variant="contained" onClick={() => {
                   setSlipStep(false);
                   setSavedVoucher(null);
-                  setForm({ expenseType: 'Indirect Expense', name: null, vehicleNumber: null, reasonCategory: null, reason: '', amount: '' });
+                  setForm({
+                    voucherType: 'DEBIT',
+                    expenseType: 'Indirect Expense',
+                    name: null,
+                    vehicleNumber: null,
+                    reasonCategory: null,
+                    reason: '',
+                    amount: ''
+                  });
                 }}
                   sx={{ borderRadius: '12px', fontWeight: 700, bgcolor: '#7b1fa2' }}>
                   Create Another
@@ -496,7 +599,34 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                     <Chip label="Live" size="small" sx={{ bgcolor: '#e8f5e9', color: '#2e7d32', fontWeight: 700 }} />
                   </Box>
 
-                  {/* Voucher No — shown after save */}
+                  {/* ── 1. TYPE OF VOUCHER (Required dropdown above Voucher No.) ── */}
+                  <Box sx={{ mb: 2.5 }}>
+                    <TextField
+                      select
+                      fullWidth
+                      label="TYPE OF VOUCHER *"
+                      value={form.voucherType}
+                      onChange={handleVoucherTypeChange}
+                      InputProps={{
+                        sx: {
+                          borderRadius: '14px',
+                          fontWeight: 800,
+                          fontSize: '15px',
+                          bgcolor: form.voucherType === 'CREDIT' ? '#ecfdf5' : '#f5f3ff',
+                          color: form.voucherType === 'CREDIT' ? '#047857' : '#6b21a8',
+                        }
+                      }}
+                    >
+                      <MenuItem value="DEBIT" sx={{ fontWeight: 700, color: '#4a148c' }}>
+                        1. DEBIT VOUCHER
+                      </MenuItem>
+                      <MenuItem value="CREDIT" sx={{ fontWeight: 700, color: '#047857' }}>
+                        2. CREDIT VOUCHER
+                      </MenuItem>
+                    </TextField>
+                  </Box>
+
+                  {/* Voucher No — auto-assigned */}
                   <Box sx={{ mb: 2.5, display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Typography variant="caption" color="text.secondary" fontWeight={700}>VOUCHER NO.</Typography>
                     <Chip
@@ -506,252 +636,464 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                     />
                   </Box>
 
-                  <Box display="flex" flexDirection="column" gap={2.5}>
-                    {/* Expense Type Toggle */}
-                    <Box>
-                      <TextField
-                        select
-                        fullWidth
-                        label="Expense Type *"
-                        value={form.expenseType}
-                        onChange={(e) => setForm(p => ({ ...p, expenseType: e.target.value, reasonCategory: null, reason: '' }))}
-                        InputProps={{ sx: { borderRadius: '14px' } }}
-                      >
-                        <MenuItem value="Indirect Expense">Indirect Expense (Trucks/Logistics)</MenuItem>
-                        <MenuItem value="Direct Expense">Direct Expense (Office/Misc)</MenuItem>
-                      </TextField>
-                    </Box>
+                  {/* ──────────────────────────────────────────────────────────
+                      CREDIT VOUCHER FORM:
+                      Exact order: 1. OWNER NAME, 2. VEHICLE NUMBER, 3. REASON, 4. AMOUNT
+                  ────────────────────────────────────────────────────────── */}
+                  {form.voucherType === 'CREDIT' ? (
+                    <Box display="flex" flexDirection="column" gap={2.5}>
+                      {/* 1. OWNER NAME (Dropdown from Party Master / Truck Contact) */}
+                      <Box>
+                        <Autocomplete
+                          fullWidth
+                          options={contacts.names}
+                          value={form.name}
+                          onChange={handleOwnerChange}
+                          loading={contactsLoading}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              label="OWNER NAME *"
+                              placeholder="Select registered owner"
+                              error={!!errors.name}
+                              helperText={errors.name || `${contacts.names.length} registered owner(s) available`}
+                              InputProps={{
+                                ...params.InputProps,
+                                sx: { borderRadius: '14px' },
+                                startAdornment: <PersonIcon sx={{ color: '#059669', mr: 0.5, fontSize: 20 }} />,
+                                endAdornment: (
+                                  <>
+                                    {contactsLoading && <CircularProgress size={16} />}
+                                    {params.InputProps.endAdornment}
+                                  </>
+                                ),
+                              }}
+                            />
+                          )}
+                          renderOption={(props, option) => (
+                            <li {...props} key={option}>
+                              <Box>
+                                <Typography variant="body2" fontWeight={700}>{option}</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {(contacts.ownerMap?.[option] || []).length} vehicle(s) registered
+                                </Typography>
+                              </Box>
+                            </li>
+                          )}
+                        />
+                      </Box>
 
-                    {/* Owner Name dropdown */}
-                    <Box>
-                      <Autocomplete
-                        fullWidth
-                        options={contacts.names}
-                        value={form.name}
-                        onChange={handleOwnerChange}
-                        loading={contactsLoading}
-                        renderInput={(params) => (
+                      {/* 2. VEHICLE NUMBER (Dropdown filtered by selected owner) */}
+                      <Box>
+                        <Autocomplete
+                          fullWidth
+                          options={filteredVehicles}
+                          value={form.vehicleNumber}
+                          onChange={handleVehicleChange}
+                          disabled={!form.name}
+                          loading={contactsLoading}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              label="VEHICLE NUMBER *"
+                              placeholder={form.name ? "Select vehicle" : "Select owner first"}
+                              error={!!errors.vehicleNumber}
+                              helperText={errors.vehicleNumber || (form.name ? `${filteredVehicles.length} vehicle(s) belonging to ${form.name}` : 'Select owner above to view vehicles')}
+                              InputProps={{
+                                ...params.InputProps,
+                                sx: { borderRadius: '14px' },
+                                startAdornment: <LocalShippingIcon sx={{ color: form.name ? '#059669' : '#aaa', mr: 0.5, fontSize: 20 }} />,
+                                endAdornment: (
+                                  <>
+                                    {contactsLoading && <CircularProgress size={16} />}
+                                    {params.InputProps.endAdornment}
+                                  </>
+                                ),
+                              }}
+                            />
+                          )}
+                          renderOption={(props, option) => (
+                            <li {...props} key={option}>
+                              <Typography variant="body2" fontWeight={700} sx={{ fontFamily: 'monospace' }}>{option}</Typography>
+                            </li>
+                          )}
+                        />
+                      </Box>
+
+                      {/* 3. REASON (Manual text input) */}
+                      <Box>
+                        <TextField
+                          fullWidth
+                          label="REASON *"
+                          placeholder="e.g. Advance refund / Party payment adjustment"
+                          value={form.reason}
+                          onChange={(e) => {
+                            setForm(p => ({ ...p, reason: e.target.value }));
+                            if (errors.reason) setErrors(p => ({ ...p, reason: '' }));
+                          }}
+                          error={!!errors.reason}
+                          helperText={errors.reason || "Enter free-form manual reason"}
+                          multiline
+                          rows={2}
+                          InputProps={{ sx: { borderRadius: '14px' } }}
+                        />
+                      </Box>
+
+                      {/* 4. AMOUNT (Manual numeric input) */}
+                      <Box display="flex" gap={2.5} flexDirection={{ xs: 'column', sm: 'row' }}>
+                        <Box flex={1}>
                           <TextField
-                            {...params}
-                            label={`Truck Owner Name ${form.expenseType === 'Indirect Expense' ? '*' : '(Optional)'}`}
-                            error={!!errors.name}
-                            helperText={errors.name || `${contacts.names.length} owners in DB`}
+                            fullWidth
+                            label="AMOUNT (₹) *"
+                            type="number"
+                            value={form.amount}
+                            onChange={(e) => {
+                              setForm(p => ({ ...p, amount: e.target.value }));
+                              if (errors.amount) setErrors(p => ({ ...p, amount: '' }));
+                            }}
+                            error={!!errors.amount}
+                            helperText={errors.amount || "Direct numeric input"}
                             InputProps={{
-                              ...params.InputProps,
+                              startAdornment: <InputAdornment position="start">₹</InputAdornment>,
                               sx: { borderRadius: '14px' },
-                              startAdornment: <PersonIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                              endAdornment: (
-                                <>
-                                  {contactsLoading && <CircularProgress size={16} />}
-                                  {params.InputProps.endAdornment}
-                                </>
-                              ),
                             }}
                           />
-                        )}
-                        renderOption={(props, option) => (
-                          <li {...props} key={option}>
-                            <Box>
-                              <Typography variant="body2" fontWeight={700}>{option}</Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {(contacts.ownerMap?.[option] || []).length} vehicle(s)
+                        </Box>
+
+                        {form.amount && parseFloat(form.amount) > 0 && (
+                          <Box flex={1}>
+                            <Box sx={{ p: 1.5, borderRadius: '14px', bgcolor: '#ecfdf5', border: '1px solid rgba(5,150,105,0.2)', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '56px' }}>
+                              <Typography variant="caption" color="text.secondary" fontWeight={700}>In Words</Typography>
+                              <Typography variant="body2" fontWeight={700} color="#047857" sx={{ fontStyle: 'italic', wordBreak: 'break-word', lineHeight: 1.2 }}>
+                                {amountInWords(parseFloat(form.amount))}
                               </Typography>
                             </Box>
-                          </li>
+                          </Box>
                         )}
-                      />
+                      </Box>
                     </Box>
-
-                    {/* Vehicle Number dropdown — filtered by owner */}
-                    <Box>
-                      <Autocomplete
-                        fullWidth
-                        options={filteredVehicles}
-                        value={form.vehicleNumber}
-                        onChange={handleVehicleChange}
-                        loading={contactsLoading}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
-                            label={`Vehicle Number ${form.expenseType === 'Indirect Expense' ? '*' : '(Optional)'}`}
-                            error={!!errors.vehicleNumber}
-                            helperText={errors.vehicleNumber || (form.name ? `${filteredVehicles.length} vehicle(s) for this owner` : 'All vehicles')}
-                            InputProps={{
-                              ...params.InputProps,
-                              sx: { borderRadius: '14px' },
-                              startAdornment: <LocalShippingIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                              endAdornment: (
-                                <>
-                                  {contactsLoading && <CircularProgress size={16} />}
-                                  {params.InputProps.endAdornment}
-                                </>
-                              ),
-                            }}
-                          />
-                        )}
-                        renderOption={(props, option) => (
-                          <li {...props} key={option}>
-                            <Typography variant="body2" fontWeight={700} sx={{ fontFamily: 'monospace' }}>{option}</Typography>
-                          </li>
-                        )}
-                      />
-                    </Box>
-
-                    {/* Reason Category Dropdown & Reason Input */}
-                    <Box display="flex" flexDirection="column" gap={2}>
-                      <Autocomplete
-                        fullWidth
-                        options={form.expenseType === 'Direct Expense'
-                          ? ['Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Others']
-                          : ['Service Road Maintanance', 'Service/Maintanance', 'Extra wages', 'Extra(Additional) Toll', 'Others']}
-                        value={form.reasonCategory}
-                        onChange={(_, val) => {
-                          setForm(p => ({
-                            ...p,
-                            reasonCategory: val,
-                            reason: val === 'Others' ? '' : (val || '')
-                          }));
-                          if (errors.reason) setErrors(p => ({ ...p, reason: '' }));
-                        }}
-                        renderInput={(params) => (
-                          <TextField {...params} label="Reason Category *" InputProps={{ ...params.InputProps, sx: { borderRadius: '14px' } }} />
-                        )}
-                      />
-                      <TextField
-                        fullWidth label={form.reasonCategory === 'Others' ? "Specify Custom Reason *" : "Reason"}
-                        value={form.reason}
-                        onChange={(e) => {
-                          setForm(p => ({ ...p, reason: e.target.value }));
-                          if (errors.reason) setErrors(p => ({ ...p, reason: '' }));
-                        }}
-                        error={!!errors.reason}
-                        helperText={errors.reason || (form.reasonCategory === 'Others' ? 'Describe the purpose of this payment' : 'Auto-filled based on category')}
-                        multiline rows={2}
-                        disabled={form.reasonCategory !== 'Others'}
-                        InputProps={{
-                          sx: {
-                            borderRadius: '14px',
-                            bgcolor: form.reasonCategory !== 'Others' ? '#f5f5f5' : 'transparent',
-                            color: form.reasonCategory !== 'Others' ? '#777' : 'inherit'
-                          }
-                        }}
-                      />
-                    </Box>
-
-                    {/* Amount & Words */}
-                    <Box display="flex" gap={2.5} flexDirection={{ xs: 'column', sm: 'row' }}>
-                      <Box flex={1}>
+                  ) : (
+                    /* ──────────────────────────────────────────────────────────
+                        DEBIT VOUCHER FORM (Existing flow preserved)
+                    ────────────────────────────────────────────────────────── */
+                    <Box display="flex" flexDirection="column" gap={2.5}>
+                      {/* Expense Type Toggle */}
+                      <Box>
                         <TextField
-                          fullWidth label="Amount (₹) *" type="number" value={form.amount}
-                          onChange={(e) => { setForm(p => ({ ...p, amount: e.target.value })); if (errors.amount) setErrors(p => ({ ...p, amount: '' })); }}
-                          error={!!errors.amount} helperText={errors.amount}
+                          select
+                          fullWidth
+                          label="Expense Type *"
+                          value={form.expenseType}
+                          onChange={(e) => setForm(p => ({ ...p, expenseType: e.target.value, reasonCategory: null, reason: '' }))}
+                          InputProps={{ sx: { borderRadius: '14px' } }}
+                        >
+                          <MenuItem value="Indirect Expense">Indirect Expense (Trucks/Logistics)</MenuItem>
+                          <MenuItem value="Direct Expense">Direct Expense (Office/Misc)</MenuItem>
+                        </TextField>
+                      </Box>
+
+                      {/* Owner Name dropdown */}
+                      <Box>
+                        <Autocomplete
+                          fullWidth
+                          options={contacts.names}
+                          value={form.name}
+                          onChange={handleOwnerChange}
+                          loading={contactsLoading}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              label={`Truck Owner Name ${form.expenseType === 'Indirect Expense' ? '*' : '(Optional)'}`}
+                              error={!!errors.name}
+                              helperText={errors.name || `${contacts.names.length} owners in DB`}
+                              InputProps={{
+                                ...params.InputProps,
+                                sx: { borderRadius: '14px' },
+                                startAdornment: <PersonIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
+                                endAdornment: (
+                                  <>
+                                    {contactsLoading && <CircularProgress size={16} />}
+                                    {params.InputProps.endAdornment}
+                                  </>
+                                ),
+                              }}
+                            />
+                          )}
+                          renderOption={(props, option) => (
+                            <li {...props} key={option}>
+                              <Box>
+                                <Typography variant="body2" fontWeight={700}>{option}</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {(contacts.ownerMap?.[option] || []).length} vehicle(s)
+                                </Typography>
+                              </Box>
+                            </li>
+                          )}
+                        />
+                      </Box>
+
+                      {/* Vehicle Number dropdown — filtered by owner */}
+                      <Box>
+                        <Autocomplete
+                          fullWidth
+                          options={filteredVehicles}
+                          value={form.vehicleNumber}
+                          onChange={handleVehicleChange}
+                          loading={contactsLoading}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              label={`Vehicle Number ${form.expenseType === 'Indirect Expense' ? '*' : '(Optional)'}`}
+                              error={!!errors.vehicleNumber}
+                              helperText={errors.vehicleNumber || (form.name ? `${filteredVehicles.length} vehicle(s) for this owner` : 'All vehicles')}
+                              InputProps={{
+                                ...params.InputProps,
+                                sx: { borderRadius: '14px' },
+                                startAdornment: <LocalShippingIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
+                                endAdornment: (
+                                  <>
+                                    {contactsLoading && <CircularProgress size={16} />}
+                                    {params.InputProps.endAdornment}
+                                  </>
+                                ),
+                              }}
+                            />
+                          )}
+                          renderOption={(props, option) => (
+                            <li {...props} key={option}>
+                              <Typography variant="body2" fontWeight={700} sx={{ fontFamily: 'monospace' }}>{option}</Typography>
+                            </li>
+                          )}
+                        />
+                      </Box>
+
+                      {/* Reason Category Dropdown & Reason Input */}
+                      <Box display="flex" flexDirection="column" gap={2}>
+                        <Autocomplete
+                          fullWidth
+                          options={form.expenseType === 'Direct Expense'
+                            ? ['Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Others']
+                            : ['Service Road Maintanance', 'Service/Maintanance', 'Extra wages', 'Extra(Additional) Toll', 'Others']}
+                          value={form.reasonCategory}
+                          onChange={(_, val) => {
+                            setForm(p => ({
+                              ...p,
+                              reasonCategory: val,
+                              reason: val === 'Others' ? '' : (val || '')
+                            }));
+                            if (errors.reason) setErrors(p => ({ ...p, reason: '' }));
+                          }}
+                          renderInput={(params) => (
+                            <TextField {...params} label="Reason Category *" InputProps={{ ...params.InputProps, sx: { borderRadius: '14px' } }} />
+                          )}
+                        />
+                        <TextField
+                          fullWidth label={form.reasonCategory === 'Others' ? "Specify Custom Reason *" : "Reason"}
+                          value={form.reason}
+                          onChange={(e) => {
+                            setForm(p => ({ ...p, reason: e.target.value }));
+                            if (errors.reason) setErrors(p => ({ ...p, reason: '' }));
+                          }}
+                          error={!!errors.reason}
+                          helperText={errors.reason || (form.reasonCategory === 'Others' ? 'Describe the purpose of this payment' : 'Auto-filled based on category')}
+                          multiline rows={2}
+                          disabled={form.reasonCategory !== 'Others'}
                           InputProps={{
-                            startAdornment: <InputAdornment position="start">₹</InputAdornment>,
-                            sx: { borderRadius: '14px' },
+                            sx: {
+                              borderRadius: '14px',
+                              bgcolor: form.reasonCategory !== 'Others' ? '#f5f5f5' : 'transparent',
+                              color: form.reasonCategory !== 'Others' ? '#777' : 'inherit'
+                            }
                           }}
                         />
                       </Box>
 
-                      {/* Amount in words live preview */}
-                      {form.amount && parseFloat(form.amount) > 0 && (
+                      {/* Amount & Words */}
+                      <Box display="flex" gap={2.5} flexDirection={{ xs: 'column', sm: 'row' }}>
                         <Box flex={1}>
-                          <Box sx={{ p: 1.5, borderRadius: '14px', bgcolor: '#f3e5f5', border: '1px solid rgba(123,31,162,0.15)', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '56px' }}>
-                            <Typography variant="caption" color="text.secondary" fontWeight={700}>In Words</Typography>
-                            <Typography variant="body2" fontWeight={700} color="#7b1fa2" sx={{ fontStyle: 'italic', wordBreak: 'break-word', lineHeight: 1.2 }}>
-                              {amountInWords(parseFloat(form.amount))}
-                            </Typography>
-                          </Box>
+                          <TextField
+                            fullWidth label="Amount (₹) *" type="number" value={form.amount}
+                            onChange={(e) => { setForm(p => ({ ...p, amount: e.target.value })); if (errors.amount) setErrors(p => ({ ...p, amount: '' })); }}
+                            error={!!errors.amount} helperText={errors.amount}
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">₹</InputAdornment>,
+                              sx: { borderRadius: '14px' },
+                            }}
+                          />
                         </Box>
-                      )}
+
+                        {form.amount && parseFloat(form.amount) > 0 && (
+                          <Box flex={1}>
+                            <Box sx={{ p: 1.5, borderRadius: '14px', bgcolor: '#f3e5f5', border: '1px solid rgba(123,31,162,0.15)', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '56px' }}>
+                              <Typography variant="caption" color="text.secondary" fontWeight={700}>In Words</Typography>
+                              <Typography variant="body2" fontWeight={700} color="#7b1fa2" sx={{ fontStyle: 'italic', wordBreak: 'break-word', lineHeight: 1.2 }}>
+                                {amountInWords(parseFloat(form.amount))}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        )}
+                      </Box>
                     </Box>
-                  </Box>
+                  )}
 
                   <Button
                     fullWidth variant="contained" size="large" onClick={handleSave}
+                    disabled={saving}
                     sx={{
                       mt: 3.5, py: 1.8, borderRadius: '16px', fontWeight: 900, fontSize: '1rem',
-                      background: 'linear-gradient(45deg, #4a148c, #7b1fa2)',
-                      boxShadow: '0 10px 30px rgba(123,31,162,0.3)',
-                      '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 14px 36px rgba(123,31,162,0.4)' },
+                      background: form.voucherType === 'CREDIT'
+                        ? 'linear-gradient(45deg, #059669, #10b981)'
+                        : 'linear-gradient(45deg, #4a148c, #7b1fa2)',
+                      boxShadow: form.voucherType === 'CREDIT'
+                        ? '0 10px 30px rgba(5,150,105,0.3)'
+                        : '0 10px 30px rgba(123,31,162,0.3)',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: form.voucherType === 'CREDIT'
+                          ? '0 14px 36px rgba(5,150,105,0.4)'
+                          : '0 14px 36px rgba(123,31,162,0.4)'
+                      },
                       transition: 'all 0.2s',
                     }}
                   >
-                    Generate Voucher Slip
+                    {saving ? 'Generating...' : `Generate ${form.voucherType === 'CREDIT' ? 'Credit' : 'Debit'} Voucher Slip`}
                   </Button>
                 </Box>
               </TabPanel>
 
               {/* ──────────────────────────────────────────────────────────
-                  TAB 1 — Previous Vouchers
+                  TAB 1 — Previous Vouchers (with ALL / DEBIT / CREDIT filter)
               ────────────────────────────────────────────────────────── */}
               <TabPanel value={tab} index={1}>
                 <Box sx={{ p: 2 }}>
+                  {/* Type Filter Controls */}
+                  <Box display="flex" alignItems="center" justifyContent="space-between" mb={2} flexWrap="wrap" gap={1}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <FilterListIcon sx={{ fontSize: 18, color: '#7b1fa2' }} />
+                      <Typography variant="caption" fontWeight={800} color="text.secondary" textTransform="uppercase">Filter:</Typography>
+                    </Box>
+                    <Stack direction="row" spacing={1}>
+                      {['ALL', 'DEBIT', 'CREDIT'].map((t) => (
+                        <Chip
+                          key={t}
+                          label={t === 'ALL' ? `ALL (${vouchers.length})` : t === 'DEBIT' ? `DEBIT (${vouchers.filter(v => v.voucherType !== 'CREDIT').length})` : `CREDIT (${vouchers.filter(v => v.voucherType === 'CREDIT').length})`}
+                          size="small"
+                          clickable
+                          onClick={() => setTypeFilter(t)}
+                          sx={{
+                            fontWeight: 800,
+                            borderRadius: '8px',
+                            bgcolor: typeFilter === t
+                              ? (t === 'CREDIT' ? '#059669' : t === 'DEBIT' ? '#1a237e' : '#7b1fa2')
+                              : '#f5f5f5',
+                            color: typeFilter === t ? '#fff' : '#555',
+                            '&:hover': {
+                              bgcolor: typeFilter === t
+                                ? (t === 'CREDIT' ? '#047857' : t === 'DEBIT' ? '#0d1642' : '#6a1b9a')
+                                : '#e0e0e0'
+                            }
+                          }}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
+
                   {vouchersLoading ? (
                     <Box display="flex" justifyContent="center" py={6}><CircularProgress sx={{ color: '#7b1fa2' }} /></Box>
-                  ) : vouchers.length === 0 ? (
+                  ) : displayedVouchers.length === 0 ? (
                     <Box sx={{ textAlign: 'center', py: 8, opacity: 0.5 }}>
                       <ReceiptLongIcon sx={{ fontSize: 48, color: '#7b1fa2', mb: 1 }} />
-                      <Typography color="text.secondary">No vouchers created yet</Typography>
+                      <Typography color="text.secondary">No {typeFilter !== 'ALL' ? `${typeFilter} ` : ''}vouchers found</Typography>
                     </Box>
                   ) : (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, maxHeight: '55vh', overflowY: 'auto', pr: 0.5 }}>
-                      {vouchers.map((v) => (
-                        <Box key={v._id} sx={{
-                          p: 2, borderRadius: '14px',
-                          border: '1.5px solid #ede7f6',
-                          bgcolor: '#fdf8ff',
-                          '&:hover': { bgcolor: '#f3e5f5', borderColor: '#ce93d8' },
-                          transition: 'all 0.15s',
-                        }}>
-                          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={0.5}>
-                            <Box flex={1} minWidth={0}>
-                              <Typography sx={{ fontFamily: 'monospace', fontWeight: 900, color: '#7b1fa2', fontSize: '13px' }}>
-                                {v.voucherNumber}
-                              </Typography>
-                              <Box display="flex" gap={1.5} mt={0.25}>
-                                {v.name && (
-                                  <Box display="flex" alignItems="center" gap={0.4}>
-                                    <PersonIcon sx={{ fontSize: 13, color: '#888' }} />
-                                    <Typography variant="caption" fontWeight={700} color="#333">{v.name}</Typography>
-                                  </Box>
-                                )}
-                                <Box display="flex" alignItems="center" gap={0.4}>
-                                  <LocalShippingIcon sx={{ fontSize: 13, color: '#888' }} />
-                                  <Typography variant="caption" sx={{ fontFamily: 'monospace' }} color="#555">{v.vehicleNumber}</Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, maxHeight: '52vh', overflowY: 'auto', pr: 0.5 }}>
+                      {displayedVouchers.map((v) => {
+                        const isVoucherCredit = v.voucherType === 'CREDIT';
+                        return (
+                          <Box key={v._id} sx={{
+                            p: 2, borderRadius: '14px',
+                            border: `1.5px solid ${isVoucherCredit ? '#a7f3d0' : '#ede7f6'}`,
+                            bgcolor: isVoucherCredit ? '#f0fdf4' : '#fdf8ff',
+                            '&:hover': {
+                              bgcolor: isVoucherCredit ? '#ecfdf5' : '#f3e5f5',
+                              borderColor: isVoucherCredit ? '#34d399' : '#ce93d8'
+                            },
+                            transition: 'all 0.15s',
+                          }}>
+                            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={0.5}>
+                              <Box flex={1} minWidth={0}>
+                                <Box display="flex" alignItems="center" gap={1}>
+                                  <Typography sx={{ fontFamily: 'monospace', fontWeight: 900, color: isVoucherCredit ? '#047857' : '#7b1fa2', fontSize: '13px' }}>
+                                    {v.voucherNumber}
+                                  </Typography>
+                                  <Chip
+                                    label={isVoucherCredit ? "CREDIT VOUCHER" : "DEBIT VOUCHER"}
+                                    size="small"
+                                    sx={{
+                                      height: 20,
+                                      fontSize: '10px',
+                                      fontWeight: 800,
+                                      bgcolor: isVoucherCredit ? '#d1fae5' : '#ede7f6',
+                                      color: isVoucherCredit ? '#065f46' : '#4a148c',
+                                      borderRadius: '6px'
+                                    }}
+                                  />
                                 </Box>
+                                <Box display="flex" gap={1.5} mt={0.5} flexWrap="wrap">
+                                  {(v.ownerName || v.name) && (
+                                    <Box display="flex" alignItems="center" gap={0.4}>
+                                      <PersonIcon sx={{ fontSize: 13, color: '#888' }} />
+                                      <Typography variant="caption" fontWeight={700} color="#333">{v.ownerName || v.name}</Typography>
+                                    </Box>
+                                  )}
+                                  {v.vehicleNumber && (
+                                    <Box display="flex" alignItems="center" gap={0.4}>
+                                      <LocalShippingIcon sx={{ fontSize: 13, color: '#888' }} />
+                                      <Typography variant="caption" sx={{ fontFamily: 'monospace' }} color="#555">{v.vehicleNumber}</Typography>
+                                    </Box>
+                                  )}
+                                </Box>
+                                {v.reason && (
+                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <strong>Reason:</strong> {v.reason}
+                                  </Typography>
+                                )}
                               </Box>
-                              {v.reason && (
-                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {v.reason}
+                              <Box textAlign="right" ml={1} flexShrink={0}>
+                                <Typography variant="body2" fontWeight={900} color={isVoucherCredit ? '#047857' : '#1a237e'}>
+                                  ₹{Number(v.amount).toLocaleString('en-IN')}
                                 </Typography>
-                              )}
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                  {fmtDate(v.date || v.createdAt)}
+                                </Typography>
+                              </Box>
                             </Box>
-                            <Box textAlign="right" ml={1} flexShrink={0}>
-                              <Typography variant="body2" fontWeight={900} color="#1a237e">
-                                ₹{Number(v.amount).toLocaleString('en-IN')}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                                {fmtDate(v.date || v.createdAt)}
-                              </Typography>
-                            </Box>
-                          </Box>
 
-                          {v.slip_url && (
-                            <Box display="flex" gap={1} mt={1}>
-                              <Button size="small" variant="outlined" startIcon={<VisibilityIcon sx={{ fontSize: '13px !important' }} />}
-                                component="a" href={v.slip_url} target="_blank"
-                                sx={{ borderRadius: '8px', fontSize: '11px', fontWeight: 700, flex: 1, borderColor: '#7b1fa2', color: '#7b1fa2', py: 0.4 }}>
-                                View Slip
-                              </Button>
-                              <Button size="small" variant="contained" startIcon={<DownloadIcon sx={{ fontSize: '13px !important' }} />}
-                                onClick={() => handleDownloadSlip(v)}
-                                sx={{ borderRadius: '8px', fontSize: '11px', fontWeight: 700, flex: 1, bgcolor: '#7b1fa2', py: 0.4, '&:hover': { bgcolor: '#6a1b9a' } }}>
-                                Download
-                              </Button>
-                            </Box>
-                          )}
-                        </Box>
-                      ))}
+                            {v.slip_url && (
+                              <Box display="flex" gap={1} mt={1}>
+                                <Button size="small" variant="outlined" startIcon={<VisibilityIcon sx={{ fontSize: '13px !important' }} />}
+                                  component="a" href={v.slip_url} target="_blank"
+                                  sx={{
+                                    borderRadius: '8px', fontSize: '11px', fontWeight: 700, flex: 1,
+                                    borderColor: isVoucherCredit ? '#059669' : '#7b1fa2',
+                                    color: isVoucherCredit ? '#059669' : '#7b1fa2', py: 0.4
+                                  }}>
+                                  View Slip
+                                </Button>
+                                <Button size="small" variant="contained" startIcon={<DownloadIcon sx={{ fontSize: '13px !important' }} />}
+                                  onClick={() => handleDownloadSlip(v)}
+                                  sx={{
+                                    borderRadius: '8px', fontSize: '11px', fontWeight: 700, flex: 1,
+                                    bgcolor: isVoucherCredit ? '#059669' : '#7b1fa2', py: 0.4,
+                                    '&:hover': { bgcolor: isVoucherCredit ? '#047857' : '#6a1b9a' }
+                                  }}>
+                                  Download
+                                </Button>
+                              </Box>
+                            )}
+                          </Box>
+                        );
+                      })}
                     </Box>
                   )}
                 </Box>
@@ -762,66 +1104,118 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
               ────────────────────────────────────────────────────────── */}
               <TabPanel value={tab} index={2}>
                 <Box sx={{ p: 2 }}>
-                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'block', mb: 1.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                    Select a voucher to download its slip
-                  </Typography>
+                  <Box display="flex" alignItems="center" justifyContent="space-between" mb={1.5} flexWrap="wrap" gap={1}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Select a voucher to download its slip
+                    </Typography>
+                    <Stack direction="row" spacing={1}>
+                      {['ALL', 'DEBIT', 'CREDIT'].map((t) => (
+                        <Chip
+                          key={t}
+                          label={t}
+                          size="small"
+                          clickable
+                          onClick={() => setTypeFilter(t)}
+                          sx={{
+                            fontWeight: 800,
+                            borderRadius: '8px',
+                            height: 24,
+                            fontSize: '11px',
+                            bgcolor: typeFilter === t ? '#7b1fa2' : '#f5f5f5',
+                            color: typeFilter === t ? '#fff' : '#555',
+                          }}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
+
                   {vouchersLoading ? (
                     <Box display="flex" justifyContent="center" py={6}><CircularProgress sx={{ color: '#7b1fa2' }} /></Box>
                   ) : (
-                    <Box sx={{ maxHeight: '48vh', overflowY: 'auto' }}>
+                    <Box sx={{ maxHeight: '46vh', overflowY: 'auto' }}>
                       <List disablePadding>
-                        {vouchers.map((v, i) => (
-                          <React.Fragment key={v._id}>
-                            <ListItemButton
-                              selected={selectedVoucher?._id === v._id}
-                              onClick={() => setSelectedVoucher(v)}
-                              sx={{
-                                borderRadius: '12px', mb: 0.5,
-                                '&.Mui-selected': { bgcolor: '#f3e5f5', '&:hover': { bgcolor: '#ede7f6' } },
-                                border: selectedVoucher?._id === v._id ? '1.5px solid #7b1fa2' : '1.5px solid transparent',
-                              }}
-                            >
-                              <ListItemText
-                                primary={
-                                  <Box display="flex" alignItems="center" gap={1}>
-                                    <Typography sx={{ fontFamily: 'monospace', fontWeight: 900, color: '#7b1fa2', fontSize: '13px' }}>{v.voucherNumber}</Typography>
-                                    {v.name && <Chip label={v.name} size="small" sx={{ height: 18, fontSize: '10px', fontWeight: 700 }} />}
-                                    <Chip label={v.vehicleNumber} size="small" variant="outlined" sx={{ height: 18, fontSize: '10px', fontFamily: 'monospace', fontWeight: 700 }} />
-                                  </Box>
-                                }
-                                secondary={
-                                  <Box display="flex" justifyContent="space-between">
-                                    <Typography variant="caption" color="text.secondary">{v.reason}</Typography>
-                                    <Typography variant="caption" fontWeight={900} color="#1a237e">₹{Number(v.amount).toLocaleString('en-IN')}</Typography>
-                                  </Box>
-                                }
-                              />
-                              {v.slip_url && <CheckCircleIcon sx={{ color: '#4caf50', fontSize: 18, ml: 1, flexShrink: 0 }} />}
-                            </ListItemButton>
-                            {i < vouchers.length - 1 && <Divider sx={{ my: 0.2 }} />}
-                          </React.Fragment>
-                        ))}
+                        {displayedVouchers.map((v, i) => {
+                          const isVoucherCredit = v.voucherType === 'CREDIT';
+                          return (
+                            <React.Fragment key={v._id}>
+                              <ListItemButton
+                                selected={selectedVoucher?._id === v._id}
+                                onClick={() => setSelectedVoucher(v)}
+                                sx={{
+                                  borderRadius: '12px', mb: 0.5,
+                                  '&.Mui-selected': { bgcolor: isVoucherCredit ? '#ecfdf5' : '#f3e5f5', '&:hover': { bgcolor: isVoucherCredit ? '#d1fae5' : '#ede7f6' } },
+                                  border: selectedVoucher?._id === v._id
+                                    ? `1.5px solid ${isVoucherCredit ? '#059669' : '#7b1fa2'}`
+                                    : '1.5px solid transparent',
+                                }}
+                              >
+                                <ListItemText
+                                  primary={
+                                    <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+                                      <Typography sx={{ fontFamily: 'monospace', fontWeight: 900, color: isVoucherCredit ? '#047857' : '#7b1fa2', fontSize: '13px' }}>
+                                        {v.voucherNumber}
+                                      </Typography>
+                                      <Chip
+                                        label={isVoucherCredit ? "CREDIT" : "DEBIT"}
+                                        size="small"
+                                        sx={{
+                                          height: 18, fontSize: '9px', fontWeight: 900,
+                                          bgcolor: isVoucherCredit ? '#d1fae5' : '#ede7f6',
+                                          color: isVoucherCredit ? '#065f46' : '#4a148c',
+                                        }}
+                                      />
+                                      {(v.ownerName || v.name) && <Chip label={v.ownerName || v.name} size="small" sx={{ height: 18, fontSize: '10px', fontWeight: 700 }} />}
+                                      {v.vehicleNumber && <Chip label={v.vehicleNumber} size="small" variant="outlined" sx={{ height: 18, fontSize: '10px', fontFamily: 'monospace', fontWeight: 700 }} />}
+                                    </Box>
+                                  }
+                                  secondary={
+                                    <Box display="flex" justifyContent="space-between" mt={0.5}>
+                                      <Typography variant="caption" color="text.secondary">{v.reason || v.purpose}</Typography>
+                                      <Typography variant="caption" fontWeight={900} color={isVoucherCredit ? '#047857' : '#1a237e'}>
+                                        ₹{Number(v.amount).toLocaleString('en-IN')}
+                                      </Typography>
+                                    </Box>
+                                  }
+                                />
+                                {v.slip_url && <CheckCircleIcon sx={{ color: '#4caf50', fontSize: 18, ml: 1, flexShrink: 0 }} />}
+                              </ListItemButton>
+                              {i < displayedVouchers.length - 1 && <Divider sx={{ my: 0.2 }} />}
+                            </React.Fragment>
+                          );
+                        })}
                       </List>
                     </Box>
                   )}
 
                   {/* Download actions for selected voucher */}
                   {selectedVoucher && (
-                    <Box sx={{ mt: 2, p: 2, borderRadius: '14px', bgcolor: '#f3e5f5', border: '1px solid #ce93d8' }}>
-                      <Typography variant="body2" fontWeight={700} color="#4a148c" mb={1}>
-                        {selectedVoucher.voucherNumber} — {selectedVoucher.name} — {selectedVoucher.vehicleNumber}
+                    <Box sx={{
+                      mt: 2, p: 2, borderRadius: '14px',
+                      bgcolor: selectedVoucher.voucherType === 'CREDIT' ? '#ecfdf5' : '#f3e5f5',
+                      border: `1px solid ${selectedVoucher.voucherType === 'CREDIT' ? '#6ee7b7' : '#ce93d8'}`
+                    }}>
+                      <Typography variant="body2" fontWeight={700} color={selectedVoucher.voucherType === 'CREDIT' ? '#065f46' : '#4a148c'} mb={1}>
+                        {selectedVoucher.voucherNumber} ({selectedVoucher.voucherType === 'CREDIT' ? 'CREDIT VOUCHER' : 'DEBIT VOUCHER'}) — {selectedVoucher.ownerName || selectedVoucher.name} — {selectedVoucher.vehicleNumber}
                       </Typography>
                       <Box display="flex" gap={1.5}>
                         {selectedVoucher.slip_url ? (
                           <>
                             <Button variant="outlined" startIcon={<VisibilityIcon />}
                               component="a" href={selectedVoucher.slip_url} target="_blank" fullWidth
-                              sx={{ borderRadius: '12px', fontWeight: 700, borderColor: '#7b1fa2', color: '#7b1fa2' }}>
+                              sx={{
+                                borderRadius: '12px', fontWeight: 700,
+                                borderColor: selectedVoucher.voucherType === 'CREDIT' ? '#059669' : '#7b1fa2',
+                                color: selectedVoucher.voucherType === 'CREDIT' ? '#059669' : '#7b1fa2'
+                              }}>
                               View Slip
                             </Button>
                             <Button variant="contained" startIcon={<DownloadIcon />}
                               onClick={() => handleDownloadSlip(selectedVoucher)} fullWidth
-                              sx={{ borderRadius: '12px', fontWeight: 700, bgcolor: '#7b1fa2', '&:hover': { bgcolor: '#6a1b9a' } }}>
+                              sx={{
+                                borderRadius: '12px', fontWeight: 700,
+                                bgcolor: selectedVoucher.voucherType === 'CREDIT' ? '#059669' : '#7b1fa2',
+                                '&:hover': { bgcolor: selectedVoucher.voucherType === 'CREDIT' ? '#047857' : '#6a1b9a' }
+                              }}>
                               Download PDF
                             </Button>
                           </>
@@ -848,8 +1242,8 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
       {/* Saving overlay */}
       <Backdrop open={saving} sx={{ color: '#fff', zIndex: 9999, backdropFilter: 'blur(8px)', flexDirection: 'column', gap: 2 }}>
         <CircularProgress color="inherit" size={56} thickness={4} />
-        <Typography variant="h6" fontWeight={700}>Generating & Uploading Voucher Slip...</Typography>
-        <Typography variant="caption" sx={{ opacity: 0.7 }}>Saving to MongoDB & AWS S3</Typography>
+        <Typography variant="h6" fontWeight={700}>Generating &amp; Uploading Voucher Slip...</Typography>
+        <Typography variant="caption" sx={{ opacity: 0.7 }}>Saving to MongoDB &amp; AWS S3</Typography>
       </Backdrop>
 
       <Snackbar open={!!snack} autoHideDuration={5000} onClose={() => setSnack(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>

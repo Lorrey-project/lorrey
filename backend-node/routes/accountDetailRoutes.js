@@ -10,101 +10,208 @@ const remittanceUpload = require('../middleware/remittanceUpload');
 const { allocatePaymentToBills, detectPaymentRow } = require('../utils/paymentMapper');
 
 // ── Auto-sync Bank Book Freight Payments -> Party Payment Details ──────
-const syncPartyPayments = async (affectedDocs) => {
-  const monthNameToNumber = (name) => {
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    return months.indexOf(name) + 1;
-  };
+const TruckContact = require('../models/TruckContact');
 
-  const makeSpaceAgnosticRegex = (str) => {
-    if (!str) return /^$/;
-    const stripped = str.replace(/[^a-zA-Z0-9]/g, '');
-    const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
-    return new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
-  };
+// ── Robust date parser for Bank Book sync ────────────────────────────────
+const parseDateForSync = (val) => {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  const str = String(val).trim();
+  const ddmmyyyy = str.match(/^(\d{1,2})[\-\/](\d{1,2})[\-\/](\d{4})/);
+  if (ddmmyyyy) {
+    const d = parseInt(ddmmyyyy[1], 10), m = parseInt(ddmmyyyy[2], 10), y = parseInt(ddmmyyyy[3], 10);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) return new Date(y, m - 1, d);
+  }
+  const yyyymmdd = str.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})/);
+  if (yyyymmdd) {
+    const y = parseInt(yyyymmdd[1], 10), m = parseInt(yyyymmdd[2], 10), d = parseInt(yyyymmdd[3], 10);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) return new Date(y, m - 1, d);
+  }
+  const iso = new Date(str);
+  if (!isNaN(iso.getTime())) return iso;
+  return null;
+};
 
-  const getCombo = (doc) => {
-    const ledger = (doc.ledgerName || '').trim().toLowerCase();
-    if (ledger !== 'freight payment') return null; // STRICT REQUIREMENT 7: ONLY Freight Payment!
-    const v = (doc.vehicle || '').trim();
-    const owner = (doc.names || '').trim();
-    if (!v || !owner) return null; // STRICT REQUIREMENT 2 & 3: MUST match Vehicle AND Owner Name!
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-    const docMonthStr = (doc.month || doc.selectedMonth || '').trim();
-    const m = monthNameToNumber(docMonthStr);
-    if (m < 1 || m > 12) return null;
+const getDocMonthYear = (doc) => {
+  let m = null;
+  let y = null;
 
-    let fyStart = parseInt(doc.selectedYear, 10);
-    if (isNaN(fyStart)) {
-      const tDate = doc.transactionDate || doc['Transaction Date'];
-      if (tDate) {
-        const parts = String(tDate).split(/[-\/\.]/);
-        if (parts.length === 3) {
-          let yr = parseInt(parts[0], 10);
-          if (isNaN(yr) || yr < 1000) yr = parseInt(parts[2], 10);
-          if (!isNaN(yr)) {
-            if (yr < 100) yr += 2000;
-            fyStart = (m >= 4) ? yr : yr - 1;
-          }
-        }
-      }
-      if (isNaN(fyStart)) {
-        const nowY = new Date().getFullYear();
-        fyStart = (m >= 4) ? nowY : nowY - 1;
+  if (doc.month !== undefined && doc.month !== null && doc.month !== '') {
+    if (typeof doc.month === 'number') {
+      m = doc.month;
+    } else {
+      const idx = monthNames.findIndex(name => name.toLowerCase() === String(doc.month).trim().toLowerCase());
+      if (idx !== -1) m = idx + 1;
+      else {
+        const parsed = parseInt(doc.month, 10);
+        if (!isNaN(parsed) && parsed >= 1 && parsed <= 12) m = parsed;
       }
     }
+  }
 
-    const y = (m >= 4) ? fyStart : fyStart + 1;
-    return { vehicleNo: v, ownerName: owner, month: m, year: y };
-  };
+  if (!m && doc.selectedMonth) {
+    const idx = monthNames.findIndex(name => name.toLowerCase() === String(doc.selectedMonth).trim().toLowerCase());
+    if (idx !== -1) m = idx + 1;
+    else {
+      const parsed = parseInt(doc.selectedMonth, 10);
+      if (!isNaN(parsed) && parsed >= 1 && parsed <= 12) m = parsed;
+    }
+  }
 
-  const combinationsToUpdate = new Set();
+  const tDate = doc.transactionDate || doc['Transaction Date'];
+  const parsedDate = parseDateForSync(tDate);
+  if (parsedDate) {
+    if (!m) m = parsedDate.getMonth() + 1;
+    if (!y) y = parsedDate.getFullYear();
+  }
 
-  affectedDocs.forEach(doc => {
-    const combo = getCombo(doc);
-    if (combo) combinationsToUpdate.add(JSON.stringify(combo));
-  });
+  if (!y) {
+    if (doc.year) y = parseInt(doc.year, 10);
+    else if (doc.selectedYear) {
+      const match = String(doc.selectedYear).match(/(\d{4})/);
+      if (match) {
+        const fyStart = parseInt(match[1], 10);
+        y = (m && m >= 4) ? fyStart : (m ? fyStart + 1 : fyStart);
+      }
+    }
+  }
+
+  if (!y && parsedDate) y = parsedDate.getFullYear();
+  if (!y) y = new Date().getFullYear();
+
+  return { month: m, year: y };
+};
+
+const getVehiclesForOwner = async (ownerName) => {
+  if (!ownerName) return [];
+  try {
+    const escaped = ownerName.trim().replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regex = new RegExp(`^\\s*${escaped}\\s*$`, 'i');
+    const db = mongoose.connection.useDb('invoice_system');
+    const truckCol = db.collection('Truck Contact Number');
+    const ownerCol = db.collection('owner details');
+    const [trucks, owners] = await Promise.all([
+      truckCol.find({
+        $or: [
+          { owner_name: regex },
+          { 'Owner Name': regex },
+          { 'Owner Name ': regex }
+        ]
+      }).toArray(),
+      ownerCol.find({
+        $or: [
+          { owner_name: regex },
+          { 'Owner Name': regex },
+          { 'Owner Name ': regex }
+        ]
+      }).toArray()
+    ]);
+    const vehicles = [];
+    [...trucks, ...owners].forEach(c => {
+      const v = (c.truck_no || c['Truck No'] || c['Truck No '] || '').trim().toUpperCase().replace(/\s+/g, '');
+      if (v && !vehicles.includes(v)) vehicles.push(v);
+    });
+    return vehicles;
+  } catch (err) {
+    console.error('getVehiclesForOwner error:', err);
+    return [];
+  }
+};
+
+// ── Auto-sync Bank Book Freight Payments -> Party Payment Details ──────
+const syncPartyPayments = async (affectedDocs) => {
+  if (!affectedDocs || !Array.isArray(affectedDocs) || affectedDocs.length === 0) return;
+
+  const combinationsToUpdate = new Map(); // key -> { ownerName, vehicleNo, month, year }
+
+  for (const doc of affectedDocs) {
+    const ledger = (doc.ledgerName || '').trim().toLowerCase();
+    if (ledger !== 'freight payment') continue;
+
+    const owner = (doc.names || '').trim();
+    if (!owner) continue;
+
+    const { month: m, year: y } = getDocMonthYear(doc);
+    if (!m || !y) continue;
+
+    const directVeh = (doc.vehicle || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (directVeh) {
+      const key = `${owner.toUpperCase()}__${directVeh}__${m}__${y}`;
+      combinationsToUpdate.set(key, { ownerName: owner, vehicleNo: directVeh, month: m, year: y });
+    } else {
+      // Find registered vehicles for this owner
+      const vehicles = await getVehiclesForOwner(owner);
+      if (vehicles.length > 0) {
+        for (const v of vehicles) {
+          const key = `${owner.toUpperCase()}__${v}__${m}__${y}`;
+          combinationsToUpdate.set(key, { ownerName: owner, vehicleNo: v, month: m, year: y });
+        }
+      } else {
+        const key = `${owner.toUpperCase()}____${m}__${y}`;
+        combinationsToUpdate.set(key, { ownerName: owner, vehicleNo: '', month: m, year: y });
+      }
+    }
+  }
 
   if (combinationsToUpdate.size === 0) return;
 
-  for (const comboStr of combinationsToUpdate) {
-    const combo = JSON.parse(comboStr);
+  for (const combo of combinationsToUpdate.values()) {
+    const escapedOwner = combo.ownerName.trim().replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 
-    // Find all 'freight payment' documents for this EXACT vehicle & name in Bank Book
-    const relatedDocs = await AccountDetail.find({
-      vehicle: { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) },
-      names: { $regex: new RegExp(`^\\s*${combo.ownerName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\s*$`, 'i') },
+    // Find all 'freight payment' documents in Bank Book for this owner
+    const allOwnerDocs = await AccountDetail.find({
+      names: { $regex: new RegExp(`^\\s*${escapedOwner}\\s*$`, 'i') },
       ledgerName: { $regex: /^freight payment$/i }
-    });
+    }).lean();
 
+    // Filter documents matching the month and year
     let totalWithdraw = 0;
-    relatedDocs.forEach(d => {
-      const dCombo = getCombo(d);
-      if (
-        dCombo &&
-        dCombo.month === combo.month &&
-        dCombo.year === combo.year &&
-        dCombo.ownerName.toLowerCase() === combo.ownerName.toLowerCase()
-      ) {
+    allOwnerDocs.forEach(d => {
+      const { month: dm, year: dy } = getDocMonthYear(d);
+      if (dm === combo.month && dy === combo.year) {
+        const dVeh = (d.vehicle || '').trim().toUpperCase().replace(/\s+/g, '');
+        // If combo has vehicleNo and doc specifies a different vehicle, don't mix
+        if (combo.vehicleNo && dVeh && dVeh !== combo.vehicleNo) {
+          return;
+        }
         const amt = parseFloat(String(d.withdraw || '').replace(/,/g, ''));
-        if (!isNaN(amt)) totalWithdraw += amt;
+        if (!isNaN(amt) && amt > 0) {
+          totalWithdraw += amt;
+        }
       }
     });
 
-    await PartyPayment.updateOne(
-      {
-        vehicleNo: combo.vehicleNo.trim().toUpperCase(),
+    const targetVeh = combo.vehicleNo || (await getVehiclesForOwner(combo.ownerName))[0] || '';
+    if (targetVeh) {
+      const existing = await PartyPayment.findOne({
+        vehicleNo: targetVeh,
         month: combo.month,
         year: combo.year
-      },
-      {
-        $set: {
-          paidToParty: totalWithdraw,
-          ownerName: combo.ownerName
-        }
-      },
-      { upsert: true }
-    );
+      }).lean();
+
+      const np = existing?.netPayable !== undefined ? Number(existing.netPayable) : 0;
+      const rec = existing?.recoveredToDac !== undefined ? Number(existing.recoveredToDac) : 0;
+      const ref = existing?.creditRefund !== undefined ? Number(existing.creditRefund) : 0;
+      const bal = Math.round(np - totalWithdraw - rec + ref);
+
+      await PartyPayment.updateOne(
+        {
+          vehicleNo: targetVeh,
+          month: combo.month,
+          year: combo.year
+        },
+        {
+          $set: {
+            paidToParty: totalWithdraw,
+            ownerName: combo.ownerName,
+            balanceDue: bal
+          }
+        },
+        { upsert: true }
+      );
+    }
   }
 
   try {
@@ -233,14 +340,20 @@ const syncMainCashToCashBook = async (affectedDocs) => {
 
   for (const dateItemStr of datesToSync) {
     const { day, month, year, dateStr } = JSON.parse(dateItemStr);
+    const dPad = String(day).padStart(2, '0');
+    const mPad = String(month).padStart(2, '0');
 
     const dateVariants = [
       dateStr,
+      `${dPad}-${mPad}-${year}`,
       `${day}-${month}-${year}`,
-      `${String(day).padStart(2, '0')}-${month}-${year}`,
-      `${day}-${String(month).padStart(2, '0')}-${year}`,
-      `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-      `${year}-${month}-${day}`
+      `${dPad}/${mPad}/${year}`,
+      `${day}/${month}/${year}`,
+      `${year}-${mPad}-${dPad}`,
+      `${year}-${month}-${day}`,
+      `${year}/${mPad}/${dPad}`,
+      `${dPad}.${mPad}.${year}`,
+      `${day}.${month}.${year}`
     ];
 
     // Find all 'Main Cash' transactions for this date across account_details
@@ -387,6 +500,7 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
   const mongoose = require('mongoose');
   const col = mongoose.connection.useDb('cement_register').collection('entries');
   const { getIO } = require('../socket');
+  const { syncDummyCementRow, deleteDummyRowBySource } = require('../utils/dummyCementRowManager');
 
   for (const comboStr of combinationsToUpdate) {
     const combo = JSON.parse(comboStr);
@@ -406,9 +520,11 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
       }
     });
 
-    // Find all matching Cement Register rows for this Vehicle
+    // Find all matching REAL (non-dummy) Cement Register rows for this Vehicle
     const cementRows = await col.find({
-      "VEHICLE NUMBER": { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) }
+      "VEHICLE NUMBER": { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) },
+      isDummy: { $ne: true },
+      _isDummy: { $ne: true }
     }).toArray();
 
     const idsToUpdate = [];
@@ -432,10 +548,48 @@ const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
     }
 
     if (idsToUpdate.length > 0) {
+      // Real trips exist in this month/year: clean up any dummy row for this vehicle/period
+      await col.deleteMany({
+        sourceType: 'BANK_BOOK_FREIGHT_ADVANCE',
+        "VEHICLE NUMBER": makeSpaceAgnosticRegex(combo.vehicleNo),
+        month: combo.month,
+        year: combo.year
+      });
+
       await col.updateMany(
         { _id: { $in: idsToUpdate } },
         { $set: { "Bank TF": totalWithdraw } }
       );
+    } else {
+      // No real trip exists for this vehicle: create or update dummy row if totalWithdraw > 0
+      const primaryDoc = relatedDocs[0] || affectedDocs.find(d => {
+        const c = getCombo(d);
+        return c && c.vehicleNo === combo.vehicleNo && c.month === combo.month && c.year === combo.year;
+      });
+      const ownerName = String(primaryDoc?.names || primaryDoc?.party || '').trim();
+      const txDate = primaryDoc?.transactionDate || primaryDoc?.['Transaction Date'] || `${combo.year}-${String(combo.month).padStart(2, '0')}-01`;
+      const txIdStr = primaryDoc ? primaryDoc._id.toString() : `${combo.vehicleNo}_${combo.month}_${combo.year}`;
+
+      if (totalWithdraw > 0) {
+        await syncDummyCementRow({
+          sourceType: 'BANK_BOOK_FREIGHT_ADVANCE',
+          sourceTransactionId: txIdStr,
+          vehicleNumber: combo.vehicleNo,
+          ownerName,
+          date: txDate,
+          month: combo.month,
+          year: combo.year,
+          field: 'Bank TF',
+          amount: totalWithdraw
+        });
+      } else {
+        await col.deleteMany({
+          sourceType: 'BANK_BOOK_FREIGHT_ADVANCE',
+          "VEHICLE NUMBER": makeSpaceAgnosticRegex(combo.vehicleNo),
+          month: combo.month,
+          year: combo.year
+        });
+      }
     }
   }
 
@@ -560,7 +714,9 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
     // ── 1. CEMENT REGISTER INTEGRATION ─────────────────────────────
     const vehicleRegex = makeSpaceAgnosticRegex(vehicleNo);
     const candidateTrips = await cementCol.find({
-      "VEHICLE NUMBER": { $regex: vehicleRegex }
+      "VEHICLE NUMBER": { $regex: vehicleRegex },
+      isDummy: { $ne: true },
+      _isDummy: { $ne: true }
     }).toArray();
 
     const matchingTrips = [];
@@ -599,8 +755,25 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
     let latestWrapper = null;
 
     if (matchingTrips.length === 0) {
-      warnings.push("No Cement Register trip found for this vehicle in the selected month.");
+      if (isDelete || withdrawAmount <= 0) {
+        await deleteDummyRowBySource('BRINDA_SHYAM_PAID_AMOUNT', txIdStr);
+      } else {
+        await syncDummyCementRow({
+          sourceType: 'BRINDA_SHYAM_PAID_AMOUNT',
+          sourceTransactionId: txIdStr,
+          vehicleNumber: vehicleNo,
+          ownerName,
+          date: doc.transactionDate || doc['Transaction Date'] || doc.date,
+          month: targetMonthNum,
+          year: targetYear,
+          field: 'Bank TF',
+          amount: withdrawAmount
+        });
+      }
     } else {
+      // Clean up any dummy row for this transaction if a real trip was found
+      await deleteDummyRowBySource('BRINDA_SHYAM_PAID_AMOUNT', txIdStr);
+
       // Sort trips by actual trip/invoice date descending to determine the LATEST trip
       matchingTrips.sort((a, b) => {
         const diff = b.dateObj.getTime() - a.dateObj.getTime();
@@ -953,8 +1126,8 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
     const txIdStr = doc._id.toString();
     const ledger = String(doc.ledgerName || '').trim();
     const name = String(doc.names || '').trim();
-    const isMonojLedger = /^monoj\s*bandhan$/i.test(ledger);
-    const isMonojName = /^monoj\s*bandhan$/i.test(name);
+    const isMonojLedger = /^m[ao]noj\s*bandhan$/i.test(ledger);
+    const isMonojName = /^m[ao]noj\s*bandhan$/i.test(name);
     const withdrawAmount = num(doc.withdraw);
 
     let prevSync = doc._monojSync;
@@ -975,7 +1148,7 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
     }
     if (!linkedRecord) {
       linkedRecord = await OthersCreditor.findOne({
-        creditorName: 'MONOJ BANDHAN',
+        creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] },
         $or: [
           { sourceBankBookTxId: txIdStr },
           { appliedBankBookTxIds: txIdStr }
@@ -984,7 +1157,7 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
     }
 
     // ── DELETE OR UNLINK SCENARIO ──
-    // User deleted the Bank Book row, or changed ledger/name away from MONOJ BANDHAN, or reduced withdraw to 0
+    // User deleted the Bank Book row, or changed ledger/name away from MANOJ BANDHAN, or reduced withdraw to 0
     if (isDelete || (wasApplied && (!isMonojLedger || !isMonojName || withdrawAmount <= 0))) {
       if (linkedRecord) {
         const hasOtherData = num(linkedRecord.debit) > 0 || (Array.isArray(linkedRecord.appliedBankBookTxIds) && linkedRecord.appliedBankBookTxIds.filter(id => id !== txIdStr).length > 0);
@@ -1010,7 +1183,7 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
       continue;
     }
 
-    // Must satisfy: Ledger Name = MONOJ BANDHAN and Names = MONOJ BANDHAN and withdraw > 0
+    // Must satisfy: Ledger Name = MANOJ BANDHAN and Names = MANOJ BANDHAN and withdraw > 0
     if (!isMonojLedger || !isMonojName || withdrawAmount <= 0) {
       continue;
     }
@@ -1058,9 +1231,9 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
           $set: {
             credit: withdrawAmount,
             date: docDate,
-            creditorName: 'MONOJ BANDHAN',
-            ledgerName: 'MONOJ BANDHAN',
-            names: 'MONOJ BANDHAN',
+            creditorName: 'MANOJ BANDHAN',
+            ledgerName: 'MANOJ BANDHAN',
+            names: 'MANOJ BANDHAN',
             vehicleNo: doc.vehicle || '',
             month: docMonthNum,
             year: docYearStr,
@@ -1073,15 +1246,17 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
       monojNeedsBalanceRecalc = true;
     } else {
       // ── NEW ROW SCENARIO: Create a brand new SEPARATE credit row for this transaction ──
-      const maxDoc = await OthersCreditor.findOne({ creditorName: 'MONOJ BANDHAN' }).sort({ slNo: -1 }).lean();
+      const maxDoc = await OthersCreditor.findOne({
+        creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] }
+      }).sort({ slNo: -1 }).lean();
       const nextSlNo = (maxDoc && maxDoc.slNo ? Number(maxDoc.slNo) : 0) + 1;
 
       linkedRecord = new OthersCreditor({
-        creditorName: 'MONOJ BANDHAN',
+        creditorName: 'MANOJ BANDHAN',
         slNo: nextSlNo,
         date: docDate,
-        ledgerName: 'MONOJ BANDHAN',
-        names: 'MONOJ BANDHAN',
+        ledgerName: 'MANOJ BANDHAN',
+        names: 'MANOJ BANDHAN',
         vehicleNo: doc.vehicle || '',
         credit: withdrawAmount,
         debit: 0,
@@ -1115,56 +1290,11 @@ const syncMonojBandhanWithdraw = async (affectedDocs, isDelete = false) => {
     if (doc) doc._monojSync = syncMeta;
   }
 
-  // ── Recalculate Monoj Bandhan Running Balances if records modified ──
+  // ── Recalculate Manoj Bandhan Running Balances if records modified ──
   if (monojNeedsBalanceRecalc) {
-    try {
-      const allRows = await OthersCreditor.find({ creditorName: 'MONOJ BANDHAN' });
-
-      // Sort chronologically by date first, then slNo, then createdAt
-      allRows.sort((a, b) => {
-        const tA = parseToDate(a.date).getTime() || 0;
-        const tB = parseToDate(b.date).getTime() || 0;
-        if (tA && tB && tA !== tB) return tA - tB;
-        if (tA && !tB) return -1;
-        if (!tA && tB) return 1;
-        const sA = num(a.slNo);
-        const sB = num(b.slNo);
-        if (sA && sB && sA !== sB) return sA - sB;
-        const cA = new Date(a.createdAt || 0).getTime();
-        const cB = new Date(b.createdAt || 0).getTime();
-        if (cA && cB && cA !== cB) return cA - cB;
-        return String(a._id || '').localeCompare(String(b._id || ''));
-      });
-
-      let runningBal = 0;
-      for (let i = 0; i < allRows.length; i++) {
-        const row = allRows[i];
-        const cr = num(row.credit);
-        const dr = num(row.debit);
-        runningBal = runningBal + cr - dr;
-        const calculatedBal = Math.round(runningBal * 100) / 100;
-        const canonicalDate = normalizeToYMD(row.date) || row.date;
-        const updateFields = { balance: calculatedBal, date: canonicalDate };
-        if (!row.slNo) {
-          updateFields.slNo = i + 1;
-        }
-        await OthersCreditor.updateOne(
-          { _id: row._id },
-          { $set: updateFields }
-        );
-      }
-    } catch (balErr) {
-      console.error('[syncMonojBandhanWithdraw] Balance recalculation error:', balErr);
-    }
-
-    try {
-      const io = getIO();
-      if (io) {
-        io.emit('othersCreditorUpdate', { creditorName: 'MONOJ BANDHAN' });
-        io.emit('accountDetailsUpdate', { action: 'monojSync' });
-      }
-    } catch (e) {
-      console.warn('Socket emit failed in syncMonojBandhanWithdraw:', e.message);
+    const { recalculateMonojBandhanBalances } = require('./othersCreditorRoutes');
+    if (typeof recalculateMonojBandhanBalances === 'function') {
+      await recalculateMonojBandhanBalances();
     }
   }
 
@@ -1491,7 +1621,7 @@ router.put('/bulk-update', async (req, res) => {
       console.error('[accountDetailRoutes] sync to pump payment register error:', syncRemarksErr.message);
     }
 
-    res.json({ success: true, paymentResults, warnings: creditorWarnings });
+    res.json({ success: true, createdDocs, updatedDocs, paymentResults, warnings: creditorWarnings });
   } catch (error) {
     console.error('Bulk Update Error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -1566,7 +1696,9 @@ router.delete('/bulk-delete', async (req, res) => {
       const { revertMonojSystem2Allocation } = require('./othersCreditorRoutes');
       if (typeof revertMonojSystem2Allocation === 'function') {
         for (const d of docsToDelete) {
-          if (d._monojSystem2Allocation || (String(d.ledgerName || '').trim().toUpperCase() === 'MONOJ BANDHAN' && String(d.names || '').trim().toUpperCase() === 'OTHERS CREDITOR')) {
+          const isMonoj = /^m[ao]noj\s*bandhan$/i.test(String(d.ledgerName || '').trim());
+          const isOthers = /^others[_\s]*creditor$/i.test(String(d.names || '').trim());
+          if (d._monojSystem2Allocation || (isMonoj && isOthers)) {
             await revertMonojSystem2Allocation(d._id);
           }
         }

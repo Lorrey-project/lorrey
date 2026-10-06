@@ -86,7 +86,7 @@ export const LEDGER_OPTIONS = [
   "Bill & Unbilled", "BRINDA SHYAM", "CA charges", "Capital investment", "Capital investment refund", "Challan Sign",
   "Employee P Tax", "Endhan Cash Back", "Fasttag payment", "Freight Advance",
   "Freight payment", "Freight Payment Refund", "GST Paid", "interest Paid",
-  "ITR return", "JEET PANJA", "Main cash", "MONOJ BANDHAN", "Office Exp", "Partner Interest", "Partner Salary",
+  "ITR return", "JEET PANJA", "Main cash", "MANOJ BANDHAN", "MONOJ BANDHAN", "Office Exp", "Partner Interest", "Partner Salary",
   "Payment Received", "Printing&stationary", "Pump payment", "Room rent",
   "Salary Advance", "Staff Salary", "subscription", "TDS on Cash Withdrawl",
   "Tds Payment", "Toll Payment"
@@ -99,8 +99,8 @@ export const NAMES_OPTIONS = [
   "Dipali Association", "Endhaan Cash Book", "Fasttag Payment", "Gorachand Dutta",
   "Goutam Kumar roy", "Haradhan Mondal", "Indranil Ray", "Interest paid",
   "ITR retund", "Jayanta maji", "Kanika nayak", "Kush Singh", "Main Cash",
-  "Manas Sarkar", "Manoj Modak", "Md Faiyaz Alam", "Mir Ahasan Ali", "MONOJ BANDHAN", "NON_GST PURCHASE", "NVCL",
-  "NVL", "Office Exp.", "OTHERS CREDITOR", "Pbd Associations", "Prasanta Maji",
+  "Manas Sarkar", "Manoj Modak", "MANOJ BANDHAN", "MONOJ BANDHAN", "Md Faiyaz Alam", "Mir Ahasan Ali", "NON_GST PURCHASE", "NVCL",
+  "NVL", "Office Exp.", "OTHERS CREDITOR", "OTHERS_CREDITOR", "Pbd Associations", "Prasanta Maji",
   "Printing & Stationary", "Ragunath guin", "Room Rent", "Ruhul Sk",
   "Sajal Banerjee", "satyanarayan Ghosh", "Sekh mustafa", "Suvadip Konar",
   "Sonthalia Pump", "Sourav Ghosh", "Subscription", "Suman Ghosh",
@@ -435,7 +435,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
     }
   };
 
-  // ── Monoj Bandhan: System 2 Debit Payment Allocation Modal ─────────────────
+  // ── Manoj Bandhan: System 2 Debit Payment Allocation Modal ─────────────────
   const [monojDebitAllocModal, setMonojDebitAllocModal] = useState({
     open: false,
     rowId: null,
@@ -477,13 +477,14 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
       });
 
       if (res.data && res.data.success) {
-        const rows = res.data.debitRows || [];
+        const rawRows = res.data.debitRows || [];
+        const rows = rawRows.filter(r => (Number(r.outstanding) || 0) > 0.001 && r.status !== 'Paid' && r.status !== 'Cleared');
         const savedSelected = localData[rowId]?.selectedMonojDebitIds;
         let initialSelected = new Set();
         if (savedSelected && Array.isArray(savedSelected) && savedSelected.length > 0) {
-          initialSelected = new Set(savedSelected);
+          initialSelected = new Set(savedSelected.filter(id => rows.some(r => r._id === id)));
         } else {
-          initialSelected = new Set(rows.filter(r => r.outstanding > 0).map(r => r._id));
+          initialSelected = new Set(rows.map(r => r._id));
         }
 
         setMonojDebitAllocModal(prev => ({
@@ -494,8 +495,8 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         }));
       }
     } catch (err) {
-      console.error('Error fetching Monoj Bandhan debit rows:', err);
-      setSnack({ severity: 'error', msg: 'Failed to fetch Monoj Bandhan debit rows.' });
+      console.error('Error fetching Manoj Bandhan debit rows:', err);
+      setSnack({ severity: 'error', msg: 'Failed to fetch Manoj Bandhan debit rows.' });
       setMonojDebitAllocModal(prev => ({ ...prev, loading: false }));
     }
   };
@@ -1065,15 +1066,21 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
 
   const handleAddRow = () => {
     const newId = 'new_' + Date.now();
-    const today = new Date().toISOString().split('T')[0]; // Auto-fill today's date (YYYY-MM-DD)
+    const mIdx = MONTHS.findIndex(m => m.toLowerCase() === (displayMonth || '').toLowerCase());
+    const monthNum = mIdx !== -1 ? mIdx + 1 : (new Date().getMonth() + 1);
+    const yrNum = parseInt(displayYear, 10) || new Date().getFullYear();
+    const nowDay = Math.min(new Date().getDate(), new Date(yrNum, monthNum, 0).getDate());
+    const defaultDate = `${yrNum}-${String(monthNum).padStart(2, '0')}-${String(nowDay).padStart(2, '0')}`;
+
     setEntries(prev => [{ _id: newId, isNewRow: true }, ...prev]);
     setLocalData(prev => ({
       ...prev,
       [newId]: {
         isNewRow: true,
-        'Transaction Date': today,
+        'Transaction Date': defaultDate,
+        'Month': displayMonth,
         selectedMonth: displayMonth,
-        selectedYear: displayYear
+        selectedYear: String(yrNum)
       }
     }));
   };
@@ -1155,17 +1162,10 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         }
 
         if (ledger === 'main cash') {
-          const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
           const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
 
           if (isNaN(w) || w <= 0) {
             setSnack({ severity: 'error', msg: 'Main Cash requires a valid Withdraw Amount > 0.' });
-            setSaving(false);
-            return;
-          }
-
-          if (m && m.toLowerCase() !== currentMonthName.toLowerCase()) {
-            setSnack({ severity: 'error', msg: `Main Cash is allowed ONLY for the current month (${currentMonthName}).` });
             setSaving(false);
             return;
           }
@@ -1242,17 +1242,10 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         }
 
         if (ledger === 'main cash') {
-          const m = String(mergedRow['Month'] || mergedRow.selectedMonth || '').trim();
           const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
 
           if (isNaN(w) || w <= 0) {
             setSnack({ severity: 'error', msg: 'Main Cash requires a valid Withdraw Amount > 0.' });
-            setSaving(false);
-            return;
-          }
-
-          if (m && m.toLowerCase() !== currentMonthName.toLowerCase()) {
-            setSnack({ severity: 'error', msg: `Main Cash is allowed ONLY for the current month (${currentMonthName}).` });
             setSaving(false);
             return;
           }
@@ -1364,7 +1357,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
       } else {
         setSnack({ severity: 'success', msg: 'Saved successfully!' });
       }
-      // System 2: Apply Monoj Bandhan Debit Row Payment Allocation on Bank Book SAVE
+      // System 2: Apply Manoj Bandhan Debit Row Payment Allocation on Bank Book SAVE
       for (const [savedRowId, changes] of Object.entries(localData)) {
         const originalEntry = entries.find(e => e._id === savedRowId);
         const mergedRow = { ...originalEntry, ...changes };
@@ -1373,7 +1366,10 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         const withdrawAmt = parseFloat(String(mergedRow['Withdraw'] || 0).replace(/,/g, ''));
         const selectedDebitIds = changes.selectedMonojDebitIds || localData[savedRowId]?.selectedMonojDebitIds || originalEntry?.selectedMonojDebitIds || [];
 
-        if (ledger === 'MONOJ BANDHAN' && party === 'OTHERS CREDITOR' && withdrawAmt > 0) {
+        const isManojLedger = ledger === 'MANOJ BANDHAN' || ledger === 'MONOJ BANDHAN';
+        const isOthersParty = party === 'OTHERS CREDITOR' || party === 'OTHERS_CREDITOR';
+
+        if (isManojLedger && isOthersParty && withdrawAmt > 0) {
           if (selectedDebitIds && selectedDebitIds.length > 0) {
             try {
               const actualTxId = (savedRowId && !savedRowId.startsWith('new_')) ? savedRowId : null;
@@ -1400,7 +1396,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
               }));
             } catch (allocErr) {
               console.error('System 2 debit allocation on Bank Book SAVE error:', allocErr);
-              syncErrors.push(allocErr.response?.data?.error || `Monoj Bandhan debit allocation error: ${allocErr.message}`);
+              syncErrors.push(allocErr.response?.data?.error || `Manoj Bandhan debit allocation error: ${allocErr.message}`);
             }
           } else if (!mergedRow.isMonojDebitAllocated && !mergedRow._monojSystem2Allocation) {
             const tDate = mergedRow['Transaction Date'] || mergedRow.transactionDate || '';
@@ -1909,13 +1905,12 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                           <Autocomplete
                             disabled={
                               (col.key === 'Vehicle' && !rowOwner) ||
-                              (isParticularsCreditor && !canSelectValidity) ||
-                              (col.key === 'Month' && rowLedger.toLowerCase() === 'main cash')
+                              (isParticularsCreditor && !canSelectValidity)
                             }
                             options={
                               col.key === 'Month'
                                 ? (() => {
-                                  if (rowLedger.toLowerCase() === 'freight advance' || rowLedger.toLowerCase() === 'main cash') {
+                                  if (rowLedger.toLowerCase() === 'freight advance') {
                                     const curMonthName = MONTHS[new Date().getMonth()];
                                     return [curMonthName];
                                   }
@@ -1934,7 +1929,10 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                                     : col.key === 'Ledger Name'
                                       ? LEDGER_OPTIONS
                                       : ((rowLedger?.toLowerCase().includes('payment') && rowLedger?.toLowerCase().includes('receiv'))
-                                        ? ['NVL', 'NVCL'] : NAMES_OPTIONS)
+                                        ? ['NVL', 'NVCL']
+                                        : (rowLedger?.toLowerCase() === 'main cash'
+                                          ? ['Main Cash', ...NAMES_OPTIONS.filter(n => n.toLowerCase() !== 'main cash')]
+                                          : NAMES_OPTIONS))
                             }
                             value={val || ''}
                             freeSolo={!isParticularsCreditor}
@@ -1963,6 +1961,31 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                                 }
                               }
 
+                              if (col.key === 'Month' && newValue) {
+                                const mIdx = MONTHS.findIndex(m => m.toLowerCase() === String(newValue).toLowerCase());
+                                if (mIdx !== -1) {
+                                  const newMonthNum = mIdx + 1;
+                                  const curDateStr = String(localData[row._id]?.['Transaction Date'] ?? row['Transaction Date'] ?? row.transactionDate ?? '');
+                                  const dateParts = curDateStr.split(/[-\/\.]/);
+                                  if (dateParts.length === 3) {
+                                    if (dateParts[0].length === 4) {
+                                      // YYYY-MM-DD
+                                      const y = parseInt(dateParts[0], 10);
+                                      const d = Math.min(parseInt(dateParts[2], 10) || 1, new Date(y, newMonthNum, 0).getDate());
+                                      const updatedDate = `${y}-${String(newMonthNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                      handleCellEdit(row._id, 'Transaction Date', updatedDate);
+                                    } else {
+                                      // DD-MM-YYYY
+                                      let y = parseInt(dateParts[2], 10);
+                                      if (y < 100) y += 2000;
+                                      const d = Math.min(parseInt(dateParts[0], 10) || 1, new Date(y, newMonthNum, 0).getDate());
+                                      const updatedDate = `${String(d).padStart(2, '0')}-${String(newMonthNum).padStart(2, '0')}-${y}`;
+                                      handleCellEdit(row._id, 'Transaction Date', updatedDate);
+                                    }
+                                  }
+                                }
+                              }
+
                               if (col.key === 'Vehicle') {
                                 if (isCreditor) {
                                   const curParticulars = localData[row._id]?.['Particulars'] !== undefined ? localData[row._id]['Particulars'] : (row['Particulars'] || '');
@@ -1981,11 +2004,12 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                               const curMonth = (col.key === 'Month' ? newValue : (localData[row._id]?.['Month'] || row['Month'] || ''));
                               const curParty = (col.key === 'Names' ? newValue : (localData[row._id]?.['Names'] || row['Names'] || ''));
 
-                              // System 2: Monoj Bandhan Debit Row Allocation trigger
+                              // System 2: Manoj Bandhan Debit Row Allocation trigger
+                              const isManojL = /^m[ao]noj\s*bandhan$/i.test(String(curLedger || '').trim());
+                              const isOthersP = /^others[_\s]*creditor$/i.test(String(curParty || '').trim());
                               if (
                                 (col.key === 'Names' || col.key === 'Ledger Name') &&
-                                String(curLedger || '').trim().toUpperCase() === 'MONOJ BANDHAN' &&
-                                String(curParty || '').trim().toUpperCase() === 'OTHERS CREDITOR'
+                                isManojL && isOthersP
                               ) {
                                 const curW = localData[row._id]?.['Withdraw'] !== undefined ? localData[row._id]['Withdraw'] : (row['Withdraw'] || 0);
                                 const curD = localData[row._id]?.['Transaction Date'] !== undefined ? localData[row._id]['Transaction Date'] : (row['Transaction Date'] || '');
@@ -2029,22 +2053,14 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                                   }));
                                 }
 
-                                // ── MAIN CASH: lock to current month + today's date ──
+                                // ── MAIN CASH: default Names to 'Main Cash' without restricting Month or Date ──
                                 if (currentLedgerLower === 'main cash' && col.key === 'Ledger Name') {
-                                  const curMonthName = MONTHS[new Date().getMonth()];
-                                  const curYearStr = String(new Date().getFullYear());
-                                  // today in YYYY-MM-DD (matches handleAddRow format & Transaction Date input)
-                                  const todayISO = new Date().toISOString().split('T')[0];
                                   setLocalData(prev => ({
                                     ...prev,
                                     [row._id]: {
                                       ...prev[row._id],
                                       'Ledger Name': currentLedger,
                                       'Names': prev[row._id]?.['Names'] || row['Names'] || 'Main Cash',
-                                      'Month': curMonthName,
-                                      'Transaction Date': todayISO,
-                                      selectedMonth: curMonthName,
-                                      selectedYear: curYearStr
                                     }
                                   }));
                                 }
@@ -2152,9 +2168,9 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                           }}
                         />
                       ) : col.key === 'Particulars' ? (() => {
-                        const rowLedger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toUpperCase();
-                        const rowOwner = String(localData[row._id]?.['Names'] || row['Names'] || '').trim().toUpperCase();
-                        const isMonojOthers = rowLedger === 'MONOJ BANDHAN' && rowOwner === 'OTHERS CREDITOR';
+                        const rowLedger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim();
+                        const rowOwner = String(localData[row._id]?.['Names'] || row['Names'] || '').trim();
+                        const isMonojOthers = /^m[ao]noj\s*bandhan$/i.test(rowLedger) && /^others[_\s]*creditor$/i.test(rowOwner);
                         const selectedCount = localData[row._id]?.selectedMonojDebitIds?.length || 0;
                         const hasSelected = selectedCount > 0;
                         const isAllocated = !!(row.isMonojDebitAllocated || row.monojAllocatedDebits?.length > 0 || localData[row._id]?._monojSystem2Allocation);
@@ -2220,23 +2236,13 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                           className="erp-input"
                           type={col.isDate ? 'date' : 'text'}
                           value={val}
-                          readOnly={
-                            col.key === 'Transaction Date' &&
-                            String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toLowerCase() === 'main cash'
-                          }
                           onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
                           style={{
                             width: '100%', height: '100%', border: '1px solid transparent', padding: '10px 10px',
-                            background:
-                              col.key === 'Transaction Date' &&
-                              String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toLowerCase() === 'main cash'
-                                ? '#f1f5f9' : 'transparent',
+                            background: 'transparent',
                             outline: 'none', fontSize: '12px', color: cellColor, fontWeight: cellFontWeight,
                             transition: 'all 0.2s', boxSizing: 'border-box',
-                            cursor:
-                              col.key === 'Transaction Date' &&
-                              String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim().toLowerCase() === 'main cash'
-                                ? 'not-allowed' : 'text'
+                            cursor: 'text'
                           }}
                         />
                       )}
@@ -2832,7 +2838,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         <DialogTitle sx={{ fontWeight: 800, borderBottom: '1px solid #334155', color: '#38bdf8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box>
             <Typography variant="h6" fontWeight={800} sx={{ letterSpacing: '0.3px' }}>
-              MONOJ BANDHAN — DEBIT PAYMENT ALLOCATION
+              MANOJ BANDHAN — DEBIT PAYMENT ALLOCATION
             </Typography>
             <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mt: 0.2 }}>
               Select debit rows to pay/settle. The payment will be applied when you save the Bank Book transaction.
@@ -2851,9 +2857,9 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
             </Box>
           ) : monojDebitAllocModal.debitRows.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 6, color: '#64748b' }}>
-              <Typography variant="body1" fontWeight={600}>No debit records found for MONOJ BANDHAN.</Typography>
+              <Typography variant="body1" fontWeight={600}>No outstanding debit records found for MANOJ BANDHAN.</Typography>
               <Typography variant="caption" sx={{ mt: 0.5, display: 'block' }}>
-                Debit records entered in OFFICE PANEL &rarr; OTHERS CREDITOR &rarr; MONOJ BANDHAN will appear here.
+                All previous debit records have been paid/settled, or no unpaid debits are recorded.
               </Typography>
             </Box>
           ) : (
@@ -2893,7 +2899,6 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                 <tbody>
                   {monojDebitAllocModal.debitRows.map((r, idx) => {
                     const isSel = monojDebitAllocModal.selectedIds.has(r._id);
-                    const isFullyPaid = r.outstanding === 0;
 
                     return (
                       <tr
@@ -2916,7 +2921,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                         <td style={{ padding: '10px 12px', color: '#38bdf8', fontWeight: 700 }}>{r.slNo || idx + 1}</td>
                         <td style={{ padding: '10px 12px', color: '#cbd5e1' }}>{r.date || '-'}</td>
                         <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
-                          {r.ledgerName || r.names || r.remarks || 'Monoj Bandhan Debit'}
+                          {r.ledgerName || r.names || r.remarks || 'Manoj Bandhan Debit'}
                           {r.vehicleNo ? ` (${r.vehicleNo})` : ''}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#f87171', fontWeight: 800, textAlign: 'right' }}>
@@ -2925,19 +2930,19 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                         <td style={{ padding: '10px 12px', color: '#4ade80', fontWeight: 700, textAlign: 'right' }}>
                           ₹{Number(r.paidAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
-                        <td style={{ padding: '10px 12px', color: r.outstanding > 0 ? '#fbbf24' : '#64748b', fontWeight: 800, textAlign: 'right' }}>
+                        <td style={{ padding: '10px 12px', color: '#fbbf24', fontWeight: 800, textAlign: 'right' }}>
                           ₹{Number(r.outstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                           <Chip
-                            label={isFullyPaid ? 'PAID' : (r.paidAmount > 0 ? 'PARTIAL' : 'UNPAID')}
+                            label={r.paidAmount > 0 ? 'PARTIAL' : 'UNPAID'}
                             size="small"
                             sx={{
                               height: 20,
                               fontSize: '9.5px',
                               fontWeight: 800,
-                              bgcolor: isFullyPaid ? '#065f46' : (r.paidAmount > 0 ? '#78350f' : '#7f1d1d'),
-                              color: isFullyPaid ? '#6ee7b7' : (r.paidAmount > 0 ? '#fde68a' : '#fca5a5')
+                              bgcolor: r.paidAmount > 0 ? '#78350f' : '#7f1d1d',
+                              color: r.paidAmount > 0 ? '#fde68a' : '#fca5a5'
                             }}
                           />
                         </td>
@@ -2951,8 +2956,11 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         </DialogContent>
 
         <DialogActions sx={{ p: 2, bgcolor: '#0f172a', borderTop: '1px solid #334155', justifyContent: 'space-between' }}>
-          <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
-            {monojDebitAllocModal.selectedIds.size} debit row(s) selected
+          <Typography variant="body2" sx={{ color: '#38bdf8', fontWeight: 700 }}>
+            Selected: {monojDebitAllocModal.selectedIds.size} row(s) | Total Outstanding: ₹{monojDebitAllocModal.debitRows
+              .filter(r => monojDebitAllocModal.selectedIds.has(r._id))
+              .reduce((sum, r) => sum + (Number(r.outstanding) || 0), 0)
+              .toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </Typography>
           <Box sx={{ display: 'flex', gap: 1.5 }}>
             <Button

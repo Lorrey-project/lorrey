@@ -104,17 +104,17 @@ export default function TotalPaymentReports({ onBack }) {
             r.O_OPENING = prevRow.O_CLOSING;
           }
           
-          r.P_TOTAL = fmt2(num(r.P_OPENING) + num(r.P_WITHDRAW));
-          r.P_CLOSING = fmt2(num(r.P_TOTAL) - num(r.P_GIVEN_DAC) - num(r.P_GIVEN_OFFICE) - num(r.P_OTHERS));
+          r.P_TOTAL = fmt2(num(r.P_OPENING) + num(r.P_CASH_RECV_BB) + num(r.P_LOAN || r.P_WITHDRAW));
+          r.P_CLOSING = fmt2(num(r.P_TOTAL) - num(r.P_GIVEN_DAC) - num(r.P_GIVEN_OFFICE) - num(r.P_LOAN_REPAY) - num(r.P_OTHERS));
 
           r.S_RECV_SANGRAM = num(r.P_GIVEN_DAC);
           r.S_TOTAL = fmt2(num(r.S_OPENING) + num(r.S_RECV_SANGRAM) + num(r.S_TRANS_OFFICE));
           r.S_CLOSING = fmt2(num(r.S_TOTAL) - num(r.S_EXPENSE) - num(r.S_TRANS_TO_OFFICE));
 
-          r.O_RECV_HFS = num(r.P_GIVEN_OFFICE);
-          r.O_RECV_SITE = num(r.S_TRANS_TO_OFFICE);
+          r.O_RECV_HFS = num(r.O_RECV_HFS || r.P_GIVEN_OFFICE);
+          r.O_RECV_SITE = num(r.O_RECV_SITE || r.S_TRANS_TO_OFFICE);
           r.O_TOTAL = fmt2(num(r.O_OPENING) + num(r.O_RECV_HFS) + num(r.O_RECV_SITE));
-          r.O_CLOSING = fmt2(num(r.O_TOTAL) - num(r.O_EXPENSE));
+          r.O_CLOSING = fmt2(num(r.O_TOTAL) - num(r.O_EXPENSE) - num(r.O_TRANS_SITE));
 
           prevResult.push(r);
         }
@@ -198,19 +198,19 @@ export default function TotalPaymentReports({ onBack }) {
       }
       
       // Pump calculations
-      r.P_TOTAL = fmt2(num(r.P_OPENING) + num(r.P_WITHDRAW));
-      r.P_CLOSING = fmt2(num(r.P_TOTAL) - num(r.P_GIVEN_DAC) - num(r.P_GIVEN_OFFICE) - num(r.P_OTHERS));
+      r.P_TOTAL = fmt2(num(r.P_OPENING) + num(r.P_CASH_RECV_BB) + num(r.P_LOAN || r.P_WITHDRAW));
+      r.P_CLOSING = fmt2(num(r.P_TOTAL) - num(r.P_GIVEN_DAC) - num(r.P_GIVEN_OFFICE) - num(r.P_LOAN_REPAY) - num(r.P_OTHERS));
 
-      // Site calculations (subtract S_TRANS_TO_OFFICE to prevent site-to-office transfer double counting)
+      // Site calculations
       r.S_RECV_SANGRAM = num(r.P_GIVEN_DAC);
       r.S_TOTAL = fmt2(num(r.S_OPENING) + num(r.S_RECV_SANGRAM) + num(r.S_TRANS_OFFICE));
       r.S_CLOSING = fmt2(num(r.S_TOTAL) - num(r.S_EXPENSE) - num(r.S_TRANS_TO_OFFICE));
 
       // Office calculations
-      r.O_RECV_HFS = num(r.P_GIVEN_OFFICE);
-      r.O_RECV_SITE = num(r.S_TRANS_TO_OFFICE);
+      r.O_RECV_HFS = num(r.O_RECV_HFS || r.P_GIVEN_OFFICE);
+      r.O_RECV_SITE = num(r.O_RECV_SITE || r.S_TRANS_TO_OFFICE);
       r.O_TOTAL = fmt2(num(r.O_OPENING) + num(r.O_RECV_HFS) + num(r.O_RECV_SITE));
-      r.O_CLOSING = fmt2(num(r.O_TOTAL) - num(r.O_EXPENSE));
+      r.O_CLOSING = fmt2(num(r.O_TOTAL) - num(r.O_EXPENSE) - num(r.O_TRANS_SITE));
 
       result.push(r);
     }

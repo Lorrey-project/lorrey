@@ -158,6 +158,15 @@ export default function PartyFullYear({ onBack, initialFy, initialParty }) {
     socket.on('partyPaymentUpdate', () => {
       fetchFullYearReport();
     });
+    socket.on('voucherCreated', () => {
+      fetchFullYearReport();
+    });
+    socket.on('voucherUpdate', () => {
+      fetchFullYearReport();
+    });
+    socket.on('voucherDeleted', () => {
+      fetchFullYearReport();
+    });
     socket.on('freightCreditorGstUpdate', () => {
       fetchFullYearReport();
     });

@@ -224,8 +224,8 @@ const MobileDashboard = ({
         }
     };
 
-    const isOffice = user?.role === 'HEAD_OFFICE' || (user?.role === 'OFFICE' && import.meta.env.VITE_PORTAL !== 'site');
-    const isSite = import.meta.env.VITE_PORTAL === 'site';
+    const isSite = import.meta.env.VITE_PORTAL === 'site' || user?.role === 'SITE' || (user?.email || '').toLowerCase() === 'site@nuvoco.com';
+    const isOffice = !isSite && (user?.role === 'HEAD_OFFICE' || user?.role === 'OFFICE' || !user?.role || user?.role === 'ADMIN');
     const isPump = user?.role === 'PETROL PUMP';
 
     const getStatusChip = (status) => {
@@ -518,7 +518,7 @@ const MobileDashboard = ({
                             </Grid>
 
                             {/* Vouchers Action Card (If Site/Office) */}
-                            {(isOffice || isSite) && onOpenVouchers && (
+                            {(isOffice || isSite) && (
                                 <Grid item xs={12}>
                                     <Paper
                                         elevation={0}
@@ -947,7 +947,7 @@ const MobileDashboard = ({
                                     <ListItemText primary="Contacts" primaryTypographyProps={{ fontWeight: 600 }} />
                                 </ListItem>
                             )}
-                            {(isOffice || isSite) && onOpenVouchers && (
+                            {(isOffice || isSite) && (
                                 <ListItem button onClick={() => { setDrawerOpen(false); setVoucherDialogOpen(true); }} sx={{ borderRadius: 2 }}>
                                     <ListItemIcon><ReceiptLongIcon sx={{ color: '#94a3b8' }} /></ListItemIcon>
                                     <ListItemText primary="Vouchers" primaryTypographyProps={{ fontWeight: 600 }} />

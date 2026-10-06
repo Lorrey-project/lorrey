@@ -9,6 +9,9 @@ const auth = require("../middleware/authMiddleware");
 const adminOnly = require("../middleware/adminOnly");
 const { cementValidationRules, validateCement } = require("../middleware/validateCement");
 const cementAttachUpload = require("../middleware/cementAttachUpload");
+const ProjectedDeductionVersion = require("../models/ProjectedDeductionVersion");
+const ProjectedDeductionSetting = require("../models/ProjectedDeductionSetting");
+const { toDateStr } = require("../utils/projectedDeductionResolver");
 
 function normVeh(v) {
   if (!v) return "";
@@ -174,17 +177,49 @@ function getCollection() {
 }
 
 // ── GET /cement-register ─────────────────────────────────────────────────────
+const { parseCalendarDate, parseDate: parseDateHelper } = require("../utils/billRegisterHelper");
+
 // Fetch all entries, newest first. Supports optional query params:
 //   ?site=NVCL   → filter by SITE
 //   ?owner=NAME  → filter by OWNER NAME
+//   ?vehicle=NO  → filter by VEHICLE NO
+//   ?month=M&year=YYYY → filter by month & year
 //   ?from=YYYY-MM-DD&to=YYYY-MM-DD → filter by LOADING DATE range
 router.get("/", async (req, res) => {
   try {
     const col = getCollection();
 
     const andConditions = [];
-    if (req.query.site) andConditions.push({ "SITE": req.query.site });
-    if (req.query.owner) {
+    if (req.query.site && req.query.site !== 'ALL') {
+      const sRegex = new RegExp(`^\\s*${req.query.site.trim()}\\s*$`, 'i');
+      andConditions.push({
+        $or: [
+          { "SITE": sRegex },
+          { "site": sRegex },
+          { "Site": sRegex },
+          { "SITE NAME": sRegex }
+        ]
+      });
+    }
+
+    if (req.query.vehicle) {
+      const stripped = req.query.vehicle.replace(/[^a-zA-Z0-9]/g, '');
+      const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
+      const vRegex = new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
+      andConditions.push({
+        $or: [
+          { "VEHICLE NUMBER": vRegex },
+          { "VEHICLE NO": vRegex },
+          { "VEHICLE NO.": vRegex },
+          { "vehicleNumber": vRegex },
+          { "Truck No": vRegex },
+          { "TRUCK NO": vRegex },
+          { "truck_no": vRegex }
+        ]
+      });
+    }
+
+    if (req.query.owner && !req.query.vehicle) {
       const oRegex = new RegExp(`^${req.query.owner.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}$`, 'i');
       andConditions.push({
         $or: [
@@ -195,19 +230,7 @@ router.get("/", async (req, res) => {
         ]
       });
     }
-    if (req.query.vehicle) {
-      const stripped = req.query.vehicle.replace(/[^a-zA-Z0-9]/g, '');
-      const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
-      const vRegex = new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
-      andConditions.push({
-        $or: [
-          { "VEHICLE NUMBER": vRegex },
-          { "VEHICLE NO": vRegex },
-          { "VEHICLE NO.": vRegex },
-          { "vehicleNumber": vRegex }
-        ]
-      });
-    }
+
     if (req.query.from || req.query.to) {
       const dateCond = {};
       if (req.query.from) dateCond["$gte"] = new Date(req.query.from);
@@ -219,50 +242,80 @@ router.get("/", async (req, res) => {
     let reqYear = req.query.year ? parseInt(req.query.year, 10) : null;
 
     if (reqMonth && reqYear) {
+      const shortY = String(reqYear).slice(-2);
+      const mRegex = new RegExp(`(^|[\\.\\-\\s\\/])0?${reqMonth}[\\.\\-\\s\\/](${reqYear}|${shortY})($|[\\.\\-\\s\\/])`, 'i');
+      const isoRegex = new RegExp(`^${reqYear}[\\-\\s\\/]0?${reqMonth}`, 'i');
       andConditions.push({
         $or: [
           { month: reqMonth, year: reqYear },
-          { month: String(reqMonth), year: String(reqYear) }
+          { month: String(reqMonth), year: String(reqYear) },
+          { "LOADING DT": mRegex },
+          { "LOADING DATE": mRegex },
+          { "BILL DATE": mRegex },
+          { "RECEIVING DATE": mRegex },
+          { "INVOICE DATE": mRegex },
+          { "DATE": mRegex },
+          { "LOADING DT": isoRegex },
+          { "LOADING DATE": isoRegex },
+          { "BILL DATE": isoRegex },
+          { "RECEIVING DATE": isoRegex },
+          { "INVOICE DATE": isoRegex },
+          { "DATE": isoRegex }
         ]
       });
     }
 
     const filter = andConditions.length > 0 ? { $and: andConditions } : {};
 
-    const [entries, ownerDocs, truckDocs] = await Promise.all([
+    const [entries, ownerDocs, truckDocs, damageVersions, damageSettingDoc] = await Promise.all([
       col.find(filter).toArray(),
       mongoose.connection.useDb("invoice_system").collection("owner details").find({}).toArray().catch(() => []),
-      mongoose.connection.useDb("invoice_system").collection("Truck Contact Number").find({}).toArray().catch(() => [])
+      mongoose.connection.useDb("invoice_system").collection("Truck Contact Number").find({}).toArray().catch(() => []),
+      ProjectedDeductionVersion.find({ settingType: 'DAMAGE_DEDUCTION' }).sort({ effectiveDate: -1, createdAt: -1 }).lean().catch(() => []),
+      ProjectedDeductionSetting.findOne().lean().catch(() => null)
     ]);
+
+    const fallbackDamageRate = damageSettingDoc?.damage ?? 476;
+    const resolveDamageRate = (recordDate) => {
+      if (!recordDate) return fallbackDamageRate;
+      const dateStr = toDateStr(recordDate);
+      if (damageVersions && damageVersions.length > 0) {
+        const v = damageVersions.find(ver => ver.effectiveDate <= dateStr);
+        if (v && typeof v.amount === 'number') return v.amount;
+      }
+      return fallbackDamageRate;
+    };
 
     const combinedContacts = [...ownerDocs, ...truckDocs];
 
     // Post-filter to guarantee strictly exact month and year match based on actual bill/record date
     let filteredEntries = entries;
     if (reqMonth && reqYear) {
-      const startDate = new Date(reqYear, reqMonth - 1, 1, 0, 0, 0, 0);
-      const endDate = new Date(reqYear, reqMonth, 0, 23, 59, 59, 999);
-
       filteredEntries = entries.filter(entry => {
-        const rawDate = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || entry["RECEIVING DATE"] || entry["INVOICE DATE"] || entry["UNLOADING STATUS"];
-        const dObj = parseToDate(rawDate);
-        if (dObj.getTime() > 0) {
-          return dObj.getTime() >= startDate.getTime() && dObj.getTime() <= endDate.getTime();
+        const rawDate = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || entry["RECEIVING DATE"] || entry["INVOICE DATE"] || entry["UNLOADING STATUS"] || entry["DATE"];
+        const cal = parseCalendarDate(rawDate);
+        if (cal) {
+          return cal.month === reqMonth && cal.year === reqYear;
         }
-        return entry.month === reqMonth && entry.year === reqYear;
+        const em = typeof entry.month === 'number' ? entry.month : parseInt(entry.month, 10);
+        const ey = typeof entry.year === 'number' ? entry.year : parseInt(entry.year, 10);
+        return em === reqMonth && ey === reqYear;
       });
     }
 
     // Sort chronologically by date
     filteredEntries.sort((a, b) => {
-      const dateA = parseToDate(a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"] || a["UNLOADING STATUS"]);
-      const dateB = parseToDate(b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"] || b["UNLOADING STATUS"]);
-      if (dateA.getTime() !== dateB.getTime()) {
-        return dateA.getTime() - dateB.getTime();
+      const rawA = a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["RECEIVING DATE"] || a["INVOICE DATE"] || a["UNLOADING STATUS"] || a["DATE"];
+      const rawB = b["LOADING DT"] || b["LOADING DATE"] || b["BILL DATE"] || b["RECEIVING DATE"] || b["INVOICE DATE"] || b["UNLOADING STATUS"] || b["DATE"];
+      const calA = parseCalendarDate(rawA);
+      const calB = parseCalendarDate(rawB);
+      const timeA = calA ? new Date(calA.year, calA.month - 1, calA.day).getTime() : 0;
+      const timeB = calB ? new Date(calB.year, calB.month - 1, calB.day).getTime() : 0;
+      if (timeA !== timeB) {
+        return timeA - timeB;
       }
       const slA = parseInt(String(a["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
       const slB = parseInt(String(b["SL NO"] || '').replace(/\D/g, ''), 10) || 0;
-      return slA - slB;
     });
 
     // Format dates to DD.MM.YY and assign sequential SL NO + apply Owner Details TDS & Commission mapping
@@ -364,6 +417,25 @@ router.get("/", async (req, res) => {
         }
         entry["tds_manual"] = true;
       }
+
+      // ── Shortage Calculation from Projected Deduction Settings (Damage Deduction) ──
+      const damageRate = resolveDamageRate(recordDate);
+      entry["_damage_deduction_rate"] = damageRate;
+
+      const shortageBags = parseFloat(String(entry["SHORTAGE (BAG)"] || "0").replace(/,/g, "")) || 0;
+      if (shortageBags > 0) {
+        let existingRate = parseFloat(String(entry["SHORTAGE (RATE)"] || "0").replace(/,/g, "")) || 0;
+        if (existingRate === 0) {
+          existingRate = damageRate;
+          entry["SHORTAGE (RATE)"] = existingRate;
+        }
+        entry["SHORTAGE (AMOUNT)"] = Math.round(shortageBags * existingRate * 100) / 100;
+      } else {
+        if (!entry["SHORTAGE (RATE)"] || entry["SHORTAGE (RATE)"] === 0) {
+          entry["SHORTAGE (RATE)"] = damageRate;
+        }
+        entry["SHORTAGE (AMOUNT)"] = 0;
+      }
       
       return entry;
     });
@@ -378,7 +450,7 @@ router.get("/", async (req, res) => {
 // Fetch records from the previous 4 months that are pending (Freight or Unloading bill not generated)
 router.get("/pending-bills", async (req, res) => {
   try {
-    const { month, year } = req.query;
+    const { month, year, site } = req.query;
     if (!month || !year) return res.status(400).json({ error: "Missing month/year" });
     
     const m = parseInt(month, 10);
@@ -397,7 +469,12 @@ router.get("/pending-bills", async (req, res) => {
     }
     
     const col = getCollection();
-    const entries = await col.find({}).toArray();
+    const query = { isDummy: { $ne: true }, _isDummy: { $ne: true } };
+    if (site && site !== 'ALL') {
+      const sRegex = new RegExp(`^\\s*${site.trim()}\\s*$`, 'i');
+      query.$or = [{ "SITE": sRegex }, { "site": sRegex }, { "Site": sRegex }, { "SITE NAME": sRegex }];
+    }
+    const entries = await col.find(query).toArray();
     
     const pendingEntries = [];
 
@@ -460,9 +537,45 @@ router.get("/pending-bills", async (req, res) => {
       pendingEntries.push(...unbilledInMonth);
     }
 
+    const [damageVersionsPending, damageSettingPending] = await Promise.all([
+      ProjectedDeductionVersion.find({ settingType: 'DAMAGE_DEDUCTION' }).sort({ effectiveDate: -1, createdAt: -1 }).lean().catch(() => []),
+      ProjectedDeductionSetting.findOne().lean().catch(() => null)
+    ]);
+    const fallbackDamageRatePending = damageSettingPending?.damage ?? 476;
+    const resolvePendingDamageRate = (recordDate) => {
+      if (!recordDate) return fallbackDamageRatePending;
+      const dateStr = toDateStr(recordDate);
+      if (damageVersionsPending && damageVersionsPending.length > 0) {
+        const v = damageVersionsPending.find(ver => ver.effectiveDate <= dateStr);
+        if (v && typeof v.amount === 'number') return v.amount;
+      }
+      return fallbackDamageRatePending;
+    };
+
     const formattedEntries = pendingEntries.map((entry) => {
+      const rawDate = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || entry["RECEIVING DATE"] || entry["INVOICE DATE"];
+      const recordDate = normalizeDate(rawDate);
       if (entry["LOADING DT"]) entry["LOADING DT"] = formatDateToDDMMYY(entry["LOADING DT"]);
       if (entry["LOADING DATE"]) entry["LOADING DATE"] = formatDateToDDMMYY(entry["LOADING DATE"]);
+
+      const damageRate = resolvePendingDamageRate(recordDate);
+      entry["_damage_deduction_rate"] = damageRate;
+
+      const shortageBags = parseFloat(String(entry["SHORTAGE (BAG)"] || "0").replace(/,/g, "")) || 0;
+      if (shortageBags > 0) {
+        let existingRate = parseFloat(String(entry["SHORTAGE (RATE)"] || "0").replace(/,/g, "")) || 0;
+        if (existingRate === 0) {
+          existingRate = damageRate;
+          entry["SHORTAGE (RATE)"] = existingRate;
+        }
+        entry["SHORTAGE (AMOUNT)"] = Math.round(shortageBags * existingRate * 100) / 100;
+      } else {
+        if (!entry["SHORTAGE (RATE)"] || entry["SHORTAGE (RATE)"] === 0) {
+          entry["SHORTAGE (RATE)"] = damageRate;
+        }
+        entry["SHORTAGE (AMOUNT)"] = 0;
+      }
+
       return entry;
     });
 
@@ -856,8 +969,9 @@ router.post("/generate-batch-bills", auth, async (req, res) => {
     const parts = billDate.split('-');
     const formattedBillDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
 
-    // Fetch records
-    const objectIds = recordIds.map(id => new ObjectId(id));
+    // Fetch records uniquely
+    const uniqueRecordIds = Array.from(new Set(recordIds.map(String)));
+    const objectIds = uniqueRecordIds.map(id => new ObjectId(id));
     const records = await col.find({ _id: { $in: objectIds } }).toArray();
 
     // Group by Party

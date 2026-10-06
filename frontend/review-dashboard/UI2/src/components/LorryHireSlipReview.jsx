@@ -184,35 +184,19 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
     const [dieselLtrs, setDieselLtrs] = useState('');
     const [dieselRate, setDieselRate] = useState('0');
 
-    // Biometric authorization state (Driver + Site Member dual custody)
+    // Biometric authorization state (Preserved for future re-enablement)
     const { user } = useAuth();
     const [biometricDialogOpen, setBiometricDialogOpen] = useState(false);
     const [authorizationId, setAuthorizationId] = useState(null);
     const [authorizationToken, setAuthToken] = useState(null);
     const [authorizedAmounts, setAuthorizedAmounts] = useState(null);
 
-    // Derived advance requests & validity
-    const isAdvanceRequested = (parseFloat(loadingAdv) || 0) > 0 || (parseFloat(dieselLtrs) || 0) > 0;
-    const isBiometricallyAuthorized = Boolean(
-        authorizationId &&
-        authorizationToken &&
-        authorizedAmounts?.loadingAdv === (parseFloat(loadingAdv) || 0) &&
-        authorizedAmounts?.dieselLtrs === (parseFloat(dieselLtrs) || 0)
-    );
-
-    // Invalidate authorization if amounts change
     const handleLoadingAdvChange = (val) => {
         setLoadingAdv(val);
-        setAuthorizationId(null);
-        setAuthToken(null);
-        setAuthorizedAmounts(null);
     };
 
     const handleDieselLtrsChange = (val) => {
         setDieselLtrs(val);
-        setAuthorizationId(null);
-        setAuthToken(null);
-        setAuthorizedAmounts(null);
     };
 
     // Required fuel (auto-calculated, read-only)
@@ -387,10 +371,6 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
     }, [step]);
 
     const handleProceedToSlip = () => {
-        if (isAdvanceRequested && !isBiometricallyAuthorized) {
-            setBiometricDialogOpen(true);
-            return;
-        }
         setStep(1);
     };
 
@@ -518,25 +498,6 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                             }} elevation={0}>
                                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                                     <Typography variant="h5" fontWeight="900" color="#0f172a">Trip Advance</Typography>
-                                    {isAdvanceRequested && (
-                                        isBiometricallyAuthorized ? (
-                                            <Chip
-                                                icon={<FingerprintIcon />}
-                                                label="Dual Verified"
-                                                color="success"
-                                                size="small"
-                                                sx={{ fontWeight: 700 }}
-                                            />
-                                        ) : (
-                                            <Chip
-                                                icon={<FingerprintIcon />}
-                                                label="Biometrics Required"
-                                                size="small"
-                                                onClick={() => setBiometricDialogOpen(true)}
-                                                sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, cursor: 'pointer' }}
-                                            />
-                                        )
-                                    )}
                                 </Box>
                                 <Typography variant="body2" color="#64748b" mb={4}>Review the AI estimated fuel allowance and input the specific loading advance amounts.</Typography>
 
@@ -624,28 +585,24 @@ const LorryHireSlipReview = ({ invoiceId, onBack, formData: propFormData, onOpen
                                     variant="contained" 
                                     fullWidth 
                                     size="large" 
-                                    endIcon={isAdvanceRequested && !isBiometricallyAuthorized ? <FingerprintIcon /> : <ArrowForwardIcon />} 
+                                    endIcon={<ArrowForwardIcon />} 
                                     onClick={handleProceedToSlip} 
                                     sx={{ 
                                         borderRadius: 3, 
                                         fontWeight: 800, 
                                         py: 1.8, 
                                         fontSize: '1.05rem',
-                                        background: isAdvanceRequested && !isBiometricallyAuthorized
-                                            ? 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)'
-                                            : 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', 
+                                        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', 
                                         boxShadow: '0 8px 20px rgba(15,23,42,0.15)',
                                         transition: 'all 0.2s',
                                         '&:hover': { 
-                                            background: isAdvanceRequested && !isBiometricallyAuthorized
-                                                ? 'linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%)'
-                                                : 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
+                                            background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
                                             transform: 'translateY(-2px)',
                                             boxShadow: '0 12px 25px rgba(15,23,42,0.25)',
                                         } 
                                     }}
                                 >
-                                    {isAdvanceRequested && !isBiometricallyAuthorized ? 'Authenticate Biometrics & Generate Slip' : 'Generate Lorry Slip'}
+                                    Generate Slip
                                 </Button>
                             </Paper>
                         </Grid>

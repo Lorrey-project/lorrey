@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import SearchableSelect from '../components/SearchableSelect';
 import {
   Box, Button, CircularProgress, Typography, IconButton,
-  Snackbar, Alert, Chip, Tooltip, Select, MenuItem, FormControl, InputLabel,
+  Snackbar, Alert, Chip, Tooltip, MenuItem, Select,
   Dialog, DialogTitle, DialogContent, DialogActions, Checkbox, ListItemText, OutlinedInput
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -11,11 +11,6 @@ import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import TrendingDownIcon from '@mui/icons-material/TrendingDown';
-import TodayIcon from '@mui/icons-material/Today';
-import SavingsIcon from '@mui/icons-material/Savings';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import * as XLSX from 'xlsx';
@@ -26,8 +21,8 @@ import { useTableNavigation } from '../hooks/useTableNavigation';
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 const socket = io(SOCKET_URL, {
-    autoConnect: true,
-    transports: ["websocket", "polling"]
+  autoConnect: true,
+  transports: ["websocket", "polling"]
 });
 
 const MONTH_NAMES = [
@@ -35,139 +30,138 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-// Helpers
-function num(val, fallback = 0) { const n = parseFloat(val); return isNaN(n) ? fallback : n; }
-function fmt2(n) { return Math.round(num(n) * 100) / 100; }
+const MONTH_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+
+// Helper calculation functions
+function num(val, fallback = 0) {
+  if (val === undefined || val === null || val === '') return fallback;
+  const n = parseFloat(String(val).replace(/,/g, ''));
+  return isNaN(n) ? fallback : n;
+}
+
+function fmt2(n) {
+  return Math.round(num(n) * 100) / 100;
+}
+
+function formatDisplayNum(val) {
+  if (val === undefined || val === null || val === '') return '';
+  const n = num(val);
+  return n === 0 ? '0' : String(n);
+}
 
 const normalizeDate = (dStr) => {
   if (!dStr) return '';
-  const parts = String(dStr).trim().split(/[-\/]/);
+  const parts = String(dStr).trim().split(/[-\/\.]/);
   if (parts.length >= 3) {
     const d = String(parseInt(parts[0], 10)).padStart(2, '0');
     const m = String(parseInt(parts[1], 10)).padStart(2, '0');
-    const y = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+    let y = parseInt(parts[2], 10);
+    if (y < 100) y += 2000;
     return `${d}-${m}-${y}`;
   }
   return String(dStr).trim();
 };
 
+const formatDateShort = (dStr) => {
+  if (!dStr) return '';
+  const parts = String(dStr).trim().split(/[-\/\.]/);
+  if (parts.length >= 3) {
+    const d = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    let y = parseInt(parts[2], 10);
+    if (y > 2000) y = y % 100;
+    return `${d}/${m}/${y}`;
+  }
+  return dStr;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
-// COLUMNS — new format matching the reference Excel layout
-// Groups: global | pump | site | office | diff | remarks
+// COLUMN DEFINITIONS — EXACT MATCH TO REFERENCE SPREADSHEET
 // ─────────────────────────────────────────────────────────────────────────────
 const COLUMNS = [
-  // ── Global ──
-  { key: 'DATE', label: 'Date', width: 110, type: 'manual', group: 'global' },
+  // ── Global Date ──
+  { key: 'DATE', label: 'Date', width: 85, type: 'manual', group: 'global' },
 
-  // ── Pump Cash Details ──
-  { key: 'P_OPENING',       label: 'Opening\nBalance',            width: 110, type: 'manual', group: 'pump' },
-  { key: 'P_CASH_RECV_BB', label: 'Cash Receive\nBank Book',    width: 130, type: 'calc', group: 'pump' },
-  { key: 'P_LOAN_RECV',    label: 'Loan Recv',                  width: 200, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
-  { key: 'P_LOAN_PAY',     label: 'Loan Pay',                   width: 200, type: 'manual', group: 'pump', subGroup: 'Cash Source' },
-  { key: 'P_WITHDRAW',     label: 'Cash with\ndraw',            width: 110, type: 'manual', group: 'pump' },
-  {
-    key: 'P_TOTAL', label: 'Total\nAmount', width: 110, type: 'calc', group: 'pump',
-    formula: r => fmt2(num(r.P_OPENING) + num(r.P_WITHDRAW))
-  },
-  { key: 'P_GIVEN_DAC',    label: 'Site cash\ngiven from DAC',  width: 130, type: 'manual', group: 'pump' },
-  { key: 'P_GIVEN_OFFICE', label: 'Cash Given\nTo Office',      width: 120, type: 'manual', group: 'pump' },
-  { key: 'P_LOAN_REPAY',   label: 'LOAN\nREPAY',                width: 110, type: 'manual', group: 'pump' },
-  {
-    key: 'P_CLOSING', label: 'Closing\nBalance', width: 110, type: 'calc', group: 'pump',
-    formula: r => fmt2(num(r.P_TOTAL) - num(r.P_GIVEN_DAC) - num(r.P_GIVEN_OFFICE))
-  },
-  { key: 'P_LOAN_BALANCE', label: 'LOAN\nBALANCE',              width: 110, type: 'manual', group: 'pump' },
+  // ── Pump Cash Details (Group: pump, gold/yellow) ──
+  { key: 'P_OPENING', label: 'Opening\nBalance', width: 105, type: 'manual', group: 'pump' },
+  { key: 'P_CASH_RECV_BB', label: 'bank', width: 95, type: 'calc', group: 'pump', subGroup: 'cash source' },
+  { key: 'P_LOAN', label: 'loan', width: 95, type: 'manual', group: 'pump', subGroup: 'cash source' },
+  { key: 'CREDIT_VOUCHER', label: 'CREDIT\nVOUCHER', width: 110, type: 'manual', group: 'pump' },
+  { key: 'P_TOTAL', label: 'Total\nAmount', width: 105, type: 'calc', group: 'pump' },
+  { key: 'P_GIVEN_DAC', label: 'Site cash\ngiven from\nDAC', width: 115, type: 'manual', group: 'pump' },
+  { key: 'P_GIVEN_OFFICE', label: 'Cash\nGiven to\nOffice', width: 100, type: 'manual', group: 'pump' },
+  { key: 'P_LOAN_REPAY', label: 'LOAN\nREPAY', width: 100, type: 'manual', group: 'pump' },
+  { key: 'P_CLOSING', label: 'Closing\nBalance', width: 105, type: 'calc', group: 'pump' },
+  { key: 'P_LOAN_BALANCE', label: 'LOAN\nBALANCE', width: 105, type: 'calc', group: 'pump' },
 
-  // ── Site Cash ──
-  { key: 'S_OPENING',      label: 'Site\nopening',              width: 110, type: 'manual', group: 'site' },
-  {
-    key: 'S_RECV_SANGRAM', label: 'Site cash\nreceive from',   width: 120, type: 'calc', group: 'site',
-    formula: r => num(r.P_GIVEN_DAC)
-  },
-  { key: 'S_TRANS_OFFICE', label: 'Transferred\nfrom office cash', width: 130, type: 'manual', group: 'site' },
-  {
-    key: 'S_TOTAL', label: 'Total Cash\nSite', width: 110, type: 'calc', group: 'site',
-    formula: r => fmt2(num(r.S_OPENING) + num(r.S_RECV_SANGRAM))
-  },
-  { key: 'S_TRANS_TO_OFFICE', label: 'Transferred\nto office cash', width: 130, type: 'manual', group: 'site' },
-  {
-    key: 'S_EXPENSE', label: 'Site Cash\nExp', width: 110, type: 'calc', group: 'site',
-    formula: r => fmt2(r.S_EXPENSE || 0)
-  },
-  {
-    key: 'S_CLOSING', label: 'Site Cash\nClosing', width: 110, type: 'calc', group: 'site',
-    formula: r => fmt2(num(r.S_TOTAL) - num(r.S_EXPENSE))
-  },
+  // ── Site Cash (Group: site, light grey) ──
+  { key: 'S_OPENING', label: 'Site opening', width: 100, type: 'manual', group: 'site' },
+  { key: 'S_RECV_SANGRAM', label: 'Site cash\nreceive\nfrom', width: 115, type: 'calc', group: 'site' },
+  { key: 'S_TRANS_OFFICE', label: 'Transfered\nfrom office\ncash', width: 115, type: 'manual', group: 'site' },
+  { key: 'S_TOTAL', label: 'Total Cash\nSite', width: 105, type: 'calc', group: 'site' },
+  { key: 'S_TRANS_TO_OFFICE', label: 'Transfered to\noffice cash', width: 115, type: 'manual', group: 'site' },
+  { key: 'S_EXPENSE', label: 'Site Cash\nExp', width: 105, type: 'calc', group: 'site' },
+  { key: 'S_CLOSING', label: 'Site cash\nClosing', width: 105, type: 'calc', group: 'site' },
 
-  // ── Office Cash ──
-  { key: 'O_OPENING',      label: 'Office Cash\nopening',       width: 120, type: 'manual', group: 'office' },
-  { key: 'O_RECV_HFS',     label: 'Office Cash\nrecv from hfs', width: 130, type: 'manual', group: 'office' },
-  { key: 'O_RECV_SITE',    label: 'Office Cash\nreceive from site', width: 130, type: 'manual', group: 'office' },
-  { key: 'O_TOTAL',        label: 'Total Office\nCash',         width: 120, type: 'manual', group: 'office' },
-  { key: 'O_EXPENSE',      label: 'Office\nExp',                width: 110, type: 'manual', group: 'office' },
-  {
-    key: 'O_CLOSING', label: 'Closing\nBalance', width: 110, type: 'calc', group: 'office',
-    formula: r => fmt2(num(r.O_TOTAL) - num(r.O_EXPENSE))
-  },
+  // ── Office Cash (Group: office, sky blue) ──
+  { key: 'O_OPENING', label: 'Office\nCash\nopening', width: 105, type: 'manual', group: 'office' },
+  { key: 'O_RECV_HFS', label: 'Office\nCash\nreceive\nfrom hfs', width: 115, type: 'manual', group: 'office' },
+  { key: 'O_RECV_SITE', label: 'Office Cash\nreceive\nfrom site', width: 115, type: 'calc', group: 'office' },
+  { key: 'O_TOTAL', label: 'Total\nOffice\nCash', width: 105, type: 'calc', group: 'office' },
+  { key: 'O_EXPENSE', label: 'Office\nExp', width: 95, type: 'manual', group: 'office' },
+  { key: 'O_TRANS_SITE', label: 't/f to\nsite\ncash', width: 95, type: 'manual', group: 'office' },
+  { key: 'O_CLOSING', label: 'Closing\nBalance', width: 105, type: 'calc', group: 'office' },
+  { key: 'DIFFERENCE', label: 'Difference', width: 95, type: 'manual', group: 'office', isDiff: true },
+  { key: 'REMARKS_EXP', label: 'Office exp\ndetails', width: 180, type: 'manual', group: 'office' },
 
-  // ── Difference ──
-  { key: 'DIFFERENCE',     label: 'Difference',                 width: 110, type: 'manual', group: 'diff' },
-
-  // ── Remarks ──
-  { key: 'REMARKS_EXP',    label: 'Office exp\ndetails',        width: 420, type: 'manual', group: 'remarks' },
-  { key: 'REMARKS',        label: 'Remarks',                    width: 420, type: 'manual', group: 'remarks' },
+  // ── Remarks (Group: remarks, warm yellow) ──
+  { key: 'REMARKS', label: 'Remarks', width: 180, type: 'manual', group: 'remarks' },
 ];
 
-// P_OTHERS is still stored on the row but NOT displayed as its own column
-// (it's kept for backward-compat with existing data / P_CLOSING formula)
+const NUMERIC_COLS = COLUMNS.filter(c => !['DATE', 'REMARKS_EXP', 'REMARKS'].includes(c.key));
 
-// Numeric columns for monthly summary totals
-const NUMERIC_COLS = COLUMNS.filter(c => !['DATE', 'P_LOAN_RECV', 'P_LOAN_PAY', 'REMARKS_EXP', 'REMARKS'].includes(c.key));
-
-function applyCalcs(row) {
-  const r = { ...row };
-  for (const col of COLUMNS) {
-    if (col.type === 'calc' && typeof col.formula === 'function') {
-      r[col.key] = col.formula(r);
-    }
-  }
-  return r;
-}
-
-const GROUP_COLORS = {
-  global:  { bg: '#f8fafc', title: 'Date',             titleBg: '#f1f5f9' },
-  pump:    { bg: '#faf5ff', title: 'Pump cash details', titleBg: '#f3e8ff' },
-  site:    { bg: '#f0fdf4', title: 'Site cash',         titleBg: '#dcfce7' },
-  office:  { bg: '#eff6ff', title: 'Office Cash',       titleBg: '#dbeafe' },
-  diff:    { bg: '#fef2f2', title: 'Reconciliation',    titleBg: '#fee2e2' },
-  remarks: { bg: '#fef9c3', title: 'Remarks',           titleBg: '#fef08a' },
+// Group styling matching the visual reference spreadsheet
+const GROUP_STYLES = {
+  global: { title: 'Date', headerBg: '#f8fafc', cellBg: '#ffffff', border: '#cbd5e1' },
+  pump: { title: 'Pump cash details', headerBg: '#fde68a', subHeaderBg: '#fef08a', cellBg: '#fffdf0', calcBg: '#fef9c3', border: '#cbd5e1' },
+  site: { title: 'Site cash', headerBg: '#e2e8f0', subHeaderBg: '#f1f5f9', cellBg: '#f8fafc', calcBg: '#f1f5f9', border: '#cbd5e1' },
+  office: { title: 'Office Cash', headerBg: '#bfdbfe', subHeaderBg: '#dbeafe', cellBg: '#f0f9ff', calcBg: '#e0f2fe', diffBg: '#fed7aa', border: '#cbd5e1' },
+  remarks: { title: 'Remarks', headerBg: '#fde047', subHeaderBg: '#fef08a', cellBg: '#fefce8', border: '#cbd5e1' }
 };
 
 const OPENING_KEYS = ['P_OPENING', 'S_OPENING', 'O_OPENING'];
 
 const CASHBOOK_HEADER_MAP = {
   'date': 'DATE',
-  'opening balance': 'P_OPENING', 'opening': 'P_OPENING', 'opening balance ': 'P_OPENING',
-  'cash source': 'P_SOURCE', 'cash source ': 'P_SOURCE',
-  'loan recv': 'P_LOAN_RECV', 'loan recv ': 'P_LOAN_RECV',
-  'loan pay': 'P_LOAN_PAY', 'loan pay ': 'P_LOAN_PAY',
-  'cash withdraw': 'P_WITHDRAW', 'withdraw': 'P_WITHDRAW', 'cash withdraw ': 'P_WITHDRAW',
-  'cash with draw': 'P_WITHDRAW', 'cash with draw ': 'P_WITHDRAW',
-  'site cash given from dac': 'P_GIVEN_DAC', 'given dac': 'P_GIVEN_DAC', 'site cash given from dac ': 'P_GIVEN_DAC',
-  'cash given to office': 'P_GIVEN_OFFICE', 'given office': 'P_GIVEN_OFFICE', 'cash given to office ': 'P_GIVEN_OFFICE',
-  'loan repay': 'P_LOAN_REPAY', 'loan repay ': 'P_LOAN_REPAY',
-  'loan balance': 'P_LOAN_BALANCE', 'loan balance ': 'P_LOAN_BALANCE',
-  'cash receive bank book': 'P_CASH_RECV_BB', 'cash recv bank book': 'P_CASH_RECV_BB',
-  'cash recive bank book': 'P_CASH_RECV_BB', 'cash received bank book': 'P_CASH_RECV_BB',
-  'others': 'P_OTHERS', 'others ': 'P_OTHERS',
-  'site opening': 'S_OPENING', 'site opening ': 'S_OPENING',
-  'transferred from office': 'S_TRANS_OFFICE', 'transferred from office ': 'S_TRANS_OFFICE',
-  'transfered from office': 'S_TRANS_OFFICE', 'transfered from office cash': 'S_TRANS_OFFICE',
-  'transferred from office cash': 'S_TRANS_OFFICE', 'site cash receive from': 'S_RECV_SANGRAM',
-  'transferred to office cash': 'S_TRANS_TO_OFFICE', 'transferred to office cash ': 'S_TRANS_TO_OFFICE',
-  'transfered to office cash': 'S_TRANS_TO_OFFICE',
-  'office cash opening': 'O_OPENING', 'office cash opening ': 'O_OPENING',
-  'remarks': 'REMARKS', 'remarks ': 'REMARKS'
+  'opening balance': 'P_OPENING', 'opening': 'P_OPENING', 'pump opening': 'P_OPENING',
+  'bank': 'P_CASH_RECV_BB', 'cash receive bank book': 'P_CASH_RECV_BB', 'cash recv bank book': 'P_CASH_RECV_BB',
+  'loan': 'P_LOAN', 'loan recv': 'P_LOAN', 'loan receive': 'P_LOAN',
+  'credit voucher': 'CREDIT_VOUCHER', 'credit vouchers': 'CREDIT_VOUCHER', 'credit vch': 'CREDIT_VOUCHER',
+  'total amount': 'P_TOTAL',
+  'site cash given from dac': 'P_GIVEN_DAC', 'given dac': 'P_GIVEN_DAC', 'site cash given dac': 'P_GIVEN_DAC',
+  'cash given to office': 'P_GIVEN_OFFICE', 'given office': 'P_GIVEN_OFFICE', 'cash given office': 'P_GIVEN_OFFICE',
+  'loan repay': 'P_LOAN_REPAY',
+  'closing balance': 'P_CLOSING',
+  'loan balance': 'P_LOAN_BALANCE',
+  'site opening': 'S_OPENING',
+  'site cash receive from': 'S_RECV_SANGRAM', 'site cash receive': 'S_RECV_SANGRAM', 'receive from': 'S_RECV_SANGRAM',
+  'transferred from office cash': 'S_TRANS_OFFICE', 'transfered from office cash': 'S_TRANS_OFFICE', 'from office cash': 'S_TRANS_OFFICE',
+  'total cash site': 'S_TOTAL',
+  'transferred to office cash': 'S_TRANS_TO_OFFICE', 'transfered to office cash': 'S_TRANS_TO_OFFICE', 'to office cash': 'S_TRANS_TO_OFFICE',
+  'site cash exp': 'S_EXPENSE', 'site cash expense': 'S_EXPENSE', 'site exp': 'S_EXPENSE',
+  'site cash closing': 'S_CLOSING',
+  'office cash opening': 'O_OPENING', 'office opening': 'O_OPENING',
+  'office cash receive from hfs': 'O_RECV_HFS', 'office cash recv from hfs': 'O_RECV_HFS', 'receive from hfs': 'O_RECV_HFS',
+  'office cash receive from site': 'O_RECV_SITE', 'office cash recv from site': 'O_RECV_SITE', 'receive from site': 'O_RECV_SITE',
+  'total office cash': 'O_TOTAL',
+  'office exp': 'O_EXPENSE', 'office expense': 'O_EXPENSE',
+  't/f to site cash': 'O_TRANS_SITE', 'tf to site cash': 'O_TRANS_SITE', 'transfer to site cash': 'O_TRANS_SITE', 't/f to site': 'O_TRANS_SITE',
+  'difference': 'DIFFERENCE',
+  'office exp details': 'REMARKS_EXP', 'office expense details': 'REMARKS_EXP',
+  'remarks': 'REMARKS'
 };
 
 export default function MainCashbook({ onBack }) {
@@ -175,7 +169,6 @@ export default function MainCashbook({ onBack }) {
   const currentFyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
   const [selYear, setSelYear] = useState(`${currentFyStart}-${currentFyStart + 1}`);
-  const years = useMemo(() => Array.from({ length: 5 }, (_, i) => currentFyStart - 2 + i), [currentFyStart]);
 
   const tableContainerRef = useRef(null);
   useTableNavigation(tableContainerRef);
@@ -187,8 +180,7 @@ export default function MainCashbook({ onBack }) {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
-  // carry-forward balances from previous month
-  const [prevClosing, setPrevClosing] = useState({ P_CLOSING: 0, S_CLOSING: 0, O_CLOSING: 0 });
+  const [prevClosing, setPrevClosing] = useState({ P_CLOSING: 0, S_CLOSING: 0, O_CLOSING: 0, P_LOAN_BALANCE: 0 });
 
   const dirtyCount = Object.keys(localData).length;
   const allSelected = entries.length > 0 && selectedIds.size === entries.length;
@@ -204,7 +196,7 @@ export default function MainCashbook({ onBack }) {
 
   // Year options
   const yearOptions = [];
-  for (let y = currentFyStart - 2; y <= currentFyStart + 1; y++) yearOptions.push(`${y}-${y + 1}`);
+  for (let y = currentFyStart - 3; y <= currentFyStart + 1; y++) yearOptions.push(`${y}-${y + 1}`);
 
   const toggleSelect = (id) => setSelectedIds(prev => {
     const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s;
@@ -219,6 +211,11 @@ export default function MainCashbook({ onBack }) {
   // Fetch previous month's last closing balances
   const fetchPrevClosing = useCallback(async (month, yearStr) => {
     try {
+      if (month === 4) {
+        // April is the opening month of the financial year - starts clean with 0
+        setPrevClosing({ P_CLOSING: 0, S_CLOSING: 0, O_CLOSING: 0, P_LOAN_BALANCE: 0 });
+        return;
+      }
       const fyStartYear = parseInt(String(yearStr).split('-')[0], 10);
       const calendarYear = month >= 4 ? fyStartYear : fyStartYear + 1;
       let prevMonth = month - 1, prevYear = calendarYear;
@@ -230,7 +227,7 @@ export default function MainCashbook({ onBack }) {
       if (res.data.success && res.data.data) {
         setPrevClosing(res.data.data);
       } else {
-        setPrevClosing({ P_CLOSING: 0, S_CLOSING: 0, O_CLOSING: 0 });
+        setPrevClosing({ P_CLOSING: 0, S_CLOSING: 0, O_CLOSING: 0, P_LOAN_BALANCE: 0 });
       }
     } catch { /* ignore */ }
   }, []);
@@ -261,7 +258,7 @@ export default function MainCashbook({ onBack }) {
     fetchPrevClosing(selMonth, selYear);
   }, [selMonth, selYear, fetchData, fetchPrevClosing]);
 
-  // Socket: re-fetch silently on cashbook updates (debounced)
+  // Socket: re-fetch silently on cashbook updates & vouchers (debounced)
   useEffect(() => {
     let timer = null;
     const handler = () => {
@@ -269,7 +266,16 @@ export default function MainCashbook({ onBack }) {
       timer = setTimeout(() => fetchData(selMonth, selYear, true), 150);
     };
     socket.on('mainCashbookUpdates', handler);
-    return () => { socket.off('mainCashbookUpdates', handler); clearTimeout(timer); };
+    socket.on('voucherCreated', handler);
+    socket.on('voucherUpdate', handler);
+    socket.on('voucherDeleted', handler);
+    return () => {
+      socket.off('mainCashbookUpdates', handler);
+      socket.off('voucherCreated', handler);
+      socket.off('voucherUpdate', handler);
+      socket.off('voucherDeleted', handler);
+      clearTimeout(timer);
+    };
   }, [selMonth, selYear, fetchData]);
 
   // Socket: instant expense patch
@@ -287,19 +293,9 @@ export default function MainCashbook({ onBack }) {
     return () => socket.off('expenseUpdate', handler);
   }, []);
 
-  // Socket: new voucher notification
-  useEffect(() => {
-    const handler = ({ voucher }) => {
-      setSnack({
-        severity: 'info',
-        msg: `New voucher ${voucher?.voucherNumber || ''} created — remember to update Site Cash Expense (S_EXPENSE) if applicable.`
-      });
-    };
-    socket.on('voucherCreated', handler);
-    return () => socket.off('voucherCreated', handler);
-  }, []);
-
-  // Build computed rows: chain opening ← prev closing
+  // ─────────────────────────────────────────────────────────────────────────────
+  // COMPUTED ROWS WITH EXACT BUSINESS FORMULAS
+  // ─────────────────────────────────────────────────────────────────────────────
   const computedRows = useMemo(() => {
     const fyStart = parseInt(String(selYear).split('-')[0], 10);
     const actualYear = selMonth >= 4 ? fyStart : fyStart + 1;
@@ -329,7 +325,7 @@ export default function MainCashbook({ onBack }) {
       const maxRows = Math.max(1, dbRows.length, impRows.length);
 
       for (let i = 0; i < maxRows; i++) {
-        const dbRow = dbRows[i] || (i === 0 ? { DATE: dStr, _id: `auto-${dStr}` } : null);
+        const dbRow = dbRows[i] || (i === 0 ? { DATE: dStr, _id: `auto-${dStr}`, month: selMonth, year: actualYear } : null);
         const impRow = impRows[i] || null;
         const locRow = (dbRow && dbRow._id) ? (localData[dbRow._id] || {}) : {};
 
@@ -341,15 +337,20 @@ export default function MainCashbook({ onBack }) {
         } else if (dbRow && !impRow) {
           merged = { ...dbRow, ...locRow };
         }
-        rawList.push(merged);
+        if (merged) rawList.push(merged);
       }
     }
 
     rawList.sort((a, b) => {
       const parseMs = (dStr) => {
         if (!dStr) return 0;
-        const [d, m, y] = String(dStr).split('-');
-        return new Date(`${y}-${m}-${d}`).getTime();
+        const parts = String(dStr).split(/[-\/\.]/);
+        if (parts.length >= 3) {
+          let yr = parseInt(parts[2], 10);
+          if (yr < 100) yr += 2000;
+          return new Date(yr, parseInt(parts[1], 10) - 1, parseInt(parts[0], 10)).getTime();
+        }
+        return 0;
       };
       const timeA = parseMs(a.DATE);
       const timeB = parseMs(b.DATE);
@@ -364,93 +365,147 @@ export default function MainCashbook({ onBack }) {
     const result = [];
     for (let i = 0; i < rawList.length; i++) {
       const r = { ...rawList[i] };
+
+      // ── 1. PUMP CASH DETAILS ──
+      // Opening balance: Day 1 from stored / prev month closing, Day 2+ from prev day closing
       if (i === 0) {
-        if (!rawList[i].P_OPENING && !localData[rawList[i]._id]?.P_OPENING)
-          r.P_OPENING = prevClosing.P_CLOSING;
-        if (!rawList[i].S_OPENING && !localData[rawList[i]._id]?.S_OPENING)
-          r.S_OPENING = prevClosing.S_CLOSING;
-        if (!rawList[i].O_OPENING && !localData[rawList[i]._id]?.O_OPENING)
-          r.O_OPENING = prevClosing.O_CLOSING;
+        r.P_OPENING = (r.P_OPENING !== undefined && r.P_OPENING !== '' && r.P_OPENING !== null && localData[r._id]?.P_OPENING !== undefined)
+          ? num(r.P_OPENING)
+          : (r.P_OPENING !== undefined && r.P_OPENING !== '' && r.P_OPENING !== null ? num(r.P_OPENING) : num(prevClosing.P_CLOSING, 0));
       } else {
-        const prev = result[i - 1];
-        r.P_OPENING = prev.P_CLOSING;
-        r.S_OPENING = prev.S_CLOSING;
-        r.O_OPENING = prev.O_CLOSING;
+        r.P_OPENING = fmt2(result[i - 1].P_CLOSING);
       }
-      result.push(applyCalcs(r));
+
+      r.P_CASH_RECV_BB = num(r.P_CASH_RECV_BB);
+      r.P_LOAN = num(r.P_LOAN !== undefined ? r.P_LOAN : (r.P_LOAN_RECV !== undefined ? r.P_LOAN_RECV : ''));
+      r.CREDIT_VOUCHER = num(r.CREDIT_VOUCHER !== undefined ? r.CREDIT_VOUCHER : (r.CREDIT_VCH !== undefined ? r.CREDIT_VCH : ''));
+      r.P_TOTAL = fmt2(num(r.P_OPENING) + num(r.P_CASH_RECV_BB) + num(r.P_LOAN) + num(r.CREDIT_VOUCHER));
+
+      r.P_GIVEN_DAC = num(r.P_GIVEN_DAC);
+      r.P_GIVEN_OFFICE = num(r.P_GIVEN_OFFICE);
+      r.P_LOAN_REPAY = num(r.P_LOAN_REPAY);
+
+      // Closing = Total Amount - Site Given DAC - Given to Office - Loan Repay
+      r.P_CLOSING = fmt2(num(r.P_TOTAL) - num(r.P_GIVEN_DAC) - num(r.P_GIVEN_OFFICE) - num(r.P_LOAN_REPAY));
+
+      // Loan Balance = Yesterday's Loan Balance + Today's Loan - Today's Loan Repay
+      if (i === 0) {
+        const initialLoanBal = prevClosing.P_LOAN_BALANCE !== undefined ? num(prevClosing.P_LOAN_BALANCE) : 0;
+        r.P_LOAN_BALANCE = fmt2(initialLoanBal + num(r.P_LOAN) - num(r.P_LOAN_REPAY));
+      } else {
+        const prevLoanBal = num(result[i - 1].P_LOAN_BALANCE);
+        r.P_LOAN_BALANCE = fmt2(prevLoanBal + num(r.P_LOAN) - num(r.P_LOAN_REPAY));
+      }
+
+      // ── 2. SITE CASH ──
+      // Site opening: Day 1 from stored / prev month closing, Day 2+ from prev day site closing
+      if (i === 0) {
+        r.S_OPENING = (r.S_OPENING !== undefined && r.S_OPENING !== '' && r.S_OPENING !== null && localData[r._id]?.S_OPENING !== undefined)
+          ? num(r.S_OPENING)
+          : (r.S_OPENING !== undefined && r.S_OPENING !== '' && r.S_OPENING !== null ? num(r.S_OPENING) : num(prevClosing.S_CLOSING, 0));
+      } else {
+        r.S_OPENING = fmt2(result[i - 1].S_CLOSING);
+      }
+
+      // Live sync from Pump Cash Given DAC
+      r.S_RECV_SANGRAM = num(r.P_GIVEN_DAC);
+      r.S_TRANS_OFFICE = num(r.S_TRANS_OFFICE);
+      r.S_TOTAL = fmt2(num(r.S_OPENING) + num(r.S_RECV_SANGRAM) + num(r.S_TRANS_OFFICE));
+
+      r.S_TRANS_TO_OFFICE = num(r.S_TRANS_TO_OFFICE);
+      r.S_EXPENSE = num(r.S_EXPENSE);
+
+      // Site Closing = Total Cash Site - Site Cash Exp - Transferred to Office Cash
+      r.S_CLOSING = fmt2(num(r.S_TOTAL) - num(r.S_EXPENSE) - num(r.S_TRANS_TO_OFFICE));
+
+      // ── 3. OFFICE CASH ──
+      // Office opening: Day 1 from stored / prev month closing, Day 2+ from prev day office closing
+      if (i === 0) {
+        r.O_OPENING = (r.O_OPENING !== undefined && r.O_OPENING !== '' && r.O_OPENING !== null && localData[r._id]?.O_OPENING !== undefined)
+          ? num(r.O_OPENING)
+          : (r.O_OPENING !== undefined && r.O_OPENING !== '' && r.O_OPENING !== null ? num(r.O_OPENING) : num(prevClosing.O_CLOSING, 0));
+      } else {
+        r.O_OPENING = fmt2(result[i - 1].O_CLOSING);
+      }
+
+      r.O_RECV_HFS = num(r.O_RECV_HFS);
+
+      // Live sync from Site Cash: Transferred to Office Cash (with manual override support)
+      if (localData[r._id]?.O_RECV_SITE !== undefined) {
+        r.O_RECV_SITE = num(localData[r._id].O_RECV_SITE);
+      } else if (r.O_RECV_SITE !== undefined && r.O_RECV_SITE !== '' && r.O_RECV_SITE !== null && !r._id.startsWith('auto-')) {
+        r.O_RECV_SITE = num(r.O_RECV_SITE);
+      } else {
+        r.O_RECV_SITE = num(r.S_TRANS_TO_OFFICE);
+      }
+
+      r.O_TOTAL = fmt2(num(r.O_OPENING) + num(r.O_RECV_HFS) + num(r.O_RECV_SITE));
+      r.O_EXPENSE = num(r.O_EXPENSE);
+      r.O_TRANS_SITE = num(r.O_TRANS_SITE);
+
+      // Office Closing = Total Office Cash - Office Expense - T/F to Site Cash
+      r.O_CLOSING = fmt2(num(r.O_TOTAL) - num(r.O_EXPENSE) - num(r.O_TRANS_SITE));
+
+      // Difference: Manual
+      r.DIFFERENCE = r.DIFFERENCE !== undefined ? r.DIFFERENCE : '';
+      r.REMARKS_EXP = r.REMARKS_EXP || '';
+      r.REMARKS = r.REMARKS || '';
+
+      result.push(r);
     }
     return result;
   }, [entries, localData, importedEntries, prevClosing, selMonth, selYear]);
 
-  // Monthly column totals for summary row
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MONTHLY SUMMARY ROW TOTALS
+  // ─────────────────────────────────────────────────────────────────────────────
   const monthSums = useMemo(() => {
     const s = {};
     if (computedRows.length === 0) return s;
+    const firstRow = computedRows[0];
     const lastRow = computedRows[computedRows.length - 1];
-    for (const col of NUMERIC_COLS) {
-      if (['P_OPENING', 'S_OPENING', 'O_OPENING'].includes(col.key)) {
-        s[col.key] = fmt2(lastRow[col.key]);
-      } else if (['P_CLOSING', 'S_CLOSING', 'O_CLOSING'].includes(col.key)) {
-        s[col.key] = fmt2(lastRow[col.key]);
-      } else {
-        s[col.key] = fmt2(computedRows.reduce((acc, r) => acc + num(r[col.key]), 0));
-      }
-    }
+
+    // Opening balances -> First day's opening balance
+    s.P_OPENING = fmt2(firstRow.P_OPENING);
+    s.S_OPENING = fmt2(firstRow.S_OPENING);
+    s.O_OPENING = fmt2(firstRow.O_OPENING);
+
+    // Closing balances -> Last day's closing balance
+    s.P_CLOSING = fmt2(lastRow.P_CLOSING);
+    s.S_CLOSING = fmt2(lastRow.S_CLOSING);
+    s.O_CLOSING = fmt2(lastRow.O_CLOSING);
+    s.P_LOAN_BALANCE = fmt2(lastRow.P_LOAN_BALANCE);
+
+    // Transaction sums
+    s.P_CASH_RECV_BB = fmt2(computedRows.reduce((acc, r) => acc + num(r.P_CASH_RECV_BB), 0));
+    s.P_LOAN = fmt2(computedRows.reduce((acc, r) => acc + num(r.P_LOAN), 0));
+    s.CREDIT_VOUCHER = fmt2(computedRows.reduce((acc, r) => acc + num(r.CREDIT_VOUCHER), 0));
+    s.P_TOTAL = fmt2(num(s.P_OPENING) + num(s.P_CASH_RECV_BB) + num(s.P_LOAN) + num(s.CREDIT_VOUCHER));
+
+    s.P_GIVEN_DAC = fmt2(computedRows.reduce((acc, r) => acc + num(r.P_GIVEN_DAC), 0));
+    s.P_GIVEN_OFFICE = fmt2(computedRows.reduce((acc, r) => acc + num(r.P_GIVEN_OFFICE), 0));
+    s.P_LOAN_REPAY = fmt2(computedRows.reduce((acc, r) => acc + num(r.P_LOAN_REPAY), 0));
+
+    s.S_RECV_SANGRAM = fmt2(computedRows.reduce((acc, r) => acc + num(r.S_RECV_SANGRAM), 0));
+    s.S_TRANS_OFFICE = fmt2(computedRows.reduce((acc, r) => acc + num(r.S_TRANS_OFFICE), 0));
+    s.S_TOTAL = fmt2(num(s.S_OPENING) + num(s.S_RECV_SANGRAM) + num(s.S_TRANS_OFFICE));
+    s.S_TRANS_TO_OFFICE = fmt2(computedRows.reduce((acc, r) => acc + num(r.S_TRANS_TO_OFFICE), 0));
+    s.S_EXPENSE = fmt2(computedRows.reduce((acc, r) => acc + num(r.S_EXPENSE), 0));
+
+    s.O_RECV_HFS = fmt2(computedRows.reduce((acc, r) => acc + num(r.O_RECV_HFS), 0));
+    s.O_RECV_SITE = fmt2(computedRows.reduce((acc, r) => acc + num(r.O_RECV_SITE), 0));
+    s.O_TOTAL = fmt2(num(s.O_OPENING) + num(s.O_RECV_HFS) + num(s.O_RECV_SITE));
+    s.O_EXPENSE = fmt2(computedRows.reduce((acc, r) => acc + num(r.O_EXPENSE), 0));
+    s.O_TRANS_SITE = fmt2(computedRows.reduce((acc, r) => acc + num(r.O_TRANS_SITE), 0));
+
+    const totalDiff = computedRows.reduce((acc, r) => acc + num(r.DIFFERENCE), 0);
+    s.DIFFERENCE = totalDiff !== 0 ? fmt2(totalDiff) : 0;
+
     return s;
-  }, [computedRows]);
-
-  // ── KPI Metrics ──────────────────────────────────────────────────────────────
-  const kpiMetrics = useMemo(() => {
-    let openingBalance = 0;
-    let totalReceipts = 0;
-    let totalPayments = 0;
-    let closingBalance = 0;
-    let todaysTransactions = 0;
-
-    const todayStr = new Date().toLocaleDateString('en-IN').replace(/\//g, '-');
-    const todayParts = todayStr.split('-');
-    const todayYYYYMMDD = `${todayParts[2]}-${todayParts[1]?.padStart(2, '0')}-${todayParts[0]?.padStart(2, '0')}`;
-    const todayDDMMYYYY = `${todayParts[0]?.padStart(2, '0')}-${todayParts[1]?.padStart(2, '0')}-${todayParts[2]}`;
-
-    if (computedRows.length > 0) {
-      openingBalance = num(computedRows[0].P_OPENING) + num(computedRows[0].S_OPENING) + num(computedRows[0].O_OPENING);
-      closingBalance = num(computedRows[computedRows.length - 1].P_CLOSING) + num(computedRows[computedRows.length - 1].S_CLOSING) + num(computedRows[computedRows.length - 1].O_CLOSING);
-    }
-
-    computedRows.forEach(r => {
-      totalPayments += num(r.S_EXPENSE) + num(r.O_EXPENSE) + num(r.P_OTHERS);
-      const rDate = r.DATE || '';
-      if (rDate === todayStr || rDate === todayYYYYMMDD || rDate === todayDDMMYYYY) {
-        todaysTransactions += 1;
-      }
-    });
-
-    totalReceipts = closingBalance - openingBalance + totalPayments;
-    return { openingBalance, totalReceipts, totalPayments, closingBalance, todaysTransactions, currentBalance: closingBalance };
   }, [computedRows]);
 
   const handleCellEdit = useCallback((rowId, field, value) => {
     setLocalData(prev => ({ ...prev, [rowId]: { ...(prev[rowId] || {}), [field]: value } }));
-  }, []);
-
-  const handleBlur = useCallback((rowId, field, value, rawRow) => {
-    if (field === 'P_WITHDRAW') {
-      const loanPay = String(rawRow.P_LOAN_PAY || '');
-      if (loanPay.startsWith('DAC-RS-')) {
-        const match = loanPay.match(/DAC-RS-(\d+(?:\.\d+)?)/);
-        if (match) {
-          const minVal = parseFloat(match[1]);
-          const currentVal = parseFloat(value);
-          if (isNaN(currentVal) || currentVal < minVal) {
-            setLocalData(prev => ({
-              ...prev,
-              [rowId]: { ...(prev[rowId] || {}), [field]: String(minVal) }
-            }));
-            setSnack({ severity: 'warning', msg: `Withdraw amount cannot be less than Bank Book synced amount (${minVal})` });
-          }
-        }
-      }
-    }
   }, []);
 
   const handleImportFileChange = (e) => {
@@ -530,18 +585,6 @@ export default function MainCashbook({ onBack }) {
             if (val !== '') rowObj[internalKey] = val;
           });
 
-          if (rowObj['P_SOURCE'] !== undefined) {
-            const pSource = String(rowObj['P_SOURCE'] || '').trim();
-            if (pSource.startsWith('DAC-RS-')) {
-              rowObj['P_LOAN_PAY'] = pSource;
-              rowObj['P_LOAN_RECV'] = '';
-            } else {
-              rowObj['P_LOAN_RECV'] = pSource;
-              rowObj['P_LOAN_PAY'] = '';
-            }
-            delete rowObj['P_SOURCE'];
-          }
-
           if (rowObj['DATE']) {
             let dateStr = String(rowObj['DATE']).trim();
             let day = null, month = null, year = null;
@@ -599,29 +642,10 @@ export default function MainCashbook({ onBack }) {
   const handleImportSubmit = () => {
     if (!importPreview || importPreview.validCount === 0) return;
     setImportedEntries(importPreview.entries);
-    setSnack({ severity: 'success', msg: `Successfully imported ${importPreview.validCount} rows to preview! Click the Save button next to XLS on the toolbar to save permanently.` });
+    setSnack({ severity: 'success', msg: `Successfully imported ${importPreview.validCount} rows to preview! Click Save to save permanently.` });
     setImportModalOpen(false);
     setImportFile(null);
     setImportPreview(null);
-  };
-
-  const handleAddRow = async () => {
-    try {
-      const today = new Date().toLocaleDateString('en-IN').replace(/\//g, '-');
-      const fyStartYear = parseInt(String(selYear).split('-')[0], 10);
-      const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
-      const newEntry = { DATE: today, month: selMonth, year: calendarYear };
-      const res = await axios.post(`${API_URL}/main-cashbook`, newEntry, {
-        headers: { Authorization: `Bearer ${token()}` }
-      });
-      if (res.data.success) {
-        setEntries(prev => [...prev, res.data.entry]);
-        setSnack({ severity: 'success', msg: 'New row added' });
-      }
-    } catch (err) {
-      console.error(err);
-      setSnack({ severity: 'error', msg: `Failed to add row: ${err.response?.data?.error || err.message}` });
-    }
   };
 
   const handleBulkDelete = async () => {
@@ -695,92 +719,64 @@ export default function MainCashbook({ onBack }) {
   };
 
   const handleExport = () => {
-    const summaryRow = { DATE: `${MONTH_NAMES[selMonth - 1].toUpperCase()} ${selYear} TOTAL` };
-    for (const col of NUMERIC_COLS) summaryRow[col.key] = monthSums[col.key];
-    exportToCsv(`cashbook_${selYear}_${selMonth}.xls`, [...computedRows, summaryRow]);
+    const fyStart = parseInt(String(selYear).split('-')[0], 10);
+    const actualYear = selMonth >= 4 ? fyStart : fyStart + 1;
+    const summaryLabel = `${MONTH_SHORT[selMonth - 1]}'${String(actualYear).slice(-2)} Summary`;
+
+    const exportRows = computedRows.map(r => {
+      const rowObj = {};
+      rowObj['Date'] = formatDateShort(r.DATE);
+      COLUMNS.filter(c => c.key !== 'DATE').forEach(c => {
+        rowObj[c.label.replace(/\n/g, ' ')] = r[c.key] !== undefined ? r[c.key] : '';
+      });
+      return rowObj;
+    });
+
+    const summaryRow = { 'Date': summaryLabel };
+    COLUMNS.filter(c => c.key !== 'DATE').forEach(c => {
+      summaryRow[c.label.replace(/\n/g, ' ')] = monthSums[c.key] !== undefined ? monthSums[c.key] : '';
+    });
+    exportRows.push(summaryRow);
+
+    exportToCsv(`Cashbook_${selYear}_${MONTH_SHORT[selMonth - 1]}.xls`, exportRows);
   };
 
   useShortcut('ctrl+s', handleSave);
-  useShortcut('ctrl+r', () => fetchData());
+  useShortcut('ctrl+r', () => fetchData(selMonth, selYear));
   useShortcut('ctrl+e', handleExport);
   useShortcut('delete', () => { if (selectedIds.size > 0) setConfirmDel(true); });
 
   if (loading) return (
     <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh" gap={2}>
-      <CircularProgress size={48} thickness={4} sx={{ color: '#7c3aed' }} />
+      <CircularProgress size={48} thickness={4} sx={{ color: '#0284c7' }} />
       <Typography color="text.secondary" fontWeight={600}>Loading Cash Book...</Typography>
     </Box>
   );
 
-  // ── Helper: group columns for <thead> rendering ──────────────────────────────
-  const groupOrder = Object.keys(GROUP_COLORS);
-  const groupedCols = groupOrder.map(grp => ({
-    grp, cols: COLUMNS.filter(c => c.group === grp)
-  })).filter(g => g.cols.length > 0);
-
-  // Row 2: sub-groups (Cash Source) + individual cols without subGroup (rowspan=2)
-  // Row 3: leaf cols under sub-groups
-  const buildRow2 = () => {
-    const cells = [];
-    const seen = new Set();
-    for (let i = 0; i < COLUMNS.length; i++) {
-      const col = COLUMNS[i];
-      if (col.group === 'global') continue; // Global group (Date) spans rowSpan=3 in Row 1
-      const gc = GROUP_COLORS[col.group];
-      if (col.subGroup) {
-        if (!seen.has(col.subGroup)) {
-          seen.add(col.subGroup);
-          const subGroupCols = COLUMNS.filter(c => c.subGroup === col.subGroup);
-          cells.push(
-            <th key={`sg-${col.subGroup}`} colSpan={subGroupCols.length} style={{
-              position: 'sticky', top: 30, zIndex: 3,
-              background: gc.bg, color: '#334155', padding: '4px',
-              textAlign: 'center', fontSize: '11px', fontWeight: 800,
-              border: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8'
-            }}>
-              {col.subGroup}
-            </th>
-          );
-        }
-      } else {
-        cells.push(
-          <th key={col.key} rowSpan={2} style={{
-            position: 'sticky', top: 30, zIndex: 3,
-            background: gc.bg, color: '#334155', padding: '8px 4px',
-            textAlign: 'center', fontSize: '11px', fontWeight: 700,
-            border: '1px solid #cbd5e1', whiteSpace: 'pre-line'
-          }}>
-            {col.label}
-          </th>
-        );
-      }
-    }
-    return cells;
-  };
+  const actualCalendarYear = selMonth >= 4 ? parseInt(selYear.split('-')[0], 10) : parseInt(selYear.split('-')[0], 10) + 1;
+  const monthShortYear = `${MONTH_SHORT[selMonth - 1]}'${String(actualCalendarYear).slice(-2)}`;
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#f8fafc', overflow: 'hidden' }}>
 
-      {/* ── Header ── */}
-      <Box sx={{ p: 2, bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 2, zIndex: 10 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <IconButton onClick={onBack} size="small" sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
-              <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
-            </IconButton>
-            <Typography variant="h6" fontWeight={800} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
-              Cash Book
-            </Typography>
-            <Chip label={`${MONTH_NAMES[selMonth - 1]} ${selMonth >= 4 ? selYear.split('-')[0] : parseInt(selYear.split('-')[0], 10) + 1}`}
-              size="small" sx={{ fontWeight: 800, bgcolor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }} />
-          </Box>
+      {/* ── Top Header Bar ── */}
+      <Box sx={{ p: 2, bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2, zIndex: 10 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <IconButton onClick={onBack} size="small" sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <ArrowBackIcon fontSize="small" sx={{ color: '#475569' }} />
+          </IconButton>
+          <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', letterSpacing: '-0.5px' }}>
+            Cash Book
+          </Typography>
+          <Chip label={`${MONTH_NAMES[selMonth - 1]} ${actualCalendarYear}`}
+            size="small" sx={{ fontWeight: 800, bgcolor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }} />
         </Box>
       </Box>
 
-      {/* ── Toolbar ── */}
+      {/* ── Filter & Action Toolbar ── */}
       <Box sx={{
         px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
-        bgcolor: 'background.paper', borderBottom: '1px solid #e2e8f0', flexShrink: 0, zIndex: 9
+        bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0', flexShrink: 0, zIndex: 9
       }}>
         <Box sx={{ minWidth: 140 }}>
           <SearchableSelect sx={{ minWidth: 140 }} value={selMonth} label="Month" onChange={e => setSelMonth(e.target.value)}>
@@ -793,30 +789,27 @@ export default function MainCashbook({ onBack }) {
           </SearchableSelect>
         </Box>
 
-        <Chip label={`${computedRows.length} entries`} size="small" sx={{ bgcolor: 'background.default', fontWeight: 700, color: '#475569' }} />
-        {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ fontWeight: 700, bgcolor: '#fef08a', color: '#854d0e' }} />}
-        {selectedIds.size > 0 && <Chip label={`${selectedIds.size} selected`} size="small" sx={{ fontWeight: 700, bgcolor: '#fee2e2', color: '#b91c1c' }} />}
+        <Chip label={`${computedRows.length} Days`} size="small" sx={{ bgcolor: '#f1f5f9', fontWeight: 800, color: '#475569' }} />
+        {dirtyCount > 0 && <Chip label={`${dirtyCount} unsaved`} size="small" sx={{ fontWeight: 800, bgcolor: '#fef08a', color: '#854d0e' }} />}
+        {selectedIds.size > 0 && <Chip label={`${selectedIds.size} selected`} size="small" sx={{ fontWeight: 800, bgcolor: '#fee2e2', color: '#b91c1c' }} />}
 
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1, alignItems: 'center' }}>
           {selectedIds.size > 0 && (
             <Button size="small" variant="contained"
               startIcon={deleting ? <CircularProgress size={13} color="inherit" /> : <DeleteIcon />}
               onClick={() => setConfirmDel(true)} disabled={deleting}
-              sx={{ fontWeight: 800, borderRadius: 2, background: 'linear-gradient(135deg,#dc2626,#b91c1c)' }}>
+              sx={{ fontWeight: 800, borderRadius: 2, bgcolor: '#dc2626', '&:hover': { bgcolor: '#b91c1c' } }}>
               Delete ({selectedIds.size})
             </Button>
           )}
           <Button size="small" variant="outlined"
-            onClick={() => { setImportYear(selYear); setImportMonths([1,2,3,4,5,6,7,8,9,10,11,12]); setImportFile(null); setImportPreview(null); setImportModalOpen(true); }}
+            onClick={() => { setImportYear(selYear); setImportMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); setImportFile(null); setImportPreview(null); setImportModalOpen(true); }}
             startIcon={<UploadIcon sx={{ fontSize: '1.1rem' }} />}
-            sx={{ fontWeight: 700, borderRadius: 2 }}>
+            sx={{ fontWeight: 700, borderRadius: 2, color: '#475569', borderColor: '#cbd5e1' }}>
             Import Excel
           </Button>
-          <Button size="small" variant="outlined" onClick={handleAddRow} sx={{ fontWeight: 700, borderRadius: 2 }}>
-            + Add Row
-          </Button>
           <Tooltip title="Discard & reload">
-            <IconButton size="small" onClick={() => fetchData(selMonth, selYear)} sx={{ bgcolor: 'background.default', '&:hover': { bgcolor: '#e2e8f0' } }}>
+            <IconButton size="small" onClick={() => fetchData(selMonth, selYear)} sx={{ bgcolor: '#f1f5f9', '&:hover': { bgcolor: '#e2e8f0' } }}>
               <RefreshIcon fontSize="small" sx={{ color: '#475569' }} />
             </IconButton>
           </Tooltip>
@@ -827,185 +820,271 @@ export default function MainCashbook({ onBack }) {
             onClick={handleSave}
             disabled={(dirtyCount === 0 && importedEntries.length === 0) || saving}
             sx={{
-              fontWeight: 700, borderRadius: 2,
-              bgcolor: (dirtyCount + importedEntries.length) > 0 ? '#3b82f6' : '#cbd5e1',
-              '&:hover': { bgcolor: '#2563eb' }, px: 3, transition: 'all 0.2s ease-in-out'
+              fontWeight: 800, borderRadius: 2,
+              bgcolor: (dirtyCount + importedEntries.length) > 0 ? '#0284c7' : '#cbd5e1',
+              '&:hover': { bgcolor: '#0369a1' }, px: 3, transition: 'all 0.2s ease-in-out'
             }}>
             {saving ? 'Saving...' : `Save${(dirtyCount + importedEntries.length) > 0 ? ` (${dirtyCount + importedEntries.length})` : ''}`}
           </Button>
         </Box>
       </Box>
 
-      {/* ── Table ── */}
-      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1 }}>
+      {/* ── SPREADSHEET TABLE ── */}
+      <Box ref={tableContainerRef} sx={{ overflow: 'auto', flex: 1, bgcolor: '#ffffff' }}>
         <table style={{
           borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content',
-          fontFamily: 'Inter, system-ui, sans-serif', fontSize: '12px'
+          fontFamily: '"Outfit", "Inter", -apple-system, BlinkMacSystemFont, sans-serif', fontSize: '12px'
         }}>
           <colgroup>
-            <col style={{ width: 40, minWidth: 40 }} />
-            <col style={{ width: 50, minWidth: 50 }} />
+            <col style={{ width: 36, minWidth: 36 }} />
             {COLUMNS.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
           </colgroup>
 
           <thead>
-            {/* Row 1 — Group headers */}
+            {/* ── ROW 1: PRIMARY GROUP HEADERS ── */}
             <tr>
-              <th rowSpan={3} style={{ position: 'sticky', top: 0, zIndex: 4, width: 40, background: '#f8fafc', borderRight: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8' }}>
-                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ accentColor: '#3b82f6' }} />
+              <th rowSpan={3} style={{ position: 'sticky', top: 0, zIndex: 6, width: 36, background: '#f8fafc', border: '1px solid #cbd5e1', textAlign: 'center' }}>
+                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ accentColor: '#0284c7' }} />
               </th>
+              {/* DATE spans all 3 header rows */}
               <th rowSpan={3} style={{
-                position: 'sticky', top: 0, zIndex: 4, background: '#f8fafc', color: '#334155',
-                fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', borderBottom: '1px solid #94a3b8'
+                position: 'sticky', top: 0, left: 36, zIndex: 6, width: 85,
+                background: GROUP_STYLES.global.headerBg, color: '#0f172a',
+                fontSize: 12, fontWeight: 900, border: '1px solid #cbd5e1', textAlign: 'center', padding: '4px'
               }}>
-                SL No
+                Date
               </th>
-              {groupedCols.map(({ grp, cols }) => {
-                const gc = GROUP_COLORS[grp];
-                // "global" group (Date) spans all 3 header rows → rowSpan=3, colSpan=cols.length
-                if (grp === 'global') {
-                  return (
-                    <th key={grp} rowSpan={3} colSpan={cols.length} style={{
-                      position: 'sticky', top: 0, zIndex: 3,
-                      background: gc.titleBg, color: '#0f172a', padding: '6px',
-                      textAlign: 'center', fontSize: '13px', fontWeight: 800,
-                      border: '1px solid #cbd5e1'
-                    }}>
-                      {gc.title}
-                    </th>
-                  );
-                }
-                return (
-                  <th key={grp} colSpan={cols.length} style={{
-                    position: 'sticky', top: 0, zIndex: 3,
-                    background: gc.titleBg, color: '#0f172a', padding: '6px',
-                    textAlign: 'center', fontSize: '12px', fontWeight: 800,
-                    border: '1px solid #cbd5e1'
-                  }}>
-                    {gc.title}
-                  </th>
-                );
-              })}
+
+              {/* PUMP CASH DETAILS (colSpan 10) */}
+              <th colSpan={10} style={{
+                position: 'sticky', top: 0, zIndex: 5,
+                background: GROUP_STYLES.pump.headerBg, color: '#000000', padding: '6px',
+                textAlign: 'center', fontSize: '14px', fontWeight: 900, letterSpacing: '0.3px',
+                border: '1px solid #cbd5e1'
+              }}>
+                Pump cash details
+              </th>
+
+              {/* SITE CASH (colSpan 7) */}
+              <th colSpan={7} style={{
+                position: 'sticky', top: 0, zIndex: 5,
+                background: GROUP_STYLES.site.headerBg, color: '#000000', padding: '6px',
+                textAlign: 'center', fontSize: '14px', fontWeight: 900, letterSpacing: '0.3px',
+                border: '1px solid #cbd5e1'
+              }}>
+                Site cash
+              </th>
+
+              {/* OFFICE CASH (colSpan 9) */}
+              <th colSpan={9} style={{
+                position: 'sticky', top: 0, zIndex: 5,
+                background: GROUP_STYLES.office.headerBg, color: '#000000', padding: '6px',
+                textAlign: 'center', fontSize: '14px', fontWeight: 900, letterSpacing: '0.3px',
+                border: '1px solid #cbd5e1'
+              }}>
+                Office Cash
+              </th>
+
+              {/* REMARKS (colSpan 1) */}
+              <th colSpan={1} style={{
+                position: 'sticky', top: 0, zIndex: 5,
+                background: GROUP_STYLES.remarks.headerBg, color: '#000000', padding: '6px',
+                textAlign: 'center', fontSize: '14px', fontWeight: 900,
+                border: '1px solid #cbd5e1'
+              }}>
+                Remarks
+              </th>
             </tr>
 
-            {/* Row 2 — Sub-group headers + individual col headers (rowspan=2 for those without subGroup) */}
+            {/* ── ROW 2: SUB-GROUP (CASH SOURCE) & COLUMNS ── */}
             <tr>
-              {buildRow2()}
+              {/* Pump Cash columns */}
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Opening<br />Balance
+              </th>
+              <th colSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 12, fontWeight: 900, border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center' }}>
+                cash source
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 900, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                CREDIT<br />VOUCHER
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Total<br />Amount
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Site cash<br />given from<br />DAC
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Cash<br />Given to<br />Office
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 900, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                LOAN<br />REPAY
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 900, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Closing<br />Balance
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 900, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                LOAN<br />BALANCE
+              </th>
+
+              {/* Site Cash columns */}
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.site.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Site opening
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.site.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Site cash<br />receive<br />from
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.site.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Transfered<br />from office<br />cash
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.site.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Total Cash<br />Site
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.site.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Transfered to<br />office cash
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: '#dcfce7', color: '#14532d', fontSize: 11, fontWeight: 900, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Site Cash<br />Exp
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.site.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Site cash<br />Closing
+              </th>
+
+              {/* Office Cash columns */}
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.office.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Office<br />Cash<br />opening
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.office.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Office<br />Cash<br />receive<br />from hfs
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.office.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Office Cash<br />receive<br />from site
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.office.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Total<br />Office<br />Cash
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.office.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Office<br />Exp
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.office.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                t/f to<br />site<br />cash
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.office.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 900, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Closing<br />Balance
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: '#fed7aa', color: '#7c2d12', fontSize: 11, fontWeight: 900, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Difference
+              </th>
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.office.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center', whiteSpace: 'pre-line' }}>
+                Office exp<br />details
+              </th>
+
+              {/* Remarks */}
+              <th rowSpan={2} style={{ position: 'sticky', top: 31, zIndex: 4, background: GROUP_STYLES.remarks.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '4px', textAlign: 'center' }}>
+                Remarks
+              </th>
             </tr>
 
-            {/* Row 3 — Leaf cols under sub-groups */}
+            {/* ── ROW 3: LEAF SUB-HEADERS (bank, loan) ── */}
             <tr>
-              {COLUMNS.filter(c => c.subGroup).map(col => {
-                const gc = GROUP_COLORS[col.group];
-                return (
-                  <th key={col.key} style={{
-                    position: 'sticky', top: 53, zIndex: 3,
-                    background: gc.bg, color: '#334155', padding: '4px',
-                    textAlign: 'center', fontSize: '11px', fontWeight: 700,
-                    border: '1px solid #cbd5e1', whiteSpace: 'pre-line'
-                  }}>
-                    {col.label}
-                  </th>
-                );
-              })}
+              <th style={{ position: 'sticky', top: 58, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center' }}>
+                bank
+              </th>
+              <th style={{ position: 'sticky', top: 58, zIndex: 4, background: GROUP_STYLES.pump.subHeaderBg, color: '#000', fontSize: 11, fontWeight: 800, border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center' }}>
+                loan
+              </th>
             </tr>
           </thead>
 
           <tbody>
-            {computedRows.length === 0 && (
-              <tr>
-                <td colSpan={COLUMNS.length + 2} style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-                  No entries for {MONTH_NAMES[selMonth - 1]} {selYear}. Click "+ Add Row" to begin.
-                </td>
-              </tr>
-            )}
-
             {computedRows.map((row, ri) => {
               const isSelected = selectedIds.has(row._id);
-              const othersVal = num(row.P_OTHERS);
-              const sourceYellow = othersVal > 0;
 
               return (
-                <tr key={row._id} style={{ background: isSelected ? 'rgba(59,130,246,0.08)' : (ri % 2 === 0 ? '#fff' : '#fafafa'), transition: 'background 0.15s ease' }}>
-                  <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', background: isSelected ? 'rgba(59,130,246,0.06)' : 'transparent' }}>
-                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(row._id)} />
-                  </td>
-                  <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', fontWeight: 700, color: '#475569', background: '#f8fafc' }}>
-                    {ri + 1}
+                <tr key={row._id} style={{
+                  background: isSelected ? 'rgba(2, 132, 199, 0.08)' : (ri % 2 === 0 ? '#ffffff' : '#fcfcfc'),
+                  transition: 'background 0.1s ease'
+                }}>
+                  {/* Select Checkbox */}
+                  <td style={{ textAlign: 'center', border: '1px solid #e2e8f0', background: isSelected ? 'rgba(2, 132, 199, 0.12)' : '#ffffff' }}>
+                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(row._id)} style={{ accentColor: '#0284c7' }} />
                   </td>
 
-                  {COLUMNS.map((col) => {
+                  {/* Date Column */}
+                  <td style={{
+                    position: 'sticky', left: 36, zIndex: 2,
+                    textAlign: 'center', border: '1px solid #cbd5e1',
+                    fontWeight: 800, color: '#0f172a', background: '#f8fafc',
+                    padding: '4px 2px', fontSize: '11px', whiteSpace: 'nowrap'
+                  }}>
+                    {formatDateShort(row.DATE)}
+                  </td>
+
+                  {/* Render Data Columns */}
+                  {COLUMNS.filter(c => c.key !== 'DATE').map((col) => {
                     const rawVal = row[col.key];
                     const localVal = localData[row._id]?.[col.key];
-                    const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
                     const isDirty = localVal !== undefined;
-                    const gc = GROUP_COLORS[col.group];
+                    const displayVal = localVal !== undefined ? localVal : (rawVal !== null && rawVal !== undefined ? String(rawVal) : '');
+                    const gStyle = GROUP_STYLES[col.group];
 
                     const isOpeningBalance = OPENING_KEYS.includes(col.key);
-                    const isCalcLike = col.type === 'calc' || (isOpeningBalance && ri > 0);
+                    const isAutoCalc = col.type === 'calc' || (isOpeningBalance && ri > 0);
 
-                    let dateError = false;
-                    if (col.key === 'DATE' && displayVal) {
-                      const parts = displayVal.split(/[-\/]/);
-                      if (parts.length >= 2) {
-                        const day = parseInt(parts[0]);
-                        const daysInMonth = new Date(selYear, selMonth, 0).getDate();
-                        if (!isNaN(day) && day > daysInMonth) dateError = true;
-                      }
-                    }
-
-                    let cellBg;
-                    if (dateError) {
-                      cellBg = '#fca5a5';
-                    } else if (col.key === 'DIFFERENCE' && num(displayVal) !== 0) {
-                      cellBg = '#fca5a5';
-                    } else if (col.key === 'P_LOAN_PAY' && (sourceYellow || String(displayVal).startsWith('DAC-RS-'))) {
-                      cellBg = '#fef08a';
-                    } else if (col.key === 'P_LOAN_REPAY') {
-                      cellBg = isDirty ? '#fff3cd' : '#fef9c3'; // distinct yellow for loan repay
-                    } else if (col.key === 'P_LOAN_BALANCE') {
-                      cellBg = isDirty ? '#d1fae5' : '#ecfdf5'; // green tint for loan balance
-                    } else if (isDirty) {
-                      cellBg = '#fff3cd';
-                    } else if (isCalcLike) {
-                      cellBg = 'transparent';
-                    } else {
-                      cellBg = gc.bg;
+                    // Cell Background styling
+                    let cellBg = gStyle.cellBg;
+                    if (isDirty) {
+                      cellBg = '#fff3cd'; // Amber for edited unsaved cells
+                    } else if (col.isDiff) {
+                      cellBg = num(displayVal) !== 0 ? '#ffedd5' : '#fed7aa'; // Difference column
+                    } else if (col.key === 'S_EXPENSE') {
+                      cellBg = num(displayVal) > 0 ? '#f0fdf4' : gStyle.cellBg; // Soft green highlight for expenses
+                    } else if (isAutoCalc) {
+                      cellBg = gStyle.calcBg || '#ffffff';
                     }
 
                     return (
                       <td key={col.key} style={{
-                        padding: 0, border: '1px solid #e2e8f0', background: cellBg,
-                        fontWeight: isCalcLike ? 700 : 400
+                        padding: 0, border: '1px solid #cbd5e1', background: cellBg,
+                        textAlign: (col.key === 'REMARKS_EXP' || col.key === 'REMARKS') ? 'left' : 'center',
+                        fontWeight: isAutoCalc ? 800 : (isDirty ? 700 : 500),
+                        color: isDirty ? '#92400e' : '#0f172a',
+                        fontSize: '11px'
                       }}>
-                        {isCalcLike ? (
-                          <div style={{ padding: '6px', textAlign: col.key === 'REMARKS_EXP' ? 'left' : 'center', whiteSpace: col.key === 'REMARKS_EXP' ? 'pre-wrap' : 'normal' }}>{displayVal}</div>
+                        {isAutoCalc ? (
+                          <div style={{
+                            padding: '4px 6px',
+                            textAlign: 'center',
+                            fontVariantNumeric: 'tabular-nums',
+                            letterSpacing: '-0.2px'
+                          }}>
+                            {formatDisplayNum(displayVal)}
+                          </div>
                         ) : col.key === 'REMARKS' || col.key === 'REMARKS_EXP' ? (
-                          <textarea
+                          <input
+                            type="text"
                             value={displayVal}
                             onChange={e => handleCellEdit(row._id, col.key, e.target.value)}
-                            onBlur={e => handleBlur(row._id, col.key, e.target.value, row)}
                             style={{
-                              width: '100%', height: '100%', padding: '6px',
+                              width: '100%', height: '100%', padding: '4px 6px',
                               border: 'none', background: 'transparent', textAlign: 'left',
-                              fontSize: '12px', fontWeight: isDirty ? 700 : 400, outline: 'none',
-                              resize: 'vertical', minHeight: '60px', fontFamily: 'inherit',
-                              whiteSpace: 'pre-wrap'
+                              fontSize: '11px', fontWeight: isDirty ? 700 : 400, outline: 'none',
+                              color: isDirty ? '#92400e' : '#0f172a',
+                              fontFamily: 'inherit', boxSizing: 'border-box'
                             }}
                           />
                         ) : (
                           <input
                             type="text"
                             value={displayVal}
-                            title={dateError ? `⚠️ ${MONTH_NAMES[selMonth - 1]} only has ${new Date(selYear, selMonth, 0).getDate()} days` : undefined}
                             onChange={e => handleCellEdit(row._id, col.key, e.target.value)}
-                            onBlur={e => handleBlur(row._id, col.key, e.target.value, row)}
                             style={{
-                              width: '100%', height: '100%', padding: '6px',
-                              border: dateError ? '2px solid #dc2626' : 'none',
-                              background: 'transparent', textAlign: 'center',
-                              fontSize: '12px', fontWeight: isDirty ? 700 : 400, outline: 'none',
-                              color: isDirty ? '#92400e' : '#334155'
+                              width: '100%', height: '100%', padding: '4px',
+                              border: 'none', background: 'transparent', textAlign: 'center',
+                              fontSize: '11px', fontWeight: isDirty ? 800 : 500, outline: 'none',
+                              color: isDirty ? '#92400e' : '#0f172a',
+                              fontVariantNumeric: 'tabular-nums',
+                              fontFamily: 'inherit', boxSizing: 'border-box'
                             }}
                           />
                         )}
@@ -1016,23 +1095,31 @@ export default function MainCashbook({ onBack }) {
               );
             })}
 
-            {/* ── Monthly Summary Row ── */}
+            {/* ── MONTHLY SUMMARY ROW (GREEN BACKGROUND AS IN REFERENCE) ── */}
             {computedRows.length > 0 && (
-              <tr style={{ background: '#f0fdf4' }}>
-                <td colSpan={2} style={{
-                  padding: '8px', border: '1px solid #bbf7d0', borderTop: '2px solid #86efac',
-                  fontWeight: 800, textAlign: 'center', color: '#166534', fontSize: 13
-                }}>
-                  {MONTH_NAMES[selMonth - 1].toUpperCase()} {selYear} TOTAL
+              <tr style={{ background: '#86efac', borderTop: '2px solid #22c55e' }}>
+                <td style={{ textAlign: 'center', padding: '6px', border: '1px solid #4ade80', background: '#86efac' }}>
+                  ★
                 </td>
-                {COLUMNS.map(col => {
-                  const val = NUMERIC_COLS.find(c => c.key === col.key) ? monthSums[col.key] : '—';
+                {/* Summary Label (e.g. Apr'26 Summary) */}
+                <td style={{
+                  position: 'sticky', left: 36, zIndex: 2,
+                  padding: '6px 4px', border: '1px solid #4ade80',
+                  fontWeight: 900, textAlign: 'center', color: '#000000', fontSize: '11px',
+                  background: '#86efac', whiteSpace: 'nowrap'
+                }}>
+                  {monthShortYear}<br />Summary
+                </td>
+
+                {COLUMNS.filter(c => c.key !== 'DATE').map(col => {
+                  const val = NUMERIC_COLS.find(c => c.key === col.key) ? monthSums[col.key] : '';
                   return (
                     <td key={col.key} style={{
-                      padding: '8px 4px', border: '1px solid #bbf7d0', borderTop: '2px solid #86efac',
-                      fontWeight: 800, textAlign: 'center', color: '#166534', fontSize: 12
+                      padding: '6px 2px', border: '1px solid #4ade80',
+                      fontWeight: 900, textAlign: 'center', color: '#000000', fontSize: '11px',
+                      fontVariantNumeric: 'tabular-nums'
                     }}>
-                      {val}
+                      {formatDisplayNum(val)}
                     </td>
                   );
                 })}
@@ -1044,7 +1131,7 @@ export default function MainCashbook({ onBack }) {
 
       {/* ── Import Modal ── */}
       <Dialog open={importModalOpen} onClose={() => !importing && setImportModalOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0' }}>
+        <DialogTitle sx={{ fontWeight: 800, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
           Import Excel (Multi-Month)
         </DialogTitle>
         <DialogContent sx={{ py: 3, display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
@@ -1105,7 +1192,7 @@ export default function MainCashbook({ onBack }) {
           background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center'
         }} onClick={() => setConfirmDel(false)}>
-          <Box sx={{ bgcolor: 'background.paper', borderRadius: 3, p: 4, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+          <Box sx={{ bgcolor: '#ffffff', borderRadius: 3, p: 4, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
             <Typography variant="h6" fontWeight={800} color="error" mb={1}>Delete {selectedIds.size} Row(s)?</Typography>
             <Typography color="text.secondary" mb={3}>This action cannot be undone.</Typography>
             <Box display="flex" gap={1.5} justifyContent="flex-end">

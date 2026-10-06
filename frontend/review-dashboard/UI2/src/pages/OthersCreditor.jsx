@@ -209,7 +209,7 @@ export default function OthersCreditor({
             },
           }}
         >
-          <Tab label="MONOJ BANDHAN" icon={<PersonIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
+          <Tab label="MANOJ BANDHAN" icon={<PersonIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
           <Tab label="BRINDA SHYAM" icon={<PersonIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
           <Tab label="JEET PANJA" icon={<PersonIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
         </Tabs>
@@ -239,7 +239,7 @@ export default function OthersCreditor({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MONOJ BANDHAN SECTION - Dedicated Ledger Table (UNTOUCHED)
+// MANOJ BANDHAN SECTION - Dedicated Ledger Table
 // ─────────────────────────────────────────────────────────────────────────────
 function MonojBandhanSection() {
   const [rows, setRows] = useState([]);
@@ -261,14 +261,14 @@ function MonojBandhanSection() {
 
   const [ownerVehicleMap, setOwnerVehicleMap] = useState({});
 
-  // Fetch MONOJ BANDHAN data from backend
+  // Fetch MANOJ BANDHAN data from backend
   const fetchData = async () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await axios.get(`${API_URL}/others-creditors`, {
-        params: { creditorName: 'MONOJ BANDHAN' },
+        params: { creditorName: 'MANOJ BANDHAN' },
         headers
       });
 
@@ -277,8 +277,8 @@ function MonojBandhanSection() {
         setRows(computeMonojBalances(rawEntries));
       }
     } catch (err) {
-      console.error('[MonojBandhan] Fetch error:', err);
-      setSnack({ severity: 'error', message: 'Failed to fetch MONOJ BANDHAN ledger data: ' + (err.response?.data?.error || err.message) });
+      console.error('[ManojBandhan] Fetch error:', err);
+      setSnack({ severity: 'error', message: 'Failed to fetch MANOJ BANDHAN ledger data: ' + (err.response?.data?.error || err.message) });
     } finally {
       setLoading(false);
     }
@@ -300,10 +300,15 @@ function MonojBandhanSection() {
             const truck = c['Truck No '] || c['Truck No'] || c.truck_no;
             if (owner && truck) {
               const oName = String(owner).trim();
-              const tNo = String(truck).trim();
+              const tNo = String(truck).trim().toUpperCase();
               if (oName && tNo) {
-                if (!ownerMap[oName]) ownerMap[oName] = [];
-                ownerMap[oName].push(tNo);
+                const normKey = oName.toLowerCase();
+                const existingKey = Object.keys(ownerMap).find(k => k.toLowerCase() === normKey);
+                const targetKey = existingKey || oName;
+                if (!ownerMap[targetKey]) ownerMap[targetKey] = [];
+                if (!ownerMap[targetKey].includes(tNo)) {
+                  ownerMap[targetKey].push(tNo);
+                }
               }
             }
           });
@@ -313,7 +318,7 @@ function MonojBandhanSection() {
           setOwnerVehicleMap(ownerMap);
         }
       } catch (err) {
-        console.error('[MonojBandhan] Failed to fetch contacts:', err);
+        console.error('[ManojBandhan] Failed to fetch contacts:', err);
       }
     };
     fetchContacts();
@@ -322,7 +327,7 @@ function MonojBandhanSection() {
     try {
       socket = io(SOCKET_URL, { transports: ["websocket", "polling"] });
       socket.on('othersCreditorUpdate', (data) => {
-        if (!data || !data.creditorName || data.creditorName === 'MONOJ BANDHAN') {
+        if (!data || !data.creditorName || data.creditorName === 'MANOJ BANDHAN' || data.creditorName === 'MONOJ BANDHAN') {
           fetchData();
         }
       });
@@ -337,21 +342,53 @@ function MonojBandhanSection() {
   }, []);
 
   const dynamicNamesOptions = useMemo(() => {
-    return [...new Set([...(NAMES_OPTIONS || []), ...Object.keys(ownerVehicleMap)])].sort();
+    const map = new Map();
+
+    // 1. Authoritative owner names from MongoDB Truck Contacts (prefer their canonical casing)
+    Object.keys(ownerVehicleMap).forEach(name => {
+      const clean = String(name || '').trim();
+      if (!clean) return;
+      const key = clean.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, clean);
+      }
+    });
+
+    // 2. Static fallback names from NAMES_OPTIONS if not already present
+    (NAMES_OPTIONS || []).forEach(name => {
+      const clean = String(name || '').trim();
+      if (!clean) return;
+      const key = clean.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, clean);
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [ownerVehicleMap]);
 
-  // Retrieve all vehicles belonging to the specified owner (exact Bank Book logic)
+  // Retrieve all vehicles belonging to the specified owner (case-insensitive & deduplicated)
   const getVehiclesForOwner = (ownerName) => {
     const typed = String(ownerName || '').trim();
     if (!typed) return [];
-    if (ownerVehicleMap[typed]) return ownerVehicleMap[typed];
     const typedLower = typed.toLowerCase();
-    return [...new Set(Object.keys(ownerVehicleMap).reduce((acc, k) => {
-      if (k.toLowerCase().includes(typedLower) || typedLower.includes(k.toLowerCase())) {
-        return acc.concat(ownerVehicleMap[k]);
+
+    // 1. Exact case-insensitive key match
+    for (const [key, vehs] of Object.entries(ownerVehicleMap)) {
+      if (key.trim().toLowerCase() === typedLower) {
+        return vehs || [];
       }
-      return acc;
-    }, []))];
+    }
+
+    // 2. Fallback: Substring/partial match across all owner keys
+    const matchedVehicles = new Set();
+    for (const [key, vehs] of Object.entries(ownerVehicleMap)) {
+      const kLower = key.trim().toLowerCase();
+      if (kLower.includes(typedLower) || typedLower.includes(kLower)) {
+        (vehs || []).forEach(v => matchedVehicles.add(v));
+      }
+    }
+    return Array.from(matchedVehicles).sort();
   };
 
   // When owner changes, update names and clear vehicle if it no longer belongs to that owner
@@ -369,6 +406,9 @@ function MonojBandhanSection() {
         idx = copy.findIndex(r => (r._id && target._id && r._id === target._id) || (r.tempId && target.tempId && r.tempId === target.tempId) || r === target);
       }
       if (idx === -1 || !copy[idx]) return prev;
+      // Reject manual changes to saved records
+      if (copy[idx]._id && !String(copy[idx]._id).startsWith('temp-')) return prev;
+
       const currentVehicle = copy[idx]?.vehicleNo || '';
       const shouldClearVehicle = !owner || (currentVehicle && !allowedVehicles.includes(currentVehicle));
       copy[idx] = {
@@ -382,6 +422,9 @@ function MonojBandhanSection() {
 
   // Handle cell edit by index or rowId
   const handleCellChange = (target, field, value) => {
+    // CREDIT is completely read-only
+    if (field === 'credit') return;
+
     setRows(prev => {
       const copy = [...prev];
       let idx = -1;
@@ -393,6 +436,9 @@ function MonojBandhanSection() {
         idx = copy.findIndex(r => (r._id && target._id && r._id === target._id) || (r.tempId && target.tempId && r.tempId === target.tempId) || r === target);
       }
       if (idx === -1 || !copy[idx]) return prev;
+      // Reject manual changes to saved records
+      if (copy[idx]._id && !String(copy[idx]._id).startsWith('temp-')) return prev;
+
       copy[idx] = { ...copy[idx], [field]: value };
       return computeMonojBalances(copy);
     });
@@ -470,7 +516,7 @@ function MonojBandhanSection() {
   // Add new empty row with continuous SL NO
   const handleAddRow = async () => {
     const defaultDate = selectedDate || new Date().toISOString().split('T')[0];
-    const initialCredit = num(manualAmount) || 0;
+    const initialCredit = 0; // Credit is system generated only
 
     // Determine current highest SL NO across loaded rows
     let maxSlNo = Math.max(0, ...rows.map(r => num(r.slNo) || 0));
@@ -480,21 +526,21 @@ function MonojBandhanSection() {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await axios.get(`${API_URL}/others-creditors/next-sl-no`, {
-        params: { creditorName: 'MONOJ BANDHAN' },
+        params: { creditorName: 'MANOJ BANDHAN' },
         headers
       });
       if (res.data?.success && res.data.nextSlNo) {
         maxSlNo = Math.max(maxSlNo, Number(res.data.nextSlNo) - 1);
       }
     } catch (err) {
-      console.warn('[MonojBandhan] next-sl-no check fallback:', err.message);
+      console.warn('[ManojBandhan] next-sl-no check fallback:', err.message);
     }
 
     const nextSlNo = maxSlNo + 1;
 
     const newRow = {
       tempId: `temp-${Date.now()}-${Math.random()}`,
-      creditorName: 'MONOJ BANDHAN',
+      creditorName: 'MANOJ BANDHAN',
       slNo: nextSlNo,
       date: defaultDate,
       credit: initialCredit,
@@ -523,7 +569,7 @@ function MonojBandhanSection() {
       const computed = computeMonojBalances(rows);
       const payloadRows = computed.map((r) => ({
         ...r,
-        creditorName: 'MONOJ BANDHAN',
+        creditorName: 'MANOJ BANDHAN',
         slNo: num(r.slNo) || 1
       }));
 
@@ -533,7 +579,7 @@ function MonojBandhanSection() {
         const appliedMsgs = syncResults.filter(s => s && s.applied && s.message).map(s => s.message);
         const notFoundMsgs = syncResults.filter(s => s && s.notFound && s.message).map(s => s.message);
 
-        let finalMsg = 'MONOJ BANDHAN ledger saved successfully!';
+        let finalMsg = 'MANOJ BANDHAN ledger saved successfully!';
         let severity = 'success';
         if (appliedMsgs.length > 0 && notFoundMsgs.length === 0) {
           finalMsg = `Saved! ${appliedMsgs.join(' | ')}`;
@@ -548,7 +594,7 @@ function MonojBandhanSection() {
         fetchData();
       }
     } catch (err) {
-      console.error('[MonojBandhan] Save error:', err);
+      console.error('[ManojBandhan] Save error:', err);
       setSnack({ severity: 'error', message: 'Failed to save ledger: ' + (err.response?.data?.error || err.message) });
     } finally {
       setSaving(false);
@@ -764,16 +810,16 @@ function MonojBandhanSection() {
     const exportData = filteredRows.map((r, i) => ({
       'SL NO': i + 1,
       'DATE': r.date || '',
-      'CREDIT (Rs)': r.credit || 0,
       'LEDGER NAME': r.ledgerName || '',
       'NAMES': r.names || '',
       'VEHICLE NO': r.vehicleNo || '',
+      'CREDIT (Rs)': r.credit || 0,
       'DEBIT (Rs)': r.debit || 0,
       'BALANCE (Rs)': r.balance || 0,
       'REMARKS': r.remarks || '',
       'PDF URL': r.pdfUrl || ''
     }));
-    exportToCsv(`Monoj_Bandhan_Ledger.csv`, exportData);
+    exportToCsv(`Manoj_Bandhan_Ledger.csv`, exportData);
   };
 
   const thStyle = {
@@ -1056,10 +1102,10 @@ function MonojBandhanSection() {
               </th>
               <th style={{ ...thStyle, width: '70px' }}>SL NO</th>
               <th style={{ ...thStyle, width: '140px' }}>DATE</th>
-              <th style={{ ...thStyle, width: '150px' }}>CREDIT</th>
               <th style={{ ...thStyle, width: '190px' }}>LEDGER NAME</th>
               <th style={{ ...thStyle, width: '190px' }}>NAMES</th>
               <th style={{ ...thStyle, width: '180px' }}>VEHICLE NO</th>
+              <th style={{ ...thStyle, width: '150px' }}>CREDIT</th>
               <th style={{ ...thStyle, width: '150px' }}>DEBIT</th>
               <th style={{ ...thStyle, width: '160px' }}>BALANCE</th>
               <th style={{ ...thStyle, width: '240px' }}>REMARKS</th>
@@ -1071,13 +1117,14 @@ function MonojBandhanSection() {
             {filteredRows.length === 0 && !loading && (
               <tr>
                 <td colSpan={12} style={{ textAlign: 'center', padding: '48px', color: '#64748b', fontWeight: 600 }}>
-                  No entries recorded for MONOJ BANDHAN yet. Click "+ Add Row" to add a new transaction.
+                  No entries recorded for MANOJ BANDHAN yet. Click "+ Add Row" to add a new transaction.
                 </td>
               </tr>
             )}
 
             {filteredRows.map((row, index) => {
               const rowId = row._id || row.tempId || `temp-${index}`;
+              const isSaved = Boolean(row._id && !String(row._id).startsWith('temp-'));
               const isChecked = selectedIds.has(rowId);
               const isUploading = uploadingId === rowId;
 
@@ -1098,220 +1145,236 @@ function MonojBandhanSection() {
                     {row.slNo !== undefined && row.slNo !== null && row.slNo !== '' ? row.slNo : (index + 1)}
                   </td>
 
-                  {/* 2. DATE (MANUAL DATE PICKER) */}
+                  {/* 2. DATE (READ-ONLY WHEN SAVED, MANUAL DATE PICKER WHEN NEW) */}
                   <td style={{ ...tdStyle, textAlign: 'center' }}>
-                    <input
-                      type="date"
-                      value={row.date || ''}
-                      onChange={(e) => handleCellChange(rowId, 'date', e.target.value)}
-                      style={{
-                        width: '100%',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '4px',
-                        padding: '4px 6px',
-                        outline: 'none',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        color: '#0f172a',
-                        textAlign: 'center',
-                        backgroundColor: '#fff'
-                      }}
-                    />
-                  </td>
-
-                  {/* 3. CREDIT (MANUAL NUMERIC INPUT) */}
-                  <td style={{ ...tdStyle, backgroundColor: '#fef3c7' }}>
-                    <input
-                      type="number"
-                      value={row.credit !== undefined ? row.credit : 0}
-                      onChange={(e) => handleCellChange(rowId, 'credit', e.target.value)}
-                      placeholder="0.00"
-                      style={{
-                        width: '100%',
-                        border: 'none',
-                        outline: 'none',
-                        background: 'transparent',
-                        fontSize: '13px',
-                        fontWeight: 800,
-                        textAlign: 'right',
-                        color: '#b45309',
-                        paddingRight: '6px'
-                      }}
-                    />
-                  </td>
-
-                  {/* 4. LEDGER NAME (BANK BOOK DROPDOWN SYSTEM) */}
-                  <td style={{ ...tdStyle, padding: '2px 4px' }}>
-                    <Autocomplete
-                      options={LEDGER_OPTIONS}
-                      value={row.ledgerName || ''}
-                      freeSolo
-                      onChange={(event, newValue) => {
-                        handleCellChange(rowId, 'ledgerName', newValue || '');
-                      }}
-                      onInputChange={(event, newInputValue, reason) => {
-                        if (reason === 'input' || reason === 'clear') {
-                          handleCellChange(rowId, 'ledgerName', newInputValue || '');
-                        }
-                      }}
-                      ListboxProps={{
-                        style: {
-                          background: 'rgba(255, 255, 255, 0.98)',
-                          backdropFilter: 'blur(8px)',
-                          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '10px',
-                          padding: '4px',
-                          maxHeight: '300px'
-                        }
-                      }}
-                      renderOption={(props, option) => (
-                        <li {...props} style={{
+                    {isSaved ? (
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
+                        {row.date || '-'}
+                      </span>
+                    ) : (
+                      <input
+                        type="date"
+                        value={row.date || ''}
+                        onChange={(e) => handleCellChange(rowId, 'date', e.target.value)}
+                        style={{
+                          width: '100%',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '4px',
+                          padding: '4px 6px',
+                          outline: 'none',
                           fontSize: '13px',
-                          padding: '8px 12px',
-                          borderRadius: '6px',
-                          color: '#334155',
-                          backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
-                        }}>
-                          {option}
-                        </li>
-                      )}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          variant="standard"
-                          placeholder="Search Ledger..."
-                          InputProps={{
-                            ...params.InputProps,
-                            disableUnderline: true,
-                            style: {
-                              fontSize: '12px',
-                              padding: '6px 8px',
-                              fontWeight: 600,
-                              color: '#0f172a'
-                            }
-                          }}
-                        />
-                      )}
-                    />
-                  </td>
-
-                  {/* 5. NAMES (BANK BOOK DROPDOWN SYSTEM) */}
-                  <td style={{ ...tdStyle, padding: '2px 4px' }}>
-                    <Autocomplete
-                      options={dynamicNamesOptions}
-                      value={row.names || ''}
-                      freeSolo
-                      onChange={(event, newValue) => {
-                        handleOwnerChange(rowId, newValue || '');
-                      }}
-                      onInputChange={(event, newInputValue, reason) => {
-                        if (reason === 'input' || reason === 'clear') {
-                          handleOwnerChange(rowId, newInputValue || '');
-                        }
-                      }}
-                      ListboxProps={{
-                        style: {
-                          background: 'rgba(255, 255, 255, 0.98)',
-                          backdropFilter: 'blur(8px)',
-                          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '10px',
-                          padding: '4px',
-                          maxHeight: '300px'
-                        }
-                      }}
-                      renderOption={(props, option) => (
-                        <li {...props} style={{
-                          fontSize: '13px',
-                          padding: '8px 12px',
-                          borderRadius: '6px',
-                          color: '#334155',
-                          backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
-                        }}>
-                          {option}
-                        </li>
-                      )}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          variant="standard"
-                          placeholder="Search Name..."
-                          InputProps={{
-                            ...params.InputProps,
-                            disableUnderline: true,
-                            style: {
-                              fontSize: '12px',
-                              padding: '6px 8px',
-                              fontWeight: 600,
-                              color: '#0f172a'
-                            }
-                          }}
-                        />
-                      )}
-                    />
-                  </td>
-
-                  {/* 6. VEHICLE NO (CONNECTED TO NAMES DROPDOWN - EXACT BANK BOOK LOGIC) */}
-                  <td style={{ ...tdStyle, padding: '2px 4px' }}>
-                    <Autocomplete
-                      disabled={!row.names}
-                      options={getVehiclesForOwner(row.names)}
-                      value={row.vehicleNo || ''}
-                      freeSolo
-                      onChange={(event, newValue) => {
-                        handleCellChange(rowId, 'vehicleNo', (newValue || '').toUpperCase());
-                      }}
-                      onInputChange={(event, newInputValue, reason) => {
-                        if (reason === 'input' || reason === 'clear') {
-                          handleCellChange(rowId, 'vehicleNo', (newInputValue || '').toUpperCase());
-                        }
-                      }}
-                      ListboxProps={{
-                        style: {
-                          background: 'rgba(255, 255, 255, 0.98)',
-                          backdropFilter: 'blur(8px)',
-                          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '10px',
-                          padding: '4px',
-                          maxHeight: '300px'
-                        }
-                      }}
-                      renderOption={(props, option) => (
-                        <li {...props} style={{
-                          fontSize: '13px',
-                          padding: '8px 12px',
-                          borderRadius: '6px',
+                          fontWeight: 600,
                           color: '#0f172a',
-                          fontWeight: 700,
-                          backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
-                        }}>
-                          {option}
-                        </li>
-                      )}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          variant="standard"
-                          placeholder={row.names ? "Search Vehicle..." : "Select Owner first..."}
-                          InputProps={{
-                            ...params.InputProps,
-                            disableUnderline: true,
-                            style: {
-                              fontSize: '12px',
-                              padding: '6px 8px',
-                              fontWeight: 700,
-                              color: row.names ? '#0f172a' : '#94a3b8',
-                              textTransform: 'uppercase'
-                            }
-                          }}
-                        />
-                      )}
-                    />
+                          textAlign: 'center',
+                          backgroundColor: '#fff'
+                        }}
+                      />
+                    )}
                   </td>
 
-                  {/* 7. DEBIT (MANUAL NUMERIC INPUT) */}
+                  {/* 3. LEDGER NAME (READ-ONLY WHEN SAVED, DROPDOWN WHEN NEW) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px' }}>
+                    {isSaved ? (
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
+                        {row.ledgerName || '-'}
+                      </span>
+                    ) : (
+                      <Autocomplete
+                        options={LEDGER_OPTIONS}
+                        value={row.ledgerName || ''}
+                        freeSolo
+                        onChange={(event, newValue) => {
+                          handleCellChange(rowId, 'ledgerName', newValue || '');
+                        }}
+                        onInputChange={(event, newInputValue, reason) => {
+                          if (reason === 'input' || reason === 'clear') {
+                            handleCellChange(rowId, 'ledgerName', newInputValue || '');
+                          }
+                        }}
+                        ListboxProps={{
+                          style: {
+                            background: 'rgba(255, 255, 255, 0.98)',
+                            backdropFilter: 'blur(8px)',
+                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '10px',
+                            padding: '4px',
+                            maxHeight: '300px'
+                          }
+                        }}
+                        renderOption={(props, option) => (
+                          <li {...props} style={{
+                            fontSize: '13px',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            color: '#334155',
+                            backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
+                          }}>
+                            {option}
+                          </li>
+                        )}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            variant="standard"
+                            placeholder="Search Ledger..."
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                              style: {
+                                fontSize: '12px',
+                                padding: '6px 8px',
+                                fontWeight: 600,
+                                color: '#0f172a'
+                              }
+                            }}
+                          />
+                        )}
+                      />
+                    )}
+                  </td>
+
+                  {/* 4. NAMES (READ-ONLY WHEN SAVED, DROPDOWN WHEN NEW) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px' }}>
+                    {isSaved ? (
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
+                        {row.names || '-'}
+                      </span>
+                    ) : (
+                      <Autocomplete
+                        options={dynamicNamesOptions}
+                        value={row.names || ''}
+                        freeSolo
+                        onChange={(event, newValue) => {
+                          handleOwnerChange(rowId, newValue || '');
+                        }}
+                        onInputChange={(event, newInputValue, reason) => {
+                          if (reason === 'input' || reason === 'clear') {
+                            handleOwnerChange(rowId, newInputValue || '');
+                          }
+                        }}
+                        ListboxProps={{
+                          style: {
+                            background: 'rgba(255, 255, 255, 0.98)',
+                            backdropFilter: 'blur(8px)',
+                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '10px',
+                            padding: '4px',
+                            maxHeight: '300px'
+                          }
+                        }}
+                        renderOption={(props, option) => (
+                          <li {...props} style={{
+                            fontSize: '13px',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            color: '#334155',
+                            backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
+                          }}>
+                            {option}
+                          </li>
+                        )}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            variant="standard"
+                            placeholder="Search Name..."
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                              style: {
+                                fontSize: '12px',
+                                padding: '6px 8px',
+                                fontWeight: 600,
+                                color: '#0f172a'
+                              }
+                            }}
+                          />
+                        )}
+                      />
+                    )}
+                  </td>
+
+                  {/* 5. VEHICLE NO (READ-ONLY WHEN SAVED, DROPDOWN WHEN NEW) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px' }}>
+                    {isSaved ? (
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', textTransform: 'uppercase' }}>
+                        {row.vehicleNo || '-'}
+                      </span>
+                    ) : (
+                      <Autocomplete
+                        disabled={!row.names}
+                        options={getVehiclesForOwner(row.names)}
+                        value={row.vehicleNo || ''}
+                        freeSolo
+                        onChange={(event, newValue) => {
+                          handleCellChange(rowId, 'vehicleNo', (newValue || '').toUpperCase());
+                        }}
+                        onInputChange={(event, newInputValue, reason) => {
+                          if (reason === 'input' || reason === 'clear') {
+                            handleCellChange(rowId, 'vehicleNo', (newInputValue || '').toUpperCase());
+                          }
+                        }}
+                        ListboxProps={{
+                          style: {
+                            background: 'rgba(255, 255, 255, 0.98)',
+                            backdropFilter: 'blur(8px)',
+                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '10px',
+                            padding: '4px',
+                            maxHeight: '300px'
+                          }
+                        }}
+                        renderOption={(props, option) => (
+                          <li {...props} style={{
+                            fontSize: '13px',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            color: '#0f172a',
+                            fontWeight: 700,
+                            backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
+                          }}>
+                            {option}
+                          </li>
+                        )}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            variant="standard"
+                            placeholder={row.names ? "Search Vehicle..." : "Select Owner first..."}
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                              style: {
+                                fontSize: '12px',
+                                padding: '6px 8px',
+                                fontWeight: 700,
+                                color: row.names ? '#0f172a' : '#94a3b8',
+                                textTransform: 'uppercase'
+                              }
+                            }}
+                          />
+                        )}
+                      />
+                    )}
+                  </td>
+
+                  {/* 6. CREDIT (PERMANENTLY READ-ONLY SYSTEM INTEGRATION VALUE) */}
+                  <td style={{
+                    ...tdStyle,
+                    backgroundColor: '#fef3c7',
+                    textAlign: 'right',
+                    paddingRight: '12px',
+                    fontWeight: 800,
+                    color: '#b45309',
+                    userSelect: 'none'
+                  }}>
+                    ₹{formatAmt(row.credit || 0)}
+                  </td>
+
+                  {/* 7. DEBIT (READ-ONLY WHEN SAVED, NUMERIC INPUT WHEN NEW) */}
                   {(() => {
                     const dVal = Number(row.debit) || 0;
                     const pVal = Number(row.paidAmount) || 0;
@@ -1326,6 +1389,25 @@ function MonojBandhanSection() {
                       : isPartial
                       ? `Status: Partial Paid (Paid: ₹${pVal.toLocaleString('en-IN')}, Due: ₹${(dVal - pVal).toLocaleString('en-IN')})`
                       : `Status: Pending / Unpaid (₹${dVal.toLocaleString('en-IN')})`;
+
+                    if (isSaved) {
+                      return (
+                        <td
+                          style={{
+                            ...tdStyle,
+                            backgroundColor: '#e0f2fe',
+                            textAlign: 'right',
+                            paddingRight: '12px',
+                            fontWeight: 800,
+                            color: debitColor,
+                            userSelect: 'none'
+                          }}
+                          title={titleText}
+                        >
+                          ₹{formatAmt(dVal)}
+                        </td>
+                      );
+                    }
 
                     return (
                       <td style={{ ...tdStyle, backgroundColor: '#e0f2fe' }}>
@@ -1363,22 +1445,28 @@ function MonojBandhanSection() {
                     ₹{formatAmt(row.balance)}
                   </td>
 
-                  {/* 9. REMARKS (MANUAL TEXT INPUT) */}
-                  <td style={{ ...tdStyle }}>
-                    <input
-                      type="text"
-                      value={row.remarks || ''}
-                      onChange={(e) => handleCellChange(rowId, 'remarks', e.target.value)}
-                      placeholder="Enter remarks / notes..."
-                      style={{
-                        width: '100%',
-                        border: 'none',
-                        outline: 'none',
-                        background: 'transparent',
-                        fontSize: '13px',
-                        color: '#334155'
-                      }}
-                    />
+                  {/* 9. REMARKS (READ-ONLY WHEN SAVED, MANUAL TEXT INPUT WHEN NEW) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '4px 6px' }}>
+                    {isSaved ? (
+                      <span style={{ fontSize: '13px', color: '#334155' }}>
+                        {row.remarks || '-'}
+                      </span>
+                    ) : (
+                      <input
+                        type="text"
+                        value={row.remarks || ''}
+                        onChange={(e) => handleCellChange(rowId, 'remarks', e.target.value)}
+                        placeholder="Enter remarks / notes..."
+                        style={{
+                          width: '100%',
+                          border: 'none',
+                          outline: 'none',
+                          background: 'transparent',
+                          fontSize: '13px',
+                          color: '#334155'
+                        }}
+                      />
+                    )}
                   </td>
 
                   {/* 10. PDF UPLOAD */}

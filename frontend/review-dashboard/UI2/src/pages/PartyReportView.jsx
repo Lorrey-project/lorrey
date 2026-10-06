@@ -53,14 +53,7 @@ const BASE_FREIGHT_COLUMNS = [
 const COL_10WH = { key: '10WH_INCENTIVE', label: '10WH extra\n8.5% incentive', width: 110, type: 'readonly', isNumeric: true };
 const COL_6WH = { key: '6WH_INCENTIVE', label: '6WH extra\n15% incentive', width: 110, type: 'readonly', isNumeric: true };
 
-// Top section (Deductions above NET BALANCE) dropdown options
-const TOP_ADJUSTMENT_OPTIONS = [
-  { key: 'advance_bank_tf', label: 'Advance bank TF', settingKey: 'advanceBankTF' },
-  { key: 'rfid', label: 'RFID charges', settingKey: 'rfid' },
-  { key: 'damage_shortage', label: 'Damage/shortage', settingKey: 'damage' },
-  { key: 'gps_installation', label: 'GPS installation charges', settingKey: 'gpsDeviceInstallation' },
-  { key: 'others', label: 'Others', settingKey: null },
-];
+
 
 /**
  * Build the active column list for a given owner's vehicle portfolio.
@@ -334,24 +327,9 @@ export default function PartyReportView({
   // Full deduction settings (rfid, damage, gpsDeviceInstallation, advanceBankTF, gpsTripCharge)
   const [deductionSettings, setDeductionSettings] = useState({});
 
-  // Manual adjustment rows (fetched from MongoDB, scoped to this owner+vehicle+month context)
-  const [adjustmentRows, setAdjustmentRows] = useState([]);
-  const [adjLoading, setAdjLoading] = useState(false);
-  const [adjSaving, setAdjSaving] = useState(false);
-
-  // Top section (Deductions above NET BALANCE) states
-  const [addingTopRow, setAddingTopRow] = useState(false);
-  const [selectedTopType, setSelectedTopType] = useState('advance_bank_tf');
-  const [pendingTopOthersDesc, setPendingTopOthersDesc] = useState('');
-  const [pendingTopOthersAmt, setPendingTopOthersAmt] = useState('');
-  const [topSaving, setTopSaving] = useState(false);
-
-  // Bottom section (Manual Additions below NET BALANCE) states
-  const [manualReason, setManualReason] = useState('');
-  const [manualAmount, setManualAmount] = useState('');
-  const [editingRowId, setEditingRowId] = useState(null);
-  const [editingReason, setEditingReason] = useState('');
-  const [editingAmount, setEditingAmount] = useState('');
+  // Party Payment Details (authoritative source for Damage Recovery, Cash/Bank TF/Others, GPS Device, Other Deduction)
+  const [partyPaymentData, setPartyPaymentData] = useState(null);
+  const [partyPaymentLoading, setPartyPaymentLoading] = useState(false);
 
   useEffect(() => {
     localDataRef.current = localData;
@@ -367,7 +345,6 @@ export default function PartyReportView({
   useTableNavigation(tableContainerRef);
 
   // Build active column set dynamically based on owner's vehicle portfolio wheel types.
-  // This is memoized so it only recomputes when the flags change.
   const activeColumns = useMemo(
     () => buildActiveColumns(show6WHColumn, show10WHColumn),
     [show6WHColumn, show10WHColumn]
@@ -427,7 +404,6 @@ export default function PartyReportView({
       if (res.data.success && res.data.data) {
         const d = res.data.data;
         setGlobalGPS(parseFloat(d.gpsTripCharge) || 0);
-        // Store full settings for auto-populating adjustment amounts
         setDeductionSettings({
           rfid: parseFloat(d.rfid) || 0,
           damage: parseFloat(d.damage) || 0,
@@ -440,36 +416,41 @@ export default function PartyReportView({
     }
   }, []);
 
-  // Fetch persisted adjustment rows for this specific owner + vehicle + month context
-  const fetchAdjustments = useCallback(async () => {
-    if (!partyName || !selectedVehicle) return;
-    setAdjLoading(true);
+  // Fetch Party Payment Details for this exact Owner + Vehicle + FY + Month context
+  const fetchPartyPaymentData = useCallback(async () => {
+    if (!partyName || !selectedVehicle || !financialYear || !month) return;
     try {
-      const res = await axios.get(`${API_URL}/freight-adjustments`, {
+      setPartyPaymentLoading(true);
+      const res = await axios.get(`${API_URL}/party-payment/full-year`, {
         params: {
-          ownerName: partyName,
+          partyName,
           vehicleNo: selectedVehicle,
-          month: month || '',
-          financialYear: financialYear || '',
+          fy: financialYear,
         }
       });
-      if (res.data.success) {
-        setAdjustmentRows(res.data.adjustments || []);
+      if (res.data && res.data.success && Array.isArray(res.data.months)) {
+        const mObj = res.data.months.find(
+          m => String(m.monthName || '').toLowerCase() === String(month || '').toLowerCase()
+        );
+        setPartyPaymentData(mObj || null);
+      } else {
+        setPartyPaymentData(null);
       }
-    } catch (e) {
-      console.error('Failed to fetch adjustments', e);
+    } catch (err) {
+      console.error('Failed to fetch party payment details for freight summary', err);
+      setPartyPaymentData(null);
     } finally {
-      setAdjLoading(false);
+      setPartyPaymentLoading(false);
     }
-  }, [partyName, selectedVehicle, month, financialYear]);
+  }, [partyName, selectedVehicle, financialYear, month]);
 
   useEffect(() => {
     fetchGlobalSettings();
   }, [fetchGlobalSettings]);
 
   useEffect(() => {
-    fetchAdjustments();
-  }, [fetchAdjustments]);
+    fetchPartyPaymentData();
+  }, [fetchPartyPaymentData]);
 
   useEffect(() => {
     fetchReportData();
@@ -490,7 +471,6 @@ export default function PartyReportView({
     if (document.activeElement && document.activeElement.blur) {
       document.activeElement.blur();
     }
-    // Give React a tick to process any pending onBlur updates
     await new Promise(r => setTimeout(r, 100));
 
     const currentData = localDataRef.current;
@@ -522,196 +502,6 @@ export default function PartyReportView({
 
   useShortcut('ctrl+s', handleSave);
 
-  // ── Top Section (Deductions above NET BALANCE) Handlers ─────────────────────
-  const handleAddTopAdjustment = async () => {
-    if (!selectedTopType) return;
-    const opt = TOP_ADJUSTMENT_OPTIONS.find(o => o.key === selectedTopType);
-    let finalLabel = opt ? opt.label : selectedTopType;
-    let finalAmount = 0;
-
-    if (selectedTopType === 'others') {
-      finalLabel = pendingTopOthersDesc.trim() || 'Others';
-      finalAmount = parseFloat(pendingTopOthersAmt) || 0;
-    } else {
-      finalAmount = opt && opt.settingKey ? (deductionSettings[opt.settingKey] || 0) : 0;
-    }
-
-    setTopSaving(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(
-        `${API_URL}/freight-adjustments`,
-        {
-          ownerName: partyName,
-          vehicleNo: selectedVehicle,
-          ownerId: ownerDetails?._id || ownerDetails?.ownerId || '',
-          vehicleId: ownerDetails?.vehicleId || '',
-          month: month || '',
-          financialYear: financialYear || '',
-          summaryRecordId: firstRowId || '',
-          category: 'deduction',
-          adjustmentType: selectedTopType,
-          reason: finalLabel,
-          label: finalLabel,
-          amount: finalAmount,
-          othersDescription: selectedTopType === 'others' ? finalLabel : '',
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (res.data.success) {
-        setAdjustmentRows(prev => [...prev, res.data.adjustment]);
-        setSnack({ severity: 'success', msg: `Deduction "${finalLabel}" added.` });
-        setAddingTopRow(false);
-        setSelectedTopType('advance_bank_tf');
-        setPendingTopOthersDesc('');
-        setPendingTopOthersAmt('');
-      } else {
-        setSnack({ severity: 'error', msg: res.data.error || 'Failed to add deduction.' });
-      }
-    } catch (err) {
-      setSnack({ severity: 'error', msg: err.response?.data?.error || 'Failed to add deduction.' });
-    } finally {
-      setTopSaving(false);
-    }
-  };
-
-  const handleDeleteTopAdjustment = async (id) => {
-    setTopSaving(true);
-    try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${API_URL}/freight-adjustments/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setAdjustmentRows(prev => prev.filter(r => r._id !== id));
-      setSnack({ severity: 'success', msg: 'Deduction removed.' });
-    } catch (err) {
-      setSnack({ severity: 'error', msg: 'Failed to remove deduction.' });
-    } finally {
-      setTopSaving(false);
-    }
-  };
-
-  const handleUpdateTopAdjustmentAmount = async (id, newAmount) => {
-    const parsed = parseFloat(newAmount) || 0;
-    setAdjustmentRows(prev => prev.map(r => r._id === id ? { ...r, amount: parsed } : r));
-    try {
-      const token = localStorage.getItem('token');
-      await axios.put(
-        `${API_URL}/freight-adjustments/${id}`,
-        { amount: parsed },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-    } catch (err) {
-      console.error('Failed to update deduction amount', err);
-    }
-  };
-
-  // ── Bottom Section (Manual Additions below NET BALANCE) Handlers ───────────
-  const handleAddBottomAdjustment = async () => {
-    if (!manualReason.trim() && !manualAmount) {
-      setSnack({ severity: 'warning', msg: 'Please enter Reason and Amount.' });
-      return;
-    }
-    const finalReason = manualReason.trim() || 'Manual Addition';
-    const finalAmount = parseFloat(manualAmount) || 0;
-
-    setAdjSaving(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(
-        `${API_URL}/freight-adjustments`,
-        {
-          ownerName: partyName,
-          vehicleNo: selectedVehicle,
-          ownerId: ownerDetails?._id || ownerDetails?.ownerId || '',
-          vehicleId: ownerDetails?.vehicleId || '',
-          month: month || '',
-          financialYear: financialYear || '',
-          summaryRecordId: firstRowId || '',
-          category: 'addition',
-          adjustmentType: 'manual',
-          reason: finalReason,
-          label: finalReason,
-          amount: finalAmount,
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (res.data.success) {
-        setAdjustmentRows(prev => [...prev, res.data.adjustment]);
-        setSnack({ severity: 'success', msg: `Addition "${finalReason}" added.` });
-        setManualReason('');
-        setManualAmount('');
-      } else {
-        setSnack({ severity: 'error', msg: res.data.error || 'Failed to add manual adjustment.' });
-      }
-    } catch (err) {
-      setSnack({ severity: 'error', msg: err.response?.data?.error || 'Failed to add manual adjustment.' });
-    } finally {
-      setAdjSaving(false);
-    }
-  };
-
-  const handleDeleteBottomAdjustment = async (id) => {
-    setAdjSaving(true);
-    try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${API_URL}/freight-adjustments/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setAdjustmentRows(prev => prev.filter(r => r._id !== id));
-      setSnack({ severity: 'success', msg: 'Manual adjustment deleted.' });
-    } catch (err) {
-      setSnack({ severity: 'error', msg: 'Failed to delete adjustment.' });
-    } finally {
-      setAdjSaving(false);
-    }
-  };
-
-  const handleUpdateBottomAdjustmentAmount = async (id, newAmount) => {
-    const parsed = parseFloat(newAmount) || 0;
-    setAdjustmentRows(prev => prev.map(r => r._id === id ? { ...r, amount: parsed } : r));
-    try {
-      const token = localStorage.getItem('token');
-      await axios.put(
-        `${API_URL}/freight-adjustments/${id}`,
-        { amount: parsed },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-    } catch (err) {
-      console.error('Failed to update adjustment amount', err);
-    }
-  };
-
-  const startEditBottomAdjustment = (row) => {
-    setEditingRowId(row._id);
-    setEditingReason(row.reason || row.label || '');
-    setEditingAmount(String(row.amount ?? ''));
-  };
-
-  const cancelEditBottomAdjustment = () => {
-    setEditingRowId(null);
-    setEditingReason('');
-    setEditingAmount('');
-  };
-
-  const saveEditBottomAdjustment = async (id) => {
-    const finalReason = editingReason.trim() || 'Manual Addition';
-    const finalAmount = parseFloat(editingAmount) || 0;
-    setAdjustmentRows(prev => prev.map(r => r._id === id ? { ...r, reason: finalReason, label: finalReason, amount: finalAmount } : r));
-    setEditingRowId(null);
-    try {
-      const token = localStorage.getItem('token');
-      await axios.put(
-        `${API_URL}/freight-adjustments/${id}`,
-        { reason: finalReason, label: finalReason, amount: finalAmount },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setSnack({ severity: 'success', msg: 'Adjustment updated.' });
-    } catch (err) {
-      setSnack({ severity: 'error', msg: 'Failed to update adjustment.' });
-    }
-  };
-
   // Apply manual overrides and calculate fields
   let totalMT = 0, totalAmount = 0, totalAdvance = 0;
   let totalHSDLtr = 0, totalHSDAmount = 0, totalBasicAmount = 0;
@@ -722,36 +512,45 @@ export default function PartyReportView({
   const rows = data.map((originalRow, i) => {
     const changes = localData[originalRow._id] || {};
     // Helper to get effective value: local override > DB override > DB original > fallback
-    const getVal = (key, dbKey, fallback = '') => {
+    const getVal = (key, ...dbKeys) => {
       if (changes[`_PR_${key}`] !== undefined) return changes[`_PR_${key}`];
       if (originalRow[`_PR_${key}`] !== undefined) return originalRow[`_PR_${key}`];
-      if (dbKey && originalRow[dbKey] !== undefined) return originalRow[dbKey];
-      return fallback;
+      for (const dbKey of dbKeys) {
+        if (dbKey && originalRow[dbKey] !== undefined && originalRow[dbKey] !== null && originalRow[dbKey] !== '') {
+          return originalRow[dbKey];
+        }
+      }
+      return '';
     };
 
-    const mt = parseNum(getVal('MT', 'MT', 0));
-    const frtRate = parseNum(getVal('PARTY RATE', 'BILLING', 0));
+    const mt = parseNum(getVal('MT', 'MT', 'QTY', 'QUANTITY', 'BILLING QTY', 'NET WEIGHT', 'mt') || 0);
+    const frtRate = parseNum(getVal('PARTY RATE', 'PARTY RATE', 'PARTY RATE (95-97%)', 'PARTY RATE (95%)', 'BILLING', 'BILLING RATE', 'partyRate') || 0);
 
-    // AMOUNT = MT × Freight/MT
-    let amount = round2(mt * frtRate);
+    // AMOUNT = MT × Freight/MT or authoritative AMOUNT from Cement Register
+    let amount = 0;
     if (changes['_PR_AMOUNT'] !== undefined) amount = parseNum(changes['_PR_AMOUNT']);
     else if (originalRow['_PR_AMOUNT'] !== undefined) amount = parseNum(originalRow['_PR_AMOUNT']);
+    else if (originalRow['AMOUNT'] !== undefined && originalRow['AMOUNT'] !== null && originalRow['AMOUNT'] !== '') amount = parseNum(originalRow['AMOUNT']);
+    else if (originalRow['BILLING ER 95%'] !== undefined && originalRow['BILLING ER 95%'] !== null && originalRow['BILLING ER 95%'] !== '') amount = parseNum(originalRow['BILLING ER 95%']);
+    else if (originalRow['Billing Amount'] !== undefined && originalRow['Billing Amount'] !== null && originalRow['Billing Amount'] !== '') amount = parseNum(originalRow['Billing Amount']);
+    else if (mt > 0 && frtRate > 0) amount = round2(mt * frtRate);
 
-    const advance = parseNum(getVal('ADVANCE', 'LOADING ADVANCE') || getVal('ADVANCE', 'ADVANCE', 0));
-    const hsdLtr = parseNum(getVal('HSD (LTR)', 'HSD') || getVal('HSD (LTR)', 'HSD (LTR)', 0));
-    const hsdRate = parseNum(getVal('HSD RATE', 'HSD RATE', 0));
-    const hsdAmt = parseNum(getVal('HSD AMOUNT', 'HSD AMOUNT', 0));
+    const advance = parseNum(getVal('ADVANCE', 'ADVANCE', 'LOADING ADVANCE', 'ADV', 'Advance', 'advance') || 0);
+    const hsdLtr = parseNum(getVal('HSD (LTR)', 'HSD (LTR)', 'HSD', 'HSD LTR', 'HSD_LTR', 'hsd') || 0);
+    const hsdRate = parseNum(getVal('HSD RATE', 'HSD RATE', 'HSD_RATE', 'DIESEL RATE', 'hsdRate') || 0);
+    const hsdAmt = parseNum(getVal('HSD AMOUNT', 'HSD AMOUNT', 'HSD_AMOUNT', 'DIESEL AMOUNT', 'hsdAmount') || 0);
 
     // BASIC AMOUNT = AMOUNT - LOADING ADVANCE - HSD AMOUNT
     let basicAmount = round2(amount - advance - hsdAmt);
     if (changes['_PR_BASIC AMOUNT'] !== undefined) basicAmount = parseNum(changes['_PR_BASIC AMOUNT']);
     else if (originalRow['_PR_BASIC AMOUNT'] !== undefined) basicAmount = parseNum(originalRow['_PR_BASIC AMOUNT']);
+    else if (originalRow['BASIC AMOUNT'] !== undefined && originalRow['BASIC AMOUNT'] !== null && originalRow['BASIC AMOUNT'] !== '') basicAmount = parseNum(originalRow['BASIC AMOUNT']);
 
     // INCENTIVE DEDICATED:
     // 1. Check local unsaved changes for manual override
     // 2. Check DB persisted record for manual override (_PR_INCENTIVE)
     // 3. Fallback to authoritative automatic calculation (originalRow['DEDICATED'] ?? originalRow['INCENTIVE'] ?? 0)
-    const originalIncentiveDedicated = parseNum(originalRow['DEDICATED'] ?? originalRow['INCENTIVE'] ?? 0);
+    const originalIncentiveDedicated = parseNum(originalRow['DEDICATED'] ?? originalRow['INCENTIVE'] ?? originalRow['DEDICATED INCENTIVE'] ?? 0);
     let isManualIncentive = false;
     let manualIncentiveVal = null;
 
@@ -782,10 +581,10 @@ export default function PartyReportView({
     }
 
     const incentive = incentiveNum;
-    const extraUL = parseNum(getVal('EXTRA UNLOADING', 'EXTRA UNLOADING') || getVal('EXTRA UNLOADING', 'EXTRA U/L', 0));
+    const extraUL = parseNum(getVal('EXTRA UNLOADING', 'EXTRA UNLOADING', 'EXTRA  UNLOADING', 'EXTRA U/L', 'EXTRA UL') || 0);
 
     // TOLL (preserved if present in record)
-    let dbToll = parseNum(originalRow['UP TOLL']) + parseNum(originalRow['DOWN TOLL']);
+    let dbToll = parseNum(originalRow['UP TOLL'] || originalRow['TOLL UP'] || 0) + parseNum(originalRow['DOWN TOLL'] || originalRow['TOLL DOWN'] || 0) + parseNum(originalRow['TOLL'] || 0);
     let toll = changes['_PR_TOLL'] !== undefined ? parseNum(changes['_PR_TOLL']) :
       (originalRow['_PR_TOLL'] !== undefined ? parseNum(originalRow['_PR_TOLL']) : dbToll);
 
@@ -805,7 +604,7 @@ export default function PartyReportView({
 
     let incentive10WH = 0;
     if (rowIs10Wheel) {
-      const stored10W = parseNum(originalRow['10W EXTRA 8.5%']);
+      const stored10W = parseNum(originalRow['10W EXTRA 8.5%'] || originalRow['10WH EXTRA 8.5%'] || originalRow['10W EXTRA 8']);
       if (stored10W > 0) {
         incentive10WH = stored10W;
       } else {
@@ -850,10 +649,10 @@ export default function PartyReportView({
         if (!rawDate || rawDate === '-' || rawDate === '—') return '';
         return isoToDdmmyyyy(rawDate);
       })(),
-      'SITE': getVal('SITE', 'SITE', '-'),
-      'CHALLAN STATUS': getVal('CHALLAN STATUS', 'CHALLAN STATUS', '-'),
-      'DESTINATION': getVal('DESTINATION', 'DESTINATION', '-'),
-      'PARTY NAME': getVal('PARTY NAME', 'PARTY NAME', '-'),
+      'SITE': getVal('SITE', 'SITE', 'site', 'Site') || '-',
+      'CHALLAN STATUS': getVal('CHALLAN STATUS', 'CHALLAN STATUS', 'Challan Status', 'status') || '-',
+      'DESTINATION': getVal('DESTINATION', 'DESTINATION', 'Destination', 'destination') || '-',
+      'PARTY NAME': getVal('PARTY NAME', 'PARTY NAME', 'Party Name', 'partyName') || '-',
       'MT': mt,
       'PARTY RATE': frtRate,
       'AMOUNT': amount,
@@ -925,25 +724,20 @@ export default function PartyReportView({
 
   const gpsValue = parseNum(globalGPS);
 
-  // Separate TOP deductions (System 1) vs BOTTOM manual additions (System 2)
-  const topDeductionRows = adjustmentRows.filter(
-    r => r.category === 'deduction' || (r.adjustmentType && r.adjustmentType !== 'manual' && r.category !== 'addition')
-  );
-  const bottomAdditionRows = adjustmentRows.filter(
-    r => r.category === 'addition' || (!r.category && (!r.adjustmentType || r.adjustmentType === 'manual'))
-  );
+  // Authoritative values from Party Payment Details for the selected Owner + Vehicle + FY + Month
+  const damageRecovery = parseNum(partyPaymentData?.['DAMAGE RECOVERY']);
+  const cashBankOthers = parseNum(partyPaymentData?.['CASH_BANK_OTHERS']);
+  const gpsDevice = parseNum(partyPaymentData?.['GPS DEVICE']);
+  const otherDeduction = parseNum(partyPaymentData?.['OTHER DEDUCTION']);
 
-  // 1. TOP SECTION DEDUCTIONS: sum of all "+ ADD ADJUSTMENT" amounts
-  const totalTopDeductions = topDeductionRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+  // Total adjustments = Damage Recovery + Cash/Bank TF/Others + GPS Device + Other Deduction
+  const totalAdjustments = round2(damageRecovery + cashBankOthers + gpsDevice + otherDeduction);
 
-  // NET BALANCE = Base Amount (Total Net Realization) - TDS - GPS - TOTAL OF ALL "ADD ADJUSTMENT" DEDUCTIONS
-  const netBalanceCalc = totalNetRealization - tdsValue - gpsValue - totalTopDeductions;
+  // NET BALANCE = Base Amount (Total Net Realization) - TDS - GPS - TOTAL ADJUSTMENTS
+  const netBalanceCalc = round2(totalNetRealization - tdsValue - gpsValue - totalAdjustments);
 
-  // 2. BOTTOM SECTION MANUAL REASON/AMOUNT: sum of all manually entered additions
-  const totalManualAddition = bottomAdditionRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-
-  // 3. FINAL NET PAYABLE = NET BALANCE + TOTAL OF ALL MANUALLY ENTERED REASON/AMOUNT VALUES
-  const netPayableCalc = netBalanceCalc + totalManualAddition;
+  // NET PAYABLE = NET BALANCE
+  const netPayableCalc = netBalanceCalc;
 
 
   const dirtyCount = Object.keys(localData).length;
@@ -1280,143 +1074,67 @@ export default function PartyReportView({
                       </td>
                     </tr>
 
-                    {/* 3. DYNAMIC TOP DEDUCTION ROWS (Added via "+ ADD ADJUSTMENT") */}
-                    {topDeductionRows.map((row) => (
-                      <tr key={row._id} style={{ background: '#fff' }}>
-                        <td style={{ padding: '12px 20px', borderBottom: '1px dashed #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
-                              <span style={{ fontWeight: 700, color: '#334155', fontSize: '13px' }}>
-                                {row.label || row.reason || 'Deduction'}
-                              </span>
-                            </div>
-                            <button
-                              onClick={() => handleDeleteTopAdjustment(row._id)}
-                              disabled={topSaving}
-                              title="Remove deduction"
-                              style={{
-                                background: 'none', border: 'none', cursor: 'pointer',
-                                color: '#ef4444', fontSize: '12px', fontWeight: 700,
-                                padding: '2px 6px', borderRadius: '4px',
-                                opacity: topSaving ? 0.5 : 1,
-                              }}
-                            >
-                              ✕
-                            </button>
+                    {/* 3. Damage Recovery */}
+                    <tr style={{ background: '#fff' }}>
+                      <td style={{ padding: '12px 20px', borderBottom: '1px dashed #cbd5e1', borderRight: '1px solid #e2e8f0', color: '#1e293b' }}>
+                        Damage Recovery
+                      </td>
+                      <td style={{ padding: '8px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                          <span style={{ color: '#64748b' }}>₹</span>
+                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                            {damageRecovery > 0 ? f(damageRecovery) : '0.00'}
                           </div>
-                        </td>
-                        <td style={{ padding: '8px 20px', borderBottom: '1px dashed #e2e8f0', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '12px' }}>₹</span>
-                            <EditableCell
-                              value={row.amount}
-                              onChange={(v) => handleUpdateTopAdjustmentAmount(row._id, v)}
-                              style={{
-                                background: '#fef2f2', border: '1px solid #fca5a5',
-                                padding: '5px 10px', borderRadius: '8px',
-                                minWidth: '90px', textAlign: 'right',
-                                color: '#991b1b', fontWeight: 800, fontSize: '13px',
-                              }}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-
-                    {/* 4. "+ ADD ADJUSTMENT" CONTROLS (Top Deductions System) */}
-                    <tr style={{ background: '#f8fafc' }}>
-                      <td colSpan={2} style={{ padding: '10px 20px', borderBottom: '1px dashed #cbd5e1' }}>
-                        {!addingTopRow ? (
-                          <button
-                            onClick={() => setAddingTopRow(true)}
-                            style={{
-                              background: 'none', border: '1.5px dashed #6366f1',
-                              borderRadius: '8px', padding: '6px 14px',
-                              color: '#4f46e5', fontWeight: 700, fontSize: '12.5px',
-                              cursor: 'pointer', display: 'flex', alignItems: 'center',
-                              gap: '6px', width: '100%', justifyContent: 'center',
-                              transition: 'all 0.15s',
-                            }}
-                          >
-                            + ADD ADJUSTMENT
-                          </button>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                              <select
-                                value={selectedTopType}
-                                onChange={e => setSelectedTopType(e.target.value)}
-                                style={{
-                                  padding: '6px 10px', borderRadius: '6px',
-                                  border: '1.5px solid #6366f1', fontSize: '12.5px',
-                                  color: '#0f172a', fontWeight: 700, background: '#fff',
-                                  flex: 1, outline: 'none'
-                                }}
-                              >
-                                {TOP_ADJUSTMENT_OPTIONS.map(opt => (
-                                  <option key={opt.key} value={opt.key}>{opt.label}</option>
-                                ))}
-                              </select>
-                              <button
-                                onClick={handleAddTopAdjustment}
-                                disabled={topSaving}
-                                style={{
-                                  padding: '6px 14px', borderRadius: '6px', border: 'none',
-                                  background: '#4f46e5', color: '#fff', fontWeight: 800,
-                                  fontSize: '12px', cursor: 'pointer',
-                                  opacity: topSaving ? 0.6 : 1,
-                                }}
-                              >
-                                {topSaving ? 'Adding…' : 'Add'}
-                              </button>
-                              <button
-                                onClick={() => setAddingTopRow(false)}
-                                style={{
-                                  padding: '6px 10px', borderRadius: '6px',
-                                  border: '1px solid #cbd5e1', background: '#fff',
-                                  color: '#475569', fontWeight: 700, fontSize: '12px',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                            {selectedTopType === 'others' && (
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <input
-                                  type="text"
-                                  placeholder="Description (e.g. Penalty)"
-                                  value={pendingTopOthersDesc}
-                                  onChange={e => setPendingTopOthersDesc(e.target.value)}
-                                  style={{
-                                    padding: '6px 10px', borderRadius: '6px',
-                                    border: '1px solid #cbd5e1', fontSize: '12px',
-                                    flex: 2, background: '#fff', outline: 'none', fontWeight: 600
-                                  }}
-                                />
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
-                                  <span style={{ color: '#475569', fontWeight: 700, fontSize: '12px' }}>₹</span>
-                                  <input
-                                    type="number"
-                                    placeholder="Amount"
-                                    value={pendingTopOthersAmt}
-                                    onChange={e => setPendingTopOthersAmt(e.target.value)}
-                                    style={{
-                                      padding: '6px 10px', borderRadius: '6px',
-                                      border: '1px solid #cbd5e1', fontSize: '12px',
-                                      width: '100%', background: '#fff', outline: 'none', fontWeight: 700
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        </div>
                       </td>
                     </tr>
 
-                    {/* ── NET BALANCE (Base - TDS - GPS - Total Top Deductions) ── */}
+                    {/* 4. Cash/Bank TF/Others */}
+                    <tr style={{ background: '#f8fafc' }}>
+                      <td style={{ padding: '12px 20px', borderBottom: '1px dashed #cbd5e1', borderRight: '1px solid #e2e8f0', color: '#1e293b' }}>
+                        Cash/Bank TF/Others
+                      </td>
+                      <td style={{ padding: '8px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                          <span style={{ color: '#64748b' }}>₹</span>
+                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                            {cashBankOthers > 0 ? f(cashBankOthers) : '0.00'}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* 5. GPS Device */}
+                    <tr style={{ background: '#fff' }}>
+                      <td style={{ padding: '12px 20px', borderBottom: '1px dashed #cbd5e1', borderRight: '1px solid #e2e8f0', color: '#1e293b' }}>
+                        GPS Device
+                      </td>
+                      <td style={{ padding: '8px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                          <span style={{ color: '#64748b' }}>₹</span>
+                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                            {gpsDevice > 0 ? f(gpsDevice) : '0.00'}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* 6. Other Deduction */}
+                    <tr style={{ background: '#f8fafc' }}>
+                      <td style={{ padding: '12px 20px', borderBottom: '1px dashed #cbd5e1', borderRight: '1px solid #e2e8f0', color: '#1e293b' }}>
+                        Other Deduction
+                      </td>
+                      <td style={{ padding: '8px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                          <span style={{ color: '#64748b' }}>₹</span>
+                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                            {otherDeduction > 0 ? f(otherDeduction) : '0.00'}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* ── NET BALANCE ── */}
                     <tr>
                       <td style={{ padding: '18px 20px', borderBottom: '1px dashed #cbd5e1', borderRight: '1px solid #e2e8f0', fontSize: '14.5px', color: '#0f172a', fontWeight: 800 }}>NET BALANCE</td>
                       <td style={{ padding: '12px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
@@ -1429,228 +1147,7 @@ export default function PartyReportView({
                       </td>
                     </tr>
 
-                    {/* ── MANUAL REASON / ADJUSTMENT (DIRECTLY BELOW NET BALANCE) ── */}
-                    <tr style={{ background: '#f1f5f9' }}>
-                      <td colSpan={2} style={{ padding: '10px 20px', borderBottom: '1px solid #cbd5e1', borderTop: '1px solid #cbd5e1' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 800, color: '#475569', letterSpacing: '0.5px' }}>
-                            MANUAL REASON / ADJUSTMENT
-                          </span>
-                          <div style={{ display: 'flex', gap: '20px', fontSize: '11px', color: '#64748b', fontWeight: 700 }}>
-                            <span>Reason</span>
-                            <span style={{ minWidth: '80px', textAlign: 'right' }}>Amount</span>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-
-                    {adjLoading && (
-                      <tr>
-                        <td colSpan={2} style={{ padding: '10px 20px', textAlign: 'center', color: '#94a3b8', fontSize: '12px', borderBottom: '1px dashed #e2e8f0' }}>
-                          Loading adjustments…
-                        </td>
-                      </tr>
-                    )}
-
-                    {/* Bottom Manual Addition Rows */}
-                    {bottomAdditionRows.map((row) => {
-                      const isEditing = editingRowId === row._id;
-                      if (isEditing) {
-                        return (
-                          <tr key={row._id} style={{ background: '#f0fdfa' }}>
-                            <td colSpan={2} style={{ padding: '10px 20px', borderBottom: '1px dashed #e2e8f0' }}>
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <input
-                                  type="text"
-                                  placeholder="Reason / Description"
-                                  value={editingReason}
-                                  onChange={e => setEditingReason(e.target.value)}
-                                  style={{
-                                    padding: '6px 10px', border: '1.5px solid #14b8a6',
-                                    borderRadius: '6px', fontSize: '12.5px', color: '#0f172a',
-                                    fontWeight: 700, flex: 2, background: '#fff', outline: 'none'
-                                  }}
-                                  autoFocus
-                                />
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
-                                  <span style={{ color: '#475569', fontWeight: 700, fontSize: '12.5px' }}>₹</span>
-                                  <input
-                                    type="number"
-                                    placeholder="Amount"
-                                    value={editingAmount}
-                                    onChange={e => setEditingAmount(e.target.value)}
-                                    onKeyDown={e => { if (e.key === 'Enter') saveEditBottomAdjustment(row._id); }}
-                                    style={{
-                                      padding: '6px 10px', border: '1.5px solid #14b8a6',
-                                      borderRadius: '6px', fontSize: '12.5px', color: '#0f172a',
-                                      fontWeight: 700, width: '100%', background: '#fff', outline: 'none'
-                                    }}
-                                  />
-                                </div>
-                                <button
-                                  onClick={() => saveEditBottomAdjustment(row._id)}
-                                  style={{
-                                    padding: '6px 12px', borderRadius: '6px', border: 'none',
-                                    background: '#0f172a', color: '#fff', fontWeight: 800,
-                                    fontSize: '11.5px', cursor: 'pointer'
-                                  }}
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={cancelEditBottomAdjustment}
-                                  style={{
-                                    padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1',
-                                    background: '#fff', color: '#475569', fontWeight: 700,
-                                    fontSize: '11.5px', cursor: 'pointer'
-                                  }}
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      }
-
-                      return (
-                        <tr key={row._id} style={{ background: '#fff', transition: 'background 0.15s' }}>
-                          <td style={{ padding: '10px 20px', borderBottom: '1px dashed #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-                                <span style={{
-                                  display: 'inline-block',
-                                  width: 6, height: 6, borderRadius: '50%',
-                                  background: '#14b8a6', flexShrink: 0
-                                }} />
-                                <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {row.reason || row.label || 'Manual Addition'}
-                                </span>
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                                <button
-                                  onClick={() => startEditBottomAdjustment(row)}
-                                  title="Edit Reason and Amount"
-                                  style={{
-                                    background: '#f1f5f9', border: '1px solid #cbd5e1', cursor: 'pointer',
-                                    color: '#475569', fontSize: '11px', fontWeight: 700,
-                                    padding: '3px 8px', borderRadius: '5px',
-                                    transition: 'all 0.15s',
-                                  }}
-                                  onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; }}
-                                  onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; }}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteBottomAdjustment(row._id)}
-                                  disabled={adjSaving}
-                                  title="Delete this manual addition"
-                                  style={{
-                                    background: 'none', border: 'none', cursor: 'pointer',
-                                    color: '#ef4444', fontSize: '11px', fontWeight: 700,
-                                    padding: '3px 6px', borderRadius: '5px',
-                                    transition: 'background 0.15s',
-                                    opacity: adjSaving ? 0.5 : 1,
-                                  }}
-                                  onMouseEnter={e => { e.currentTarget.style.background = '#fee2e2'; }}
-                                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
-                                >
-                                  ✕ Delete
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-                          <td style={{ padding: '8px 20px', borderBottom: '1px dashed #e2e8f0', textAlign: 'right' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
-                              <span style={{ color: '#94a3b8', fontSize: '12px' }}>₹</span>
-                              <EditableCell
-                                value={row.amount}
-                                onChange={(v) => handleUpdateBottomAdjustmentAmount(row._id, v)}
-                                style={{
-                                  background: '#f0fdf4', border: '1px solid #86efac',
-                                  padding: '5px 10px', borderRadius: '8px',
-                                  minWidth: '90px', textAlign: 'right',
-                                  color: '#065f46', fontWeight: 800, fontSize: '13px',
-                                  transition: 'all 0.2s',
-                                }}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-
-                    {/* Manual Reason / Amount Input Row */}
-                    <tr style={{ background: '#f8fafc' }}>
-                      <td colSpan={2} style={{ padding: '12px 20px', borderBottom: '1px dashed #cbd5e1' }}>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <input
-                            type="text"
-                            placeholder="Reason: e.g. Advance Payment"
-                            value={manualReason}
-                            onChange={e => setManualReason(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') handleAddBottomAdjustment(); }}
-                            style={{
-                              padding: '8px 12px', borderRadius: '8px',
-                              border: '1.5px solid #cbd5e1', outline: 'none',
-                              fontSize: '12.5px', color: '#0f172a',
-                              background: '#fff', flex: 2, fontWeight: 600,
-                            }}
-                          />
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1.2 }}>
-                            <span style={{ color: '#475569', fontWeight: 700, fontSize: '13px' }}>₹</span>
-                            <input
-                              type="number"
-                              placeholder="Amount"
-                              value={manualAmount}
-                              onChange={e => setManualAmount(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') handleAddBottomAdjustment(); }}
-                              style={{
-                                padding: '8px 12px', borderRadius: '8px',
-                                border: '1.5px solid #cbd5e1', outline: 'none',
-                                fontSize: '12.5px', color: '#0f172a',
-                                background: '#fff', width: '100%', fontWeight: 700,
-                              }}
-                            />
-                          </div>
-                          <button
-                            onClick={handleAddBottomAdjustment}
-                            disabled={adjSaving || (!manualReason && !manualAmount)}
-                            style={{
-                              padding: '8px 16px', borderRadius: '8px',
-                              border: 'none', cursor: 'pointer',
-                              background: '#0f172a', color: '#fff',
-                              fontWeight: 800, fontSize: '12.5px',
-                              transition: 'all 0.18s',
-                              opacity: adjSaving ? 0.6 : 1,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {adjSaving ? 'Adding…' : '+ ADD'}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-
-                    {/* ── TOTAL MANUAL AMOUNT ROW ─────────────────────────────── */}
-                    {bottomAdditionRows.length > 0 && (
-                      <tr style={{ background: '#f8fafc' }}>
-                        <td style={{ padding: '14px 20px', borderBottom: '1px dashed #cbd5e1', borderRight: '1px solid #e2e8f0', fontSize: '13.5px', color: '#334155', fontWeight: 800 }}>
-                          TOTAL MANUAL AMOUNT
-                        </td>
-                        <td style={{ padding: '10px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
-                            <span style={{ fontWeight: 800, color: '#0f172a' }}>₹</span>
-                            <div style={{ background: '#fff', border: '1.5px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', fontWeight: 800, color: '#0f172a' }}>
-                              {totalManualAddition > 0 ? f(totalManualAddition) : (totalManualAddition === 0 ? '0.00' : f(totalManualAddition))}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-
-                    {/* ── NET PAYABLE (NET BALANCE + TOTAL MANUALLY ENTERED AMOUNTS) ── */}
+                    {/* ── NET PAYABLE ── */}
                     <tr style={{ background: '#0f172a', color: '#fff' }}>
                       <td style={{ padding: '20px', borderRight: '1px solid #334155', fontSize: '16px', fontWeight: 900, letterSpacing: '0.5px' }}>NET PAYABLE</td>
                       <td style={{ padding: '14px 20px', textAlign: 'right' }}>

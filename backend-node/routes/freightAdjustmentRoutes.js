@@ -12,12 +12,12 @@ router.get("/", async (req, res) => {
       return res.status(400).json({ success: false, error: "ownerName and vehicleNo are required." });
     }
     const query = {};
-    if (ownerName) query.ownerName = ownerName;
-    if (vehicleNo) query.vehicleNo = vehicleNo;
+    if (ownerName) query.ownerName = { $regex: new RegExp(`^\\s*${ownerName.trim()}\\s*$`, 'i') };
+    if (vehicleNo) query.vehicleNo = { $regex: new RegExp(`^\\s*${vehicleNo.trim()}\\s*$`, 'i') };
     if (ownerId) query.ownerId = ownerId;
     if (vehicleId) query.vehicleId = vehicleId;
-    if (month) query.month = month;
-    if (financialYear) query.financialYear = financialYear;
+    if (month) query.month = { $regex: new RegExp(`^\\s*${month.trim()}\\s*$`, 'i') };
+    if (financialYear) query.financialYear = { $regex: new RegExp(`^\\s*${financialYear.trim()}\\s*$`, 'i') };
     if (summaryRecordId) query.summaryRecordId = summaryRecordId;
     if (category) query.category = category;
 
@@ -60,9 +60,14 @@ router.post("/", auth, async (req, res) => {
 
     // Prevent duplicates of non-'others' types for deduction rows in the same owner+vehicle+month
     if (effectiveCategory === "deduction" && adjustmentType && adjustmentType !== "others" && adjustmentType !== "manual") {
-      const existingQuery = { ownerName, vehicleNo, adjustmentType, category: "deduction" };
-      if (month) existingQuery.month = month;
-      if (financialYear) existingQuery.financialYear = financialYear;
+      const existingQuery = {
+        ownerName: { $regex: new RegExp(`^\\s*${ownerName.trim()}\\s*$`, 'i') },
+        vehicleNo: { $regex: new RegExp(`^\\s*${vehicleNo.trim()}\\s*$`, 'i') },
+        adjustmentType,
+        category: "deduction"
+      };
+      if (month) existingQuery.month = { $regex: new RegExp(`^\\s*${month.trim()}\\s*$`, 'i') };
+      if (financialYear) existingQuery.financialYear = { $regex: new RegExp(`^\\s*${financialYear.trim()}\\s*$`, 'i') };
       const existing = await FreightAdjustment.findOne(existingQuery);
       if (existing) {
         return res.status(409).json({
@@ -73,9 +78,12 @@ router.post("/", auth, async (req, res) => {
     }
 
     // Determine sequence = max existing sequence + 1
-    const seqQuery = { ownerName, vehicleNo };
-    if (month) seqQuery.month = month;
-    if (financialYear) seqQuery.financialYear = financialYear;
+    const seqQuery = {
+      ownerName: { $regex: new RegExp(`^\\s*${ownerName.trim()}\\s*$`, 'i') },
+      vehicleNo: { $regex: new RegExp(`^\\s*${vehicleNo.trim()}\\s*$`, 'i') }
+    };
+    if (month) seqQuery.month = { $regex: new RegExp(`^\\s*${month.trim()}\\s*$`, 'i') };
+    if (financialYear) seqQuery.financialYear = { $regex: new RegExp(`^\\s*${financialYear.trim()}\\s*$`, 'i') };
     if (effectiveCategory) seqQuery.category = effectiveCategory;
 
     const lastRow = await FreightAdjustment.findOne(seqQuery).sort({ sequence: -1 }).lean();

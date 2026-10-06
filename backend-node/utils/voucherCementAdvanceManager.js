@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const { ObjectId } = require("mongodb");
 const Voucher = require("../models/Voucher");
 const { getIO } = require("../socket");
+const { isDummyRow } = require("./dummyCementRowManager");
 
 function getCementCollection() {
   return mongoose.connection.useDb("cement_register").collection("entries");
@@ -42,13 +43,30 @@ async function findLatestCementRecord(vehicleNumber, ownerName = "") {
     $regex: new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i')
   };
 
-  const query = { "VEHICLE NUMBER": vehFilter };
+  const query = {
+    "VEHICLE NUMBER": vehFilter
+  };
 
-  const entries = await col.find(query).toArray();
+  const allEntries = await col.find(query).toArray();
+  if (!allEntries || allEntries.length === 0) return null;
+
+  const entries = allEntries.filter(e => !isDummyRow(e));
   if (!entries || entries.length === 0) return null;
 
+  let matchedEntries = entries;
+  if (ownerName) {
+    const cleanOwner = String(ownerName).trim().toLowerCase();
+    const ownerMatches = entries.filter(e => {
+      const rowOwner = String(e["OWNER NAME"] || e["PARTY NAME"] || e["OWNER"] || "").trim().toLowerCase();
+      return rowOwner && (rowOwner.includes(cleanOwner) || cleanOwner.includes(rowOwner));
+    });
+    if (ownerMatches.length > 0) {
+      matchedEntries = ownerMatches;
+    }
+  }
+
   // Sort chronologically descending (latest date first)
-  entries.sort((a, b) => {
+  matchedEntries.sort((a, b) => {
     const dateA = parseToDate(
       a["LOADING DT"] || a["LOADING DATE"] || a["BILL DATE"] || a["INVOICE DATE"] || a["RECEIVING DATE"] || a["UNLOADING STATUS"]
     );
@@ -64,7 +82,7 @@ async function findLatestCementRecord(vehicleNumber, ownerName = "") {
     return idTimeB - idTimeA;
   });
 
-  return entries[0];
+  return matchedEntries[0];
 }
 
 /**
@@ -85,8 +103,10 @@ function determinePanel(panelSource, createdByRole) {
   return 'OFFICE';
 }
 
+const { syncDummyCementRow, deleteDummyRowBySource } = require("./dummyCementRowManager");
+
 /**
- * Apply a voucher to the selected vehicle's latest Cement Register invoice.
+ * Apply a voucher to the selected vehicle's latest Cement Register invoice or create a dummy row.
  */
 async function applyVoucherToCement(voucherDoc, panelSource = null) {
   try {
@@ -109,6 +129,7 @@ async function applyVoucherToCement(voucherDoc, panelSource = null) {
     const isSite = panel === 'SITE';
     const targetField = isSite ? "Site Cash" : "OFFICE CASH";
     const proofField = isSite ? "SITE_CASH_PROOF_URL" : "OFFICE_CASH_PROOF_URL";
+    const sourceType = isSite ? 'SITE_VOUCHER' : 'OFFICE_VOUCHER';
 
     const voucherIdStr = voucherDoc._id.toString();
 
@@ -119,12 +140,41 @@ async function applyVoucherToCement(voucherDoc, panelSource = null) {
 
     const targetRecord = await findLatestCementRecord(voucherDoc.vehicleNumber, voucherDoc.name);
     if (!targetRecord) {
+      // Vehicle has NO existing real Cement Register invoice/trip record: CREATE ONE DUMMY CEMENT REGISTER ROW
+      const syncRes = await syncDummyCementRow({
+        sourceType,
+        sourceTransactionId: voucherIdStr,
+        vehicleNumber: voucherDoc.vehicleNumber,
+        ownerName: voucherDoc.name || '',
+        date: voucherDoc.date,
+        field: targetField,
+        amount,
+        proofUrl: voucherDoc.slip_url || ''
+      });
+
+      await Voucher.updateOne({ _id: voucherDoc._id }, {
+        $set: {
+          appliedToCementId: syncRes.recordId || null,
+          appliedField: targetField,
+          appliedAmount: amount,
+          appliedPanel: panel,
+          appliedAt: new Date()
+        }
+      });
+
       return {
-        success: false,
-        notFound: true,
-        message: "No uploaded Cement Register invoice found for this vehicle. Voucher could not be linked."
+        success: true,
+        isDummy: true,
+        linkedRecordId: syncRes.recordId,
+        panel,
+        field: targetField,
+        amount,
+        totalFieldAmount: amount
       };
     }
+
+    // If a real trip exists, clean up any previous dummy row for this voucher
+    await deleteDummyRowBySource(sourceType, voucherIdStr);
 
     const col = getCementCollection();
 
@@ -170,8 +220,11 @@ async function applyVoucherToCement(voucherDoc, panelSource = null) {
     if (isSite) {
       updateDoc["Site Cash"] = currentFieldValue;
       updateDoc["SITE CASH"] = currentFieldValue;
+      updateDoc["SITE CASH ADVANCE"] = currentFieldValue;
     } else {
       updateDoc["OFFICE CASH"] = currentFieldValue;
+      updateDoc["OFFICE CASH ADVANCE"] = currentFieldValue;
+      updateDoc["Office Cash"] = currentFieldValue;
     }
 
     if (voucherDoc.slip_url) {
@@ -229,10 +282,38 @@ async function reverseVoucherFromCement(voucherDoc) {
     }
 
     if (!targetRecord) {
-      targetRecord = await col.findOne({ "_voucherContributions.voucherId": voucherIdStr });
+      targetRecord = await col.findOne({
+        $or: [
+          { "_voucherContributions.voucherId": voucherIdStr },
+          { sourceTransactionId: voucherIdStr }
+        ]
+      });
     }
 
+    // Also delete any dummy row linked to this voucher
+    await deleteDummyRowBySource('OFFICE_VOUCHER', voucherIdStr);
+    await deleteDummyRowBySource('SITE_VOUCHER', voucherIdStr);
+
     if (!targetRecord) return { success: true, notLinked: true };
+
+    // If targetRecord is a dummy row, delete it directly
+    if (targetRecord.isDummy === true || targetRecord._isDummy === true) {
+      await col.deleteOne({ _id: targetRecord._id });
+      await Voucher.updateOne({ _id: voucherDoc._id }, {
+        $set: {
+          appliedToCementId: null,
+          appliedField: null,
+          appliedAmount: 0,
+          appliedPanel: null,
+          appliedAt: null
+        }
+      });
+      try {
+        const io = getIO();
+        if (io) io.emit('cementUpdates', { action: 'dummyRowDeleted', id: targetRecord._id.toString() });
+      } catch (_) {}
+      return { success: true, reversedAmount: voucherDoc.appliedAmount || voucherDoc.amount, isDummy: true };
+    }
 
     const contributions = Array.isArray(targetRecord._voucherContributions) ? targetRecord._voucherContributions : [];
     const matchContrib = contributions.find(c => c.voucherId === voucherIdStr);
@@ -248,11 +329,14 @@ async function reverseVoucherFromCement(voucherDoc) {
       [targetField]: newVal,
       _voucherContributions: remainingContributions
     };
-    if (targetField === 'Site Cash' || targetField === 'SITE CASH') {
+    if (targetField === 'Site Cash' || targetField === 'SITE CASH' || targetField === 'SITE CASH ADVANCE') {
       updateDoc["Site Cash"] = newVal;
       updateDoc["SITE CASH"] = newVal;
+      updateDoc["SITE CASH ADVANCE"] = newVal;
     } else {
       updateDoc["OFFICE CASH"] = newVal;
+      updateDoc["OFFICE CASH ADVANCE"] = newVal;
+      updateDoc["Office Cash"] = newVal;
     }
 
     await col.updateOne({ _id: targetRecord._id }, { $set: updateDoc });

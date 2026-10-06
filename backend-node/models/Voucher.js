@@ -7,9 +7,25 @@ const voucherSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    voucherType: {
+      type: String,
+      enum: ["DEBIT", "CREDIT"],
+      default: "DEBIT",
+    },
+    ownerId: {
+      type: String,
+      default: null,
+    },
+    ownerName: {
+      type: String,
+      default: "",
+    },
+    vehicleId: {
+      type: String,
+      default: null,
+    },
     expenseType: {
       type: String,
-      enum: ["Direct Expense", "Indirect Expense"],
       default: "Indirect Expense",
     },
     vehicleNumber: {
@@ -24,12 +40,11 @@ const voucherSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
-      min: [1, "Amount must be positive"],
+      min: [0.01, "Amount must be positive"],
     },
     purpose: {
       type: String,
-      required: true,
-      enum: ["Fuel", "Advance", "Repair", "Toll", "Others", "Water", "Cleaning", "WiFi Recharge", "Salary"],
+      default: "Others",
     },
     slip_url: {
       type: String,

@@ -111,15 +111,29 @@ export const COLUMNS = [
   { key: 'Bank TF', label: 'ADVANCE (BANK TF)', width: 120, type: 'manual', group: 'billing' },
 
   // ── Group 3: Deductions ────────────────────────────────────────────────────
-  { key: 'Others deduction', label: 'OTHERS\nDEDUCTION', width: 130, type: 'manual', group: 'deductions' },
-  { key: 'Other', label: 'OTHER', width: 100, type: 'manual', group: 'deductions' },
   { key: 'GPS Monitoring Charge', label: 'GPS MONITORING /\nTRIP CHARGE', width: 160, type: 'manual', group: 'deductions' },
   { key: 'Give GPS DEVICE', label: 'GIVE GPS DEVICE', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
   { key: 'GPS Deviation Charges', label: 'GPS DEVIATION\nCHARGES', width: 150, type: 'manual', group: 'deductions' },
   { key: 'Suspense', label: 'SUSPENSE', width: 120, type: 'manual', group: 'deductions' },
   { key: 'Give RFID TAG', label: 'GIVE RFID TAG', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
-
   { key: 'FASTAG', label: 'FASTAG', width: 100, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
+  { key: 'Others deduction', label: 'OTHERS\nDEDUCTION', width: 130, type: 'manual', group: 'deductions' },
+  { key: 'Other', label: 'OTHERS DEDUCTION REASON', width: 160, type: 'manual', group: 'deductions' },
+  {
+    key: 'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
+    label: 'SUM OF RFID & FASTAG &\nDEVIATION & SUSPENSE &\nOTHERS DEDUCTION',
+    width: 220,
+    type: 'calc',
+    group: 'deductions',
+    hint: 'Give RFID Tag + Fastag + GPS Deviation Charges + Suspense + Others Deduction',
+    formula: r => fmt2(
+      (num(r['Give RFID TAG']) || num(r['GIVE RFID TAG']) || 0)
+      + (num(r['FASTAG']) || 0)
+      + (num(r['GPS Deviation Charges']) || num(r['GPS DEVIATION CHARGES']) || 0)
+      + (num(r['Suspense']) || num(r['SUSPENSE']) || 0)
+      + (num(r['Others deduction']) || num(r['OTHERS DEDUCTION']) || 0)
+    )
+  },
 
   // ── Group 4: HSD / Fuel ────────────────────────────────────────────────────
   { key: 'PUMP NAME', label: 'PUMP NAME', width: 130, type: 'auto', group: 'hsd' },
@@ -172,16 +186,14 @@ export const COLUMNS = [
   },
   { key: 'TRAVELLING EXP', label: 'TRAVELLING EXP', width: 130, type: 'manual', group: 'hsd' },
   { key: 'SHORTAGE (BAG)', label: 'SHORTAGE (BAG)', width: 120, type: 'manual', group: 'hsd' },
-  { key: 'SHORTAGE (RATE)', label: 'SHORTAGE (RATE)', width: 120, type: 'manual', group: 'hsd' },
+  { key: 'SHORTAGE (RATE)', label: 'SHORTAGE (RATE)', width: 120, type: 'auto', group: 'hsd', hint: 'Auto from Projected Deduction Settings (Damage Deduction)' },
   {
     key: 'SHORTAGE (AMOUNT)', label: 'SHORTAGE (AMOUNT)', width: 130, type: 'calc', group: 'hsd',
     formula: r => {
-      // Prioritize manual input/override over calculation
-      const manualAmt = num(r['SHORTAGE (AMOUNT)']);
-      if (manualAmt > 0) return fmt2(manualAmt);
-
-      const calc = num(r['SHORTAGE (RATE)']) * num(r['SHORTAGE (BAG)']);
-      return fmt2(calc);
+      const bags = num(r['SHORTAGE (BAG)']);
+      if (bags <= 0) return 0;
+      const rate = num(r['SHORTAGE (RATE)']) || num(r._damage_deduction_rate) || num(r._damage_rate) || 476;
+      return fmt2(bags * rate);
     }
   },
 
@@ -228,8 +240,6 @@ export const COLUMNS = [
       + num(r['UP TOLL'])
       + num(r['DOWN TOLL'])
       + num(r['EXTRA UNLOADING'])
-      + num(r.DEDICATED)
-      + num(r['10W EXTRA 8.5%'])
     )
   },
 
@@ -387,15 +397,96 @@ export function formatDateToDDMMYY(dStr) {
   return `${day}.${month}.${year}`;
 }
 
+/**
+ * Helper to check if an invoice or shipment string represents a real shipment/invoice
+ * vs empty/whitespace/placeholder text (like "CASH VOUCHER", "VOUCHER", "DUMMY", etc.)
+ */
+function isRealInvoiceOrShipment(val) {
+  if (val === null || val === undefined) return false;
+  const str = String(val).trim();
+  if (!str) return false;
+  const upper = str.toUpperCase();
+  if (
+    upper === 'CASH VOUCHER' ||
+    upper === 'VOUCHER' ||
+    upper === 'DUMMY' ||
+    upper === 'NO SLIP' ||
+    upper === '—' ||
+    upper === '-' ||
+    upper === 'N/A' ||
+    upper === 'NA' ||
+    upper.includes('VOUCHER') ||
+    upper.includes('DUMMY')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Authoritative rule for DUMMY ROW in Cement Register:
+ * A row is considered a DUMMY ROW when:
+ * - BOTH INVOICE NUMBER and SHIPMENT NUMBER are missing/empty/placeholder (like CASH VOUCHER, VOUCHER, DUMMY)
+ * - OR the row is explicitly marked as dummy (isDummy: true, _source: 'auto_dummy', etc.)
+ *
+ * isDummy = !hasRealInvoice && !hasRealShipment
+ */
+export function isDummyRow(row) {
+  if (!row) return false;
+
+  const rawInvoice = row['INVOICE NO'] !== undefined ? row['INVOICE NO'] :
+    (row['INVOICE NUMBER'] !== undefined ? row['INVOICE NUMBER'] :
+    (row['Invoice No'] !== undefined ? row['Invoice No'] :
+    (row['invoiceNo'] !== undefined ? row['invoiceNo'] :
+    (row['invoice_number'] !== undefined ? row['invoice_number'] : ''))));
+
+  const rawShipment = row['SHIPMENT NO'] !== undefined ? row['SHIPMENT NO'] :
+    (row['SHIPMENT NUMBER'] !== undefined ? row['SHIPMENT NUMBER'] :
+    (row['Shipment No'] !== undefined ? row['Shipment No'] :
+    (row['shipmentNo'] !== undefined ? row['shipmentNo'] :
+    (row['shipment_number'] !== undefined ? row['shipment_number'] : ''))));
+
+  const hasRealInvoice = isRealInvoiceOrShipment(rawInvoice);
+  const hasRealShipment = isRealInvoiceOrShipment(rawShipment);
+
+  if (row.isDummy === true || row._isDummy === true || row._source === 'auto_dummy') {
+    if (hasRealInvoice || hasRealShipment) return false;
+    return true;
+  }
+
+  return !hasRealInvoice && !hasRealShipment;
+}
+
 // Calculate all computed fields for a single row
-export function applyCalcs(row) {
+export function applyCalcs(row, defaultDamageRate = 476) {
   const r = { ...row };
+  const isDummy = isDummyRow(r);
+  r.isDummy = isDummy;
+  r._isDummy = isDummy;
   const isManual = r.tds_manual === true || r.tds_manual === 'true' || r._tds_manual === true;
   const comm = r._freight_commission;
   const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
   const tdsRate = (r._tds_rate !== undefined && r._tds_rate !== null && r._tds_rate !== '')
     ? num(r._tds_rate)
     : ((r._tds_percent !== undefined && r._tds_percent !== null && r._tds_percent !== '') ? num(r._tds_percent) : 0);
+
+  // Auto-resolve Shortage Rate from Projected Deductions
+  const damageRate = (r._damage_deduction_rate !== undefined && r._damage_deduction_rate !== null && r._damage_deduction_rate !== '')
+    ? num(r._damage_deduction_rate)
+    : ((r._damage_rate !== undefined && r._damage_rate !== null && r._damage_rate !== '') ? num(r._damage_rate) : (num(defaultDamageRate) || 476));
+
+  const shortageBags = num(r['SHORTAGE (BAG)']);
+  if (shortageBags > 0) {
+    if (!r['SHORTAGE (RATE)'] || num(r['SHORTAGE (RATE)']) === 0) {
+      r['SHORTAGE (RATE)'] = damageRate;
+    }
+    r['SHORTAGE (AMOUNT)'] = fmt2(shortageBags * num(r['SHORTAGE (RATE)']));
+  } else {
+    if (!r['SHORTAGE (RATE)']) {
+      r['SHORTAGE (RATE)'] = damageRate;
+    }
+    r['SHORTAGE (AMOUNT)'] = 0;
+  }
 
   // Run calc columns in order (some depend on earlier calcs)
   for (const col of COLUMNS) {
@@ -447,6 +538,7 @@ export const NUMERIC_KEYS = new Set([
   'MT', 'Billing Amount', 'BILLING ER 95%', 'BILLING ER VAR', 'PROFIT', 'TDS',
   'ADVANCE', 'Site Cash', 'OFFICE CASH', 'Bank TF', 'Others deduction', 'Other',
   'GPS Monitoring Charge', 'Give GPS DEVICE', 'GPS Deviation Charges', 'GPS Trip Charges', 'Suspense', 'Give RFID TAG', 'RFID REASSURANCE', 'FASTAG',
+  'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
   'FUEL REQUIRED', 'HSD (LTR)', 'ACTUAL EXTRA', 'HSD AMOUNT', 'TRAVELLING EXP',
   'SHORTAGE (BAG)', 'SHORTAGE (AMOUNT)', 'NET AMOUNT', 'UP TOLL', 'DOWN TOLL',
   'EXTRA UNLOADING', 'DEDICATED', '10W EXTRA 8.5%', 'GROSS AMOUNT', 'AMOUNT'

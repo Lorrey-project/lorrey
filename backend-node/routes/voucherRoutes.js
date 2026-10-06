@@ -34,11 +34,11 @@ async function emitExpenseUpdate(dateIso) {
 
     const [indirectRes, directRes, cementRes] = await Promise.all([
       voucherCol.aggregate([
-        { $match: { expenseType: { $ne: 'Direct Expense' }, date: { $gte: startOfDay, $lte: endOfDay } } },
+        { $match: { voucherType: { $ne: 'CREDIT' }, expenseType: { $ne: 'Direct Expense' }, date: { $gte: startOfDay, $lte: endOfDay } } },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]).toArray(),
       voucherCol.aggregate([
-        { $match: { expenseType: 'Direct Expense', date: { $gte: startOfDay, $lte: endOfDay } } },
+        { $match: { voucherType: { $ne: 'CREDIT' }, expenseType: 'Direct Expense', date: { $gte: startOfDay, $lte: endOfDay } } },
         { $group: { _id: null, total: { $sum: '$amount' }, details: { $push: { purpose: '$purpose', amount: '$amount' } } } }
       ]).toArray(),
       cementCol.aggregate([
@@ -96,6 +96,9 @@ router.get("/contacts", async (req, res) => {
     // Build grouped map: { "OWNER NAME": ["WB12AB1234", ...] }
     const ownerMap = {};
     const ownerDetails = {};
+    const ownerIdMap = {};
+    const vehicleIdMap = {};
+    const vehicleDetails = {};
     // vehicleWheelMap: { "WB12AB1234": "10W" | "6W" | "12W" | "14W" | "" }
     // Used by the frontend to determine which wheel-type incentive columns to show per owner.
     const vehicleWheelMap = {};
@@ -103,14 +106,24 @@ router.get("/contacts", async (req, res) => {
     for (const c of contacts) {
       const name = (c.owner_name || c["Owner Name"] || c["Owner Name "] || c.Owner_Name || "").trim();
       const truck = (c.truck_no || c["Truck No"] || c["Truck No "] || c.Truck_No || "").trim();
+      const contactId = c._id ? c._id.toString() : null;
 
       if (!name || !truck) continue;
 
       if (!ownerMap[name]) ownerMap[name] = [];
       if (!ownerMap[name].includes(truck)) ownerMap[name].push(truck);
 
+      if (contactId && !ownerIdMap[name]) {
+        ownerIdMap[name] = contactId;
+      }
+      if (contactId) {
+        vehicleIdMap[truck] = contactId;
+        vehicleDetails[truck] = { vehicleId: contactId, ownerName: name };
+      }
+
       if (!ownerDetails[name]) {
         ownerDetails[name] = {
+          ownerId: contactId,
           pan: (c.pan_no || c["PAN No"] || c["PAN NO"] || c["PAN_No"] || "").trim(),
           address: (c.address || c["Address"] || c["ADDRESS"] || "").trim(),
           contactNo: (c.contact_no || c["Contact No"] || c["CONTACT NO"] || c["Contact_No"] || "").trim()
@@ -144,7 +157,7 @@ router.get("/contacts", async (req, res) => {
     // All vehicles flat list (sorted)
     const vehicles = [...new Set(contacts.map(c => (c.truck_no || "").trim()).filter(Boolean))].sort();
 
-    res.json({ success: true, names, vehicles, ownerMap, ownerDetails, vehicleWheelMap });
+    res.json({ success: true, names, vehicles, ownerMap, ownerDetails, ownerIdMap, vehicleIdMap, vehicleDetails, vehicleWheelMap });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -157,7 +170,25 @@ router.post("/", auth, async (req, res) => {
   let attempt = 0;
   while (attempt < MAX_RETRIES) {
     try {
-      const { expenseType, vehicleNumber, date, amount, purpose, name, reason, invoiceId, panelSource } = req.body;
+      const {
+        voucherType,
+        ownerId,
+        ownerName,
+        vehicleId,
+        expenseType,
+        vehicleNumber,
+        date,
+        amount,
+        purpose,
+        name,
+        reason,
+        remarks,
+        invoiceId,
+        panelSource
+      } = req.body;
+
+      const isCredit = String(voucherType || '').toUpperCase() === 'CREDIT';
+      const finalVoucherType = isCredit ? 'CREDIT' : 'DEBIT';
 
       // Always generate server-side; ignore any client-supplied voucherNumber
       const vNum = await generateVoucherNumber();
@@ -165,35 +196,47 @@ router.post("/", auth, async (req, res) => {
       // ALWAYS derive the role from the verified JWT or explicit panelSource
       const roleFromToken = panelSource || req.user?.role || "OFFICE";
 
+      const finalOwnerName = (ownerName || name || "").trim();
+      const finalVehicleNumber = vehicleNumber ? String(vehicleNumber).trim().toUpperCase() : "";
+
       const voucher = new Voucher({
         voucherNumber: vNum,
-        expenseType: expenseType || "Indirect Expense",
-        vehicleNumber: vehicleNumber ? String(vehicleNumber).trim().toUpperCase() : "",
+        voucherType: finalVoucherType,
+        ownerId: ownerId || null,
+        ownerName: finalOwnerName,
+        vehicleId: vehicleId || null,
+        expenseType: isCredit ? "Credit Voucher" : (expenseType || "Indirect Expense"),
+        vehicleNumber: finalVehicleNumber,
         date: date || new Date(),
         amount: parseFloat(amount) || 0,
-        purpose: purpose || "Others",
-        name: name || "",
+        purpose: isCredit ? "Credit Voucher" : (purpose || "Others"),
+        name: finalOwnerName,
         reason: reason || "",
+        remarks: remarks || "",
         invoiceId: invoiceId || null,
         createdByRole: roleFromToken,
       });
 
       await voucher.save();
 
-      // Automatically sync Voucher to Cement Register latest invoice for this vehicle
-      const cementSyncResult = await applyVoucherToCement(voucher, panelSource || roleFromToken);
+      let cementSyncResult = { success: true, skipped: true, reason: isCredit ? "Credit Voucher does not apply to Cement expense" : "Voucher created" };
+      if (!isCredit) {
+        // Automatically sync Debit Voucher to Cement Register latest invoice for this vehicle
+        cementSyncResult = await applyVoucherToCement(voucher, panelSource || roleFromToken);
+        // Emit instant expense patch to all cashbook clients
+        emitExpenseUpdate(voucher.date).catch(() => { });
+        // Re-sync Cement Register so Site Cash column updates immediately
+        resyncCementForVehicle(finalVehicleNumber, invoiceId || null, voucher._id.toString());
+      }
 
-      // 1. Emit instant expense patch to all cashbook clients (no round-trip needed)
-      emitExpenseUpdate(voucher.date).catch(() => { });
-
-      // 2. Notify Main Cashbook listeners that a new voucher was created
+      // Notify Main Cashbook and Party Payment listeners that a new voucher was created
       try {
         const io = getIO();
-        if (io) io.emit('voucherCreated', { voucher: voucher.toObject(), cementSyncResult });
+        if (io) {
+          io.emit('voucherCreated', { voucher: voucher.toObject(), cementSyncResult });
+          io.emit('partyPaymentUpdate', { voucher: voucher.toObject() });
+        }
       } catch (_) { /* socket not critical */ }
-
-      // 3. Re-sync Cement Register so Site Cash column updates immediately
-      resyncCementForVehicle(vehicleNumber, invoiceId || null, voucher._id.toString());
 
       return res.status(201).json({ success: true, voucher, cementSyncResult });
     } catch (error) {
@@ -212,7 +255,11 @@ router.post("/", auth, async (req, res) => {
 // GET /voucher — Fetch all vouchers (newest first)
 router.get("/", async (req, res) => {
   try {
-    const vouchers = await Voucher.find().sort({ createdAt: -1 });
+    const filter = {};
+    if (req.query.voucherType) {
+      filter.voucherType = String(req.query.voucherType).toUpperCase();
+    }
+    const vouchers = await Voucher.find(filter).sort({ createdAt: -1 });
     res.json({ success: true, vouchers });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -229,8 +276,32 @@ router.put("/:id", auth, async (req, res) => {
         .json({ success: false, error: "Voucher not found." });
     }
 
-    const { vehicleNumber, date, amount, purpose, voucherNumber, remarks, invoiceId, name, reason, expenseType, panelSource } = req.body;
+    const {
+      voucherType,
+      ownerId,
+      ownerName,
+      vehicleId,
+      vehicleNumber,
+      date,
+      amount,
+      purpose,
+      voucherNumber,
+      remarks,
+      invoiceId,
+      name,
+      reason,
+      expenseType,
+      panelSource
+    } = req.body;
+
     const updateFields = {};
+    if (voucherType !== undefined) updateFields.voucherType = voucherType;
+    if (ownerId !== undefined) updateFields.ownerId = ownerId;
+    if (ownerName !== undefined) {
+      updateFields.ownerName = ownerName;
+      if (name === undefined) updateFields.name = ownerName;
+    }
+    if (vehicleId !== undefined) updateFields.vehicleId = vehicleId;
     if (vehicleNumber !== undefined) updateFields.vehicleNumber = String(vehicleNumber).trim().toUpperCase();
     if (date !== undefined) updateFields.date = date;
     if (amount !== undefined) updateFields.amount = parseFloat(amount);
@@ -248,17 +319,26 @@ router.put("/:id", auth, async (req, res) => {
       { returnDocument: 'after', runValidators: true }
     );
 
-    // Sync edited voucher with Cement Register (reverses old from previous record, applies to new)
-    const cementSyncResult = await syncVoucherOnUpdate(oldVoucher, updated, panelSource || updated.createdByRole);
-
-    // Trigger sync for potential dummy row updates
-    resyncCementForVehicle(updated.vehicleNumber, updated.invoiceId || null, updated._id.toString());
-    // Emit instant expense patch
-    emitExpenseUpdate(updated.date).catch(() => { });
+    let cementSyncResult = null;
+    if (updated.voucherType !== 'CREDIT') {
+      // Sync edited voucher with Cement Register (reverses old from previous record, applies to new)
+      cementSyncResult = await syncVoucherOnUpdate(oldVoucher, updated, panelSource || updated.createdByRole);
+      // Trigger sync for potential dummy row updates
+      resyncCementForVehicle(updated.vehicleNumber, updated.invoiceId || null, updated._id.toString());
+      // Emit instant expense patch
+      emitExpenseUpdate(updated.date).catch(() => { });
+    } else if (oldVoucher.voucherType !== 'CREDIT') {
+      // If changed from DEBIT to CREDIT, reverse from cement
+      await reverseVoucherFromCement(oldVoucher);
+      emitExpenseUpdate(oldVoucher.date).catch(() => { });
+    }
 
     try {
       const io = getIO();
-      if (io) io.emit('voucherUpdate', { voucher: updated.toObject(), cementSyncResult });
+      if (io) {
+        io.emit('voucherUpdate', { voucher: updated.toObject(), cementSyncResult });
+        io.emit('partyPaymentUpdate', { voucher: updated.toObject() });
+      }
     } catch (_) {}
 
     res.json({ success: true, voucher: updated, cementSyncResult });
@@ -287,7 +367,10 @@ router.delete("/:id", auth, async (req, res) => {
 
     try {
       const io = getIO();
-      if (io) io.emit('voucherDeleted', { voucherId: req.params.id });
+      if (io) {
+        io.emit('voucherDeleted', { voucherId: req.params.id });
+        io.emit('partyPaymentUpdate', { voucherId: req.params.id });
+      }
     } catch (_) {}
 
     res.json({ success: true, message: "Voucher deleted successfully." });

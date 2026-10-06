@@ -4,9 +4,10 @@ const mongoose = require('mongoose');
 const OthersCreditor = require('../models/OthersCreditor');
 const truckContactUpload = require('../middleware/truckContactUpload');
 const {
-  applyMonojDebitToCement,
-  reverseMonojDebitContribution,
-  syncMonojDebitsBatch
+  applyFreightAdvanceToCement,
+  reverseFreightAdvanceContribution,
+  syncFreightAdvancesBatch,
+  isQualifyingFreightAdvance
 } = require('../utils/monojCementAdvanceManager');
 
 const num = (v) => {
@@ -82,10 +83,15 @@ const parseToDate = (dStr) => {
   return new Date(0);
 };
 
-// Continuous chronological balance recalculation for MONOJ BANDHAN
+// Helper: Check if a creditor name matches MANOJ / MONOJ BANDHAN
+const isManojBandhan = (name) => /^m[ao]noj\s*bandhan$/i.test(String(name || '').trim());
+
+// Continuous chronological balance recalculation for MANOJ BANDHAN
 async function recalculateMonojBandhanBalances() {
   try {
-    const allRows = await OthersCreditor.find({ creditorName: 'MONOJ BANDHAN' });
+    const allRows = await OthersCreditor.find({
+      creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] }
+    });
     if (allRows.length === 0) return [];
 
     // Sort chronologically by date first, then slNo, then createdAt
@@ -100,7 +106,8 @@ async function recalculateMonojBandhanBalances() {
       if (sA && sB && sA !== sB) return sA - sB;
       const cA = new Date(a.createdAt || 0).getTime();
       const cB = new Date(b.createdAt || 0).getTime();
-      return cA - cB;
+      if (cA && cB && cA !== cB) return cA - cB;
+      return String(a._id || '').localeCompare(String(b._id || ''));
     });
 
     let runningBal = 0;
@@ -129,6 +136,7 @@ async function recalculateMonojBandhanBalances() {
       const { getIO } = require('../socket');
       const io = getIO();
       if (io) {
+        io.emit('othersCreditorUpdate', { creditorName: 'MANOJ BANDHAN' });
         io.emit('othersCreditorUpdate', { creditorName: 'MONOJ BANDHAN' });
       }
     } catch (e) {
@@ -155,11 +163,15 @@ router.get('/', async (req, res) => {
       query.year = String(year);
     }
     if (creditorName) {
-      query.creditorName = creditorName;
+      if (isManojBandhan(creditorName)) {
+        query.creditorName = { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] };
+      } else {
+        query.creditorName = creditorName;
+      }
     }
 
     let entries = await OthersCreditor.find(query).sort({ slNo: 1, createdAt: 1 }).lean();
-    if (creditorName === 'MONOJ BANDHAN') {
+    if (creditorName && isManojBandhan(creditorName)) {
       entries.sort((a, b) => {
         const tA = parseToDate(a.date).getTime() || 0;
         const tB = parseToDate(b.date).getTime() || 0;
@@ -171,7 +183,8 @@ router.get('/', async (req, res) => {
         if (sA && sB && sA !== sB) return sA - sB;
         const cA = new Date(a.createdAt || 0).getTime();
         const cB = new Date(b.createdAt || 0).getTime();
-        return cA - cB;
+        if (cA && cB && cA !== cB) return cA - cB;
+        return String(a._id || '').localeCompare(String(b._id || ''));
       });
     }
     res.json({ success: true, count: entries.length, entries });
@@ -185,7 +198,14 @@ router.get('/', async (req, res) => {
 router.get('/next-sl-no', async (req, res) => {
   try {
     const { creditorName } = req.query;
-    const query = creditorName ? { creditorName } : {};
+    let query = {};
+    if (creditorName) {
+      if (isManojBandhan(creditorName)) {
+        query.creditorName = { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] };
+      } else {
+        query.creditorName = creditorName;
+      }
+    }
     const maxDoc = await OthersCreditor.findOne(query).sort({ slNo: -1 }).lean();
     const nextSlNo = (maxDoc && maxDoc.slNo ? Number(maxDoc.slNo) : 0) + 1;
     res.json({ success: true, nextSlNo });
@@ -203,8 +223,15 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Creditor / Vendor Name is required' });
     }
 
+    const isManoj = isManojBandhan(data.creditorName);
+    if (isManoj) {
+      data.creditorName = 'MANOJ BANDHAN';
+      data.credit = 0; // Manual creation cannot set credit; credit is system-generated only
+    }
+
     if (!data.slNo) {
-      const maxDoc = await OthersCreditor.findOne({ creditorName: data.creditorName }).sort({ slNo: -1 }).lean();
+      const slQuery = isManoj ? { creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] } } : { creditorName: data.creditorName };
+      const maxDoc = await OthersCreditor.findOne(slQuery).sort({ slNo: -1 }).lean();
       data.slNo = (maxDoc && maxDoc.slNo ? Number(maxDoc.slNo) : 0) + 1;
     }
 
@@ -212,11 +239,11 @@ router.post('/', async (req, res) => {
     await entry.save();
 
     let cementSyncResult = null;
-    if (data.creditorName === 'MONOJ BANDHAN') {
+    if (isManoj) {
       await recalculateMonojBandhanBalances();
-      if (num(entry.debit) > 0 && entry.vehicleNo) {
-        cementSyncResult = await applyMonojDebitToCement(entry);
-      }
+    }
+    if (isQualifyingFreightAdvance(entry)) {
+      cementSyncResult = await applyFreightAdvanceToCement(entry);
     }
 
     res.status(201).json({ success: true, entry, cementSyncResult });
@@ -229,12 +256,19 @@ router.post('/', async (req, res) => {
 // ── PUT /api/others-creditors/:id ───────────────────────────────────────────
 router.put('/:id', async (req, res) => {
   try {
-    const data = computeRowMetrics(req.body);
     const existing = await OthersCreditor.findById(req.params.id);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Record not found' });
     }
 
+    if (isManojBandhan(existing.creditorName)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Saved MANOJ BANDHAN transactions are permanently locked and cannot be manually modified.'
+      });
+    }
+
+    const data = computeRowMetrics(req.body);
     const updated = await OthersCreditor.findByIdAndUpdate(
       req.params.id,
       { $set: data },
@@ -242,9 +276,8 @@ router.put('/:id', async (req, res) => {
     );
 
     let cementSyncResult = null;
-    if (updated.creditorName === 'MONOJ BANDHAN') {
-      await recalculateMonojBandhanBalances();
-      cementSyncResult = await applyMonojDebitToCement(updated);
+    if (isQualifyingFreightAdvance(updated) || (existing._cementSync && existing._cementSync.applied)) {
+      cementSyncResult = await applyFreightAdvanceToCement(updated);
     }
 
     res.json({ success: true, entry: updated, cementSyncResult });
@@ -264,14 +297,36 @@ router.post('/bulk-save', async (req, res) => {
 
     // Determine current highest slNo in database for new rows that don't have slNo
     let maxSl = 0;
-    const maxDoc = await OthersCreditor.findOne({ creditorName: 'MONOJ BANDHAN' }).sort({ slNo: -1 }).lean();
+    const maxDoc = await OthersCreditor.findOne({
+      creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] }
+    }).sort({ slNo: -1 }).lean();
     if (maxDoc && maxDoc.slNo) maxSl = Number(maxDoc.slNo);
 
     const saved = [];
     let hasMonoj = false;
     for (let i = 0; i < rows.length; i++) {
-      const r = computeRowMetrics(rows[i]);
-      if (r.creditorName === 'MONOJ BANDHAN') hasMonoj = true;
+      const rawRow = rows[i];
+      const isManoj = isManojBandhan(rawRow.creditorName);
+
+      if (isManoj) {
+        hasMonoj = true;
+        // If this is an existing saved MANOJ BANDHAN row with MongoDB _id
+        if (rawRow._id && mongoose.Types.ObjectId.isValid(rawRow._id)) {
+          const existingDoc = await OthersCreditor.findById(rawRow._id);
+          if (existingDoc && isManojBandhan(existingDoc.creditorName)) {
+            // Permanently locked historical row: do NOT overwrite from manual user bulk-save
+            saved.push(existingDoc);
+            continue;
+          }
+        }
+      }
+
+      const r = computeRowMetrics(rawRow);
+      if (isManoj) {
+        r.creditorName = 'MANOJ BANDHAN';
+        // Manual creation must never set credit directly; credit is system-generated only
+        r.credit = 0;
+      }
       if (!r.slNo) {
         maxSl += 1;
         r.slNo = maxSl;
@@ -291,11 +346,10 @@ router.post('/bulk-save', async (req, res) => {
       }
     }
 
-    let cementSyncResults = [];
     if (hasMonoj) {
       await recalculateMonojBandhanBalances();
-      cementSyncResults = await syncMonojDebitsBatch(saved);
     }
+    const cementSyncResults = await syncFreightAdvancesBatch(saved);
 
     res.json({ success: true, count: saved.length, entries: saved, cementSyncResults });
   } catch (err) {
@@ -312,12 +366,12 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Record not found' });
     }
 
-    if (docToDelete.creditorName === 'MONOJ BANDHAN') {
-      await reverseMonojDebitContribution(docToDelete);
+    if (isQualifyingFreightAdvance(docToDelete) || (docToDelete._cementSync && docToDelete._cementSync.applied)) {
+      await reverseFreightAdvanceContribution(docToDelete);
     }
 
     const deleted = await OthersCreditor.findByIdAndDelete(req.params.id);
-    if (deleted && deleted.creditorName === 'MONOJ BANDHAN') {
+    if (deleted && isManojBandhan(deleted.creditorName)) {
       await recalculateMonojBandhanBalances();
     }
     res.json({ success: true, message: 'Record deleted' });
@@ -337,8 +391,8 @@ router.post('/bulk-delete', async (req, res) => {
 
     const docsToDelete = await OthersCreditor.find({ _id: { $in: ids } });
     for (const doc of docsToDelete) {
-      if (doc.creditorName === 'MONOJ BANDHAN') {
-        await reverseMonojDebitContribution(doc);
+      if (isQualifyingFreightAdvance(doc) || (doc._cementSync && doc._cementSync.applied)) {
+        await reverseFreightAdvanceContribution(doc);
       }
     }
 
@@ -397,11 +451,11 @@ router.post('/remove-pdf', async (req, res) => {
 });
 
 // ── GET /api/others-creditors/monoj-bandhan/debit-rows ─────────────────────
-// System 2: Fetch all Monoj Bandhan debit rows eligible for payment allocation
+// System 2: Fetch all Manoj Bandhan debit rows eligible for payment allocation
 router.get('/monoj-bandhan/debit-rows', async (req, res) => {
   try {
     const rawRows = await OthersCreditor.find({
-      creditorName: 'MONOJ BANDHAN',
+      creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] },
       debit: { $gt: 0 }
     }).lean();
 
@@ -412,30 +466,42 @@ router.get('/monoj-bandhan/debit-rows', async (req, res) => {
       if (tA && tB && tA !== tB) return tA - tB;
       if (tA && !tB) return -1;
       if (!tA && tB) return 1;
-      return num(a.slNo) - num(b.slNo);
+      const sA = num(a.slNo);
+      const sB = num(b.slNo);
+      if (sA && sB && sA !== sB) return sA - sB;
+      const cA = new Date(a.createdAt || 0).getTime();
+      const cB = new Date(b.createdAt || 0).getTime();
+      if (cA && cB && cA !== cB) return cA - cB;
+      return String(a._id || '').localeCompare(String(b._id || ''));
     });
 
-    const debitRows = rawRows.map(r => {
+    const eligibleDebitRows = [];
+    for (const r of rawRows) {
       const originalDebit = num(r.debit);
       const paid = num(r.paidAmount);
       const outstanding = Math.max(0, Math.round((originalDebit - paid) * 100) / 100);
-      return {
-        _id: r._id,
-        slNo: r.slNo,
-        date: r.date,
-        ledgerName: r.ledgerName || '',
-        names: r.names || '',
-        vehicleNo: r.vehicleNo || '',
-        debit: originalDebit,
-        paidAmount: paid,
-        outstanding: outstanding,
-        status: outstanding === 0 ? 'Paid' : (paid > 0 ? 'Partial' : 'Unpaid'),
-        remarks: r.remarks || '',
-        allocations: r.allocations || []
-      };
-    });
+      const isPaid = outstanding <= 0 || r.status === 'Paid' || r.status === 'Cleared';
 
-    res.json({ success: true, debitRows });
+      // TASK 2: Only rows with remaining outstanding amount (> 0 and not fully Paid) appear
+      if (!isPaid && outstanding > 0.001) {
+        eligibleDebitRows.push({
+          _id: r._id,
+          slNo: r.slNo,
+          date: r.date,
+          ledgerName: r.ledgerName || '',
+          names: r.names || '',
+          vehicleNo: r.vehicleNo || '',
+          debit: originalDebit,
+          paidAmount: paid,
+          outstanding: outstanding,
+          status: paid > 0 ? 'Partial' : 'Unpaid',
+          remarks: r.remarks || '',
+          allocations: r.allocations || []
+        });
+      }
+    }
+
+    res.json({ success: true, debitRows: eligibleDebitRows });
   } catch (err) {
     console.error('[OthersCreditor] Fetch debit rows error:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -464,32 +530,22 @@ router.post('/monoj-bandhan/allocate-debits', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Please select at least one debit row for payment allocation.' });
     }
 
-    // Duplicate protection: Check if this Bank Book transaction was already allocated under System 2
+    // If this Bank Book transaction was already allocated (e.g. edit flow), revert previous allocation first
     if (bankBookTxId) {
-      const alreadyAllocated = await OthersCreditor.findOne({
-        creditorName: 'MONOJ BANDHAN',
-        'allocations.bankBookTxId': String(bankBookTxId)
-      });
-      if (alreadyAllocated) {
-        return res.status(400).json({
-          success: false,
-          alreadyAllocated: true,
-          error: `Bank Book transaction (${bankBookTxId}) has already been allocated under System 2. Duplicate allocation is prevented.`
-        });
-      }
+      await revertMonojSystem2Allocation(bankBookTxId);
     }
 
     let remainingPayment = totalWithdraw;
     const allocationAudit = [];
     let totalDirectAllocated = 0;
 
-    // 1. Allocate to selected debit rows in order
+    // 1. Allocate to selected debit rows in order (exact MongoDB IDs)
     for (const debitId of selectedDebitIds) {
       if (remainingPayment <= 0) break;
       if (!mongoose.Types.ObjectId.isValid(debitId)) continue;
 
       const record = await OthersCreditor.findById(debitId);
-      if (!record || record.creditorName !== 'MONOJ BANDHAN') continue;
+      if (!record || !isManojBandhan(record.creditorName)) continue;
 
       const originalDebit = num(record.debit);
       const curPaid = num(record.paidAmount);
@@ -525,11 +581,15 @@ router.post('/monoj-bandhan/allocate-debits', async (req, res) => {
       record.paidAmount = newPaid;
       record.balanceDue = newOutstanding;
       record.status = newOutstanding === 0 ? 'Paid' : 'Partial';
+      // Put the corresponding CREDIT directly on the selected debit row
+      record.credit = Math.round((num(record.credit) + allocAmt) * 100) / 100;
       record.allocations = record.allocations || [];
       record.allocations.push(allocItem);
-      if (bankBookTxId && !record.appliedBankBookTxIds?.includes(String(bankBookTxId))) {
+      if (bankBookTxId) {
         record.appliedBankBookTxIds = record.appliedBankBookTxIds || [];
-        record.appliedBankBookTxIds.push(String(bankBookTxId));
+        if (!record.appliedBankBookTxIds.includes(String(bankBookTxId))) {
+          record.appliedBankBookTxIds.push(String(bankBookTxId));
+        }
       }
       await record.save();
 
@@ -543,12 +603,12 @@ router.post('/monoj-bandhan/allocate-debits', async (req, res) => {
       });
     }
 
-    // 2. Excess payment handling (Section 5 & 14 from user prompt):
-    // If remainingPayment > 0, apply against remaining outstanding Monoj Bandhan debits
+    // 2. Excess payment handling:
+    // If remainingPayment > 0, apply against any remaining outstanding Manoj Bandhan debits
     let autoCoveredDebits = 0;
     if (remainingPayment > 0) {
       const otherDebits = await OthersCreditor.find({
-        creditorName: 'MONOJ BANDHAN',
+        creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] },
         _id: { $nin: selectedDebitIds },
         debit: { $gt: 0 }
       });
@@ -590,11 +650,14 @@ router.post('/monoj-bandhan/allocate-debits', async (req, res) => {
         otherRec.paidAmount = newPaid;
         otherRec.balanceDue = newOutstanding;
         otherRec.status = newOutstanding === 0 ? 'Paid' : 'Partial';
+        otherRec.credit = Math.round((num(otherRec.credit) + allocAmt) * 100) / 100;
         otherRec.allocations = otherRec.allocations || [];
         otherRec.allocations.push(allocItem);
-        if (bankBookTxId && !otherRec.appliedBankBookTxIds?.includes(String(bankBookTxId))) {
+        if (bankBookTxId) {
           otherRec.appliedBankBookTxIds = otherRec.appliedBankBookTxIds || [];
-          otherRec.appliedBankBookTxIds.push(String(bankBookTxId));
+          if (!otherRec.appliedBankBookTxIds.includes(String(bankBookTxId))) {
+            otherRec.appliedBankBookTxIds.push(String(bankBookTxId));
+          }
         }
         await otherRec.save();
 
@@ -610,27 +673,22 @@ router.post('/monoj-bandhan/allocate-debits', async (req, res) => {
       }
     }
 
-    // 3. Record the total payment as Credit into Monoj Bandhan on the payment date
-    const dateStr = bankBookDate || new Date().toLocaleDateString('en-GB');
-    let targetRow = await OthersCreditor.findOne({ creditorName: 'MONOJ BANDHAN', date: dateStr });
-    if (targetRow) {
-      targetRow.credit = Math.round((num(targetRow.credit) + totalWithdraw) * 100) / 100;
-      if (bankBookTxId && !targetRow.appliedBankBookTxIds?.includes(String(bankBookTxId))) {
-        targetRow.appliedBankBookTxIds = targetRow.appliedBankBookTxIds || [];
-        targetRow.appliedBankBookTxIds.push(String(bankBookTxId));
-      }
-      if (bankBookTxId) targetRow.bankBookTxId = String(bankBookTxId);
-      await targetRow.save();
-    } else {
-      const maxDoc = await OthersCreditor.findOne({ creditorName: 'MONOJ BANDHAN' }).sort({ slNo: -1 }).lean();
+    // 3. If unallocated excess remaining, record as standalone credit row
+    if (remainingPayment > 0) {
+      const dateStr = bankBookDate || new Date().toISOString().split('T')[0];
+      const maxDoc = await OthersCreditor.findOne({
+        creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] }
+      }).sort({ slNo: -1 }).lean();
       const nextSlNo = (maxDoc && maxDoc.slNo) ? maxDoc.slNo + 1 : 1;
       await OthersCreditor.create({
         slNo: nextSlNo,
-        creditorName: 'MONOJ BANDHAN',
+        creditorName: 'MANOJ BANDHAN',
         date: dateStr,
-        credit: totalWithdraw,
+        ledgerName: 'MANOJ BANDHAN',
+        names: 'MANOJ BANDHAN',
+        credit: remainingPayment,
         debit: 0,
-        remarks: `Bank Book Withdraw payment (${bankBookTxId || ''})`,
+        remarks: `Bank Book Withdraw payment unallocated excess (${bankBookTxId || ''})`,
         bankBookTxId: String(bankBookTxId || ''),
         appliedBankBookTxIds: bankBookTxId ? [String(bankBookTxId)] : []
       });
@@ -654,7 +712,7 @@ router.post('/monoj-bandhan/allocate-debits', async (req, res) => {
       );
     }
 
-    // 5. Recalculate Monoj Bandhan running balances
+    // 5. Recalculate Manoj Bandhan running balances
     await recalculateMonojBandhanBalances();
 
     res.json({
@@ -675,8 +733,9 @@ async function revertMonojSystem2Allocation(bankBookTxId) {
   if (!bankBookTxId) return;
   const txIdStr = String(bankBookTxId);
 
+  // 1. Find all debit records allocated with this bankBookTxId
   const allocatedRecords = await OthersCreditor.find({
-    creditorName: 'MONOJ BANDHAN',
+    creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] },
     'allocations.bankBookTxId': txIdStr
   });
 
@@ -685,35 +744,36 @@ async function revertMonojSystem2Allocation(bankBookTxId) {
     const totalToRevert = matchingAllocs.reduce((sum, a) => sum + num(a.allocatedAmount), 0);
     const newPaid = Math.max(0, Math.round((num(rec.paidAmount) - totalToRevert) * 100) / 100);
     const newDue = Math.max(0, Math.round((num(rec.debit) - newPaid) * 100) / 100);
+    const newCredit = Math.max(0, Math.round((num(rec.credit) - totalToRevert) * 100) / 100);
 
     rec.paidAmount = newPaid;
     rec.balanceDue = newDue;
     rec.status = newDue === 0 && num(rec.debit) > 0 ? 'Paid' : (newPaid > 0 ? 'Partial' : 'Unpaid');
+    rec.credit = newCredit;
     rec.allocations = (rec.allocations || []).filter(a => a.bankBookTxId !== txIdStr);
     rec.appliedBankBookTxIds = (rec.appliedBankBookTxIds || []).filter(id => id !== txIdStr);
     await rec.save();
   }
 
+  // 2. Find any standalone excess credit rows created exclusively for this transaction
   const creditRows = await OthersCreditor.find({
-    creditorName: 'MONOJ BANDHAN',
-    appliedBankBookTxIds: txIdStr
+    creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] },
+    appliedBankBookTxIds: txIdStr,
+    debit: 0
   });
+
+  for (const cr of creditRows) {
+    const otherTxs = (cr.appliedBankBookTxIds || []).filter(id => id !== txIdStr);
+    if (otherTxs.length === 0 || cr.bankBookTxId === txIdStr) {
+      await OthersCreditor.deleteOne({ _id: cr._id });
+    } else {
+      cr.appliedBankBookTxIds = otherTxs;
+      await cr.save();
+    }
+  }
 
   if (mongoose.Types.ObjectId.isValid(bankBookTxId)) {
     const AccountDetail = require('../models/AccountDetail');
-    const bankTx = await AccountDetail.findById(bankBookTxId);
-    const withdrawAmt = num(bankTx?.Withdraw !== undefined ? bankTx.Withdraw : bankTx?.withdraw);
-    for (const cr of creditRows) {
-      const deduction = withdrawAmt > 0 ? withdrawAmt : num(cr.credit);
-      cr.credit = Math.max(0, Math.round((num(cr.credit) - deduction) * 100) / 100);
-      cr.appliedBankBookTxIds = (cr.appliedBankBookTxIds || []).filter(id => id !== txIdStr);
-      if (cr.bankBookTxId === txIdStr) cr.bankBookTxId = '';
-      if (num(cr.credit) === 0 && num(cr.debit) === 0) {
-        await OthersCreditor.deleteOne({ _id: cr._id });
-      } else {
-        await cr.save();
-      }
-    }
     await AccountDetail.updateOne({ _id: bankBookTxId }, { $unset: { _monojSystem2Allocation: '' } });
   }
 

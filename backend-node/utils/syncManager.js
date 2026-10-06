@@ -439,14 +439,26 @@ async function pushToRegister(invoiceId, overrides) {
     const mt = fmt2(items.reduce((sum, item) => sum + num(item.quantity), 0));
 
     // ── Add-on Charges (from invoice form) ──────────────────────────────
-    const addonCharges = hvd.addon_charges || [];
+    const addonCharges = Array.isArray(hvd.addon_charges) ? hvd.addon_charges : (Array.isArray(invoice.addon_charges) ? invoice.addon_charges : []);
     const getAddon = (typeName) => {
-      const found = addonCharges.find(c => c.type === typeName);
+      const found = addonCharges.find(c => String(c.type || '').trim().toLowerCase() === typeName.toLowerCase());
       return found ? num(found.amount) : 0;
     };
     const addonGpsDevice = getAddon("GPS Device");
     const addonRfidTag = getAddon("RFID Tag");
+    const addonRfidReassurance = getAddon("RFID Tag Reassurance");
     const addonFastag = getAddon("Fastag");
+    const totalRfid = (addonRfidTag || 0) + (addonRfidReassurance || 0);
+
+    // ── NT Details & Unloading Charges ─────────────────────────────────
+    const invoiceType = safe(invoiceDetails.invoice_type || hvd.invoice_type || invoice.invoice_type);
+    const isNTInvoice = invoiceType.toUpperCase().trim() === "NT" || (items && items.some(i => (i.description_of_product || '').toUpperCase().includes('UNLOADING')));
+    const ntDetails = hvd.nt_details || invoice.nt_details || {};
+    let ntExtraUnloading = "";
+    if (isNTInvoice && ntDetails.unloading_charges !== undefined && ntDetails.unloading_charges !== null && String(ntDetails.unloading_charges).trim() !== "") {
+      const parsedUnloading = num(ntDetails.unloading_charges);
+      ntExtraUnloading = parsedUnloading > 0 ? parsedUnloading : (parsedUnloading === 0 ? 0 : "");
+    }
 
     // ── Truck Contact lookup ─────────────────────────────────────────────
     let wheel = "", ownerName = "", tdsPercent = 0, isATO = false, driverNo = "", hasStO = false;
@@ -526,8 +538,14 @@ async function pushToRegister(invoiceId, overrides) {
       // and causes vouchers from different days to contaminate this row.
       const voucherQuery = baseQuery;
 
-      // Pick the most recently created voucher from site admin (OFFICE)
-      const siteVoucher = await Voucher.findOne({ ...voucherQuery, createdByRole: { $ne: "HEAD_OFFICE" } })
+      // Pick the most recently created voucher from site admin (SITE)
+      const siteVoucher = await Voucher.findOne({
+        ...voucherQuery,
+        $or: [
+          { appliedPanel: "SITE" },
+          { createdByRole: "SITE" }
+        ]
+      })
         .sort({ createdAt: -1 })
         .lean();
 
@@ -536,8 +554,15 @@ async function pushToRegister(invoiceId, overrides) {
         siteCashProofUrl = siteVoucher.slip_url || "";  // S3 PDF URL of the voucher slip
       }
 
-      // Pick the most recently created voucher from office admin (HEAD_OFFICE)
-      const officeVoucher = await Voucher.findOne({ ...voucherQuery, createdByRole: "HEAD_OFFICE" })
+      // Pick the most recently created voucher from office admin (OFFICE / HEAD_OFFICE)
+      const officeVoucher = await Voucher.findOne({
+        ...voucherQuery,
+        $or: [
+          { appliedPanel: "OFFICE" },
+          { createdByRole: { $in: ["HEAD_OFFICE", "OFFICE"] } },
+          { $and: [{ createdByRole: { $ne: "SITE" } }, { appliedPanel: { $ne: "SITE" } }] }
+        ]
+      })
         .sort({ createdAt: -1 })
         .lean();
 
@@ -562,7 +587,7 @@ async function pushToRegister(invoiceId, overrides) {
     const cashDiscountRate = await getCashDiscountRate(pumpName, loadingDate);
     const cashDiscountAmount = fmt2(hsdLtr * cashDiscountRate);
 
-    const advance = num(slip.total_advance || slip.loading_advance);
+    const advance = num(slip.loading_advance !== undefined && slip.loading_advance !== null && slip.loading_advance !== '' ? slip.loading_advance : (slip.advance !== undefined && slip.advance !== null && slip.advance !== '' ? slip.advance : slip.total_advance));
     const hsdBillNo = await generateHsdBillNo(pumpName, loadingDate, invoiceId);
 
     // ── SL NO & GCN NO ───────────────────────────────────────────────────
@@ -681,9 +706,14 @@ async function pushToRegister(invoiceId, overrides) {
       "DEDICATED": dedicated || "",
       "10W EXTRA 8.5%": tenWExtra || "",
       "OWNER NAME": ownerName,
-      "GPS DEVICE": addonGpsDevice || "",
-      "RFID TAG": addonRfidTag || "",
-      "FASTAG": addonFastag || "",
+      "GIVE GPS DEVICE": addonGpsDevice > 0 ? addonGpsDevice : "",
+      "Give GPS DEVICE": addonGpsDevice > 0 ? addonGpsDevice : "",
+      "GIVE RFID TAG": totalRfid > 0 ? totalRfid : "",
+      "Give RFID TAG": totalRfid > 0 ? totalRfid : "",
+      "FASTAG": addonFastag > 0 ? addonFastag : "",
+      "EXTRA UNLOADING": isNTInvoice ? (ntExtraUnloading !== "" ? ntExtraUnloading : "") : "",
+      "_is_nt_invoice": isNTInvoice,
+      "_source_nt_unloading": isNTInvoice && ntExtraUnloading !== "",
       "VERIFICATION STATUS": invoice.is_hsd_verified ? "Verified" : "Not Verified",
       "_tds_percent": tdsPercent,
       "_tds_rate": tdsPercent,
@@ -702,8 +732,25 @@ async function pushToRegister(invoiceId, overrides) {
       if (v !== "" && v !== undefined && v !== null) clean[key] = v;
     }
 
+    // Always explicitly set Addon and NT fields so removing/clearing them in invoice edit clears them in Cement Register
+    clean["Give GPS DEVICE"] = addonGpsDevice > 0 ? addonGpsDevice : "";
+    clean["GIVE GPS DEVICE"] = addonGpsDevice > 0 ? addonGpsDevice : "";
+    clean["Give RFID TAG"] = totalRfid > 0 ? totalRfid : "";
+    clean["GIVE RFID TAG"] = totalRfid > 0 ? totalRfid : "";
+    clean["FASTAG"] = addonFastag > 0 ? addonFastag : "";
+
     // Fetch existing record to guard immutable fields
     const existing = await col.findOne({ _invoiceId: invoiceId.toString() });
+
+    if (isNTInvoice) {
+      clean["EXTRA UNLOADING"] = ntExtraUnloading !== "" ? ntExtraUnloading : "";
+      clean["_source_nt_unloading"] = ntExtraUnloading !== "";
+      clean["_is_nt_invoice"] = true;
+    } else if (existing && (existing._source_nt_unloading || existing._is_nt_invoice)) {
+      clean["EXTRA UNLOADING"] = "";
+      clean["_source_nt_unloading"] = false;
+      clean["_is_nt_invoice"] = false;
+    }
 
     // VERIFICATION STATUS: once "Verified", never revert back to "Not Verified"
     if (existing && existing["VERIFICATION STATUS"] === "Verified") {
@@ -839,10 +886,11 @@ async function syncVoucherDummy(voucherId) {
     }
 
     // Otherwise, create/update the dummy row safely mapped to the UI schemas
-    const isOffice = (voucher.createdByRole === "HEAD_OFFICE");
-    const siteCash = isOffice ? "" : num(voucher.amount);
+    const isSite = voucher.appliedPanel === "SITE" || String(voucher.createdByRole || "").toUpperCase().includes("SITE");
+    const isOffice = !isSite;
+    const siteCash = isSite ? num(voucher.amount) : "";
     const officeCash = isOffice ? num(voucher.amount) : "";
-    const siteCashProofUrl = isOffice ? "" : (voucher.slip_url || "");
+    const siteCashProofUrl = isSite ? (voucher.slip_url || "") : "";
     const officeCashProofUrl = isOffice ? (voucher.slip_url || "") : "";
 
     const slNo = await getOrAssignSlNo(col, dummyId);
@@ -858,15 +906,23 @@ async function syncVoucherDummy(voucherId) {
       "LOADING DT": vDateStr,
       "SITE": "",
       "VEHICLE NUMBER": voucher.vehicleNumber,
+      "OWNER NAME": voucher.name || voucher.ownerName || "",
 
       // Clearly label it in the central registry
-      "INVOICE NO": "CASH VOUCHER",
+      "INVOICE NO": "",
+      "INVOICE NUMBER": "",
+      "SHIPMENT NO": "",
+      "SHIPMENT NUMBER": "",
       "DESTINATION": "NO SLIP",
       "VERIFICATION STATUS": "Not Verified",
 
       // Cash amounts
       "Site Cash": siteCash,
+      "SITE CASH": siteCash,
+      "SITE CASH ADVANCE": siteCash,
       "OFFICE CASH": officeCash,
+      "OFFICE CASH ADVANCE": officeCash,
+      "Office Cash": officeCash,
       "SITE_CASH_PROOF_URL": siteCashProofUrl,
       "OFFICE_CASH_PROOF_URL": officeCashProofUrl,
 
@@ -874,7 +930,11 @@ async function syncVoucherDummy(voucherId) {
       month: dummyMonth,
       year: dummyYear,
 
+      isDummy: true,
+      _isDummy: true,
       _source: "auto_dummy",
+      sourceType: isSite ? "SITE_VOUCHER" : "OFFICE_VOUCHER",
+      sourceTransactionId: voucher._id.toString(),
       _auto_updated_at: new Date()
     };
 

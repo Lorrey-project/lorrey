@@ -20,20 +20,21 @@ const API_URL = import.meta.env.VITE_API_URL;
 
 // ─── Column Definitions ───────────────────────────────────────────────────────
 const COLUMNS = [
-  { key: 'voucherNumber', label: 'VOUCHER\nNO.',     width: 140, type: 'auto'    },
-  { key: 'date',          label: 'DATE',              width: 120, type: 'auto', isDate: true },
+  { key: 'voucherNumber', label: 'VOUCHER\nNO.',     width: 130, type: 'auto'    },
+  { key: 'voucherType',   label: 'TYPE',              width: 120, type: 'voucherType' },
+  { key: 'date',          label: 'DATE',              width: 110, type: 'auto', isDate: true },
   { key: 'vehicleNumber', label: 'VEHICLE\nNUMBER',  width: 130, type: 'auto'    },
   { key: 'expenseType',   label: 'EXPENSE\nTYPE',     width: 130, type: 'auto'    },
   { key: 'purpose',       label: 'PURPOSE',           width: 110, type: 'dropdown',
-    options: ['Fuel', 'Advance', 'Repair', 'Toll', 'Others', 'Water', 'Cleaning', 'WiFi Recharge', 'Salary'],
-    colorMap: { Fuel: '#fff7ed', Advance: '#eff6ff', Repair: '#fef2f2', Toll: '#f0fdf4', Others: '#f5f3ff', Water: '#e0f2fe', Cleaning: '#d1fae5', 'WiFi Recharge': '#ede9fe', Salary: '#ffedd5' }
+    options: ['Fuel', 'Advance', 'Repair', 'Toll', 'Others', 'Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Credit Voucher'],
+    colorMap: { Fuel: '#fff7ed', Advance: '#eff6ff', Repair: '#fef2f2', Toll: '#f0fdf4', Others: '#f5f3ff', Water: '#e0f2fe', Cleaning: '#d1fae5', 'WiFi Recharge': '#ede9fe', Salary: '#ffedd5', 'Credit Voucher': '#ecfdf5' }
   },
-  { key: 'name',          label: 'PAYEE NAME',        width: 150, type: 'manual'  },
-  { key: 'reason',        label: 'REASON',            width: 160, type: 'manual'  },
+  { key: 'name',          label: 'PAYEE / OWNER',     width: 160, type: 'manual'  },
+  { key: 'reason',        label: 'REASON',            width: 180, type: 'manual'  },
   { key: 'amount',        label: 'AMOUNT (₹)',        width: 120, type: 'manual'  },
-  { key: 'remarks',       label: 'REMARKS',           width: 500, type: 'manual'  },
+  { key: 'remarks',       label: 'REMARKS',           width: 400, type: 'manual'  },
   { key: 'createdAt',     label: 'CREATED AT',        width: 140, type: 'auto'    },
-  { key: 'slip_url',      label: 'VOUCHER\nSLIP PDF', width: 120, type: 'slipUrl' },
+  { key: 'slip_url',      label: 'VOUCHER\nSLIP PDF', width: 110, type: 'slipUrl' },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -79,8 +80,18 @@ export default function VoucherRegister({ onBack }) {
   const [deleting, setDeleting]     = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
+  const [typeFilter, setTypeFilter] = useState('ALL'); // 'ALL' | 'DEBIT' | 'CREDIT'
   const dirtyCount  = Object.keys(localData).length;
-  const allSelected = vouchers.length > 0 && selectedIds.size === vouchers.length;
+  const filteredVouchers = useMemo(() => {
+    return vouchers.filter(v => {
+      if (typeFilter === 'ALL') return true;
+      if (typeFilter === 'CREDIT') return v.voucherType === 'CREDIT';
+      if (typeFilter === 'DEBIT') return v.voucherType !== 'CREDIT';
+      return true;
+    });
+  }, [vouchers, typeFilter]);
+
+  const allSelected = filteredVouchers.length > 0 && selectedIds.size === filteredVouchers.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
 
   const toggleSelect = (id) => setSelectedIds(prev => {
@@ -90,7 +101,7 @@ export default function VoucherRegister({ onBack }) {
   });
   const toggleSelectAll = () => {
     if (allSelected || someSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(vouchers.map(v => v._id)));
+    else setSelectedIds(new Set(filteredVouchers.map(v => v._id)));
   };
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
@@ -230,10 +241,33 @@ export default function VoucherRegister({ onBack }) {
         </Box>
 
         <Chip
-          label={`${vouchers.length} voucher${vouchers.length !== 1 ? 's' : ''}`}
+          label={`${filteredVouchers.length} voucher${filteredVouchers.length !== 1 ? 's' : ''}`}
           size="small"
           sx={{ fontWeight: 700, bgcolor: '#ede9fe', color: '#7c3aed' }}
         />
+
+        {/* Filter buttons */}
+        <Box sx={{ display: 'flex', gap: 0.5, ml: 1 }}>
+          {['ALL', 'DEBIT', 'CREDIT'].map(t => (
+            <Chip
+              key={t}
+              label={t}
+              size="small"
+              clickable
+              onClick={() => setTypeFilter(t)}
+              sx={{
+                fontWeight: 800,
+                fontSize: '11px',
+                borderRadius: '6px',
+                height: 24,
+                bgcolor: typeFilter === t
+                  ? (t === 'CREDIT' ? '#059669' : t === 'DEBIT' ? '#1a237e' : '#7c3aed')
+                  : '#f1f5f9',
+                color: typeFilter === t ? '#fff' : '#64748b',
+              }}
+            />
+          ))}
+        </Box>
 
         {dirtyCount > 0 && (
           <Chip label={`${dirtyCount} unsaved`} size="small" color="warning" sx={{ fontWeight: 700 }} />
@@ -329,16 +363,16 @@ export default function VoucherRegister({ onBack }) {
           </thead>
 
           <tbody>
-            {vouchers.length === 0 && (
+            {filteredVouchers.length === 0 && (
               <tr>
                 <td colSpan={COLUMNS.length + 1} style={{
                   textAlign: 'center', padding: '60px', color: '#64748b', fontSize: '13px'
                 }}>
-                  No vouchers found. Create a voucher — it will appear here automatically.
+                  No {typeFilter !== 'ALL' ? `${typeFilter} ` : ''}vouchers found.
                 </td>
               </tr>
             )}
-            {vouchers.map((row, ri) => {
+            {filteredVouchers.map((row, ri) => {
               const hasDraft   = !!localData[row._id];
               const isSelected = selectedIds.has(row._id);
               return (
@@ -394,6 +428,27 @@ export default function VoucherRegister({ onBack }) {
                               📄 PDF
                             </a>
                           ) : <span style={{ color: '#cbd5e1', fontSize: '10px' }}>—</span>}
+                        </td>
+                      );
+                    }
+
+                    // ── Voucher Type Badge ──────────────────────────────────
+                    if (col.type === 'voucherType') {
+                      const isCredit = rawVal === 'CREDIT';
+                      return (
+                        <td key={col.key} style={{ ...cellStyle, textAlign: 'center', padding: '3px' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '10px',
+                            fontWeight: 800,
+                            background: isCredit ? '#d1fae5' : '#ede9fe',
+                            color: isCredit ? '#065f46' : '#5b21b6',
+                            border: `1px solid ${isCredit ? '#a7f3d0' : '#ddd6fe'}`
+                          }}>
+                            {isCredit ? 'CREDIT' : 'DEBIT'}
+                          </span>
                         </td>
                       );
                     }

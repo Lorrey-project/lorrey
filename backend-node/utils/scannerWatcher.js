@@ -50,11 +50,13 @@ function startWatcher() {
             const fileName = path.basename(filePath);
             const mimeType = fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg';
             
+            const bucketName = s3.BUCKET_NAME || process.env.AWS_S3_BUCKET || process.env.S3_BUCKET || "lorrey-data-bucket";
+            const region = (process.env.AWS_REGION || "eu-north-1").trim();
             const key = `upload-invoice/${Date.now()}_${fileName.replace(/\s+/g, '_')}`;
-            const s3Url = `https://lorreyproject.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+            const s3Url = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 
             await s3.send(new PutObjectCommand({
-                Bucket: process.env.S3_BUCKET || "lorrey-data-bucket",
+Bucket: bucketName,
                 Key: key,
                 Body: fileBuffer,
                 ContentType: mimeType
