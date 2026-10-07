@@ -42,6 +42,7 @@ const PrintingStationaryRegister = lazy(() => import('./pages/PrintingStationary
 const PaymentReceiveHistory = lazy(() => import('./pages/PaymentReceiveHistory'));
 const FingerprintManager = lazy(() => import('./pages/FingerprintManagerPage'));
 const PartyFullYear = lazy(() => import('./pages/PartyFullYear'));
+const IndirectExpense = lazy(() => import('./pages/IndirectExpense'));
 
 const theme = createTheme({
   palette: {
@@ -356,6 +357,10 @@ function AppContent() {
       return <FingerprintManager onBack={() => handleViewChange('dashboard')} />;
     }
 
+    if (currentView === 'indirectExpense') {
+      return <IndirectExpense onBack={() => handleViewChange('dashboard')} />;
+    }
+
     if (currentView === 'dashboard') {
       const panelKey = getUserPanelKey(user);
 
@@ -460,6 +465,7 @@ function AppContent() {
           onOpenPrintingStationary={() => handleViewChange('printingStationary')}
           onOpenPaymentReceiveHistory={() => handleViewChange('paymentReceiveHistory')}
           onOpenFingerprintManager={() => handleViewChange('fingerprintManager')}
+          onOpenIndirectExpense={() => handleViewChange('indirectExpense')}
         />
       );
     }

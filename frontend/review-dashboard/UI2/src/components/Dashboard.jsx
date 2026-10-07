@@ -33,6 +33,7 @@ import TableChartIcon from '@mui/icons-material/TableChart';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
+import PaymentsIcon from '@mui/icons-material/Payments';
 import axios from 'axios';
 import { startRegistration } from '@simplewebauthn/browser';
 import { useAuth } from '../context/AuthContext';
@@ -53,7 +54,7 @@ const _dashSocket = io(SOCKET_URL, {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenFreightCreditorGst, onOpenOthersCreditor, onOpenPrintingStationary, onOpenPaymentReceiveHistory, onOpenFingerprintManager }) => {
+const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementRegister, onOpenVoucherRegister, onOpenGSTPortalRegister, onOpenMainCashbook, onOpenPumpPayment, onOpenPumpPaymentRegister, onOpenPartyPayment, onOpenFYDetails, onOpenFuelRateSettings, onOpenAccountDetails, onOpenAccountApprovals, onOpenDailySummaryReport, onOpenIncentiveSheet, onOpenAttendancePanel, onOpenAiExtraExpense, onOpenTotalPaymentReports, onOpenPieChart, onOpenTdsReports, onOpenFreightCreditorGst, onOpenOthersCreditor, onOpenPrintingStationary, onOpenPaymentReceiveHistory, onOpenFingerprintManager, onOpenIndirectExpense }) => {
 
     const { user, logout } = useAuth();
     const advanceFuelSlipRef = React.useRef();
@@ -774,6 +775,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <ActionCard title="BANK BOOK" subtitle="Transactions & Balances" icon={<AccountBalanceWalletIcon />} accentColor="#10b981" onClick={onOpenAccountDetails} />
                                     <ActionCard title="PAYMENT RECEIVE HISTORY" subtitle="Payment Receive History" icon={<ReceiptLongIcon />} accentColor="#10b981" onClick={onOpenPaymentReceiveHistory} />
                                     <ActionCard title="PRINTING & STATIONARY OR OTHERS NON_GST" subtitle="Printing & Stationary / Others Non_GST" icon={<PrintIcon />} accentColor="#f43f5e" onClick={onOpenPrintingStationary} />
+                                    <ActionCard title="INDIRECT EXPENCE" subtitle="Monthly Bank & Cash Ledger" icon={<PaymentsIcon />} accentColor="#f59e0b" onClick={onOpenIndirectExpense} />
                                     <ActionCard title="CASH BOOK" subtitle="Daily Cash Flow" icon={<DescriptionIcon />} accentColor="#06b6d4" onClick={onOpenMainCashbook} />
                                     <ActionCard title="PUMP PAYMENT DETAILS" subtitle="Clear Pump Dues" icon={<LocalGasStationIcon />} accentColor="#0ea5e9" onClick={onOpenPumpPayment} />
                                     <ActionCard title="PUMP PAYMENT REGISTER" subtitle="Payment Register" icon={<ReceiptLongIcon />} accentColor="#38bdf8" onClick={onOpenPumpPaymentRegister} />

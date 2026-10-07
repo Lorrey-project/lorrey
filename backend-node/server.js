@@ -98,6 +98,7 @@ app.use("/advance-auth", auth, require("./routes/advanceAuthRoutes"));
 app.use("/fingerprint", require("./routes/fingerprintRoutes"));
 app.use("/freight-adjustments", require("./routes/freightAdjustmentRoutes"));
 app.use("/freight-creditor-gst", require("./routes/freightCreditorGstRoutes"));
+app.use("/indirect-expense", require("./routes/indirectExpenseRoutes"));
 
 
 
