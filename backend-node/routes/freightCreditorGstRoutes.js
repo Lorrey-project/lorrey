@@ -39,20 +39,41 @@ const CREDITOR_MAPPINGS = {
   'DIPALI_ASSOCIATES': {
     creditorKey: 'DIPALI_ASSOCIATES',
     creditorTitle: 'DIPALI ASSOCIATES',
-    sourcePartyOwners: ['DIPALI ASSOCIATES', 'DIPALI ASSOCIATE', 'DIPALI ASSOCIAT', 'DIPALI NAYEK', 'DIPALI ASSOCIATES & CO', 'DIPALI ASSOCIATES & CO.', 'DIPALI ASSOCIATES(DIPALI NAYEK)'],
-    defaultVehicles: ['WB39B8916']
+    mappedOwner: 'DIPALI ASSOCIATES',
+    sourcePartyOwners: [
+      'DIPALI ASSOCIATES',
+      'DIPALI ASSOCIATE',
+      'DIPALI ASSOCIAT',
+      'DIPALI NAYEK',
+      'DIPALI ASSOCIATES & CO',
+      'DIPALI ASSOCIATES & CO.',
+      'DIPALI ASSOCIATES(DIPALI NAYEK)'
+    ]
   },
   'GKR_ENTERPRISE': {
     creditorKey: 'GKR_ENTERPRISE',
     creditorTitle: 'G.K.R. ENTERPRISE',
-    sourcePartyOwners: ['GOUTAM ROY', 'GOUTAM  ROY', 'G.K.R. ENTERPRISE', 'GKR ENTERPRISE'],
-    defaultVehicles: ['WB41H0177', 'WB41K2967', 'WB39G8384']
+    mappedOwner: 'GOUTAM ROY',
+    sourcePartyOwners: [
+      'GOUTAM ROY',
+      'GOUTAM  ROY',
+      'G.K.R. ENTERPRISE',
+      'GKR ENTERPRISE',
+      'G.K.R.  ENTERPRISE'
+    ]
   },
   'SUBHENDU_SEKHAR_GHOSWAMI': {
     creditorKey: 'SUBHENDU_SEKHAR_GHOSWAMI',
     creditorTitle: 'SUBHENDU SEKHAR GHOSWAMI',
-    sourcePartyOwners: ['SUBENDU SEKHAR GOSWAMI', 'SUBHENDU SEKHAR GHOSWAMI', 'SUBENDU SEKHAR GHOSWAMI', 'SUBHENDU SEKHAR GOSWAMI', 'SUBENDU GOSWAMI', 'SUBHENDU GHOSWAMI'],
-    defaultVehicles: ['WB39G7433']
+    mappedOwner: 'SUBENDU SEKHAR GOSWAMI',
+    sourcePartyOwners: [
+      'SUBENDU SEKHAR GOSWAMI',
+      'SUBHENDU SEKHAR GHOSWAMI',
+      'SUBENDU SEKHAR GHOSWAMI',
+      'SUBHENDU SEKHAR GOSWAMI',
+      'SUBENDU GOSWAMI',
+      'SUBHENDU GHOSWAMI'
+    ]
   }
 };
 
@@ -63,6 +84,38 @@ function normalizeCreditorKey(key) {
   if (s.includes('G.K.R') || s.includes('GKR') || s.includes('GOUTAM')) return 'GKR_ENTERPRISE';
   if (s.includes('SUBHENDU') || s.includes('SUBENDU')) return 'SUBHENDU_SEKHAR_GHOSWAMI';
   return s;
+}
+
+function isQualifyingGstFcm(doc) {
+  if (!doc) return false;
+  const rawGst = doc['GST TYPE'] || doc['GST Type'] || doc.gstType || doc.gst_type || '';
+  if (!rawGst) return false;
+  const s = String(rawGst).trim().toUpperCase();
+  return s.includes('FCM');
+}
+
+function isMatchingOwnerForCreditor(rawOwnerName, config) {
+  if (!rawOwnerName) return false;
+  const clean = String(rawOwnerName).trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!clean) return false;
+
+  // Exact match against any known variation
+  if (config.sourcePartyOwners.some(target => target.toUpperCase().trim().replace(/\s+/g, ' ') === clean)) {
+    return true;
+  }
+
+  // Safe prefix match with separator (space, parens, slash, ampersand)
+  return config.sourcePartyOwners.some(target => {
+    const t = target.toUpperCase().trim().replace(/\s+/g, ' ');
+    return clean.startsWith(t + ' ') || clean.startsWith(t + '(') || clean.startsWith(t + '/') || clean.startsWith(t + '&');
+  });
+}
+
+function extractVeh(doc) {
+  if (!doc) return '';
+  const rawVeh = doc['Truck No'] || doc['Truck No '] || doc.truck_no || doc.vehicleNo || doc['Vehicle No'] || doc.truckNo || '';
+  if (!rawVeh) return '';
+  return String(rawVeh).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 function getFyVariants(fyInput, m, y) {
@@ -99,59 +152,37 @@ function getFyVariants(fyInput, m, y) {
   return Array.from(list);
 }
 
-// Helper to get vehicles dynamically for a creditor
+// Helper to get vehicles dynamically for a creditor based ONLY on qualifying GST FCM records in MongoDB
 async function getVehiclesForCreditor(creditorKey) {
-  const config = CREDITOR_MAPPINGS[creditorKey];
+  const normKey = normalizeCreditorKey(creditorKey);
+  const config = CREDITOR_MAPPINGS[normKey];
   if (!config) return [];
 
-  const matchedVehicles = new Set(config.defaultVehicles || []);
+  const matchedVehicles = new Set();
   try {
     const db = mongoose.connection.useDb('invoice_system');
     const ownerCol = db.collection('owner details');
     const truckCol = db.collection('Truck Contact Number');
-    const cementCol = mongoose.connection.useDb('cement_register').collection('entries');
 
-    const [allOwnerDocs, allTruckDocs, savedBreakdownDocs] = await Promise.all([
-      ownerCol.find({}).toArray(),
-      truckCol.find({}).toArray(),
-      FreightCreditorGstBreakdown.find({ creditorKey }).lean()
+    const [allOwnerDocs, allTruckDocs] = await Promise.all([
+      ownerCol.find({}).toArray().catch(() => []),
+      truckCol.find({}).toArray().catch(() => [])
     ]);
 
-    const upperTargets = config.sourcePartyOwners.map(o => o.toUpperCase().trim());
-
-    allOwnerDocs.forEach(d => {
-      const oName = (d['Owner Name'] || d['Owner Name '] || d.owner_name || '').trim().toUpperCase();
-      const v = (d['Truck No'] || d['Truck No '] || d.truck_no || '').trim().toUpperCase().replace(/\s+/g, '');
-      if (v && upperTargets.some(target => oName === target || oName.startsWith(target) || target.startsWith(oName))) {
-        matchedVehicles.add(v);
+    // Evaluate documents from owner details and Truck Contact Number
+    const allDocs = [...allOwnerDocs, ...allTruckDocs];
+    allDocs.forEach(doc => {
+      const ownerName = doc['Owner Name'] || doc['Owner Name '] || doc.owner_name || doc.owner || doc.ownerName || '';
+      if (isQualifyingGstFcm(doc) && isMatchingOwnerForCreditor(ownerName, config)) {
+        const veh = extractVeh(doc);
+        if (veh) {
+          matchedVehicles.add(veh);
+        }
       }
-    });
-
-    allTruckDocs.forEach(d => {
-      const oName = (d['Owner Name'] || d['Owner Name '] || d.owner_name || '').trim().toUpperCase();
-      const v = (d['Truck No'] || d['Truck No '] || d.truck_no || '').trim().toUpperCase().replace(/\s+/g, '');
-      if (v && upperTargets.some(target => oName === target || oName.startsWith(target) || target.startsWith(oName))) {
-        matchedVehicles.add(v);
-      }
-    });
-
-    // Also check cement_register records where OWNER NAME matches
-    const cementDocsForOwner = await cementCol.find({
-      'OWNER NAME': { $in: config.sourcePartyOwners.map(n => new RegExp('^' + n + '$', 'i')) }
-    }).toArray();
-    cementDocsForOwner.forEach(d => {
-      const v = (d['VEHICLE NUMBER'] || '').trim().toUpperCase().replace(/\s+/g, '');
-      if (v) matchedVehicles.add(v);
-    });
-
-    // Also include any vehicle with saved breakdown records
-    savedBreakdownDocs.forEach(d => {
-      const v = (d.vehicleNo || '').trim().toUpperCase().replace(/\s+/g, '');
-      if (v) matchedVehicles.add(v);
     });
 
   } catch (err) {
-    console.warn('[FreightCreditorGst] Error finding vehicles from contacts:', err.message);
+    console.warn('[FreightCreditorGst] Error finding qualifying GST FCM vehicles:', err.message);
   }
 
   return Array.from(matchedVehicles).filter(Boolean).sort((a, b) => a.localeCompare(b));
@@ -236,6 +267,8 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
     }
 
     return {
+      _id: saved._id || null,
+      b2bEntryId: saved.b2bEntryId || null,
       creditorKey,
       creditorTitle: mappingConfig.creditorTitle,
       ownerName: mappingConfig.sourcePartyOwners[0],
@@ -250,6 +283,7 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
       taxableValue,
       cgst,
       sgst,
+      gstAmount: (cgst !== null && sgst !== null) ? Math.round(((cgst || 0) + (sgst || 0)) * 100) / 100 : null,
       total,
       hasCementEntries: hasEntries,
       updatedAt: saved.updatedAt || null
@@ -378,6 +412,9 @@ router.get('/all-totals', async (req, res) => {
             mappedPartyOwner: r.ownerName,
             sourcePartyOwners: r.sourcePartyOwners,
             total: r.total,
+            cgst: r.cgst,
+            sgst: r.sgst,
+            gstAmount: (r.cgst !== null && r.sgst !== null) ? Math.round(((r.cgst || 0) + (r.sgst || 0)) * 100) / 100 : null,
             basicCurrM: r.basicCurrM,
             incentiveM2: r.incentiveM2,
             incentiveM1: r.incentiveM1,
@@ -459,14 +496,19 @@ router.post('/save', async (req, res) => {
       const PartyPayment = require('../models/PartyPayment');
       const updatedCreditor = await computeCreditorBreakdown(creditorKey, m, y, fyStr);
       const partyUpdates = updatedCreditor.rows
-        .filter(r => r.total !== null && r.total !== undefined)
-        .map(r => ({
-          updateOne: {
-            filter: { vehicleNo: r.vehicleNo, month: m, year: y },
-            update: { $set: { gstFcm: r.total } },
-            upsert: false
-          }
-        }));
+        .filter(r => (r.cgst !== null && r.sgst !== null) || (r.total !== null && r.total !== undefined))
+        .map(r => {
+          const gstVal = (r.cgst !== null && r.sgst !== null)
+            ? Math.round(((r.cgst || 0) + (r.sgst || 0)) * 100) / 100
+            : Math.round(((r.total || 0) * 0.18 / 1.18) * 100) / 100;
+          return {
+            updateOne: {
+              filter: { vehicleNo: r.vehicleNo, month: m, year: y },
+              update: { $set: { gstFcm: gstVal } },
+              upsert: false
+            }
+          };
+        });
       if (partyUpdates.length > 0) {
         await PartyPayment.bulkWrite(partyUpdates);
       }
@@ -498,27 +540,84 @@ router.post('/save', async (req, res) => {
   }
 });
 
+// ── POST /freight-creditor-gst/link-b2b ─────────────────────────────────────
+// Links a B2B Entry ID to a Freight Creditor GST Breakdown record
+// and automatically updates Party Payment Details (GST FCM)
+router.post('/link-b2b', async (req, res) => {
+  try {
+    const { creditorKey: rawCreditorKey, vehicleNo, fy, month, year, b2bEntryId } = req.body;
+    if (!rawCreditorKey || !vehicleNo || !fy || !month) {
+      return res.status(400).json({ success: false, error: 'Missing required parameters' });
+    }
+    const creditorKey = normalizeCreditorKey(rawCreditorKey);
+    const m = parseInt(month, 10);
+    const y = parseInt(year, 10) || new Date().getFullYear();
+    const v = String(vehicleNo).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    const record = await FreightCreditorGstBreakdown.findOneAndUpdate(
+      { creditorKey, vehicleNo: v, fy: String(fy).trim(), month: m },
+      { $set: { b2bEntryId: String(b2bEntryId), year: y } },
+      { upsert: true, new: true }
+    );
+
+    // Coordinate with Party Payment Details to set GST FCM
+    let syncResult = null;
+    try {
+      const { syncFreightGstToPartyPayment } = require('../utils/freightGstPartyPaymentSync');
+      syncResult = await syncFreightGstToPartyPayment({ vehicleNo: v, month: m, year: y });
+    } catch (syncErr) {
+      console.error('[FreightCreditorGst] PartyPayment sync error in link-b2b:', syncErr);
+    }
+
+    res.json({ success: true, record, partyPaymentSync: syncResult });
+  } catch (err) {
+    console.error('[FreightCreditorGst] /link-b2b error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── POST /freight-creditor-gst/sync-party-payment ──────────────────────────
+// Explicit reconciliation endpoint for vehicle-wise or all GST FCM records
+router.post('/sync-party-payment', async (req, res) => {
+  try {
+    const { vehicleNo, month, year } = req.body;
+    const { syncFreightGstToPartyPayment, reconcileAllFreightGstInvoices } = require('../utils/freightGstPartyPaymentSync');
+    if (vehicleNo && month && year) {
+      const result = await syncFreightGstToPartyPayment({ vehicleNo, month, year });
+      return res.json(result);
+    }
+    const result = await reconcileAllFreightGstInvoices();
+    return res.json(result);
+  } catch (err) {
+    console.error('[FreightCreditorGst] /sync-party-payment error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Authoritative helper to determine if a vehicle or owner belongs to a Freight Creditor
 async function getCreditorKeyForVehicleOrParty(vehicleNo, partyOwnerName) {
-  const normVeh = String(vehicleNo || '').trim().toUpperCase().replace(/\s+/g, '');
-  const normParty = String(partyOwnerName || '').trim().toUpperCase();
-
+  const normVeh = String(vehicleNo || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   const creditorKeys = Object.keys(CREDITOR_MAPPINGS);
-  for (const cKey of creditorKeys) {
-    const config = CREDITOR_MAPPINGS[cKey];
-    if (normParty) {
-      if (config.sourcePartyOwners.some(target => {
-        const t = target.toUpperCase();
-        return t === normParty || normParty.startsWith(t) || t.startsWith(normParty) || normParty.includes(t) || t.includes(normParty);
-      })) {
+
+  if (normVeh) {
+    for (const cKey of creditorKeys) {
+      const vehicles = await getVehiclesForCreditor(cKey);
+      if (vehicles.includes(normVeh)) {
         return cKey;
       }
     }
-    const vehicles = await getVehiclesForCreditor(cKey);
-    if (vehicles.map(v => String(v).trim().toUpperCase().replace(/\s+/g, '')).includes(normVeh)) {
-      return cKey;
+    return null;
+  }
+
+  if (partyOwnerName) {
+    for (const cKey of creditorKeys) {
+      const config = CREDITOR_MAPPINGS[cKey];
+      if (isMatchingOwnerForCreditor(partyOwnerName, config)) {
+        return cKey;
+      }
     }
   }
+
   return null;
 }
 

@@ -3,19 +3,12 @@ const mongoose = require('mongoose');
 const router = express.Router();
 const PartyPayment = require('../models/PartyPayment');
 const AccountDetail = require('../models/AccountDetail');
-const { syncPartyPayments } = require('./accountDetailRoutes');
 const { getApplicableProjectedDeduction } = require('../utils/projectedDeductionResolver');
 const { parseCalendarDate, parseDate: parseDateHelper } = require('../utils/billRegisterHelper');
 
 // ── Robust date parser using billRegisterHelper ──────────────────
 function parseDate(val) {
   return parseDateHelper(val);
-}
-
-function getDateParts(val) {
-  const cal = parseCalendarDate(val);
-  if (!cal) return null;
-  return { day: cal.day, month: cal.month, year: cal.year };
 }
 
 function parseTdsField(doc) {
@@ -79,6 +72,43 @@ function getCementDeductionsSum(row) {
 
   const componentsSum = rfid + fastag + gpsDev + suspense + others;
   return directSum > 0 ? directSum : componentsSum;
+}
+
+function getGpsDeviceAmount(row) {
+  if (!row || typeof row !== 'object') return 0;
+  const numVal = (v) => {
+    if (v === null || v === undefined || v === '') return 0;
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      return Object.values(v).reduce((s, x) => s + numVal(x), 0);
+    }
+    const n = parseFloat(String(v).replace(/,/g, ''));
+    return isNaN(n) ? 0 : n;
+  };
+
+  const gpsDeviceKeys = [
+    'Give GPS DEVICE',
+    'GIVE GPS DEVICE',
+    'Give GPS Device',
+    'GIVE GPS Device',
+    'GPS DEVICE',
+    'GPS Device',
+    'GPS_DEVICE',
+    'GPS  DEVICE',
+    'Gps Device',
+    'Give GPS device',
+    'GIVE GPS device',
+    'GPS Device Charges',
+    'GPS Device Charge',
+    'GPS DEVICE CHARGES'
+  ];
+
+  for (const k of gpsDeviceKeys) {
+    if (row[k] !== undefined && row[k] !== null && row[k] !== '') {
+      const val = numVal(row[k]);
+      if (val > 0) return val;
+    }
+  }
+  return 0;
 }
 
 // ── GET /party-payment/full-year ───────────────────────────────────────────
@@ -399,6 +429,15 @@ router.post('/bulk', async (req, res) => {
           setFields.tds = Number(record.tds);
         }
         setFields.tds_manual = record.tds_manual !== undefined ? record.tds_manual : true;
+      }
+      if (record.gstFcm !== undefined && record.gstFcm !== null && record.gstFcm !== '') {
+        const parsedGst = Number(record.gstFcm);
+        if (!isNaN(parsedGst) && parsedGst > 0) {
+          setFields.gstFcm = parsedGst;
+        }
+      }
+      if (record.gstFcm_manual !== undefined) {
+        setFields.gstFcm_manual = record.gstFcm_manual;
       }
       return {
         updateOne: {
@@ -933,11 +972,13 @@ router.get('/full-year', async (req, res) => {
         const sAmt = getF(row, 'SHORTAGE (AMOUNT)', 'SHORTAGE AMOUNT', 'DAMAGE RECOVERY');
         const sBags = getF(row, 'SHORTAGE (BAG)', 'SHORTAGE BAG');
         const sRate = getF(row, 'SHORTAGE (RATE)', 'SHORTAGE RATE');
-        damageRecovery += sAmt || (sBags * sRate);
+        const dAmt = getF(row, 'Damage Deduction', 'DAMAGE DEDUCTION', 'Damage');
+        const extraDamage = (dAmt > 0 && dAmt !== sAmt) ? dAmt : 0;
+        damageRecovery += (sAmt || (sBags * sRate)) + extraDamage;
 
         cashBankOthers += getF(row, 'BANK TF', 'BANK TF ', 'Bank TF', 'BANK_TF') + getF(row, 'Site Cash', 'SITE CASH', 'SITE_CASH') + getF(row, 'OFFICE CASH', 'Office Cash', 'OFFICE_CASH');
         cementOtherDeduction += getCementDeductionsSum(row);
-        gpsDevice += getF(row, 'GPS DEVICE', 'GPS  DEVICE', 'GPS_DEVICE');
+        gpsDevice += getGpsDeviceAmount(row);
       });
 
       // Other Deduction = Cement Register SUM + Manual Other Deduction
@@ -994,8 +1035,8 @@ router.get('/full-year', async (req, res) => {
           const taxableValue = Math.round(((incentiveM2 || 0) + (incentiveM1 || 0) + (basicCurrM || 0)) * 100) / 100;
           const cgst = Math.round((taxableValue * 0.09) * 100) / 100;
           const sgst = Math.round((taxableValue * 0.09) * 100) / 100;
-          // Authoritative GST FCM Amount = TOTAL TAXABLE VALUE + CGST 9% + SGST 9%
-          gstFcm = Math.round((taxableValue + cgst + sgst) * 100) / 100;
+          // Authoritative GST FCM Amount = CGST 9% + SGST 9% (18% GST tax amount)
+          gstFcm = Math.round((cgst + sgst) * 100) / 100;
         }
       }
 

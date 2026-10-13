@@ -18,6 +18,525 @@ function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
 }
 
+const PERMITTED_DEBIT_REASONS = [
+  'Damage / Shortage',
+  'GPS Deviation Charge',
+  'GPS Monitoring / Trip Charges',
+  'GPS Installation Charges',
+  'RFID Deduction / Charges',
+  'Suspense',
+  'TDS PROVISION',
+  'Site office Rent',
+  'Safty Violation Charges'
+];
+
+function getCanonicalDebitReason(reason) {
+  if (!reason || typeof reason !== 'string') return null;
+  const trimmed = reason.trim().replace(/\s+/g, ' ');
+  const exact = PERMITTED_DEBIT_REASONS.find(r => r.toLowerCase() === trimmed.toLowerCase());
+  if (exact) return exact;
+
+  const clean = trimmed.toUpperCase();
+  if (clean === 'DAMAGE' || clean === 'SHORTAGE' || clean.includes('DAMAGE') || clean.includes('SHORTAGE')) {
+    return 'Damage / Shortage';
+  }
+  if (clean.includes('GPS DEVIATION')) {
+    return 'GPS Deviation Charge';
+  }
+  if (clean.includes('GPS MONITORING') || clean.includes('GPS TRIP')) {
+    return 'GPS Monitoring / Trip Charges';
+  }
+  if (clean.includes('GPS INSTALLATION') || clean.includes('DEVICE INSTALLATION') || clean.includes('GPS DEVICE')) {
+    return 'GPS Installation Charges';
+  }
+  if (clean.includes('RFID')) {
+    return 'RFID Deduction / Charges';
+  }
+  if (clean.includes('SUSPENSE')) {
+    return 'Suspense';
+  }
+  if (clean.includes('TDS PROVISION') || clean === 'TDS') {
+    return 'TDS PROVISION';
+  }
+  if (clean.includes('SITE OFFICE RENT') || clean.includes('RENT')) {
+    return 'Site office Rent';
+  }
+  if (clean.includes('SAFTY') || clean.includes('SAFETY')) {
+    return 'Safty Violation Charges';
+  }
+  return null;
+}
+
+function isPermittedDebitReason(reason) {
+  return getCanonicalDebitReason(reason) !== null;
+}
+
+function mapDebitReasonToCementField(reason) {
+  const canonical = getCanonicalDebitReason(reason);
+  if (!canonical) return null;
+  switch (canonical) {
+    case 'Damage / Shortage':
+      return 'SHORTAGE (AMOUNT)';
+    case 'GPS Deviation Charge':
+      return 'GPS Deviation Charges';
+    case 'GPS Monitoring / Trip Charges':
+      return 'GPS Monitoring Charge';
+    case 'GPS Installation Charges':
+      return 'Give GPS DEVICE';
+    case 'RFID Deduction / Charges':
+      return 'Give RFID TAG';
+    case 'Suspense':
+      return 'Suspense';
+    case 'TDS PROVISION':
+      return 'TDS';
+    case 'Site office Rent':
+      return 'Others deduction';
+    case 'Safty Violation Charges':
+      return 'Others deduction';
+    default:
+      return 'Others deduction';
+  }
+}
+
+function applyFieldAliases(updateSet, reason, fieldVal, allocSum, doc = {}) {
+  const canonical = getCanonicalDebitReason(reason) || reason;
+  if (canonical === 'Damage / Shortage') {
+    updateSet['SHORTAGE (AMOUNT)'] = fieldVal;
+    updateSet['Damage Deduction'] = fieldVal;
+  } else if (canonical === 'GPS Deviation Charge') {
+    updateSet['GPS Deviation Charges'] = fieldVal;
+    if (doc && doc['GPS DEVIATION'] !== undefined) {
+      updateSet['GPS DEVIATION'] = fieldVal;
+    }
+    if (doc && doc['GPS DEVIATION CHARGES'] !== undefined) {
+      updateSet['GPS DEVIATION CHARGES'] = fieldVal;
+    }
+  } else if (canonical === 'GPS Monitoring / Trip Charges') {
+    updateSet['GPS Monitoring Charge'] = fieldVal;
+    if (doc && doc['GPS MONITORING / TRIP CHARGE'] !== undefined) {
+      updateSet['GPS MONITORING / TRIP CHARGE'] = fieldVal;
+    }
+  } else if (canonical === 'GPS Installation Charges') {
+    updateSet['Give GPS DEVICE'] = fieldVal;
+    if (doc && doc['GIVE GPS DEVICE'] !== undefined) {
+      updateSet['GIVE GPS DEVICE'] = fieldVal;
+    }
+  } else if (canonical === 'RFID Deduction / Charges') {
+    updateSet['Give RFID TAG'] = fieldVal;
+    if (doc && doc['GIVE RFID TAG'] !== undefined) {
+      updateSet['GIVE RFID TAG'] = fieldVal;
+    }
+  } else if (canonical === 'Suspense') {
+    updateSet['Suspense'] = fieldVal;
+    if (doc && doc['SUSPENSE'] !== undefined) {
+      updateSet['SUSPENSE'] = fieldVal;
+    }
+  } else if (canonical === 'TDS PROVISION') {
+    updateSet['TDS'] = fieldVal;
+    if (doc && doc['TDS Provision'] !== undefined) updateSet['TDS Provision'] = fieldVal;
+    if (doc && doc['TDS PROVISION'] !== undefined) updateSet['TDS PROVISION'] = fieldVal;
+  } else if (canonical === 'Site office Rent') {
+    updateSet['Others deduction'] = fieldVal;
+    updateSet['Site office Rent'] = allocSum;
+    if (allocSum > 0) updateSet['Other'] = 'Site office Rent';
+  } else if (canonical === 'Safty Violation Charges') {
+    updateSet['Others deduction'] = fieldVal;
+    updateSet['Safty Violation Charges'] = allocSum;
+    if (allocSum > 0) updateSet['Other'] = 'Safty Violation Charges';
+  }
+}
+
+// Mutex locks per trip to prevent race conditions during concurrent deduction allocation
+const tripSyncLocks = new Map();
+
+async function withTripLock(tripId, fn) {
+  const key = String(tripId);
+  const prevLock = tripSyncLocks.get(key) || Promise.resolve();
+  let release;
+  const currentLock = new Promise(resolve => { release = resolve; });
+  tripSyncLocks.set(key, currentLock);
+  try {
+    await prevLock;
+    return await fn();
+  } finally {
+    release();
+    if (tripSyncLocks.get(key) === currentLock) {
+      tripSyncLocks.delete(key);
+    }
+  }
+}
+
+async function getExistingBaseAmountForTrip(doc, canonicalReason, targetField, existingAllocations = [], tripRecordDate = null) {
+  // 1. Explicitly recorded baseDeductions
+  if (doc.baseDeductions && doc.baseDeductions[canonicalReason] !== undefined && doc.baseDeductions[canonicalReason] !== null) {
+    return parseFloat(doc.baseDeductions[canonicalReason]) || 0;
+  }
+
+  // 2. Previously recorded projected value in deductionsOverride
+  if (doc.deductionsOverride && doc.deductionsOverride[canonicalReason] && doc.deductionsOverride[canonicalReason].projected !== undefined && doc.deductionsOverride[canonicalReason].projected !== null) {
+    return parseFloat(doc.deductionsOverride[canonicalReason].projected) || 0;
+  }
+
+  const numVal = (v) => {
+    if (v === undefined || v === null || v === '') return 0;
+    const n = parseFloat(String(v).replace(/,/g, ''));
+    return isNaN(n) ? 0 : n;
+  };
+
+  // 3. Amount currently recorded for that deduction in Cement Register
+  let currentFieldVal = 0;
+  if (canonicalReason === 'Damage / Shortage') {
+    const sBags = numVal(doc['SHORTAGE (BAG)']);
+    const sRate = numVal(doc['SHORTAGE (RATE)']) || numVal(doc._damage_deduction_rate) || numVal(doc._damage_rate);
+    const bagAmt = (sBags > 0 && sRate > 0) ? Math.round(sBags * sRate * 100) / 100 : 0;
+    currentFieldVal = numVal(doc['SHORTAGE (AMOUNT)']) || bagAmt || numVal(doc['Damage Deduction']);
+  } else if (canonicalReason === 'GPS Deviation Charge') {
+    currentFieldVal = numVal(doc['GPS Deviation Charges']) || numVal(doc['GPS DEVIATION']) || numVal(doc['GPS DEVIATION CHARGES']);
+  } else if (canonicalReason === 'GPS Monitoring / Trip Charges') {
+    currentFieldVal = numVal(doc['GPS Monitoring Charge']) || numVal(doc['GPS MONITORING / TRIP CHARGE']) || numVal(doc['GPS Trip Charges']);
+  } else if (canonicalReason === 'GPS Installation Charges') {
+    currentFieldVal = numVal(doc['Give GPS DEVICE']) || numVal(doc['GIVE GPS DEVICE']);
+  } else if (canonicalReason === 'RFID Deduction / Charges') {
+    currentFieldVal = numVal(doc['Give RFID TAG']) || numVal(doc['GIVE RFID TAG']);
+  } else if (canonicalReason === 'Suspense') {
+    currentFieldVal = numVal(doc['Suspense']) || numVal(doc['SUSPENSE']);
+  } else {
+    currentFieldVal = numVal(doc[targetField]);
+  }
+
+  // If allocations already existed on the document from previous runs, subtract them to get the baseline
+  const prevAllocSum = (existingAllocations || [])
+    .filter(a => {
+      const c = getCanonicalDebitReason(a.reason) || a.reason;
+      return c === canonicalReason || a.field === targetField;
+    })
+    .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+
+  if (prevAllocSum > 0 && currentFieldVal >= prevAllocSum) {
+    return Math.max(0, currentFieldVal - prevAllocSum);
+  }
+
+  if (currentFieldVal > 0) {
+    return currentFieldVal;
+  }
+
+  // 4. Relevant Deduction Settings field
+  let projectedSettingVal = 0;
+  try {
+    const recordDate = tripRecordDate || doc['LOADING DT'] || doc['LOADING DATE'] || doc['BILL DATE'] || doc['DATE'];
+    if (canonicalReason === 'Damage / Shortage') {
+      projectedSettingVal = await getApplicableProjectedDeduction('DAMAGE_DEDUCTION', recordDate);
+    } else if (canonicalReason === 'GPS Installation Charges') {
+      projectedSettingVal = await getApplicableProjectedDeduction('GPS_DEVICE_INSTALLATION', recordDate);
+    } else if (canonicalReason === 'RFID Deduction / Charges') {
+      projectedSettingVal = await getApplicableProjectedDeduction('RFID', recordDate);
+    } else if (canonicalReason === 'GPS Monitoring / Trip Charges') {
+      projectedSettingVal = await getApplicableProjectedDeduction('GPS_MONITORING_TRIP_CHARGE', recordDate);
+    }
+  } catch (_) {}
+
+  return projectedSettingVal || 0;
+}
+
+function recalcCementTripFields(doc, updateSet) {
+  const m = { ...doc, ...updateSet };
+
+  const numVal = (v) => {
+    if (v === undefined || v === null || v === '') return 0;
+    const n = parseFloat(String(v).replace(/,/g, ''));
+    return isNaN(n) ? 0 : n;
+  };
+  const fmt2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  const comm = m._freight_commission !== undefined && m._freight_commission !== null && m._freight_commission !== ''
+    ? Number(m._freight_commission)
+    : 0.05;
+  const isStd = comm === 0.05;
+  const base = isStd ? numVal(m['BILLING ER 95%']) : numVal(m['BILLING ER VAR']);
+
+  const rfid = numVal(m['Give RFID TAG']) || numVal(m['GIVE RFID TAG']);
+  const fastag = numVal(m['FASTAG']);
+  const gpsDev = numVal(m['GPS Deviation Charges']) || numVal(m['GPS DEVIATION CHARGES']) || numVal(m['GPS DEVIATION']);
+  const suspense = numVal(m['Suspense']) || numVal(m['SUSPENSE']);
+  const others = numVal(m['Others deduction']) || numVal(m['OTHERS DEDUCTION']);
+
+  updateSet['SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION'] = fmt2(
+    rfid + fastag + gpsDev + suspense + others
+  );
+
+  const shortageAmt = numVal(m['SHORTAGE (AMOUNT)']);
+  const damageAmt = numVal(m['Damage Deduction']);
+  const extraDamage = (damageAmt > 0 && damageAmt > shortageAmt) ? (damageAmt - shortageAmt) : 0;
+
+  const net = fmt2(
+    base
+    - numVal(m['TDS'])
+    - numVal(m['ADVANCE'])
+    - numVal(m['Site Cash'])
+    - numVal(m['OFFICE CASH'])
+    - numVal(m['Bank TF'])
+    - others
+    - (numVal(m['GPS Monitoring Charge']) || numVal(m['GPS MONITORING / TRIP CHARGE']) || numVal(m['GPS Trip Charges']))
+    - (numVal(m['Give GPS DEVICE']) || numVal(m['GIVE GPS DEVICE']))
+    - gpsDev
+    - suspense
+    - rfid
+    - numVal(m['RFID REASSURANCE'])
+    - fastag
+    - numVal(m['HSD AMOUNT'])
+    - numVal(m['TRAVELLING EXP'])
+    - shortageAmt
+    - extraDamage
+    - numVal(m['Other'])
+  );
+  updateSet['NET AMOUNT'] = net;
+
+  updateSet['GROSS AMOUNT'] = fmt2(
+    net + numVal(m['UP TOLL']) + numVal(m['DOWN TOLL']) + numVal(m['EXTRA UNLOADING'])
+  );
+}
+
+async function syncDebitAllocationToCementRegister({
+  billNo,
+  debitReason,
+  financialYear,
+  allocationId,
+  tripAllocations = [],
+  isDelete = false,
+  previousTripAllocations = []
+}) {
+  const cementCol = getCementCol();
+  const canonicalReason = getCanonicalDebitReason(debitReason);
+  if (!canonicalReason) return;
+  const targetField = mapDebitReasonToCementField(debitReason);
+  if (!targetField) return;
+
+  const newTripIds = new Set(
+    tripAllocations.map(t => String(t.tripRecordId || t.tripId || t._id))
+  );
+
+  // Reversals: for deleted allocation or trips removed during edit
+  const tripsToReverse = isDelete
+    ? previousTripAllocations
+    : previousTripAllocations.filter(t => !newTripIds.has(String(t.tripRecordId || t.tripId || t._id)));
+
+  for (const prevTrip of tripsToReverse) {
+    const tripId = prevTrip.tripRecordId || prevTrip.tripId || prevTrip._id;
+    if (!tripId) continue;
+
+    await withTripLock(tripId, async () => {
+      let query = null;
+      if (mongoose.Types.ObjectId.isValid(tripId) && String(new mongoose.Types.ObjectId(tripId)) === String(tripId)) {
+        query = { _id: new mongoose.Types.ObjectId(tripId) };
+      } else {
+        query = { _id: tripId };
+      }
+
+      let doc = await cementCol.findOne(query);
+      if (!doc && prevTrip.invoiceNo && prevTrip.invoiceNo !== '—') {
+        const fallbackQuery = {
+          $and: [
+            { $or: [{ 'INVOICE NO': prevTrip.invoiceNo }, { 'BILL NO': prevTrip.invoiceNo }] }
+          ]
+        };
+        if (prevTrip.loadingDate && prevTrip.loadingDate !== '—') {
+          fallbackQuery.$and.push({
+            $or: [{ 'LOADING DT': prevTrip.loadingDate }, { 'LOADING DATE': prevTrip.loadingDate }, { 'BILL DATE': prevTrip.loadingDate }]
+          });
+        }
+        if (prevTrip.vehicleNumber || prevTrip.vehicle) {
+          const v = prevTrip.vehicleNumber || prevTrip.vehicle;
+          fallbackQuery.$and.push({
+            $or: [{ 'VEHICLE NUMBER': v }, { 'VEHICLE NO': v }]
+          });
+        }
+        doc = await cementCol.findOne(fallbackQuery);
+        if (doc) query = { _id: doc._id };
+      }
+      if (!doc) return;
+
+      const existingDebitAllocations = Array.isArray(doc.debitAllocations) ? doc.debitAllocations : [];
+      const updatedDebitAllocations = existingDebitAllocations.filter(
+        a => a.allocationId !== allocationId && (!prevTrip.tripAllocationId || a.tripAllocationId !== prevTrip.tripAllocationId)
+      );
+
+      const remainingAllocSum = updatedDebitAllocations
+        .filter(a => {
+          const c = getCanonicalDebitReason(a.reason) || a.reason;
+          return c === canonicalReason || a.field === targetField;
+        })
+        .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+
+      const baseAmount = await getExistingBaseAmountForTrip(
+        doc,
+        canonicalReason,
+        targetField,
+        existingDebitAllocations,
+        prevTrip.loadingDate
+      );
+
+      // Comparison rule: Update the existing value only when final allocated amount is strictly greater than base amount
+      const newFieldVal = remainingAllocSum > baseAmount ? remainingAllocSum : baseAmount;
+
+      const updateDoc = {
+        $set: {
+          debitAllocations: updatedDebitAllocations,
+          [targetField]: newFieldVal,
+          [`baseDeductions.${canonicalReason}`]: baseAmount
+        }
+      };
+
+      if (remainingAllocSum > 0) {
+        const remainingRefs = updatedDebitAllocations
+          .filter(a => (getCanonicalDebitReason(a.reason) || a.reason) === canonicalReason)
+          .map(a => a.billRegisterRef)
+          .filter(Boolean);
+        const remainingAllocIds = updatedDebitAllocations
+          .filter(a => (getCanonicalDebitReason(a.reason) || a.reason) === canonicalReason)
+          .map(a => a.allocationId)
+          .filter(Boolean);
+
+        updateDoc.$set[`deductionsOverride.${canonicalReason}`] = {
+          projected: baseAmount,
+          actual: remainingAllocSum,
+          billRegisterRef: [...new Set(remainingRefs)].join(', '),
+          allocationId: [...new Set(remainingAllocIds)].join(', '),
+          timestamp: new Date()
+        };
+      } else {
+        if (!updateDoc.$unset) updateDoc.$unset = {};
+        updateDoc.$unset[`deductionsOverride.${canonicalReason}`] = "";
+      }
+
+      applyFieldAliases(updateDoc.$set, canonicalReason, newFieldVal, remainingAllocSum, doc);
+
+      recalcCementTripFields(doc, updateDoc.$set);
+      await cementCol.updateOne(query, updateDoc);
+    });
+  }
+
+  if (isDelete) return;
+
+  // Apply or update allocations
+  for (const t of tripAllocations) {
+    const tripId = t.tripRecordId || t.tripId || t._id;
+    if (!tripId) continue;
+
+    await withTripLock(tripId, async () => {
+      let query = null;
+      if (mongoose.Types.ObjectId.isValid(tripId) && String(new mongoose.Types.ObjectId(tripId)) === String(tripId)) {
+        query = { _id: new mongoose.Types.ObjectId(tripId) };
+      } else {
+        query = { _id: tripId };
+      }
+
+      let doc = await cementCol.findOne(query);
+      if (!doc && t.invoiceNo && t.invoiceNo !== '—') {
+        const fallbackQuery = {
+          $and: [
+            { $or: [{ 'INVOICE NO': t.invoiceNo }, { 'BILL NO': t.invoiceNo }] }
+          ]
+        };
+        if (t.loadingDate && t.loadingDate !== '—') {
+          fallbackQuery.$and.push({
+            $or: [{ 'LOADING DT': t.loadingDate }, { 'LOADING DATE': t.loadingDate }, { 'BILL DATE': t.loadingDate }]
+          });
+        }
+        if (t.vehicleNumber || t.vehicle) {
+          const v = t.vehicleNumber || t.vehicle;
+          fallbackQuery.$and.push({
+            $or: [{ 'VEHICLE NUMBER': v }, { 'VEHICLE NO': v }]
+          });
+        }
+        doc = await cementCol.findOne(fallbackQuery);
+        if (doc) query = { _id: doc._id };
+      }
+      if (!doc) return;
+
+      const tripAmt = parseFloat(t.allocatedAmount || t.tripAllocateAmount) || 0;
+      const existingDebitAllocations = Array.isArray(doc.debitAllocations) ? doc.debitAllocations : [];
+
+      const prevAllocIdx = existingDebitAllocations.findIndex(
+        a => a.allocationId === allocationId || (t.tripAllocationId && a.tripAllocationId === t.tripAllocationId)
+      );
+
+      const allocationEntry = {
+        allocationId,
+        tripAllocationId: t.tripAllocationId || new mongoose.Types.ObjectId().toString(),
+        billRegisterRef: billNo,
+        reason: canonicalReason,
+        field: targetField,
+        amount: tripAmt,
+        financialYear: financialYear || '',
+        month: t.month || '',
+        vehicleNumber: t.vehicleNumber || t.vehicle || '',
+        loadingDate: t.loadingDate || '',
+        updatedAt: new Date()
+      };
+
+      let updatedDebitAllocations;
+      if (prevAllocIdx >= 0) {
+        updatedDebitAllocations = [...existingDebitAllocations];
+        updatedDebitAllocations[prevAllocIdx] = allocationEntry;
+      } else {
+        updatedDebitAllocations = [...existingDebitAllocations, allocationEntry];
+      }
+
+      const finalAllocatedAmount = updatedDebitAllocations
+        .filter(a => {
+          const c = getCanonicalDebitReason(a.reason) || a.reason;
+          return c === canonicalReason || a.field === targetField;
+        })
+        .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+
+      const baseAmount = await getExistingBaseAmountForTrip(
+        doc,
+        canonicalReason,
+        targetField,
+        existingDebitAllocations,
+        t.loadingDate
+      );
+
+      // Required amount comparison logic:
+      // Case A: New allocated amount > existing amount -> Replace with new final allocated amount
+      // Case B: New allocated amount == existing amount -> Keep existing amount unchanged
+      // Case C: New allocated amount < existing amount -> Keep existing amount unchanged
+      // Comparison rule: Update the existing value only when the final allocated amount is strictly greater than the existing value. Otherwise, preserve the existing value.
+      const newFieldVal = finalAllocatedAmount > baseAmount ? finalAllocatedAmount : baseAmount;
+
+      const allRefsForReason = updatedDebitAllocations
+        .filter(a => (getCanonicalDebitReason(a.reason) || a.reason) === canonicalReason)
+        .map(a => a.billRegisterRef)
+        .filter(Boolean);
+      const allAllocIdsForReason = updatedDebitAllocations
+        .filter(a => (getCanonicalDebitReason(a.reason) || a.reason) === canonicalReason)
+        .map(a => a.allocationId)
+        .filter(Boolean);
+
+      const updateDoc = {
+        $set: {
+          debitAllocations: updatedDebitAllocations,
+          [targetField]: newFieldVal,
+          [`baseDeductions.${canonicalReason}`]: baseAmount,
+          [`deductionsOverride.${canonicalReason}`]: {
+            projected: baseAmount,
+            actual: finalAllocatedAmount,
+            billRegisterRef: [...new Set(allRefsForReason)].join(', '),
+            allocationId: [...new Set(allAllocIdsForReason)].join(', '),
+            timestamp: new Date()
+          },
+          'DEDICATED': 'Actual'
+        }
+      };
+
+      applyFieldAliases(updateDoc.$set, canonicalReason, newFieldVal, finalAllocatedAmount, doc);
+
+      recalcCementTripFields(doc, updateDoc.$set);
+      await cementCol.updateOne(query, updateDoc);
+    });
+  }
+}
+
 function getMonthIndexFromDate(dateStr) {
   const d = parseDate(dateStr);
   if (d) return d.getMonth() + 1;
@@ -39,11 +558,25 @@ function normalizeSite(site) {
   return site.trim();
 }
 
+router.get('/permitted-debit-reasons', (req, res) => {
+  res.json({ permittedReasons: PERMITTED_DEBIT_REASONS });
+});
+
 router.post('/validate-deduction', async (req, res) => {
   try {
     const { reasons, year, month, trips, currentBillNo } = req.body;
 
     if (!reasons || reasons.length === 0) return res.json({ valid: true });
+
+    if (Array.isArray(reasons)) {
+      const invalid = reasons.filter(r => !isPermittedDebitReason(r));
+      if (invalid.length > 0) {
+        return res.status(400).json({
+          valid: false,
+          error: `Unsupported deduction reason(s): ${invalid.join(', ')}. Permitted reasons: ${PERMITTED_DEBIT_REASONS.join(', ')}`
+        });
+      }
+    }
 
     const cementCol = getCementCol();
 
@@ -111,14 +644,7 @@ router.post('/validate-deduction', async (req, res) => {
 
       if (dbTrip) {
         for (const reason of reasons) {
-          let projectedCol = '';
-          if (reason === 'Damage / Shortage') projectedCol = 'SHORTAGE (AMOUNT)';
-          else if (reason === 'GPS Trip Charges' || reason === 'GPS Monitoring / Trip Charge' || reason === 'GPS Monitoring Charge') projectedCol = 'GPS Monitoring Charge';
-          else if (reason === 'GPS Deviation Charges') projectedCol = 'GPS Deviation Charges';
-          else if (reason === 'Device Installation Charges') projectedCol = 'Give GPS DEVICE';
-          else if (reason === 'RFID Deduction / Charges') projectedCol = 'Give RFID TAG';
-          else if (reason === 'Suspense') projectedCol = 'Suspense';
-
+          const projectedCol = mapDebitReasonToCementField(reason);
           if (!projectedCol) continue;
 
           const override = dbTrip.deductionsOverride && dbTrip.deductionsOverride[reason];
@@ -793,7 +1319,7 @@ router.post('/save-row', async (req, res) => {
       const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
 
       // 1. Clear any existing overrides in cement register for this bill across all possible reasons to avoid stale data
-      const ALL_REASONS = ['Damage / Shortage', 'GPS Trip Charges', 'GPS Monitoring / Trip Charges', 'GPS Deviation Charges', 'Device Installation Charges', 'RFID Deduction / Charges', 'Suspense', 'Site office Rent', 'Safty violation charges'];
+      const ALL_REASONS = [...new Set([...PERMITTED_DEBIT_REASONS, 'GPS Trip Charges', 'Device Installation Charges', 'RFID Charges', 'Safty violation charges'])];
       for (const reason of ALL_REASONS) {
         const overridePath = `deductionsOverride.${reason}`;
         await cementCol.updateMany(
@@ -1117,11 +1643,19 @@ router.post('/allocate-deduction', async (req, res) => {
       originalDebitAmount,
       allocatedAmount,
       allocationDate,
-      tripAllocations
+      tripAllocations,
+      allocationId: requestedAllocationId
     } = req.body;
 
     if (!billNo) return res.status(400).json({ error: 'Bill Number is required' });
     if (!debitReason) return res.status(400).json({ error: 'Debit Reason is required' });
+
+    const canonicalDebitReason = getCanonicalDebitReason(debitReason);
+    if (!canonicalDebitReason) {
+      return res.status(400).json({
+        error: `Unsupported deduction reason: "${debitReason}". Permitted reasons: ${PERMITTED_DEBIT_REASONS.join(', ')}`
+      });
+    }
 
     // Retrieve existing row in FinancialYearRow
     const existingRow = await FinancialYearRow.findOne({ billNo });
@@ -1141,7 +1675,25 @@ router.post('/allocate-deduction', async (req, res) => {
 
     // Existing allocations
     const currentAllocations = (existingRow && existingRow.deductionAllocations) || [];
-    const alreadyAllocated = currentAllocations.reduce((sum, a) => sum + (parseFloat(a.allocatedAmount) || 0), 0);
+
+    // Check if we are updating an existing allocation
+    const existingAllocIdx = requestedAllocationId
+      ? currentAllocations.findIndex(a => a.allocationId === requestedAllocationId || String(a._id) === requestedAllocationId)
+      : -1;
+    const isEdit = existingAllocIdx >= 0;
+    const targetAllocationId = isEdit
+      ? (currentAllocations[existingAllocIdx].allocationId || requestedAllocationId)
+      : (requestedAllocationId || new mongoose.Types.ObjectId().toString());
+
+    const previousTripAllocations = isEdit
+      ? (currentAllocations[existingAllocIdx].tripAllocations || [])
+      : [];
+
+    // Sum of other allocations (excluding the one being edited)
+    const alreadyAllocated = currentAllocations
+      .filter((_, idx) => !isEdit || idx !== existingAllocIdx)
+      .reduce((sum, a) => sum + (parseFloat(a.allocatedAmount) || 0), 0);
+
     const availableToAllocate = Math.max(0, baseOriginalDebit - alreadyAllocated);
 
     let allocAmt = parseFloat(allocatedAmount);
@@ -1172,7 +1724,6 @@ router.post('/allocate-deduction', async (req, res) => {
       });
     }
 
-    const newAllocationId = new mongoose.Types.ObjectId().toString();
     const newRemainingDebit = Math.max(0, availableToAllocate - allocAmt);
     const newTotalAllocated = alreadyAllocated + allocAmt;
 
@@ -1181,14 +1732,14 @@ router.post('/allocate-deduction', async (req, res) => {
         const tripAmt = parseFloat(t.allocatedAmount || t.tripAllocateAmount) || 0;
         return {
           tripAllocationId: t.tripAllocationId || new mongoose.Types.ObjectId().toString(),
-          allocationId: newAllocationId,
+          allocationId: targetAllocationId,
           bankBookRecordId: String(existingRow?._id || new mongoose.Types.ObjectId()),
           invoiceNumber: billNo,
           shipmentNo: t.shipmentNo || '',
           invoiceNo: t.invoiceNo || '',
           tripRecordId: t.tripRecordId || t.tripId || (t._id ? String(t._id) : ''),
-          tripId: t.tripId || (t._id ? String(t._id) : ''),
-          debitReason,
+          tripId: t.tripId || t.tripRecordId || (t._id ? String(t._id) : ''),
+          debitReason: canonicalDebitReason,
           financialYear: financialYear || '',
           month: t.month || '',
           vehicleNumber: t.vehicleNumber || t.vehicle || '',
@@ -1199,17 +1750,17 @@ router.post('/allocate-deduction', async (req, res) => {
           allocatedAmount: tripAmt,
           totalAllocatedAmount: newTotalAllocated,
           remainingDebitAmount: newRemainingDebit,
-          createdAt: new Date(),
+          createdAt: isEdit ? (currentAllocations[existingAllocIdx].createdAt || new Date()) : new Date(),
           updatedAt: new Date()
         };
       });
     }
 
     const allocationRecord = {
-      allocationId: newAllocationId,
+      allocationId: targetAllocationId,
       bankBookRecordId: String(existingRow?._id || new mongoose.Types.ObjectId()),
       invoiceNumber: billNo,
-      debitReason,
+      debitReason: canonicalDebitReason,
       financialYear: financialYear || '',
       months: Array.isArray(months) ? months : [months].filter(Boolean),
       vehicles: Array.isArray(vehicles) ? vehicles : [vehicles].filter(Boolean),
@@ -1219,12 +1770,19 @@ router.post('/allocate-deduction', async (req, res) => {
       remainingDebitAmount: newRemainingDebit,
       allocationDate: allocationDate || new Date().toISOString().split('T')[0],
       tripAllocations: parsedTripAllocations,
-      createdAt: new Date(),
+      createdAt: isEdit ? (currentAllocations[existingAllocIdx].createdAt || new Date()) : new Date(),
       updatedAt: new Date()
     };
 
-    const existingReasons = existingRow?.debitReasons || [];
-    const updatedReasons = [...new Set([...existingReasons, debitReason])];
+    let updatedAllocations;
+    if (isEdit) {
+      updatedAllocations = [...currentAllocations];
+      updatedAllocations[existingAllocIdx] = allocationRecord;
+    } else {
+      updatedAllocations = [...currentAllocations, allocationRecord];
+    }
+
+    const updatedReasons = [...new Set(updatedAllocations.map(a => a.debitReason).filter(Boolean))];
 
     const updatedRow = await FinancialYearRow.findOneAndUpdate(
       { billNo },
@@ -1233,10 +1791,10 @@ router.post('/allocate-deduction', async (req, res) => {
           originalDebitAmount: baseOriginalDebit,
           totalAllocatedAmount: newTotalAllocated,
           remainingDebitAmount: newRemainingDebit,
-          debitReason: debitReason,
-          debitReasons: updatedReasons
-        },
-        $push: { deductionAllocations: allocationRecord }
+          debitReason: canonicalDebitReason,
+          debitReasons: updatedReasons,
+          deductionAllocations: updatedAllocations
+        }
       },
       { upsert: true, returnDocument: 'after' }
     );
@@ -1247,10 +1805,47 @@ router.post('/allocate-deduction', async (req, res) => {
       { $set: { debitAmount: newRemainingDebit } }
     );
 
-    // Emit websocket event
+    // Check if debit reason changed on edit
+    const previousReason = isEdit ? currentAllocations[existingAllocIdx]?.debitReason : null;
+    const reasonChanged = isEdit && previousReason && getCanonicalDebitReason(previousReason) !== canonicalDebitReason;
+
+    if (reasonChanged) {
+      await syncDebitAllocationToCementRegister({
+        billNo,
+        debitReason: previousReason,
+        financialYear,
+        allocationId: targetAllocationId,
+        tripAllocations: [],
+        isDelete: true,
+        previousTripAllocations
+      });
+      await syncDebitAllocationToCementRegister({
+        billNo,
+        debitReason: canonicalDebitReason,
+        financialYear,
+        allocationId: targetAllocationId,
+        tripAllocations: parsedTripAllocations,
+        isDelete: false,
+        previousTripAllocations: []
+      });
+    } else {
+      await syncDebitAllocationToCementRegister({
+        billNo,
+        debitReason: canonicalDebitReason,
+        financialYear,
+        allocationId: targetAllocationId,
+        tripAllocations: parsedTripAllocations,
+        isDelete: false,
+        previousTripAllocations
+      });
+    }
+
+    // Emit websocket events
     try {
       const { getIO } = require('../socket');
-      getIO().emit('fyDetailsUpdates', { action: 'allocate-deduction', billNo, remainingDebit: newRemainingDebit });
+      const io = getIO();
+      io.emit('fyDetailsUpdates', { action: 'allocate-deduction', billNo, remainingDebit: newRemainingDebit });
+      io.emit('cementUpdates', { action: 'allocate-deduction', billNo });
     } catch (_) {}
 
     res.json({
@@ -1275,6 +1870,9 @@ router.delete('/allocate-deduction/:billNo/:allocationId', async (req, res) => {
     if (!existingRow) return res.status(404).json({ error: 'Record not found' });
 
     const currentAllocations = existingRow.deductionAllocations || [];
+    const allocToDelete = currentAllocations.find(a => a.allocationId === allocationId || String(a._id) === allocationId);
+    if (!allocToDelete) return res.status(404).json({ error: 'Allocation not found' });
+
     const filteredAllocations = currentAllocations.filter(a => a.allocationId !== allocationId && String(a._id) !== allocationId);
 
     const baseOriginalDebit = existingRow.originalDebitAmount != null ? existingRow.originalDebitAmount : 0;
@@ -1290,7 +1888,7 @@ router.delete('/allocate-deduction/:billNo/:allocationId', async (req, res) => {
           deductionAllocations: filteredAllocations,
           totalAllocatedAmount: newTotalAllocated,
           remainingDebitAmount: newRemainingDebit,
-          debitReasons: remainingReasons.length > 0 ? remainingReasons : existingRow.debitReasons
+          debitReasons: remainingReasons.length > 0 ? remainingReasons : (existingRow.debitReasons || [])
         }
       },
       { returnDocument: 'after' }
@@ -1301,9 +1899,22 @@ router.delete('/allocate-deduction/:billNo/:allocationId', async (req, res) => {
       { $set: { debitAmount: newRemainingDebit } }
     );
 
+    // Reverse allocation on Cement Register
+    await syncDebitAllocationToCementRegister({
+      billNo,
+      debitReason: allocToDelete.debitReason,
+      financialYear: allocToDelete.financialYear,
+      allocationId: allocToDelete.allocationId || allocationId,
+      tripAllocations: [],
+      isDelete: true,
+      previousTripAllocations: allocToDelete.tripAllocations || []
+    });
+
     try {
       const { getIO } = require('../socket');
-      getIO().emit('fyDetailsUpdates', { action: 'allocate-deduction', billNo, remainingDebit: newRemainingDebit });
+      const io = getIO();
+      io.emit('fyDetailsUpdates', { action: 'allocate-deduction', billNo, remainingDebit: newRemainingDebit });
+      io.emit('cementUpdates', { action: 'allocate-deduction', billNo });
     } catch (_) {}
 
     res.json({
@@ -1391,6 +2002,91 @@ router.get('/trips', async (req, res) => {
 
     const trips = await getCementCol().find(match).toArray();
 
+    function getExistingDeductionsForTrip(t) {
+      const numVal = (v) => {
+        if (v === undefined || v === null || v === '') return 0;
+        const n = parseFloat(String(v).replace(/,/g, ''));
+        return isNaN(n) ? 0 : n;
+      };
+
+      const getFromAllocations = (canonicalReason) => {
+        if (!Array.isArray(t.debitAllocations)) return 0;
+        return t.debitAllocations
+          .filter(a => {
+            const c = getCanonicalDebitReason(a.reason) || a.reason;
+            return c === canonicalReason;
+          })
+          .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+      };
+
+      const damageShortage = numVal(t['SHORTAGE (AMOUNT)'])
+        || numVal(t['Damage Deduction'])
+        || numVal(t.baseDeductions?.['Damage / Shortage'])
+        || numVal(t.deductionsOverride?.['Damage / Shortage']?.projected)
+        || getFromAllocations('Damage / Shortage');
+
+      const gpsDeviation = numVal(t['GPS Deviation Charges'])
+        || numVal(t['GPS DEVIATION'])
+        || numVal(t['GPS DEVIATION CHARGES'])
+        || numVal(t.baseDeductions?.['GPS Deviation Charge'])
+        || getFromAllocations('GPS Deviation Charge');
+
+      const gpsMonitoring = numVal(t['GPS Monitoring Charge'])
+        || numVal(t['GPS MONITORING / TRIP CHARGE'])
+        || numVal(t['GPS Trip Charges'])
+        || numVal(t.baseDeductions?.['GPS Monitoring / Trip Charges'])
+        || getFromAllocations('GPS Monitoring / Trip Charges');
+
+      const gpsInstallation = numVal(t['Give GPS DEVICE'])
+        || numVal(t['GIVE GPS DEVICE'])
+        || numVal(t['GPS Installation Charges'])
+        || numVal(t['Device Installation Charges'])
+        || numVal(t['GPS DEVICE'])
+        || numVal(t.baseDeductions?.['GPS Installation Charges'])
+        || getFromAllocations('GPS Installation Charges');
+
+      const rfidDeduction = numVal(t['Give RFID TAG'])
+        || numVal(t['GIVE RFID TAG'])
+        || numVal(t['RFID Deduction / Charges'])
+        || numVal(t['RFID Charges'])
+        || numVal(t.baseDeductions?.['RFID Deduction / Charges'])
+        || getFromAllocations('RFID Deduction / Charges');
+
+      const suspense = numVal(t['Suspense'])
+        || numVal(t['SUSPENSE'])
+        || numVal(t.baseDeductions?.['Suspense'])
+        || getFromAllocations('Suspense');
+
+      const tdsProvision = numVal(t['TDS PROVISION'])
+        || numVal(t['TDS Provision'])
+        || numVal(t['TDS'])
+        || getFromAllocations('TDS PROVISION');
+
+      let siteOfficeRent = numVal(t['Site office Rent']) || getFromAllocations('Site office Rent');
+      if (siteOfficeRent === 0 && (t['Other'] === 'Site office Rent' || t['OTHER'] === 'Site office Rent')) {
+        siteOfficeRent = numVal(t['Others deduction']) || numVal(t['OTHERS DEDUCTION']);
+      }
+
+      let saftyViolation = numVal(t['Safty Violation Charges'])
+        || numVal(t['Safty violation charges'])
+        || getFromAllocations('Safty Violation Charges');
+      if (saftyViolation === 0 && (String(t['Other']).toLowerCase().includes('safty') || String(t['Other']).toLowerCase().includes('safety'))) {
+        saftyViolation = numVal(t['Others deduction']) || numVal(t['OTHERS DEDUCTION']);
+      }
+
+      return {
+        'Damage / Shortage': damageShortage,
+        'GPS Deviation Charge': gpsDeviation,
+        'GPS Monitoring / Trip Charges': gpsMonitoring,
+        'GPS Installation Charges': gpsInstallation,
+        'RFID Deduction / Charges': rfidDeduction,
+        'Suspense': suspense,
+        'TDS PROVISION': tdsProvision,
+        'Site office Rent': siteOfficeRent,
+        'Safty Violation Charges': saftyViolation
+      };
+    }
+
     const formatted = trips.map(t => {
       const rawDate = t['LOADING DT'] || t['LOADING DATE'] || t['BILL DATE'] || '';
       let tripMonthName = '';
@@ -1409,16 +2105,39 @@ router.get('/trips', async (req, res) => {
       return {
         _id: String(t._id),
         tripId: String(t._id),
+        tripRecordId: String(t._id),
         shipmentNo: t['SHIPMENT NO'] || t['Shipment No'] || '—',
         invoiceNo: t['INVOICE NO'] || t['BILL NO'] || t['Invoice No'] || '—',
         loadingDate: rawDate || '—',
         tripDate: rawDate || '—',
         month: tripMonthName,
         vehicle: t['VEHICLE NUMBER'] || t['VEHICLE NO'] || vehiclesArray[0] || '—',
+        vehicleNumber: t['VEHICLE NUMBER'] || t['VEHICLE NO'] || vehiclesArray[0] || '—',
         plant: t['PLANT'] || t['FROM'] || '',
         destination: t['DESTINATION'] || t['TO'] || '',
+        origin: t['PLANT'] || t['FROM'] || '',
         shortageBag: t['SHORTAGE (BAG)'],
-        shortageRate: t['SHORTAGE (RATE)']
+        shortageRate: t['SHORTAGE (RATE)'],
+        existingDeductions: getExistingDeductionsForTrip(t),
+        rawDeductions: {
+          'SHORTAGE (AMOUNT)': t['SHORTAGE (AMOUNT)'],
+          'Damage Deduction': t['Damage Deduction'],
+          'GPS Deviation Charges': t['GPS Deviation Charges'],
+          'GPS DEVIATION': t['GPS DEVIATION'],
+          'GPS Monitoring Charge': t['GPS Monitoring Charge'],
+          'GPS MONITORING / TRIP CHARGE': t['GPS MONITORING / TRIP CHARGE'],
+          'Give GPS DEVICE': t['Give GPS DEVICE'],
+          'GPS Installation Charges': t['GPS Installation Charges'],
+          'Give RFID TAG': t['Give RFID TAG'],
+          'RFID Deduction / Charges': t['RFID Deduction / Charges'],
+          'Suspense': t['Suspense'],
+          'TDS': t['TDS'],
+          'TDS Provision': t['TDS Provision'],
+          'Others deduction': t['Others deduction'],
+          'Site office Rent': t['Site office Rent'],
+          'Safty Violation Charges': t['Safty Violation Charges']
+        },
+        debitAllocations: t.debitAllocations || []
       };
     });
 
@@ -1628,5 +2347,6 @@ router.post('/send-to-gst', auth, async (req, res) => {
   }
 });
 
+router.syncDebitAllocationToCementRegister = syncDebitAllocationToCementRegister;
 module.exports = router;
 

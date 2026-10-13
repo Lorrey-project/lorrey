@@ -31,6 +31,7 @@ const fmtDate = (d) => {
 const AccountApprovalsPage = ({ onBack }) => {
     const [tabIndex, setTabIndex] = useState(0);
     const [requests, setRequests] = useState([]);
+    const [approvedRequests, setApprovedRequests] = useState([]);
     const [activeUsers, setActiveUsers] = useState([]);
     const [loading, setLoading]   = useState(true);
     const [actionId, setActionId] = useState(null);
@@ -46,16 +47,17 @@ const AccountApprovalsPage = ({ onBack }) => {
         setLoading(true);
         try {
             const token = localStorage.getItem('token');
-            const [pendingRes, activeRes, truckRes] = await Promise.all([
-                axios.get(`${API_URL}/auth/admin/pending-registrations`, { headers: { Authorization: `Bearer ${token}` } }),
-                axios.get(`${API_URL}/auth/admin/active-users`, { headers: { Authorization: `Bearer ${token}` } }),
-                axios.get(`${API_URL}/truck-contacts/approvals`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } }))
+            const [pendingRes, activeRes, truckPendingRes, truckApprovedRes] = await Promise.all([
+                axios.get(`${API_URL}/auth/admin/pending-registrations`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } })),
+                axios.get(`${API_URL}/auth/admin/active-users`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } })),
+                axios.get(`${API_URL}/truck-contacts/approvals?status=pending`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } })),
+                axios.get(`${API_URL}/truck-contacts/approvals?status=approved`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { success: false } }))
             ]);
             
-            let unified = [];
+            let unifiedPending = [];
             
-            if (pendingRes.data.success && pendingRes.data.users) {
-                unified.push(...pendingRes.data.users.map(u => ({
+            if (pendingRes.data?.success && pendingRes.data?.users) {
+                unifiedPending.push(...pendingRes.data.users.map(u => ({
                     _id: u._id,
                     type: 'User Account Login',
                     date: u.createdAt,
@@ -69,8 +71,8 @@ const AccountApprovalsPage = ({ onBack }) => {
                 })));
             }
 
-            if (truckRes.data?.success && truckRes.data?.requests) {
-                unified.push(...truckRes.data.requests.map(t => ({
+            if (truckPendingRes.data?.success && truckPendingRes.data?.requests) {
+                unifiedPending.push(...truckPendingRes.data.requests.map(t => ({
                     _id: t._id,
                     type: t.requestType || (t["Truck No "] ? 'Truck Registration' : 'Truck Update'),
                     date: t.requestedAt || t.createdAt,
@@ -85,10 +87,34 @@ const AccountApprovalsPage = ({ onBack }) => {
             }
 
             // Sort newest first
-            unified.sort((a, b) => new Date(b.date) - new Date(a.date));
-            setRequests(unified);
+            unifiedPending.sort((a, b) => new Date(b.date) - new Date(a.date));
+            setRequests(unifiedPending);
 
-            if (activeRes.data.success) setActiveUsers(activeRes.data.users);
+            let unifiedApproved = [];
+
+            if (truckApprovedRes.data?.success && truckApprovedRes.data?.requests) {
+                unifiedApproved.push(...truckApprovedRes.data.requests.map(t => ({
+                    _id: t._id,
+                    type: t.requestType || (t["Truck No "] ? 'Truck Registration' : 'Truck Update'),
+                    date: t.processedAt || t.requestedAt || t.createdAt,
+                    requestedBy: t.actionBy || t["Driver Name "] || 'System',
+                    approvedBy: t.processedBy || 'Head Office',
+                    vehicleNo: t["Truck No "] || '-',
+                    ownerName: t["Owner Name "] || '-',
+                    status: 'APPROVED',
+                    remarks: t.remarks || '-',
+                    source: 'truck',
+                    raw: t
+                })));
+            }
+
+            // Sort newest approved first
+            unifiedApproved.sort((a, b) => new Date(b.date) - new Date(a.date));
+            setApprovedRequests(unifiedApproved);
+
+            if (activeRes.data?.success && activeRes.data?.users) {
+                setActiveUsers(activeRes.data.users);
+            }
         } catch (e) {
             setSnack({ type: 'error', message: 'Failed to load approval data.' });
         } finally {
@@ -117,10 +143,10 @@ const AccountApprovalsPage = ({ onBack }) => {
                 }, { headers: { Authorization: `Bearer ${token}` } });
                 setSnack({ type: 'success', message: '✅ Profile Verified & Approved!' });
             }
-            setRequests(prev => prev.filter(req => req._id !== id));
+            fetchData();
             setDetailsModalOpen(false);
         } catch (e) {
-            setSnack({ type: 'error', message: '❌ Failed to approve. Please try again.' });
+            setSnack({ type: 'error', message: `❌ ${e.response?.data?.error || 'Failed to approve. Please try again.'}` });
         } finally {
             setActionId(null);
         }
@@ -141,10 +167,10 @@ const AccountApprovalsPage = ({ onBack }) => {
                 }, { headers: { Authorization: `Bearer ${token}` } });
                 setSnack({ type: 'info', message: 'Truck request rejected.' });
             }
-            setRequests(prev => prev.filter(req => req._id !== id));
+            fetchData();
             setDetailsModalOpen(false);
         } catch (e) {
-            setSnack({ type: 'error', message: '❌ Failed to reject. Please try again.' });
+            setSnack({ type: 'error', message: `❌ ${e.response?.data?.error || 'Failed to reject. Please try again.'}` });
         } finally {
             setActionId(null);
         }
@@ -169,9 +195,10 @@ const AccountApprovalsPage = ({ onBack }) => {
 
     // Derived filters
     const typeOptions = useMemo(() => {
-        const types = new Set(requests.map(r => r.type));
+        const pool = tabIndex === 1 ? approvedRequests : requests;
+        const types = new Set(pool.map(r => r.type));
         return ['All', ...Array.from(types)];
-    }, [requests]);
+    }, [requests, approvedRequests, tabIndex]);
 
     const filteredRequests = useMemo(() => {
         return requests.filter(r => {
@@ -188,6 +215,23 @@ const AccountApprovalsPage = ({ onBack }) => {
             return true;
         });
     }, [requests, searchQ, filterType]);
+
+    const filteredApprovedRequests = useMemo(() => {
+        return approvedRequests.filter(r => {
+            if (filterType !== 'All' && r.type !== filterType) return false;
+            if (searchQ) {
+                const q = searchQ.toLowerCase();
+                return (
+                    (r.vehicleNo && r.vehicleNo.toLowerCase().includes(q)) ||
+                    (r.ownerName && r.ownerName.toLowerCase().includes(q)) ||
+                    (r.requestedBy && r.requestedBy.toLowerCase().includes(q)) ||
+                    (r.approvedBy && r.approvedBy.toLowerCase().includes(q)) ||
+                    (r.type && r.type.toLowerCase().includes(q))
+                );
+            }
+            return true;
+        });
+    }, [approvedRequests, searchQ, filterType]);
 
     const openDetails = (req) => {
         setSelectedRequest(req);
@@ -212,7 +256,7 @@ const AccountApprovalsPage = ({ onBack }) => {
                             Centralized Approval Dashboard
                         </Typography>
                         <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, mt: 0.3 }}>
-                            Review & manage all pending requests across the system
+                            Review & manage all pending & approved requests across the system
                         </Typography>
                     </Box>
                 </Box>
@@ -225,7 +269,18 @@ const AccountApprovalsPage = ({ onBack }) => {
                     }}>
                         <HourglassTopIcon sx={{ fontSize: 13, color: '#fff' }} />
                         <Typography sx={{ fontWeight: 900, fontSize: 13, color: '#fff' }}>
-                            {loading ? '…' : requests.length} Total Pending
+                            {loading ? '…' : requests.length} Pending
+                        </Typography>
+                    </Box>
+                    <Box sx={{
+                        bgcolor: 'rgba(34, 197, 94, 0.25)',
+                        border: '1px solid rgba(74, 222, 128, 0.4)',
+                        borderRadius: '20px', px: 2, py: 0.6,
+                        display: 'flex', alignItems: 'center', gap: 1
+                    }}>
+                        <CheckCircleIcon sx={{ fontSize: 13, color: '#4ade80' }} />
+                        <Typography sx={{ fontWeight: 900, fontSize: 13, color: '#4ade80' }}>
+                            {loading ? '…' : approvedRequests.length} Approved
                         </Typography>
                     </Box>
                     <IconButton onClick={fetchData} sx={{ color: 'rgba(255,255,255,0.8)', bgcolor: 'rgba(255,255,255,0.1)', borderRadius: '10px', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}>
@@ -238,20 +293,31 @@ const AccountApprovalsPage = ({ onBack }) => {
             <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 1, md: 4 }, position: 'sticky', top: 0, zIndex: 10 }}>
                 <Tabs 
                     value={tabIndex} 
-                    onChange={(e, v) => setTabIndex(v)} 
+                    onChange={(e, v) => { setTabIndex(v); setFilterType('All'); setSearchQ(''); }} 
                     variant="fullWidth" 
-                    TabIndicatorProps={{ sx: { height: 4, borderRadius: '4px 4px 0 0', bgcolor: tabIndex === 0 ? '#7c3aed' : '#16a34a' } }}
+                    TabIndicatorProps={{ 
+                        sx: { 
+                            height: 4, 
+                            borderRadius: '4px 4px 0 0', 
+                            bgcolor: tabIndex === 0 ? '#7c3aed' : tabIndex === 1 ? '#16a34a' : '#0284c7' 
+                        } 
+                    }}
                     sx={{
                         '& .MuiTab-root': { py: 2.5, transition: 'all 0.2s' },
                         '& .Mui-selected': { 
                             bgcolor: 'rgba(0,0,0,0.02)',
-                            color: `${tabIndex === 0 ? '#7c3aed' : '#16a34a'} !important`
+                            color: `${tabIndex === 0 ? '#7c3aed' : tabIndex === 1 ? '#16a34a' : '#0284c7'} !important`
                         }
                     }}
                 >
                     <Tab 
                       icon={<AdminPanelSettingsIcon sx={{ fontSize: 20 }} />} iconPosition="start"
                       label={`Pending Approvals (${requests.length})`} 
+                      sx={{ fontWeight: 900, textTransform: 'none', fontSize: 14 }} 
+                    />
+                    <Tab 
+                      icon={<CheckCircleIcon sx={{ fontSize: 20 }} />} iconPosition="start"
+                      label={`APPROVED Records (${approvedRequests.length})`} 
                       sx={{ fontWeight: 900, textTransform: 'none', fontSize: 14 }} 
                     />
                     <Tab 
@@ -358,8 +424,86 @@ const AccountApprovalsPage = ({ onBack }) => {
                     </Paper>
                 )}
 
-                {/* ── TAB 1: ACTIVE STAFF ── */}
+                {/* ── TAB 1: APPROVED RECORDS ── */}
                 {!loading && tabIndex === 1 && (
+                    <Paper sx={{ borderRadius: 4, overflow: 'hidden', border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
+                        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center', bgcolor: '#fafafa', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+                            <TextField
+                                size="small"
+                                placeholder="Search approved vehicle, owner, approver..."
+                                value={searchQ}
+                                onChange={(e) => setSearchQ(e.target.value)}
+                                InputProps={{
+                                    startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: '#94a3b8' }} /></InputAdornment>,
+                                    sx: { borderRadius: 3, bgcolor: 'background.paper' }
+                                }}
+                                sx={{ minWidth: 300, flex: 1 }}
+                            />
+                            <FormControl size="small" sx={{ minWidth: 200 }}>
+                                <Select
+                                    value={filterType}
+                                    onChange={(e) => setFilterType(e.target.value)}
+                                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 14, fontWeight: 600 }}
+                                >
+                                    {typeOptions.map(t => <MenuItem key={t} value={t} sx={{ fontSize: 14 }}>{t}</MenuItem>)}
+                                </Select>
+                            </FormControl>
+                        </Box>
+                        
+                        <TableContainer sx={{ maxHeight: '65vh' }}>
+                            <Table stickyHeader>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Approval Type</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Approved Date</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Requested By</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Vehicle Number</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Owner Name</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Status</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Authorized By</TableCell>
+                                        <TableCell align="center" sx={{ fontWeight: 800, color: '#475569', bgcolor: 'background.default' }}>Actions</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {filteredApprovedRequests.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={8} align="center" sx={{ py: 8 }}>
+                                                <CheckCircleIcon sx={{ fontSize: 40, color: '#cbd5e1', mb: 1 }} />
+                                                <Typography variant="h6" color="text.secondary" fontWeight={700}>No approved records found</Typography>
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        filteredApprovedRequests.map((req) => (
+                                            <TableRow key={req._id} hover sx={{ '&:hover': { bgcolor: 'background.default' } }}>
+                                                <TableCell>
+                                                    <Chip label={req.type} size="small" sx={{ fontWeight: 700, bgcolor: '#e0f2fe', color: '#0369a1' }} />
+                                                </TableCell>
+                                                <TableCell sx={{ fontSize: 13, fontWeight: 500, color: '#64748b' }}>{fmtDate(req.date)}</TableCell>
+                                                <TableCell sx={{ fontWeight: 600 }}>{req.requestedBy}</TableCell>
+                                                <TableCell sx={{ fontWeight: 900, color: '#0f172a' }}>{req.vehicleNo}</TableCell>
+                                                <TableCell sx={{ fontSize: 13 }}>{req.ownerName}</TableCell>
+                                                <TableCell>
+                                                    <Chip label="APPROVED" size="small" sx={{ fontWeight: 900, bgcolor: '#dcfce7', color: '#16a34a', border: '1px solid rgba(22,163,74,0.3)', fontSize: '11px' }} />
+                                                </TableCell>
+                                                <TableCell sx={{ fontSize: 12, color: '#475569', fontWeight: 600 }}>
+                                                    {req.approvedBy || 'Head Office Admin'}
+                                                </TableCell>
+                                                <TableCell align="center">
+                                                    <Button size="small" variant="outlined" startIcon={<VisibilityIcon />} onClick={() => openDetails(req)} sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}>
+                                                        Details
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    </Paper>
+                )}
+
+                {/* ── TAB 2: ACTIVE STAFF ── */}
+                {!loading && tabIndex === 2 && (
                     <Grid container spacing={3}>
                         {activeUsers.length === 0 ? (
                             <Grid item xs={12}>

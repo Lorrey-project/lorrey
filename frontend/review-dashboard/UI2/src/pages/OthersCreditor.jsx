@@ -17,6 +17,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import ImageIcon from '@mui/icons-material/Image';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -24,11 +25,50 @@ import axios from 'axios';
 import { exportToCsv } from '../utils/exportCsv';
 import { useTableNavigation } from '../hooks/useTableNavigation';
 
+const isImageDoc = (nameOrUrl = '') => {
+  const s = String(nameOrUrl).toLowerCase();
+  return s.endsWith('.jpg') || s.endsWith('.jpeg') || s.endsWith('.png') || s.includes('image/');
+};
+
 import BrindaPortal from '../portals/brinda/BrindaPortal';
 import JeetPortal from '../portals/jeet/JeetPortal';
 import CreditorVehicleLedgerSection from '../components/CreditorVehicleLedgerSection';
+import B2BEntryDialog from '../components/B2BEntryDialog';
 import { LEDGER_OPTIONS, NAMES_OPTIONS } from './AccountDetails';
 import { io } from 'socket.io-client';
+
+export const EXPENSE_TYPE_OPTIONS = [
+  'INDIRECT EXPENSES'
+];
+
+export const BILL_TYPE_OPTIONS = [
+  'GST',
+  'NON GST'
+];
+
+export const PARTICULARS_OPTIONS = [
+  'SALARY',
+  'BANK CHARGES',
+  'BANK GUARANTEE CHARGES',
+  'BONUS',
+  'COURIER CHARGERS',
+  'DEPRECIATION',
+  'ENTERTENTMENT EXP',
+  'Interest on Partners Capital',
+  'INTEREST ON PUNJAB & SIND BANK (CC)',
+  'Late Fees on TDS',
+  'MISC EXPENSES',
+  'OFFICE EXPENSES',
+  'Partner Salary',
+  'PRINTING & STATIONERY',
+  'PROFESSIONAL CHARGES',
+  'P TAX',
+  'RENT EXP',
+  'SERVICES CHARGES',
+  'Software development Expenses',
+  'SUBSCRIPTION',
+  'TRAVELLING & CONVANCE'
+];
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -128,6 +168,9 @@ const computeMonojBalances = (rowList) => {
     return {
       ...row,
       slNo: resolvedSlNo,
+      expenseType: row.expenseType || '',
+      billType: row.billType || '',
+      particulars: row.particulars || '',
       credit,
       debit,
       ledgerName: row.ledgerName || '',
@@ -256,6 +299,9 @@ function MonojBandhanSection() {
   const [confirmDelOpen, setConfirmDelOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  const [b2bDialogOpen, setB2bDialogOpen] = useState(false);
+  const [b2bTargetRow, setB2bTargetRow] = useState(null);
+
   const tableContainerRef = useRef(null);
   useTableNavigation(tableContainerRef);
 
@@ -344,27 +390,25 @@ function MonojBandhanSection() {
   const dynamicNamesOptions = useMemo(() => {
     const map = new Map();
 
-    // 1. Authoritative owner names from MongoDB Truck Contacts (prefer their canonical casing)
+    // 1. Authoritative owner names from MongoDB Truck Contacts
     Object.keys(ownerVehicleMap).forEach(name => {
-      const clean = String(name || '').trim();
+      const clean = String(name || '').trim().toUpperCase();
       if (!clean) return;
-      const key = clean.toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, clean);
+      if (!map.has(clean)) {
+        map.set(clean, clean);
       }
     });
 
     // 2. Static fallback names from NAMES_OPTIONS if not already present
     (NAMES_OPTIONS || []).forEach(name => {
-      const clean = String(name || '').trim();
+      const clean = String(name || '').trim().toUpperCase();
       if (!clean) return;
-      const key = clean.toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, clean);
+      if (!map.has(clean)) {
+        map.set(clean, clean);
       }
     });
 
-    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
   }, [ownerVehicleMap]);
 
   // Retrieve all vehicles belonging to the specified owner (case-insensitive & deduplicated)
@@ -408,6 +452,8 @@ function MonojBandhanSection() {
       if (idx === -1 || !copy[idx]) return prev;
       // Reject manual changes to saved records
       if (copy[idx]._id && !String(copy[idx]._id).startsWith('temp-')) return prev;
+      // When EXPENSE TYPE = INDIRECT EXPENSES, names/owner cannot be selected
+      if (String(copy[idx].expenseType || '').trim().toUpperCase() === 'INDIRECT EXPENSES') return prev;
 
       const currentVehicle = copy[idx]?.vehicleNo || '';
       const shouldClearVehicle = !owner || (currentVehicle && !allowedVehicles.includes(currentVehicle));
@@ -439,16 +485,150 @@ function MonojBandhanSection() {
       // Reject manual changes to saved records
       if (copy[idx]._id && !String(copy[idx]._id).startsWith('temp-')) return prev;
 
-      copy[idx] = { ...copy[idx], [field]: value };
+      let updatedRow = { ...copy[idx], [field]: value };
+
+      // Rule: When EXPENSE TYPE = INDIRECT EXPENSES is selected, immediately clear ledgerName, names, and vehicleNo
+      if (field === 'expenseType' && String(value || '').trim().toUpperCase() === 'INDIRECT EXPENSES') {
+        updatedRow.ledgerName = '';
+        updatedRow.names = '';
+        updatedRow.vehicleNo = '';
+      }
+
+      copy[idx] = updatedRow;
+
+      // Auto-trigger B2B GST Purchase popup when EXPENSE TYPE = INDIRECT EXPENSES, BILL TYPE = GST, and valid PARTICULARS is selected
+      const isExpIndirect = String(updatedRow.expenseType || '').trim().toUpperCase() === 'INDIRECT EXPENSES' || String(updatedRow.expenseType || '').trim().toUpperCase() === 'INDIRECT EXPENSE';
+      const isBillGst = String(updatedRow.billType || '').trim().toUpperCase() === 'GST';
+      const hasParticulars = Boolean(String(updatedRow.particulars || '').trim());
+
+      if (isExpIndirect && isBillGst && hasParticulars && !b2bDialogOpen) {
+        setTimeout(() => {
+          setB2bTargetRow(updatedRow);
+          setB2bDialogOpen(true);
+        }, 50);
+      }
+
       return computeMonojBalances(copy);
     });
   };
 
-  // PDF Upload Handler - linked directly to row ID
+  // Handler when B2B Entry is saved from the GST Purchase popup
+  const handleB2BSaved = async (res) => {
+    if (!b2bTargetRow) return;
+
+    const rowId = b2bTargetRow._id || b2bTargetRow.tempId;
+    const invoiceVal = (res.invoiceValue !== undefined && !isNaN(Number(res.invoiceValue)))
+      ? Number(res.invoiceValue)
+      : (
+          (res.payload?.['Invoice Value'] !== undefined && !isNaN(Number(res.payload?.['Invoice Value'])))
+            ? Number(res.payload['Invoice Value'])
+            : (Number(res.taxableValue) || 0)
+        );
+    const invNo = res.invoiceNumber || res.payload?.['Invoice Number'] || '';
+    const b2bEntryId = String(res.entryId || '');
+
+    // Synchronously construct updated rows array from current state
+    const currentRows = [...rows];
+    const idx = currentRows.findIndex(r => (r._id && r._id === rowId) || (r.tempId && r.tempId === rowId));
+    let targetRowData = { ...b2bTargetRow };
+
+    if (idx !== -1) {
+      currentRows[idx] = {
+        ...currentRows[idx],
+        expenseType: 'INDIRECT EXPENSES',
+        billType: 'GST',
+        particulars: b2bTargetRow.particulars || currentRows[idx].particulars || '',
+        debit: invoiceVal,
+        invoiceNo: invNo || currentRows[idx].invoiceNo || '',
+        b2bEntryId: b2bEntryId,
+        remarks: currentRows[idx].remarks || `B2B GST Purchase (Inv: ${invNo || '—'})`
+      };
+      targetRowData = currentRows[idx];
+    } else {
+      targetRowData = {
+        ...b2bTargetRow,
+        expenseType: 'INDIRECT EXPENSES',
+        billType: 'GST',
+        debit: invoiceVal,
+        invoiceNo: invNo || b2bTargetRow.invoiceNo || '',
+        b2bEntryId: b2bEntryId,
+        remarks: b2bTargetRow.remarks || `B2B GST Purchase (Inv: ${invNo || '—'})`
+      };
+      currentRows.push(targetRowData);
+    }
+
+    const updatedRowsList = computeMonojBalances(currentRows);
+    setRows(updatedRowsList);
+
+    // Persist directly to backend database
+    try {
+      setSaving(true);
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const payloadRows = updatedRowsList.map(r => {
+        const item = {
+          ...r,
+          creditorName: 'MANOJ BANDHAN',
+          slNo: num(r.slNo) || 1
+        };
+        // If it's a temporary client-side ID, remove it so Mongoose generates a clean ObjectId
+        if (item._id && String(item._id).startsWith('temp-')) {
+          delete item._id;
+        }
+        return item;
+      });
+
+      const saveRes = await axios.post(`${API_URL}/others-creditors/bulk-save`, { rows: payloadRows }, { headers });
+      if (saveRes.data?.success) {
+        // Link the saved Manoj Bandhan document _id back to the B2B entry in gst_portal
+        const createdRow = (saveRes.data.entries || []).find(e => 
+          (e.b2bEntryId && String(e.b2bEntryId) === b2bEntryId) ||
+          (e.particulars === targetRowData.particulars && num(e.debit) === invoiceVal && e.date === targetRowData.date)
+        );
+
+        if (createdRow && createdRow._id && b2bEntryId) {
+          try {
+            await axios.put(`${API_URL}/gst-portal/${b2bEntryId}`, {
+              manojRowId: String(createdRow._id)
+            }, { headers });
+          } catch (linkErr) {
+            console.warn('[ManojBandhan] Notice linking B2B to created Manoj doc:', linkErr);
+          }
+        }
+
+        setSnack({
+          severity: 'success',
+          message: `GST Purchase saved to B2B, Manoj Bandhan debited ₹${invoiceVal.toLocaleString('en-IN')}, and synced to Indirect Expenses!`
+        });
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('[ManojBandhan] Auto-save error after B2B entry:', err);
+      setSnack({ severity: 'error', message: 'Failed to save Manoj Bandhan transaction after B2B entry: ' + (err.response?.data?.error || err.message) });
+    } finally {
+      setSaving(false);
+      setB2bDialogOpen(false);
+      setB2bTargetRow(null);
+    }
+  };
+
+  // Handler when B2B Entry dialog is closed without saving
+  const handleB2BClose = () => {
+    setB2bDialogOpen(false);
+    setB2bTargetRow(null);
+  };
+
+  // Document Upload Handler (PDF, JPG, JPEG) - linked directly to row ID
   const handlePdfUpload = async (targetRow, file) => {
     if (!file) return;
-    if (file.type !== 'application/pdf') {
-      setSnack({ severity: 'error', message: 'Only PDF files are allowed.' });
+    const allowedExts = ['.pdf', '.jpg', '.jpeg'];
+    const lowerName = (file.name || '').toLowerCase();
+    const isExtAllowed = allowedExts.some(ext => lowerName.endsWith(ext));
+    const isMimeAllowed = file.type === 'application/pdf' || file.type === 'image/jpeg' || file.type === 'image/jpg' || file.type === 'image/pjpeg';
+
+    if (!isExtAllowed && !isMimeAllowed) {
+      setSnack({ severity: 'error', message: 'Only PDF, JPG, and JPEG files are allowed.' });
       return;
     }
 
@@ -457,6 +637,7 @@ function MonojBandhanSection() {
     try {
       const formData = new FormData();
       formData.append('pdf', file);
+      formData.append('file', file);
       if (targetRow._id && targetRow._id.length === 24) {
         formData.append('rowId', targetRow._id);
       }
@@ -479,19 +660,19 @@ function MonojBandhanSection() {
           copy[idx] = { ...copy[idx], pdfUrl: uploadedUrl, pdfName: fileName };
           return computeMonojBalances(copy);
         });
-        setSnack({ severity: 'success', message: 'PDF uploaded successfully!' });
+        setSnack({ severity: 'success', message: 'Document uploaded successfully!' });
       } else {
-        setSnack({ severity: 'error', message: res.data?.error || 'PDF upload failed.' });
+        setSnack({ severity: 'error', message: res.data?.error || 'Document upload failed.' });
       }
     } catch (err) {
-      console.error('[MonojBandhan] PDF upload error:', err);
-      setSnack({ severity: 'error', message: 'Error uploading PDF: ' + (err.response?.data?.error || err.message) });
+      console.error('[MonojBandhan] Document upload error:', err);
+      setSnack({ severity: 'error', message: 'Error uploading document: ' + (err.response?.data?.error || err.message) });
     } finally {
       setUploadingId(null);
     }
   };
 
-  // PDF Remove Handler
+  // Document Remove Handler
   const handlePdfRemove = async (targetRow) => {
     try {
       if (targetRow._id && targetRow._id.length === 24) {
@@ -506,10 +687,10 @@ function MonojBandhanSection() {
         copy[idx] = { ...copy[idx], pdfUrl: '', pdfName: '' };
         return computeMonojBalances(copy);
       });
-      setSnack({ severity: 'success', message: 'PDF removed.' });
+      setSnack({ severity: 'success', message: 'Document removed.' });
     } catch (err) {
-      console.error('[MonojBandhan] Remove PDF error:', err);
-      setSnack({ severity: 'error', message: 'Failed to remove PDF.' });
+      console.error('[MonojBandhan] Remove document error:', err);
+      setSnack({ severity: 'error', message: 'Failed to remove document.' });
     }
   };
 
@@ -543,6 +724,9 @@ function MonojBandhanSection() {
       creditorName: 'MANOJ BANDHAN',
       slNo: nextSlNo,
       date: defaultDate,
+      expenseType: 'INDIRECT EXPENSES',
+      billType: '',
+      particulars: '',
       credit: initialCredit,
       ledgerName: '',
       names: '',
@@ -674,6 +858,9 @@ function MonojBandhanSection() {
         const term = searchTerm.toLowerCase();
         const matches = (
           (r.date || '').toLowerCase().includes(term) ||
+          (r.expenseType || '').toLowerCase().includes(term) ||
+          (r.billType || '').toLowerCase().includes(term) ||
+          (r.particulars || '').toLowerCase().includes(term) ||
           (r.ledgerName || '').toLowerCase().includes(term) ||
           (r.names || '').toLowerCase().includes(term) ||
           (r.vehicleNo || '').toLowerCase().includes(term) ||
@@ -808,8 +995,11 @@ function MonojBandhanSection() {
   // Export CSV
   const handleExportCsv = () => {
     const exportData = filteredRows.map((r, i) => ({
-      'SL NO': i + 1,
+      'SL NO': r.slNo !== undefined && r.slNo !== null && r.slNo !== '' ? r.slNo : (i + 1),
       'DATE': r.date || '',
+      'EXPENSE TYPE': r.expenseType || '',
+      'BILL TYPE': r.billType || '',
+      'PARTICULARS': r.particulars || '',
       'LEDGER NAME': r.ledgerName || '',
       'NAMES': r.names || '',
       'VEHICLE NO': r.vehicleNo || '',
@@ -1087,7 +1277,7 @@ function MonojBandhanSection() {
           </Box>
         )}
 
-        <table style={{ width: '100%', minWidth: '1600px', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
+        <table style={{ width: '100%', minWidth: '2100px', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
             <tr>
               <th style={{ ...thStyle, width: '45px' }}>
@@ -1101,7 +1291,10 @@ function MonojBandhanSection() {
                 />
               </th>
               <th style={{ ...thStyle, width: '70px' }}>SL NO</th>
-              <th style={{ ...thStyle, width: '140px' }}>DATE</th>
+              <th style={{ ...thStyle, width: '135px' }}>DATE</th>
+              <th style={{ ...thStyle, width: '180px' }}>EXPENSE TYPE</th>
+              <th style={{ ...thStyle, width: '130px' }}>BILL TYPE</th>
+              <th style={{ ...thStyle, width: '230px' }}>PARTICULARS</th>
               <th style={{ ...thStyle, width: '190px' }}>LEDGER NAME</th>
               <th style={{ ...thStyle, width: '190px' }}>NAMES</th>
               <th style={{ ...thStyle, width: '180px' }}>VEHICLE NO</th>
@@ -1109,14 +1302,14 @@ function MonojBandhanSection() {
               <th style={{ ...thStyle, width: '150px' }}>DEBIT</th>
               <th style={{ ...thStyle, width: '160px' }}>BALANCE</th>
               <th style={{ ...thStyle, width: '240px' }}>REMARKS</th>
-              <th style={{ ...thStyle, width: '180px' }}>PDF UPLOAD</th>
+              <th style={{ ...thStyle, width: '180px' }}>UPLOAD DOCUMENT</th>
               <th style={{ ...thStyle, width: '70px' }}>ACTION</th>
             </tr>
           </thead>
           <tbody>
             {filteredRows.length === 0 && !loading && (
               <tr>
-                <td colSpan={12} style={{ textAlign: 'center', padding: '48px', color: '#64748b', fontWeight: 600 }}>
+                <td colSpan={15} style={{ textAlign: 'center', padding: '48px', color: '#64748b', fontWeight: 600 }}>
                   No entries recorded for MANOJ BANDHAN yet. Click "+ Add Row" to add a new transaction.
                 </td>
               </tr>
@@ -1127,6 +1320,7 @@ function MonojBandhanSection() {
               const isSaved = Boolean(row._id && !String(row._id).startsWith('temp-'));
               const isChecked = selectedIds.has(rowId);
               const isUploading = uploadingId === rowId;
+              const isIndirectExpense = String(row.expenseType || '').trim().toUpperCase() === 'INDIRECT EXPENSES';
 
               return (
                 <tr key={rowId} style={{ backgroundColor: isChecked ? '#eff6ff' : index % 2 === 0 ? '#ffffff' : '#f8fafc', transition: 'background-color 0.15s' }}>
@@ -1172,12 +1366,204 @@ function MonojBandhanSection() {
                     )}
                   </td>
 
-                  {/* 3. LEDGER NAME (READ-ONLY WHEN SAVED, DROPDOWN WHEN NEW) */}
+                  {/* 3. EXPENSE TYPE (DROPDOWN) */}
                   <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px' }}>
                     {isSaved ? (
                       <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
-                        {row.ledgerName || '-'}
+                        {row.expenseType || '-'}
                       </span>
+                    ) : (
+                      <Autocomplete
+                        options={EXPENSE_TYPE_OPTIONS}
+                        value={row.expenseType || ''}
+                        freeSolo
+                        onChange={(event, newValue) => {
+                          handleCellChange(rowId, 'expenseType', newValue || '');
+                        }}
+                        onInputChange={(event, newInputValue, reason) => {
+                          if (reason === 'input' || reason === 'clear') {
+                            handleCellChange(rowId, 'expenseType', newInputValue || '');
+                          }
+                        }}
+                        ListboxProps={{
+                          style: {
+                            background: 'rgba(255, 255, 255, 0.98)',
+                            backdropFilter: 'blur(8px)',
+                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '10px',
+                            padding: '4px',
+                            maxHeight: '300px'
+                          }
+                        }}
+                        renderOption={(props, option) => (
+                          <li {...props} style={{
+                            fontSize: '13px',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            color: '#334155',
+                            backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
+                          }}>
+                            {option}
+                          </li>
+                        )}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            variant="standard"
+                            placeholder="Select Expense Type..."
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                              style: {
+                                fontSize: '12px',
+                                padding: '6px 8px',
+                                fontWeight: 600,
+                                color: '#0f172a'
+                              }
+                            }}
+                          />
+                        )}
+                      />
+                    )}
+                  </td>
+
+                  {/* 4. BILL TYPE (DROPDOWN) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px' }}>
+                    {isSaved ? (
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
+                        {row.billType || '-'}
+                      </span>
+                    ) : (
+                      <Autocomplete
+                        options={BILL_TYPE_OPTIONS}
+                        value={row.billType || ''}
+                        freeSolo
+                        onChange={(event, newValue) => {
+                          handleCellChange(rowId, 'billType', newValue || '');
+                        }}
+                        onInputChange={(event, newInputValue, reason) => {
+                          if (reason === 'input' || reason === 'clear') {
+                            handleCellChange(rowId, 'billType', newInputValue || '');
+                          }
+                        }}
+                        ListboxProps={{
+                          style: {
+                            background: 'rgba(255, 255, 255, 0.98)',
+                            backdropFilter: 'blur(8px)',
+                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '10px',
+                            padding: '4px',
+                            maxHeight: '300px'
+                          }
+                        }}
+                        renderOption={(props, option) => (
+                          <li {...props} style={{
+                            fontSize: '13px',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            color: '#334155',
+                            backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
+                          }}>
+                            {option}
+                          </li>
+                        )}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            variant="standard"
+                            placeholder="Select Bill Type..."
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                              style: {
+                                fontSize: '12px',
+                                padding: '6px 8px',
+                                fontWeight: 600,
+                                color: '#0f172a'
+                              }
+                            }}
+                          />
+                        )}
+                      />
+                    )}
+                  </td>
+
+                  {/* 5. PARTICULARS (DROPDOWN) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px' }}>
+                    {isSaved ? (
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
+                        {row.particulars || '-'}
+                      </span>
+                    ) : (
+                      <Autocomplete
+                        options={PARTICULARS_OPTIONS}
+                        value={row.particulars || ''}
+                        freeSolo
+                        onChange={(event, newValue) => {
+                          handleCellChange(rowId, 'particulars', newValue || '');
+                        }}
+                        onInputChange={(event, newInputValue, reason) => {
+                          if (reason === 'input' || reason === 'clear') {
+                            handleCellChange(rowId, 'particulars', newInputValue || '');
+                          }
+                        }}
+                        ListboxProps={{
+                          style: {
+                            background: 'rgba(255, 255, 255, 0.98)',
+                            backdropFilter: 'blur(8px)',
+                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '10px',
+                            padding: '4px',
+                            maxHeight: '300px'
+                          }
+                        }}
+                        renderOption={(props, option) => (
+                          <li {...props} style={{
+                            fontSize: '13px',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            color: '#334155',
+                            backgroundColor: props['aria-selected'] === true ? '#eff6ff' : 'transparent'
+                          }}>
+                            {option}
+                          </li>
+                        )}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            variant="standard"
+                            placeholder="Select Particulars..."
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                              style: {
+                                fontSize: '12px',
+                                padding: '6px 8px',
+                                fontWeight: 600,
+                                color: '#0f172a'
+                              }
+                            }}
+                          />
+                        )}
+                      />
+                    )}
+                  </td>
+
+                  {/* 6. LEDGER NAME (DISABLED / HIDDEN FOR INDIRECT EXPENSES) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px', backgroundColor: (!isSaved && isIndirectExpense) ? '#f1f5f9' : 'inherit' }}>
+                    {isSaved ? (
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: isIndirectExpense ? '#94a3b8' : '#0f172a' }}>
+                        {isIndirectExpense ? '—' : (row.ledgerName || '-')}
+                      </span>
+                    ) : isIndirectExpense ? (
+                      <Box sx={{ px: 1, py: 0.75, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Typography sx={{ fontSize: '13px', fontWeight: 700, color: '#94a3b8' }}>
+                          —
+                        </Typography>
+                      </Box>
                     ) : (
                       <Autocomplete
                         options={LEDGER_OPTIONS}
@@ -1234,12 +1620,18 @@ function MonojBandhanSection() {
                     )}
                   </td>
 
-                  {/* 4. NAMES (READ-ONLY WHEN SAVED, DROPDOWN WHEN NEW) */}
-                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px' }}>
+                  {/* 7. NAMES (DISABLED / HIDDEN FOR INDIRECT EXPENSES) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px', backgroundColor: (!isSaved && isIndirectExpense) ? '#f1f5f9' : 'inherit' }}>
                     {isSaved ? (
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
-                        {row.names || '-'}
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: isIndirectExpense ? '#94a3b8' : '#0f172a' }}>
+                        {isIndirectExpense ? '—' : (row.names || '-')}
                       </span>
+                    ) : isIndirectExpense ? (
+                      <Box sx={{ px: 1, py: 0.75, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Typography sx={{ fontSize: '13px', fontWeight: 700, color: '#94a3b8' }}>
+                          —
+                        </Typography>
+                      </Box>
                     ) : (
                       <Autocomplete
                         options={dynamicNamesOptions}
@@ -1296,12 +1688,18 @@ function MonojBandhanSection() {
                     )}
                   </td>
 
-                  {/* 5. VEHICLE NO (READ-ONLY WHEN SAVED, DROPDOWN WHEN NEW) */}
-                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px' }}>
+                  {/* 8. VEHICLE NO (DISABLED / HIDDEN FOR INDIRECT EXPENSES) */}
+                  <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '2px 4px', backgroundColor: (!isSaved && isIndirectExpense) ? '#f1f5f9' : 'inherit' }}>
                     {isSaved ? (
-                      <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', textTransform: 'uppercase' }}>
-                        {row.vehicleNo || '-'}
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: isIndirectExpense ? '#94a3b8' : '#0f172a', textTransform: 'uppercase' }}>
+                        {isIndirectExpense ? '—' : (row.vehicleNo || '-')}
                       </span>
+                    ) : isIndirectExpense ? (
+                      <Box sx={{ px: 1, py: 0.75, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Typography sx={{ fontSize: '13px', fontWeight: 700, color: '#94a3b8' }}>
+                          —
+                        </Typography>
+                      </Box>
                     ) : (
                       <Autocomplete
                         disabled={!row.names}
@@ -1448,9 +1846,32 @@ function MonojBandhanSection() {
                   {/* 9. REMARKS (READ-ONLY WHEN SAVED, MANUAL TEXT INPUT WHEN NEW) */}
                   <td style={{ ...tdStyle, padding: isSaved ? '6px 10px' : '4px 6px' }}>
                     {isSaved ? (
-                      <span style={{ fontSize: '13px', color: '#334155' }}>
-                        {row.remarks || '-'}
-                      </span>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                        <span style={{ fontSize: '13px', color: '#334155' }}>
+                          {row.remarks || '-'}
+                        </span>
+                        {row.b2bEntryId ? (
+                          <Tooltip title="View / Edit B2B GST Purchase Entry" arrow>
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setB2bTargetRow(row);
+                                setB2bDialogOpen(true);
+                              }}
+                              sx={{
+                                color: '#0284c7',
+                                p: 0.35,
+                                bgcolor: '#f0f9ff',
+                                border: '1px solid #bae6fd',
+                                borderRadius: '4px',
+                                '&:hover': { bgcolor: '#e0f2fe' }
+                              }}
+                            >
+                              <OpenInNewIcon sx={{ fontSize: 14 }} />
+                            </IconButton>
+                          </Tooltip>
+                        ) : null}
+                      </Box>
                     ) : (
                       <input
                         type="text"
@@ -1469,7 +1890,7 @@ function MonojBandhanSection() {
                     )}
                   </td>
 
-                  {/* 10. PDF UPLOAD */}
+                  {/* 10. DOCUMENT UPLOAD (PDF, JPG, JPEG) */}
                   <td style={{ ...tdStyle, textAlign: 'center', padding: '4px 6px' }}>
                     {isUploading ? (
                       <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
@@ -1480,117 +1901,130 @@ function MonojBandhanSection() {
                       </Box>
                     ) : row.pdfUrl ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
-                        <Tooltip title={row.pdfName || 'Document.pdf'} arrow>
+                        {(() => {
+                          const isImg = isImageDoc(row.pdfName || row.pdfUrl);
+                          return (
+                            <>
+                              <Tooltip title={row.pdfName || (isImg ? 'Document.jpg' : 'Document.pdf')} arrow>
+                                <Box
+                                  sx={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 0.5,
+                                    maxWidth: '80px',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    px: 0.6,
+                                    py: 0.25,
+                                    borderRadius: '4px',
+                                    bgcolor: '#f1f5f9',
+                                    border: '1px solid #e2e8f0',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    color: '#334155'
+                                  }}
+                                >
+                                  {isImg ? (
+                                    <ImageIcon sx={{ fontSize: 13, color: '#0284c7', flexShrink: 0 }} />
+                                  ) : (
+                                    <PictureAsPdfIcon sx={{ fontSize: 13, color: '#ef4444', flexShrink: 0 }} />
+                                  )}
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {row.pdfName || (isImg ? 'IMG' : 'PDF')}
+                                  </span>
+                                </Box>
+                              </Tooltip>
+
+                              {/* View / Open Document in new tab */}
+                              <Tooltip title={isImg ? "View / Open Image" : "View / Open PDF"} arrow>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => window.open(row.pdfUrl, '_blank')}
+                                  sx={{ color: '#2563eb', p: 0.35, '&:hover': { bgcolor: '#eff6ff' } }}
+                                >
+                                  <OpenInNewIcon sx={{ fontSize: 16 }} />
+                                </IconButton>
+                              </Tooltip>
+
+                              {/* Replace Document */}
+                              <Tooltip title="Replace Document (PDF, JPG, JPEG)" arrow>
+                                <label htmlFor={`doc-replace-${rowId}`} style={{ display: 'inline-flex', margin: 0, cursor: 'pointer' }}>
+                                  <input
+                                    id={`doc-replace-${rowId}`}
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg,image/jpg"
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => {
+                                      if (e.target.files && e.target.files[0]) {
+                                        handlePdfUpload(row, e.target.files[0]);
+                                        e.target.value = '';
+                                      }
+                                    }}
+                                  />
+                                  <IconButton
+                                    component="span"
+                                    size="small"
+                                    sx={{ color: '#64748b', p: 0.35, '&:hover': { bgcolor: '#f1f5f9', color: '#1e293b' } }}
+                                  >
+                                    <CloudUploadIcon sx={{ fontSize: 16 }} />
+                                  </IconButton>
+                                </label>
+                              </Tooltip>
+
+                              {/* Remove Document */}
+                              <Tooltip title="Remove Document" arrow>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handlePdfRemove(row)}
+                                  sx={{ color: '#94a3b8', p: 0.35, '&:hover': { bgcolor: '#fee2e2', color: '#ef4444' } }}
+                                >
+                                  <ClearIcon sx={{ fontSize: 16 }} />
+                                </IconButton>
+                              </Tooltip>
+                            </>
+                          );
+                        })()}
+                      </Box>
+                    ) : (
+                      <Tooltip title="Accepted: PDF, JPG, JPEG" arrow>
+                        <label htmlFor={`doc-upload-${rowId}`} style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
+                          <input
+                            id={`doc-upload-${rowId}`}
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg,image/jpg"
+                            style={{ display: 'none' }}
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                handlePdfUpload(row, e.target.files[0]);
+                                e.target.value = '';
+                              }
+                            }}
+                          />
                           <Box
+                            component="span"
                             sx={{
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: 0.5,
-                              maxWidth: '80px',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              px: 0.6,
-                              py: 0.25,
-                              borderRadius: '4px',
-                              bgcolor: '#f1f5f9',
-                              border: '1px solid #e2e8f0',
+                              px: 1.1,
+                              py: 0.35,
+                              borderRadius: '5px',
                               fontSize: '11px',
-                              fontWeight: 600,
-                              color: '#334155'
+                              fontWeight: 700,
+                              color: '#2563eb',
+                              bgcolor: '#eff6ff',
+                              border: '1px dashed #93c5fd',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s',
+                              '&:hover': { bgcolor: '#dbeafe', borderColor: '#3b82f6' }
                             }}
                           >
-                            <PictureAsPdfIcon sx={{ fontSize: 13, color: '#ef4444', flexShrink: 0 }} />
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {row.pdfName || 'PDF'}
-                            </span>
+                            <CloudUploadIcon sx={{ fontSize: 13 }} />
+                            Upload Document
                           </Box>
-                        </Tooltip>
-
-                        {/* View PDF in new tab */}
-                        <Tooltip title="View / Open PDF" arrow>
-                          <IconButton
-                            size="small"
-                            onClick={() => window.open(row.pdfUrl, '_blank')}
-                            sx={{ color: '#2563eb', p: 0.35, '&:hover': { bgcolor: '#eff6ff' } }}
-                          >
-                            <OpenInNewIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                        </Tooltip>
-
-                        {/* Replace PDF */}
-                        <Tooltip title="Replace PDF" arrow>
-                          <label htmlFor={`pdf-replace-${rowId}`} style={{ display: 'inline-flex', margin: 0, cursor: 'pointer' }}>
-                            <input
-                              id={`pdf-replace-${rowId}`}
-                              type="file"
-                              accept="application/pdf"
-                              style={{ display: 'none' }}
-                              onChange={(e) => {
-                                if (e.target.files && e.target.files[0]) {
-                                  handlePdfUpload(row, e.target.files[0]);
-                                  e.target.value = '';
-                                }
-                              }}
-                            />
-                            <IconButton
-                              component="span"
-                              size="small"
-                              sx={{ color: '#64748b', p: 0.35, '&:hover': { bgcolor: '#f1f5f9', color: '#1e293b' } }}
-                            >
-                              <CloudUploadIcon sx={{ fontSize: 16 }} />
-                            </IconButton>
-                          </label>
-                        </Tooltip>
-
-                        {/* Remove PDF */}
-                        <Tooltip title="Remove PDF" arrow>
-                          <IconButton
-                            size="small"
-                            onClick={() => handlePdfRemove(row)}
-                            sx={{ color: '#94a3b8', p: 0.35, '&:hover': { bgcolor: '#fee2e2', color: '#ef4444' } }}
-                          >
-                            <ClearIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    ) : (
-                      <label htmlFor={`pdf-upload-${rowId}`} style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
-                        <input
-                          id={`pdf-upload-${rowId}`}
-                          type="file"
-                          accept="application/pdf"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              handlePdfUpload(row, e.target.files[0]);
-                              e.target.value = '';
-                            }
-                          }}
-                        />
-                        <Box
-                          component="span"
-                          sx={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 0.5,
-                            px: 1.1,
-                            py: 0.35,
-                            borderRadius: '5px',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            color: '#2563eb',
-                            bgcolor: '#eff6ff',
-                            border: '1px dashed #93c5fd',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s',
-                            '&:hover': { bgcolor: '#dbeafe', borderColor: '#3b82f6' }
-                          }}
-                        >
-                          <CloudUploadIcon sx={{ fontSize: 13 }} />
-                          Upload PDF
-                        </Box>
-                      </label>
+                        </label>
+                      </Tooltip>
                     )}
                   </td>
 
@@ -1612,14 +2046,13 @@ function MonojBandhanSection() {
             {filteredRows.length > 0 && (
               <tr style={{ backgroundColor: '#f1f5f9', fontWeight: 900 }}>
                 <td style={{ ...tdStyle, backgroundColor: '#e2e8f0' }}></td>
-                <td colSpan={2} style={{ ...tdStyle, textAlign: 'right', paddingRight: '12px', fontSize: '13px', color: '#0f172a', backgroundColor: '#e2e8f0' }}>
+                <td colSpan={8} style={{ ...tdStyle, textAlign: 'right', paddingRight: '12px', fontSize: '13px', color: '#0f172a', backgroundColor: '#e2e8f0' }}>
                   TOTAL SUMMARY
                 </td>
-                <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '6px', fontSize: '13px', color: '#b45309', backgroundColor: '#fef3c7' }}>
+                <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '12px', fontSize: '13px', color: '#b45309', backgroundColor: '#fef3c7' }}>
                   ₹{formatAmt(summaryMetrics.totalCredit)}
                 </td>
-                <td colSpan={3} style={{ ...tdStyle, backgroundColor: '#e2e8f0' }}></td>
-                <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '6px', fontSize: '13px', color: '#0369a1', backgroundColor: '#e0f2fe' }}>
+                <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '12px', fontSize: '13px', color: '#0369a1', backgroundColor: '#e0f2fe' }}>
                   ₹{formatAmt(summaryMetrics.totalDebit)}
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '12px', fontSize: '13px', color: summaryMetrics.finalBalance >= 0 ? '#15803d' : '#b91c1c', backgroundColor: summaryMetrics.finalBalance >= 0 ? '#dcfce7' : '#fee2e2' }}>
@@ -1661,6 +2094,17 @@ function MonojBandhanSection() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── B2B GST Purchase Entry Dialog ── */}
+      <B2BEntryDialog
+        open={b2bDialogOpen}
+        onClose={handleB2BClose}
+        invoiceNumber={b2bTargetRow?.invoiceNo}
+        debitReason={b2bTargetRow?.particulars}
+        row={b2bTargetRow}
+        isManojBandhan={true}
+        onSaved={handleB2BSaved}
+      />
 
       <Snackbar
         open={!!snack}

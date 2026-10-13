@@ -43,39 +43,10 @@ async function migrateMonthYear(col) {
 }
 
 
-const normalizeDateToKey = (val) => {
-  if (!val) return '';
-  if (val instanceof Date) {
-    if (isNaN(val.getTime())) return '';
-    const d = String(val.getDate()).padStart(2, '0');
-    const m = String(val.getMonth() + 1).padStart(2, '0');
-    const y = val.getFullYear();
-    return `${d}-${m}-${y}`;
-  }
-  const str = String(val).trim().split('T')[0].trim();
-  const parts = str.split(/[-\/\.]/);
-  if (parts.length === 3) {
-    if (parts[0].length === 4) {
-      // YYYY-MM-DD or YYYY/MM/DD
-      const y = parseInt(parts[0], 10);
-      const m = String(parseInt(parts[1], 10)).padStart(2, '0');
-      const d = String(parseInt(parts[2], 10)).padStart(2, '0');
-      if (y > 1900 && parseInt(m, 10) >= 1 && parseInt(m, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
-        return `${d}-${m}-${y}`;
-      }
-    } else {
-      // DD-MM-YYYY or DD/MM/YYYY or D/M/YY
-      const d = String(parseInt(parts[0], 10)).padStart(2, '0');
-      const m = String(parseInt(parts[1], 10)).padStart(2, '0');
-      let y = parseInt(parts[2], 10);
-      if (y < 100) y += 2000;
-      if (y > 1900 && parseInt(m, 10) >= 1 && parseInt(m, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
-        return `${d}-${m}-${y}`;
-      }
-    }
-  }
-  return '';
-};
+const {
+  normalizeDateToKey,
+  aggregateCashbookExpenses
+} = require("../utils/cashbookExpenseCalculator");
 
 // ── GET /main-cashbook ───────────────────────────────────────────────────
 // Optional query params: ?month=4&year=2026
@@ -124,9 +95,10 @@ router.get("/", auth, async (req, res) => {
 
     const voucherCol = mongoose.connection.collection("vouchers");
     const cementCol = mongoose.connection.useDb("cement_register").collection("entries");
+    const indirectCol = mongoose.connection.useDb("invoiceAI").collection("indirect_expenses");
 
     // ── Run all aggregations IN PARALLEL ──
-    const [voucherAdvances, directVouchers, creditVouchers, cementDocs, bankBookMainCash] = await Promise.all([
+    const [voucherAdvances, directVouchers, creditVouchers, cementDocs, bankBookMainCash, indirectDocs] = await Promise.all([
 
       // 1a. Indirect Vouchers (Site Cash) — strictly NOT "Direct Expense" and NOT Credit Voucher
       voucherCol.aggregate([
@@ -162,21 +134,17 @@ router.get("/", auth, async (req, res) => {
         ledgerName: { $regex: /^main cash$/i },
         names: { $regex: /^main cash$/i }
       }).lean().catch(() => []),
+
+      // 4. Indirect Expenses
+      indirectCol.find({}).toArray().catch(() => []),
     ]);
 
-    const advanceMap = {};
-    const officeExpMap = {};
     const officeDetailsMap = {};
     const creditVoucherMap = {};
     const bankBookCashRecvMap = {};
 
-    voucherAdvances.forEach(a => {
-      if (a._id) advanceMap[a._id] = (advanceMap[a._id] || 0) + a.total;
-    });
-
     directVouchers.forEach(a => {
       if (a._id) {
-        officeExpMap[a._id] = (officeExpMap[a._id] || 0) + a.total;
         officeDetailsMap[a._id] = (a.details || []).map(d => `${d.purpose} (${d.amount})`).join(", ");
       }
     });
@@ -189,33 +157,19 @@ router.get("/", auth, async (req, res) => {
       }
     });
 
-    // Cement Register daily advances: Loading Advance + Site Cash Advance + Office Cash Advance
-    cementDocs.forEach(entry => {
-      const dateVal = entry["LOADING DT"] || entry["LOADING DATE"] || entry["BILL DATE"] || entry["DATE"];
-      if (!dateVal) return;
-      const normDate = normalizeDateToKey(dateVal);
-      if (!normDate) return;
-
-      const getNum = (...keys) => {
-        for (const k of keys) {
-          const v = entry[k];
-          if (v !== undefined && v !== null && v !== '') {
-            const n = parseFloat(String(v).replace(/,/g, ''));
-            if (!isNaN(n)) return n;
-          }
-        }
-        return 0;
-      };
-
-      const loadingAdv = getNum('ADVANCE', 'LOADING ADVANCE', 'Loading Advance');
-      const siteCashAdv = getNum('SITE CASH', 'Site Cash', 'SITE_CASH', 'SITE CASH ADVANCE', 'Site Cash Advance');
-      const officeCashAdv = getNum('OFFICE CASH', 'Office Cash', 'OFFICE_CASH', 'OFFICE CASH ADVANCE', 'Office Cash Advance');
-
-      const dailyTotal = loadingAdv + siteCashAdv + officeCashAdv;
-      if (dailyTotal > 0) {
-        advanceMap[normDate] = (advanceMap[normDate] || 0) + dailyTotal;
-      }
-    });
+    // ── TASK 1 & TASK 2: Authoritative SITE CASH EXP & OFFICE EXP date-wise aggregation ──
+    // SITE CASH EXP (date) =
+    //   SUM(Cement Register Loading Advance for date)
+    // + SUM(Cement Register Site Cash Advance for date)
+    // + SUM(Indirect Expenses Site Cash for date)
+    //
+    // OFFICE EXP (date) =
+    //   SUM(Cement Register Office Cash Advance for date)
+    // + SUM(Indirect Expenses Office Cash for date)
+    const {
+      getSiteCashExp,
+      getOfficeExp
+    } = aggregateCashbookExpenses(cementDocs, indirectDocs);
 
     // Bank Book Main Cash withdrawals: Aggregate by Date
     bankBookMainCash.forEach(doc => {
@@ -230,16 +184,13 @@ router.get("/", auth, async (req, res) => {
     entries.forEach(entry => {
       if (entry.DATE) {
         const normDate = normalizeDateToKey(entry.DATE);
-        entry.S_EXPENSE = (normDate && advanceMap[normDate] !== undefined)
-          ? advanceMap[normDate]
-          : (advanceMap[entry.DATE] || 0);
 
-        // Office expenses remain user-editable/manual on entry unless empty
-        if (entry.O_EXPENSE === undefined || entry.O_EXPENSE === null) {
-          entry.O_EXPENSE = (normDate && officeExpMap[normDate] !== undefined)
-            ? officeExpMap[normDate]
-            : (officeExpMap[entry.DATE] || 0);
-        }
+        // TASK 1: SITE CASH EXP = Loading Advance + Site Cash Advance + Indirect Expenses Site Cash
+        entry.S_EXPENSE = normDate ? getSiteCashExp(normDate) : 0;
+
+        // TASK 2: OFFICE EXP = Office Cash Advance + Indirect Expenses Office Cash
+        entry.O_EXPENSE = normDate ? getOfficeExp(normDate) : 0;
+
         if (!entry.REMARKS_EXP) {
           entry.REMARKS_EXP = (normDate && officeDetailsMap[normDate] !== undefined)
             ? officeDetailsMap[normDate]
@@ -255,6 +206,7 @@ router.get("/", auth, async (req, res) => {
           : (creditVoucherMap[entry.DATE] !== undefined ? creditVoucherMap[entry.DATE] : 0);
       } else {
         entry.S_EXPENSE = 0;
+        entry.O_EXPENSE = 0;
         entry.CREDIT_VOUCHER = 0;
       }
     });

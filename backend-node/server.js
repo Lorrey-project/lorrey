@@ -237,6 +237,14 @@ const connectDB = async () => {
     } catch (idxErr) {
       console.error("Index creation error:", idxErr);
     }
+
+    // Reconcile existing confirmed Freight Creditor GST invoices into PartyPayment
+    try {
+      const { reconcileAllFreightGstInvoices } = require('./utils/freightGstPartyPaymentSync');
+      await reconcileAllFreightGstInvoices();
+    } catch (syncErr) {
+      console.warn("Freight GST PartyPayment initial sync warning:", syncErr.message);
+    }
   } catch (err) {
     console.error("MongoDB connection error:", err.message);
     console.log("Retrying MongoDB connection in 5 seconds...");

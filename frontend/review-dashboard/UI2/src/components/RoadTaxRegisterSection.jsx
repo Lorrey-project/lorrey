@@ -117,7 +117,8 @@ export default function RoadTaxRegisterSection({
       });
 
       if (res.data?.success) {
-        setRows(res.data.entries || []);
+        const filtered = (res.data.entries || []).filter(r => !r.validityType || r.validityType.toUpperCase() === 'ROAD TAX');
+        setRows(filtered);
       }
     } catch (err) {
       console.error('[VehicleValidity] Fetch error:', err);
@@ -181,6 +182,7 @@ export default function RoadTaxRegisterSection({
       await axios.post(`${API_URL}/road-tax/save`, {
         recordId: row.recordId,
         truckNo: row.truckNo,
+        ownerName: row.ownerName,
         validityType: row.validityType,
         creditor: creditorName,
         month: selMonth,
@@ -191,7 +193,8 @@ export default function RoadTaxRegisterSection({
         receivableAmount: row.receivableAmount,
         paidAmount: row.paidAmount,
         pdfUrl: row.pdfUrl,
-        pdfName: row.pdfName
+        pdfName: row.pdfName,
+        expireDate: row.expireDate
       }, { headers });
     } catch (err) {
       console.error('[VehicleValidity] Auto save error:', err);
@@ -270,6 +273,7 @@ export default function RoadTaxRegisterSection({
         axios.post(`${API_URL}/road-tax/save`, {
           recordId: row.recordId,
           truckNo: row.truckNo,
+          ownerName: row.ownerName,
           validityType: row.validityType,
           creditor: creditorName,
           month: selMonth,
@@ -280,7 +284,8 @@ export default function RoadTaxRegisterSection({
           receivableAmount: row.receivableAmount,
           paidAmount: row.paidAmount,
           pdfUrl: row.pdfUrl,
-          pdfName: row.pdfName
+          pdfName: row.pdfName,
+          expireDate: row.expireDate
         }, { headers })
       );
 

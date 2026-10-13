@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Autocomplete, TextField } from '@mui/material';
 
 export default function SearchableSelect({
@@ -14,6 +14,28 @@ export default function SearchableSelect({
   size,
   variant
 }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  // Close reliably when clicking outside without blocking clicks on adjacent elements
+  useEffect(() => {
+    if (!open) return;
+    const handleOutsideClick = (e) => {
+      if (containerRef.current && containerRef.current.contains(e.target)) {
+        return;
+      }
+      if (e.target.closest && e.target.closest('.MuiAutocomplete-popper')) {
+        return;
+      }
+      setOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handleOutsideClick, true);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideClick, true);
+    };
+  }, [open]);
+
   // Recursively extract plain string text from any React element children
   const extractText = (node) => {
     if (node === null || node === undefined) return '';
@@ -26,7 +48,7 @@ export default function SearchableSelect({
   };
 
   // Parse children to build options array
-  const options = React.useMemo(() => {
+  const options = useMemo(() => {
     const opts = [];
     React.Children.forEach(children, child => {
       // Support native <option> and MUI <MenuItem>
@@ -42,8 +64,14 @@ export default function SearchableSelect({
         }
       }
     });
+
+    // Ensure if value is provided and not in options, it is still included as an option
+    if (value && !opts.some(o => String(o.value) === String(value))) {
+      opts.push({ value: value, label: String(value), disabled: false });
+    }
+
     return opts;
-  }, [children]);
+  }, [children, value]);
 
   // Find the currently selected option object
   // If value doesn't perfectly match, default to null so Autocomplete doesn't crash
@@ -51,11 +79,18 @@ export default function SearchableSelect({
 
   return (
     <Autocomplete
+      ref={containerRef}
+      open={open}
+      onOpen={() => setOpen(true)}
+      onClose={(event, reason) => {
+        setOpen(false);
+      }}
       options={options}
       getOptionLabel={(option) => option.label || ""}
       getOptionDisabled={(option) => !!option.disabled}
       value={selectedOption}
       onChange={(event, newValue) => {
+        setOpen(false);
         if (onChange) {
           // Mock event to simulate standard native select onChange
           const fakeEvent = {
@@ -70,6 +105,9 @@ export default function SearchableSelect({
       disabled={disabled}
       disableClearable
       isOptionEqualToValue={(option, val) => String(option.value) === String(val.value)}
+      PopperProps={{
+        sx: { zIndex: 1400 }
+      }}
       renderInput={(params) => (
         <TextField 
           {...params} 

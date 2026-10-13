@@ -70,6 +70,10 @@ const voucherSchema = new mongoose.Schema(
       type: String,
       default: "OFFICE",
     },
+    panelSource: {
+      type: String,
+      default: null,
+    },
     appliedToCementId: {
       type: String,
       default: null,

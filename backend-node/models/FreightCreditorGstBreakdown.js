@@ -38,6 +38,10 @@ const freightCreditorGstBreakdownSchema = new mongoose.Schema({
   incentiveM1: {
     type: Number,
     default: null,
+  },
+  b2bEntryId: {
+    type: String,
+    default: null,
   }
 }, { timestamps: true });
 

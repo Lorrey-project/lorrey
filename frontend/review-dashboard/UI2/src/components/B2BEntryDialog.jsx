@@ -60,6 +60,9 @@ export default function B2BEntryDialog({
   debitReason,
   row,
   allocationId,
+  isManojBandhan = false,
+  isFreightCreditor = false,
+  freightContext = null,
   onSaved
 }) {
   const [formData, setFormData] = useState({ ...INITIAL_FORM_DATA });
@@ -71,9 +74,9 @@ export default function B2BEntryDialog({
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  // Fetch existing B2B entry matching this bill and debit reason
+  // Fetch existing B2B entry matching this bill and debit reason, Manoj Bandhan row, or Freight Creditor GST context
   const loadExistingB2BRecord = useCallback(async () => {
-    if (!open || !invoiceNumber) return;
+    if (!open) return;
     setLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
@@ -84,13 +87,32 @@ export default function B2BEntryDialog({
       });
 
       const allEntries = res.data?.entries || [];
-      // Look for an existing B2B record linked to this invoice number and debit reason
+      const currentVehicleNo = freightContext?.activeVehicleRow?.vehicleNo || freightContext?.selectedVehicleNo || row?.vehicleNo;
+      const currentCreditorKey = freightContext?.creditor?.creditorKey;
+      const currentMonth = freightContext?.taxDetails?.month;
+      const currentFy = freightContext?.taxDetails?.fyStr;
+      const currentYear = freightContext?.taxDetails?.year;
+
+      // Look for an existing B2B record linked to this invoice number and debit reason, Manoj Bandhan row, or Freight Creditor GST context
       const match = allEntries.find(e =>
         (!e.type || e.type === 'b2b') &&
         (
-          (e.billRegisterInvoiceNo === invoiceNumber && e.debitReason === debitReason) ||
-          (e.bankBookRecordId && row?._id && String(e.bankBookRecordId) === String(row._id) && e.debitReason === debitReason) ||
-          (row?.b2bEntryId && String(e._id) === String(row.b2bEntryId))
+          (isFreightCreditor ? (
+            (freightContext?.activeVehicleRow?.b2bEntryId && String(e._id) === String(freightContext.activeVehicleRow.b2bEntryId)) ||
+            (row?.b2bEntryId && String(e._id) === String(row.b2bEntryId)) ||
+            (
+              (e.sourceModule === 'FREIGHT_CREDITOR_GST' || e.Source === 'Freight Creditor GST') &&
+              e.creditorKey === currentCreditorKey &&
+              e.vehicleNo === currentVehicleNo &&
+              Number(e.month) === Number(currentMonth) &&
+              (String(e.fy) === String(currentFy) || String(e.year) === String(currentYear))
+            )
+          ) : (
+            (e.manojRowId && row?._id && String(e.manojRowId) === String(row._id)) ||
+            (row?.b2bEntryId && String(e._id) === String(row.b2bEntryId)) ||
+            (invoiceNumber && e.billRegisterInvoiceNo === invoiceNumber && e.debitReason === debitReason) ||
+            (e.bankBookRecordId && row?._id && String(e.bankBookRecordId) === String(row._id) && e.debitReason === debitReason)
+          ))
         )
       );
 
@@ -114,11 +136,45 @@ export default function B2BEntryDialog({
           'GSTR-1/1A/IFF/GSTR-5 Period': match['GSTR-1/1A/IFF/GSTR-5 Period'] || row?.month || '',
           'GSTR-1/1A/IFF/GSTR-5 Filing Date': match['GSTR-1/1A/IFF/GSTR-5 Filing Date'] || '',
           'ITC Availability': match['ITC Availability'] || 'Inputs',
-          'Reason': match['Reason'] || debitReason || '',
+          'Reason': match['Reason'] || debitReason || row?.particulars || '',
           'Applicable % Tax Rate': match['Applicable % Tax Rate'] != null ? String(match['Applicable % Tax Rate']) : '18',
-          'Source': match['Source'] || 'Debit Reason Allocation',
+          'Source': match['Source'] || (isFreightCreditor ? 'Freight Creditor GST' : isManojBandhan ? 'MANOJ BANDHAN GST PURCHASE' : 'Debit Reason Allocation'),
           'IRN': match['IRN'] || '',
           'IRN Date': match['IRN Date'] || ''
+        });
+      } else if (isFreightCreditor && freightContext) {
+        // Initialize form with reliable contextual defaults from Freight Creditor GST invoice
+        setExistingEntryId(null);
+        setExistingPdfUrl(null);
+        setPdfFile(null);
+
+        const { creditor, activeVehicleRow, taxDetails, taxableValue, cgstValue, sgstValue, totalInvoiceAmount } = freightContext;
+        const gstrPeriod = taxDetails ? `${taxDetails.monthName} '${String(taxDetails.year).slice(-2)}` : '';
+        const vehNo = activeVehicleRow?.vehicleNo || '';
+
+        setFormData({
+          ...INITIAL_FORM_DATA,
+          'GSTIN of Supplier': creditor?.gstn || '',
+          'Trade / Legal Name': creditor?.firmName || creditor?.creditorTitle || creditor?.ownerName || '',
+          'Invoice Number': taxDetails?.invoiceNumber || invoiceNumber || '',
+          'Invoice Type': 'Regular',
+          'Invoice Date': taxDetails?.dateInputStr || new Date().toISOString().split('T')[0],
+          'Invoice Value': totalInvoiceAmount != null ? String(totalInvoiceAmount) : '',
+          'Place of Supply': '19-West Bengal',
+          'Supply attract reverse charge': 'No',
+          'Taxable Value': taxableValue != null ? String(taxableValue) : '',
+          'Integrated Tax': '0',
+          'CGST': cgstValue != null ? String(cgstValue) : '0',
+          'SGST': sgstValue != null ? String(sgstValue) : '0',
+          'Cess': '0',
+          'GSTR-1/1A/IFF/GSTR-5 Period': gstrPeriod,
+          'GSTR-1/1A/IFF/GSTR-5 Filing Date': '',
+          'ITC Availability': 'Inputs',
+          'Reason': vehNo ? `Freight Creditor GST - ${vehNo}` : (creditor?.creditorTitle ? `Freight Creditor GST - ${creditor.creditorTitle}` : 'Freight Creditor GST'),
+          'Applicable % Tax Rate': '18',
+          'Source': 'Freight Creditor GST',
+          'IRN': '',
+          'IRN Date': ''
         });
       } else {
         // Initialize new form
@@ -128,9 +184,11 @@ export default function B2BEntryDialog({
         setFormData({
           ...INITIAL_FORM_DATA,
           'Trade / Legal Name': row?.site || '',
-          'Reason': debitReason || '',
+          'Invoice Number': row?.invoiceNo || '',
+          'Invoice Date': row?.date || new Date().toISOString().split('T')[0],
+          'Reason': debitReason || row?.particulars || '',
           'GSTR-1/1A/IFF/GSTR-5 Period': row?.month || '',
-          'Source': 'Debit Reason Allocation'
+          'Source': isManojBandhan ? 'MANOJ BANDHAN GST PURCHASE' : 'Debit Reason Allocation'
         });
       }
     } catch (err) {
@@ -138,7 +196,7 @@ export default function B2BEntryDialog({
     } finally {
       setLoading(false);
     }
-  }, [open, invoiceNumber, debitReason, row]);
+  }, [open, invoiceNumber, debitReason, row, isManojBandhan, isFreightCreditor, freightContext]);
 
   useEffect(() => {
     if (open) {
@@ -196,9 +254,43 @@ export default function B2BEntryDialog({
     setErrorMessage('');
     setSuccessMessage('');
 
+    // Field Validation
+    if (!formData['Invoice Number']?.trim()) {
+      setErrorMessage('Invoice Number is required.');
+      setSaving(false);
+      return;
+    }
+    if (!formData['Invoice Date']?.trim()) {
+      setErrorMessage('Invoice Date is required.');
+      setSaving(false);
+      return;
+    }
+    if (!formData['Trade / Legal Name']?.trim()) {
+      setErrorMessage('Trade / Legal Name is required.');
+      setSaving(false);
+      return;
+    }
+    const tv = parseFloat(formData['Taxable Value']);
+    if (formData['Taxable Value'] === '' || isNaN(tv) || tv < 0) {
+      setErrorMessage('Taxable Value is required and must be a valid positive amount.');
+      setSaving(false);
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      // Calculate authoritative invoice value
+      const calculatedInvoiceVal = (formData['Invoice Value'] !== '' && !isNaN(Number(formData['Invoice Value'])))
+        ? Number(formData['Invoice Value'])
+        : (
+            (Number(formData['Taxable Value']) || 0) +
+            (Number(formData['CGST']) || 0) +
+            (Number(formData['SGST']) || 0) +
+            (Number(formData['Integrated Tax']) || 0) +
+            (Number(formData['Cess']) || 0)
+          );
 
       // Prepare payload with relationship tracking
       const payload = {
@@ -208,7 +300,7 @@ export default function B2BEntryDialog({
         'Invoice Number': formData['Invoice Number'] || '',
         'Invoice Type': formData['Invoice Type'] || 'Regular',
         'Invoice Date': formData['Invoice Date'] || '',
-        'Invoice Value': formData['Invoice Value'] !== '' ? Number(formData['Invoice Value']) : '',
+        'Invoice Value': calculatedInvoiceVal,
         'Place of Supply': formData['Place of Supply'] || '19-West Bengal',
         'Supply attract reverse charge': formData['Supply attract reverse charge'] || 'No',
         'Taxable Value': formData['Taxable Value'] !== '' ? Number(formData['Taxable Value']) : '',
@@ -219,17 +311,31 @@ export default function B2BEntryDialog({
         'GSTR-1/1A/IFF/GSTR-5 Period': formData['GSTR-1/1A/IFF/GSTR-5 Period'] || '',
         'GSTR-1/1A/IFF/GSTR-5 Filing Date': formData['GSTR-1/1A/IFF/GSTR-5 Filing Date'] || '',
         'ITC Availability': formData['ITC Availability'] || 'Inputs',
-        'Reason': formData['Reason'] || debitReason || '',
+        'Reason': formData['Reason'] || (isFreightCreditor ? 'Freight Creditor GST' : (debitReason || row?.particulars || '')),
         'Applicable % Tax Rate': formData['Applicable % Tax Rate'] !== '' ? Number(formData['Applicable % Tax Rate']) : 18,
-        'Source': formData['Source'] || 'Debit Reason Allocation',
+        'Source': formData['Source'] || (isFreightCreditor ? 'Freight Creditor GST' : (isManojBandhan ? 'MANOJ BANDHAN GST PURCHASE' : 'Debit Reason Allocation')),
         'IRN': formData['IRN'] || '',
         'IRN Date': formData['IRN Date'] || '',
         // Preserved Relationships
-        bankBookRecordId: row?._id ? String(row._id) : '',
-        billRegisterInvoiceNo: invoiceNumber || '',
-        debitReason: debitReason || '',
+        bankBookRecordId: !isManojBandhan && !isFreightCreditor && row?._id ? String(row._id) : '',
+        manojRowId: isManojBandhan && row?._id ? String(row._id) : (row?.manojRowId ? String(row.manojRowId) : ''),
+        billRegisterInvoiceNo: !isFreightCreditor ? (invoiceNumber || '') : '',
+        debitReason: !isFreightCreditor ? (debitReason || row?.particulars || '') : '',
         allocationId: allocationId || '',
-        sourceModule: 'BANK_BOOK_DEBIT_REASON_ALLOCATION'
+        sourceModule: isFreightCreditor ? 'FREIGHT_CREDITOR_GST' : (isManojBandhan ? 'MANOJ_BANDHAN_GST_PURCHASE' : 'BANK_BOOK_DEBIT_REASON_ALLOCATION'),
+        // Freight Creditor GST specific link metadata
+        ...(isFreightCreditor && freightContext ? {
+          creditorKey: freightContext.creditor?.creditorKey || '',
+          creditorTitle: freightContext.creditor?.creditorTitle || '',
+          vehicleNo: freightContext.activeVehicleRow?.vehicleNo || freightContext.selectedVehicleNo || '',
+          fy: freightContext.taxDetails?.fyStr || freightContext.taxDetails?.fullFy || '',
+          month: freightContext.taxDetails?.month || '',
+          year: freightContext.taxDetails?.year || '',
+          freightInvoiceNo: formData['Invoice Number'] || freightContext.taxDetails?.invoiceNumber || '',
+          freightInvoiceId: freightContext.activeVehicleRow?._id 
+            ? String(freightContext.activeVehicleRow._id) 
+            : `${freightContext.creditor?.creditorKey}_${freightContext.activeVehicleRow?.vehicleNo}_${freightContext.taxDetails?.fyStr}_${freightContext.taxDetails?.month}`
+        } : {})
       };
 
       let savedRecordId = existingEntryId;
@@ -273,29 +379,46 @@ export default function B2BEntryDialog({
         }
       }
 
-      // Link B2B ID back to FinancialYearRow for complete two-way traceability
-      try {
-        await axios.post(`${API_URL}/fy-details/save-row`, {
-          billNo: invoiceNumber,
-          b2bEntryId: String(savedRecordId)
-        }, { headers });
-      } catch (linkErr) {
-        console.warn('[B2BEntryDialog] Linking to FY row notice:', linkErr);
+      // Link B2B ID to Freight Creditor GST Breakdown if freight creditor
+      if (isFreightCreditor && freightContext) {
+        try {
+          await axios.post(`${API_URL}/freight-creditor-gst/link-b2b`, {
+            creditorKey: freightContext.creditor?.creditorKey,
+            vehicleNo: freightContext.activeVehicleRow?.vehicleNo || freightContext.selectedVehicleNo,
+            fy: freightContext.taxDetails?.fyStr,
+            month: freightContext.taxDetails?.month,
+            year: freightContext.taxDetails?.year,
+            b2bEntryId: String(savedRecordId)
+          }, { headers });
+        } catch (linkErr) {
+          console.warn('[B2BEntryDialog] Linking to Freight Creditor notice:', linkErr);
+        }
+      } else if (invoiceNumber && !isManojBandhan) {
+        // Link B2B ID back to FinancialYearRow if billNo exists
+        try {
+          await axios.post(`${API_URL}/fy-details/save-row`, {
+            billNo: invoiceNumber,
+            b2bEntryId: String(savedRecordId)
+          }, { headers });
+        } catch (linkErr) {
+          console.warn('[B2BEntryDialog] Linking to FY row notice:', linkErr);
+        }
       }
 
       setSuccessMessage('B2B record saved successfully into GST Portal database!');
       if (onSaved) {
-        onSaved({
+        await onSaved({
           entryId: savedRecordId,
           isNew: !existingEntryId,
-          payload
+          payload,
+          taxableValue: Number(formData['Taxable Value']) || 0,
+          invoiceValue: calculatedInvoiceVal,
+          invoiceNumber: formData['Invoice Number'] || '',
+          vehicleNo: isFreightCreditor ? (freightContext?.activeVehicleRow?.vehicleNo || freightContext?.selectedVehicleNo) : undefined
         });
       }
 
-      // Briefly wait to display success then close modal
-      setTimeout(() => {
-        onClose();
-      }, 700);
+      onClose();
 
     } catch (err) {
       console.error('[B2BEntryDialog] Save error:', err);
@@ -332,16 +455,22 @@ export default function B2BEntryDialog({
           <ReceiptLongIcon sx={{ fontSize: 28 }} />
           <Box>
             <Typography variant="h6" fontWeight={800} sx={{ lineHeight: 1.2, color: '#ffffff' }}>
-              B2B ENTRY — DEBIT REASON ALLOCATION
+              {isFreightCreditor
+                ? 'B2B ENTRY — FREIGHT CREDITOR GST'
+                : (isManojBandhan ? 'B2B ENTRY — MANOJ BANDHAN GST PURCHASE' : 'B2B ENTRY — DEBIT REASON ALLOCATION')}
             </Typography>
             <Box display="flex" alignItems="center" gap={1} mt={0.5}>
               <Chip
                 size="small"
-                label={debitReason}
+                label={isFreightCreditor
+                  ? (freightContext?.creditor?.creditorTitle || 'FREIGHT CREDITOR')
+                  : (debitReason || row?.particulars || 'GST PURCHASE')}
                 sx={{ bgcolor: 'rgba(255,255,255,0.25)', color: '#fff', fontWeight: 700, fontSize: '11px' }}
               />
               <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.9)', fontWeight: 600 }}>
-                Bill: <span style={{ fontFamily: 'monospace', fontWeight: 800 }}>{invoiceNumber || '—'}</span>
+                {isFreightCreditor
+                  ? `Vehicle: ${freightContext?.activeVehicleRow?.vehicleNo || '—'} • Invoice: ${formData['Invoice Number'] || invoiceNumber || '—'}`
+                  : (isManojBandhan ? `Particulars: ${row?.particulars || '—'}` : `Bill: ${invoiceNumber || '—'}`)}
               </Typography>
             </Box>
           </Box>

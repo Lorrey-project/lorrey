@@ -124,7 +124,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState(null);
   const [isNotified, setIsNotified] = useState(false);
-  const [notifying, setNotifying] = useState(false);
   const [allNotifications, setAllNotifications] = useState([]);
   // Period-level bulk payment (Office Admin sets, Pump Admin sees)
   const [periodPaymentStatus, setPeriodPaymentStatus] = useState('Unpaid');
@@ -583,12 +582,6 @@ export default function PumpPaymentDetails({ onBack, lockedPump = null }) {
 
   // ── CSV export ─────────────────────────────────────────────────────────
   const handleExport = () => {
-    const fyStartYear = parseInt(selYear.split('-')[0], 10);
-    const calendarYear = selMonth >= 4 ? fyStartYear : fyStartYear + 1;
-    const { startDay, endDay } = getPeriodRange(selPeriod, selMonth, calendarYear);
-    const startFmt = `${String(startDay).padStart(2, '0')}.${String(selMonth).padStart(2, '0')}.${String(calendarYear).slice(2)}`;
-    const endFmt = `${String(endDay).padStart(2, '0')}.${String(selMonth).padStart(2, '0')}.${String(calendarYear).slice(2)}`;
-
     const exportRows = computedRows.map(r => ({
       'LOADING DT': r['LOADING DATE'],
       'VEHICLE NUMBER': r['VEHICLE NUMBER'],

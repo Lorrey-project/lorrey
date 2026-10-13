@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Autocomplete, TextField, Checkbox } from '@mui/material';
 import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
 import CheckBoxIcon from '@mui/icons-material/CheckBox';
@@ -19,14 +19,43 @@ export default function MultiSelectSearchable({
   size,
   variant
 }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
   const selectedValues = Array.isArray(value) ? value : [];
+
+  // Close when clicking outside reliably without blocking clicks on adjacent elements
+  useEffect(() => {
+    if (!open) return;
+    const handleOutsideClick = (e) => {
+      if (containerRef.current && containerRef.current.contains(e.target)) {
+        return;
+      }
+      if (e.target.closest && e.target.closest('.MuiAutocomplete-popper')) {
+        return;
+      }
+      setOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handleOutsideClick, true);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideClick, true);
+    };
+  }, [open]);
 
   return (
     <Autocomplete
+      ref={containerRef}
+      open={open}
+      onOpen={() => setOpen(true)}
+      onClose={(event, reason) => {
+        if (reason === 'selectOption' || reason === 'removeTag') return;
+        setOpen(false);
+      }}
       multiple
       options={options}
       disableCloseOnSelect
-      getOptionLabel={(option) => option}
+      getOptionLabel={(option) => String(option || '')}
       value={selectedValues}
       onChange={(event, newValue) => {
         if (onChange) {
@@ -41,17 +70,23 @@ export default function MultiSelectSearchable({
       }}
       disabled={disabled}
       isOptionEqualToValue={(option, val) => String(option) === String(val)}
-      renderOption={(props, option, { selected }) => (
-        <li {...props}>
-          <Checkbox
-            icon={icon}
-            checkedIcon={checkedIcon}
-            style={{ marginRight: 8 }}
-            checked={selected}
-          />
-          {option}
-        </li>
-      )}
+      renderOption={(props, option, { selected }) => {
+        const { key, ...otherProps } = props;
+        return (
+          <li key={key || option} {...otherProps}>
+            <Checkbox
+              icon={icon}
+              checkedIcon={checkedIcon}
+              style={{ marginRight: 8 }}
+              checked={selected}
+            />
+            {option}
+          </li>
+        );
+      }}
+      PopperProps={{
+        sx: { zIndex: 1400 }
+      }}
       renderInput={(params) => (
         <TextField 
           {...params} 

@@ -11,6 +11,7 @@ const { allocatePaymentToBills, detectPaymentRow } = require('../utils/paymentMa
 
 // ── Auto-sync Bank Book Freight Payments -> Party Payment Details ──────
 const TruckContact = require('../models/TruckContact');
+const { syncBankBookDocsToIndirectExpense, reverseBankBookDocsFromIndirectExpense } = require('../utils/bankBookIndirectExpenseManager');
 
 // ── Robust date parser for Bank Book sync ────────────────────────────────
 const parseDateForSync = (val) => {
@@ -453,152 +454,15 @@ const makeSpaceAgnosticRegex = (str) => {
 };
 
 // ── Auto-sync Bank Book Freight Advance -> Cement Register ──────────────────
+const {
+  syncBankBookFreightAdvancesBatch,
+  reverseBankBookFreightAdvanceContribution,
+  isQualifyingBankBookFreightAdvance
+} = require('../utils/monojCementAdvanceManager');
+
 const syncFreightAdvanceToCementRegister = async (affectedDocs) => {
-  const getCombo = (doc) => {
-    const ledger = (doc.ledgerName || '').trim().toLowerCase();
-    if (ledger !== 'freight advance') return null;
-    const v = (doc.vehicle || '').trim();
-    if (!v) return null;
-
-    const docMonthStr = (doc.month || doc.selectedMonth || '').trim();
-    const m = monthNameToNumber(docMonthStr);
-    if (m < 1 || m > 12) return null;
-
-    let fyStart = parseInt(doc.selectedYear, 10);
-    if (isNaN(fyStart)) {
-      const tDate = doc.transactionDate || doc['Transaction Date'];
-      if (tDate) {
-        const parts = String(tDate).split(/[-\/\.]/);
-        if (parts.length === 3) {
-          let yr = parseInt(parts[0], 10);
-          if (isNaN(yr) || yr < 1000) yr = parseInt(parts[2], 10);
-          if (!isNaN(yr)) {
-            if (yr < 100) yr += 2000;
-            fyStart = (m >= 4) ? yr : yr - 1;
-          }
-        }
-      }
-      if (isNaN(fyStart)) {
-        const nowY = new Date().getFullYear();
-        fyStart = (m >= 4) ? nowY : nowY - 1;
-      }
-    }
-
-    const y = (m >= 4) ? fyStart : fyStart + 1;
-    return { vehicleNo: v, month: m, year: y };
-  };
-
-  const combinationsToUpdate = new Set();
-
-  affectedDocs.forEach(doc => {
-    const combo = getCombo(doc);
-    if (combo) combinationsToUpdate.add(JSON.stringify(combo));
-  });
-
-  if (combinationsToUpdate.size === 0) return;
-
-  const mongoose = require('mongoose');
-  const col = mongoose.connection.useDb('cement_register').collection('entries');
-  const { getIO } = require('../socket');
-  const { syncDummyCementRow, deleteDummyRowBySource } = require('../utils/dummyCementRowManager');
-
-  for (const comboStr of combinationsToUpdate) {
-    const combo = JSON.parse(comboStr);
-
-    // Find all 'freight advance' documents for this vehicle in the Bank Book
-    const relatedDocs = await AccountDetail.find({
-      vehicle: { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) },
-      ledgerName: { $regex: /^freight advance$/i }
-    });
-
-    let totalWithdraw = 0;
-    relatedDocs.forEach(d => {
-      const dCombo = getCombo(d);
-      if (dCombo && dCombo.month === combo.month && dCombo.year === combo.year) {
-        const amt = parseFloat(String(d.withdraw || '').replace(/,/g, ''));
-        if (!isNaN(amt)) totalWithdraw += amt;
-      }
-    });
-
-    // Find all matching REAL (non-dummy) Cement Register rows for this Vehicle
-    const cementRows = await col.find({
-      "VEHICLE NUMBER": { $regex: makeSpaceAgnosticRegex(combo.vehicleNo) },
-      isDummy: { $ne: true },
-      _isDummy: { $ne: true }
-    }).toArray();
-
-    const idsToUpdate = [];
-    for (const row of cementRows) {
-      let rowMonth, rowYear;
-      if (row.month && row.year) {
-        rowMonth = parseInt(row.month, 10);
-        rowYear = parseInt(row.year, 10);
-      } else {
-        const dStr = row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || row["RECEIVING DATE"] || row["INVOICE DATE"];
-        const d = parseToDate(dStr);
-        if (d.getTime() > 0) {
-          rowMonth = d.getMonth() + 1;
-          rowYear = d.getFullYear();
-        }
-      }
-
-      if (rowMonth === combo.month && rowYear === combo.year) {
-        idsToUpdate.push(row._id);
-      }
-    }
-
-    if (idsToUpdate.length > 0) {
-      // Real trips exist in this month/year: clean up any dummy row for this vehicle/period
-      await col.deleteMany({
-        sourceType: 'BANK_BOOK_FREIGHT_ADVANCE',
-        "VEHICLE NUMBER": makeSpaceAgnosticRegex(combo.vehicleNo),
-        month: combo.month,
-        year: combo.year
-      });
-
-      await col.updateMany(
-        { _id: { $in: idsToUpdate } },
-        { $set: { "Bank TF": totalWithdraw } }
-      );
-    } else {
-      // No real trip exists for this vehicle: create or update dummy row if totalWithdraw > 0
-      const primaryDoc = relatedDocs[0] || affectedDocs.find(d => {
-        const c = getCombo(d);
-        return c && c.vehicleNo === combo.vehicleNo && c.month === combo.month && c.year === combo.year;
-      });
-      const ownerName = String(primaryDoc?.names || primaryDoc?.party || '').trim();
-      const txDate = primaryDoc?.transactionDate || primaryDoc?.['Transaction Date'] || `${combo.year}-${String(combo.month).padStart(2, '0')}-01`;
-      const txIdStr = primaryDoc ? primaryDoc._id.toString() : `${combo.vehicleNo}_${combo.month}_${combo.year}`;
-
-      if (totalWithdraw > 0) {
-        await syncDummyCementRow({
-          sourceType: 'BANK_BOOK_FREIGHT_ADVANCE',
-          sourceTransactionId: txIdStr,
-          vehicleNumber: combo.vehicleNo,
-          ownerName,
-          date: txDate,
-          month: combo.month,
-          year: combo.year,
-          field: 'Bank TF',
-          amount: totalWithdraw
-        });
-      } else {
-        await col.deleteMany({
-          sourceType: 'BANK_BOOK_FREIGHT_ADVANCE',
-          "VEHICLE NUMBER": makeSpaceAgnosticRegex(combo.vehicleNo),
-          month: combo.month,
-          year: combo.year
-        });
-      }
-    }
-  }
-
-  try {
-    const io = getIO();
-    if (io) io.emit('cementUpdates', { action: 'bulkUpdate' });
-  } catch (e) {
-    console.warn('Socket emit failed:', e.message);
-  }
+  if (!Array.isArray(affectedDocs) || affectedDocs.length === 0) return [];
+  return await syncBankBookFreightAdvancesBatch(affectedDocs);
 };
 
 const VALIDITY_FIELD_CONFIGS = [
@@ -624,6 +488,17 @@ function resolveValidityConfig(val) {
     }
   }
   return null;
+}
+
+const { syncDummyCementRow, deleteDummyRowBySource } = require('../utils/dummyCementRowManager');
+
+function formatDateToDDMMYYYY(d) {
+  if (!d) return '';
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
 }
 
 // ── Auto-sync Bank Book BRINDA SHYAM / JEET PANJA -> Cement Register & Road Tax Validity ──
@@ -655,10 +530,75 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
   }
 
   for (const doc of docMap.values()) {
+    const txIdStr = doc._id.toString();
+    const prevSync = doc._creditorSync || {};
+    const wasApplied = Boolean(prevSync.applied);
+    const prevAmount = num(prevSync.amount) || num(doc.withdraw);
+
     const ledger = (doc.ledgerName || '').trim();
     const isBrinda = /^brinda\s*shyam$/i.test(ledger);
     const isJeet = /^jeet\s*panja$/i.test(ledger);
-    if (!isBrinda && !isJeet) continue;
+
+    // If previously applied but now deleted OR ledger changed away from Brinda Shyam / Jeet Panja:
+    if (isDelete || (!isBrinda && !isJeet)) {
+      if ((wasApplied || isDelete) && prevAmount > 0) {
+        // Revert from Cement Register
+        try {
+          await deleteDummyRowBySource('BRINDA_SHYAM_PAID_AMOUNT', txIdStr);
+          if (prevSync.cementTripId) {
+            const tripIdObj = mongoose.Types.ObjectId.isValid(prevSync.cementTripId) ? new mongoose.Types.ObjectId(prevSync.cementTripId) : null;
+            if (tripIdObj) {
+              const prevTrip = await cementCol.findOne({ _id: tripIdObj });
+              if (prevTrip) {
+                const existingBankTf = num(prevTrip["Bank TF"]);
+                const newBankTf = Math.max(0, existingBankTf - prevAmount);
+                await cementCol.updateOne(
+                  { _id: tripIdObj },
+                  { $set: { "Bank TF": newBankTf }, $pull: { appliedBankBookTxIds: txIdStr } }
+                );
+              }
+            }
+          }
+        } catch (cementErr) {
+          console.warn('[syncCreditorWithdrawToCementAndValidity] Revert cement error:', cementErr.message);
+        }
+
+        // Revert from Road Tax Register
+        try {
+          const oldTruckClean = (prevSync.vehicle || doc.vehicle || '').toUpperCase().replace(/\s+/g, '');
+          const oldCreditor = prevSync.creditor || (isJeet ? 'JEET PANJA' : 'BRINDA SHYAM');
+          const oldTypeKey = (prevSync.validityDbKey || 'ROAD_TAX').replace(/\s+/g, '_');
+          const oldSuffix = oldCreditor === 'JEET PANJA' ? '_JEET_PANJA' : '';
+          const oldPrefix = `${oldTruckClean}_${oldTypeKey}${oldSuffix}`;
+
+          const oldDocs = await roadTaxCol.find({
+            $or: [
+              { appliedBankBookTxIds: txIdStr },
+              { _id: prevSync.roadTaxId && mongoose.Types.ObjectId.isValid(prevSync.roadTaxId) ? new mongoose.Types.ObjectId(prevSync.roadTaxId) : null }
+            ].filter(Boolean)
+          }).toArray();
+
+          for (const oDoc of oldDocs) {
+            const existingPaid = num(oDoc.paidAmount);
+            const newPaid = Math.max(0, existingPaid - prevAmount);
+            const recAmt = num(oDoc.receivableAmount);
+            const newBalance = Math.round(Math.abs(recAmt - newPaid) * 100) / 100;
+            await roadTaxCol.updateOne(
+              { _id: oDoc._id },
+              {
+                $set: { paidAmount: newPaid, balance: newBalance, updatedAt: new Date() },
+                $pull: { appliedBankBookTxIds: txIdStr }
+              }
+            );
+          }
+        } catch (roadTaxErr) {
+          console.warn('[syncCreditorWithdrawToCementAndValidity] Revert road tax error:', roadTaxErr.message);
+        }
+
+        await AccountDetail.updateOne({ _id: doc._id }, { $unset: { _creditorSync: "" } });
+      }
+      continue;
+    }
 
     const creditorName = isJeet ? 'JEET PANJA' : 'BRINDA SHYAM';
     const vehicleNo = (doc.vehicle || '').trim();
@@ -666,8 +606,17 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
     const withdrawAmount = num(doc.withdraw);
 
     // Month validation: must be CURRENT MONTH or PREVIOUS MONTH
-    const docMonth = (doc.month || doc.selectedMonth || '').trim();
-    const docMonthLower = docMonth.toLowerCase();
+    let docMonthStr = String(doc.month || doc.selectedMonth || '').trim();
+    if (/^\d+$/.test(docMonthStr)) {
+      const mIdx = parseInt(docMonthStr, 10) - 1;
+      if (mIdx >= 0 && mIdx < 12) docMonthStr = monthsList[mIdx];
+    }
+    if (!docMonthStr && doc.transactionDate) {
+      const dt = parseDateForSync(doc.transactionDate);
+      if (dt) docMonthStr = monthsList[dt.getMonth()];
+    }
+
+    const docMonthLower = docMonthStr.toLowerCase();
     const isCurrentMonth = docMonthLower === curMonthName.toLowerCase();
     const isPreviousMonth = docMonthLower === prevMonthName.toLowerCase();
 
@@ -688,21 +637,68 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
     if (doc.selectedYear && !isNaN(parseInt(doc.selectedYear, 10))) {
       const sy = parseInt(doc.selectedYear, 10);
       if (sy > 2000) targetYear = sy;
+    } else if (doc.transactionDate) {
+      const dt = parseDateForSync(doc.transactionDate);
+      if (dt) targetYear = dt.getFullYear();
     }
 
-    const txIdStr = doc._id.toString();
-    const prevSync = doc._creditorSync || {};
-    const wasApplied = Boolean(prevSync.applied);
-    const prevAmount = num(prevSync.amount);
+    const truckClean = vehicleNo.toUpperCase().replace(/\s+/g, '');
+    const rawParticulars = String(doc.particulars || '').trim();
+    const vConfig = resolveValidityConfig(rawParticulars);
+
+    if (!vConfig) {
+      warnings.push(`Particulars must specify a valid Validity Type for ${creditorName} (e.g. ROAD TAX VALIDITY).`);
+      continue;
+    }
+
+    // Check if target vehicle, validity type, or creditor changed from previous sync
+    const targetChanged = wasApplied && (
+      (prevSync.vehicle && prevSync.vehicle.toUpperCase().replace(/\s+/g, '') !== truckClean) ||
+      (prevSync.validityDbKey && prevSync.validityDbKey !== vConfig.dbKey) ||
+      (prevSync.creditor && prevSync.creditor !== creditorName)
+    );
+
+    if (targetChanged && prevAmount > 0) {
+      // Revert previous contribution from old road tax record
+      try {
+        const oldTypeKey = (prevSync.validityDbKey || 'ROAD_TAX').replace(/\s+/g, '_');
+        const oldTruckClean = (prevSync.vehicle || '').toUpperCase().replace(/\s+/g, '');
+        const oldSuffix = (prevSync.creditor || creditorName) === 'JEET PANJA' ? '_JEET_PANJA' : '';
+        const oldPrefix = `${oldTruckClean}_${oldTypeKey}${oldSuffix}`;
+
+        const oldDocs = await roadTaxCol.find({
+          $or: [
+            { appliedBankBookTxIds: txIdStr },
+            { key: oldPrefix }
+          ]
+        }).toArray();
+
+        for (const oDoc of oldDocs) {
+          const existingPaid = num(oDoc.paidAmount);
+          const newPaid = Math.max(0, existingPaid - prevAmount);
+          const recAmt = num(oDoc.receivableAmount);
+          const newBalance = Math.round(Math.abs(recAmt - newPaid) * 100) / 100;
+          await roadTaxCol.updateOne(
+            { _id: oDoc._id },
+            {
+              $set: { paidAmount: newPaid, balance: newBalance, updatedAt: new Date() },
+              $pull: { appliedBankBookTxIds: txIdStr }
+            }
+          );
+        }
+      } catch (oldErr) {
+        console.warn('[syncCreditorWithdrawToCementAndValidity] Revert old target error:', oldErr.message);
+      }
+    }
 
     let delta = 0;
-    if (isDelete) {
-      delta = wasApplied ? -prevAmount : 0;
+    if (targetChanged) {
+      delta = withdrawAmount;
     } else {
       delta = wasApplied ? (withdrawAmount - prevAmount) : withdrawAmount;
     }
 
-    if (delta === 0 && wasApplied && !isDelete) {
+    if (delta === 0 && wasApplied && !targetChanged) {
       // Duplicate save protection: already applied with the exact same amount
       continue;
     }
@@ -711,95 +707,74 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
       continue;
     }
 
-    // ── 1. CEMENT REGISTER INTEGRATION ─────────────────────────────
-    const vehicleRegex = makeSpaceAgnosticRegex(vehicleNo);
-    const candidateTrips = await cementCol.find({
-      "VEHICLE NUMBER": { $regex: vehicleRegex },
-      isDummy: { $ne: true },
-      _isDummy: { $ne: true }
-    }).toArray();
-
-    const matchingTrips = [];
-    for (const trip of candidateTrips) {
-      let tripMonth = trip.month ? parseInt(trip.month, 10) : null;
-      let tripYear = trip.year ? parseInt(trip.year, 10) : null;
-      const rawDate = trip["LOADING DT"] || trip["LOADING DATE"] || trip["BILL DATE"] || trip["RECEIVING DATE"] || trip["INVOICE DATE"];
-      const dObj = parseToDate(rawDate);
-      if (dObj.getTime() > 0) {
-        if (!tripMonth) tripMonth = dObj.getMonth() + 1;
-        if (!tripYear) tripYear = dObj.getFullYear();
-      }
-
-      if (tripMonth !== targetMonthNum || tripYear !== targetYear) {
-        continue;
-      }
-
-      // Check Owner Name compatibility if both exist
-      const tripOwner = (trip["OWNER NAME"] || '').trim().toLowerCase();
-      if (tripOwner && ownerName) {
-        const cleanTripOwner = tripOwner.replace(/[^a-z0-9]/g, '');
-        const cleanDocOwner = ownerName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (!cleanTripOwner.includes(cleanDocOwner) && !cleanDocOwner.includes(cleanTripOwner)) {
-          continue;
-        }
-      }
-
-      matchingTrips.push({
-        trip,
-        dateObj: dObj,
-        rawDate
-      });
-    }
-
+    // ── 1. CEMENT REGISTER INTEGRATION (SAFEGUARDED) ───────────────
     let latestTrip = null;
     let latestWrapper = null;
+    try {
+      const vehicleRegex = makeSpaceAgnosticRegex(vehicleNo);
+      const candidateTrips = await cementCol.find({
+        "VEHICLE NUMBER": { $regex: vehicleRegex },
+        isDummy: { $ne: true },
+        _isDummy: { $ne: true }
+      }).toArray();
 
-    if (matchingTrips.length === 0) {
-      if (isDelete || withdrawAmount <= 0) {
-        await deleteDummyRowBySource('BRINDA_SHYAM_PAID_AMOUNT', txIdStr);
-      } else {
-        await syncDummyCementRow({
-          sourceType: 'BRINDA_SHYAM_PAID_AMOUNT',
-          sourceTransactionId: txIdStr,
-          vehicleNumber: vehicleNo,
-          ownerName,
-          date: doc.transactionDate || doc['Transaction Date'] || doc.date,
-          month: targetMonthNum,
-          year: targetYear,
-          field: 'Bank TF',
-          amount: withdrawAmount
-        });
+      const matchingTrips = [];
+      for (const trip of candidateTrips) {
+        let tripMonth = trip.month ? parseInt(trip.month, 10) : null;
+        let tripYear = trip.year ? parseInt(trip.year, 10) : null;
+        const rawDate = trip["LOADING DT"] || trip["LOADING DATE"] || trip["BILL DATE"] || trip["RECEIVING DATE"] || trip["INVOICE DATE"];
+        const dObj = parseToDate(rawDate);
+        if (dObj.getTime() > 0) {
+          if (!tripMonth) tripMonth = dObj.getMonth() + 1;
+          if (!tripYear) tripYear = dObj.getFullYear();
+        }
+
+        if (tripMonth !== targetMonthNum || tripYear !== targetYear) {
+          continue;
+        }
+
+        const tripOwner = (trip["OWNER NAME"] || '').trim().toLowerCase();
+        if (tripOwner && ownerName) {
+          const cleanTripOwner = tripOwner.replace(/[^a-z0-9]/g, '');
+          const cleanDocOwner = ownerName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (!cleanTripOwner.includes(cleanDocOwner) && !cleanDocOwner.includes(cleanTripOwner)) {
+            continue;
+          }
+        }
+
+        matchingTrips.push({ trip, dateObj: dObj, rawDate });
       }
-    } else {
-      // Clean up any dummy row for this transaction if a real trip was found
-      await deleteDummyRowBySource('BRINDA_SHYAM_PAID_AMOUNT', txIdStr);
 
-      // Sort trips by actual trip/invoice date descending to determine the LATEST trip
-      matchingTrips.sort((a, b) => {
-        const diff = b.dateObj.getTime() - a.dateObj.getTime();
-        if (diff !== 0) return diff;
-        return String(b.trip._id).localeCompare(String(a.trip._id));
-      });
-
-      latestWrapper = matchingTrips[0];
-      latestTrip = latestWrapper.trip;
-
-      const appliedTripTxIds = Array.isArray(latestTrip.appliedBankBookTxIds) ? latestTrip.appliedBankBookTxIds : [];
-      const alreadyOnTrip = appliedTripTxIds.includes(txIdStr);
-
-      if (isDelete) {
-        if (alreadyOnTrip) {
-          const existingBankTf = num(latestTrip["Bank TF"]);
-          const newBankTf = Math.max(0, existingBankTf - prevAmount);
-          await cementCol.updateOne(
-            { _id: latestTrip._id },
-            {
-              $set: { "Bank TF": newBankTf },
-              $pull: { appliedBankBookTxIds: txIdStr }
-            }
-          );
+      if (matchingTrips.length === 0) {
+        if (withdrawAmount <= 0) {
+          await deleteDummyRowBySource('BRINDA_SHYAM_PAID_AMOUNT', txIdStr);
+        } else {
+          await syncDummyCementRow({
+            sourceType: 'BRINDA_SHYAM_PAID_AMOUNT',
+            sourceTransactionId: txIdStr,
+            vehicleNumber: vehicleNo,
+            ownerName,
+            date: doc.transactionDate || doc['Transaction Date'] || doc.date,
+            month: targetMonthNum,
+            year: targetYear,
+            field: 'Bank TF',
+            amount: withdrawAmount
+          });
         }
       } else {
+        await deleteDummyRowBySource('BRINDA_SHYAM_PAID_AMOUNT', txIdStr);
+        matchingTrips.sort((a, b) => {
+          const diff = b.dateObj.getTime() - a.dateObj.getTime();
+          if (diff !== 0) return diff;
+          return String(b.trip._id).localeCompare(String(a.trip._id));
+        });
+
+        latestWrapper = matchingTrips[0];
+        latestTrip = latestWrapper.trip;
+
+        const appliedTripTxIds = Array.isArray(latestTrip.appliedBankBookTxIds) ? latestTrip.appliedBankBookTxIds : [];
+        const alreadyOnTrip = appliedTripTxIds.includes(txIdStr);
+
         if (!alreadyOnTrip) {
           const existingBankTf = num(latestTrip["Bank TF"]);
           const newBankTf = existingBankTf + delta;
@@ -815,28 +790,16 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
           const newBankTf = Math.max(0, existingBankTf + delta);
           await cementCol.updateOne(
             { _id: latestTrip._id },
-            {
-              $set: { "Bank TF": newBankTf }
-            }
+            { $set: { "Bank TF": newBankTf } }
           );
         }
       }
+    } catch (cementErr) {
+      console.warn('[syncCreditorWithdrawToCementAndValidity] Cement sync warning:', cementErr.message);
     }
 
     // ── 2. BRINDA SHYAM / JEET PANJA PANEL INTEGRATION ─────────────
-    const creditorFilter = isJeet
-      ? { creditor: 'JEET PANJA' }
-      : { $or: [{ creditor: 'BRINDA SHYAM' }, { creditor: { $exists: false } }, { creditor: null }] };
-
-    const rawParticulars = String(doc.particulars || '').trim();
-    const vConfig = resolveValidityConfig(rawParticulars);
-
-    if (!vConfig) {
-      warnings.push(`Particulars must specify a valid Validity Type for ${creditorName} (e.g. RC VALIDITY, FITNESS VALIDITY).`);
-      continue;
-    }
-
-    // Verify vehicle contact and owner match
+    const vehicleRegex = makeSpaceAgnosticRegex(vehicleNo);
     const contact = (await ownerCol.findOne({
       $or: [
         { "Truck No": { $regex: vehicleRegex } },
@@ -851,12 +814,7 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
       ]
     }));
 
-    if (!contact) {
-      warnings.push(`No vehicle contact found for ${vehicleNo}.`);
-      continue;
-    }
-
-    if (ownerName) {
+    if (ownerName && contact) {
       const contactOwner = String(contact["Owner Name"] || contact["Owner Name "] || contact.owner_name || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
       const selectedOwner = ownerName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
       if (contactOwner && selectedOwner && !contactOwner.includes(selectedOwner) && !selectedOwner.includes(contactOwner)) {
@@ -865,9 +823,8 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
       }
     }
 
-    // Check if contact actually has this validity configured or if an existing road tax doc exists
-    let rawValidityDate = contact[vConfig.primaryKey];
-    if (!rawValidityDate) {
+    let rawValidityDate = contact ? contact[vConfig.primaryKey] : null;
+    if (!rawValidityDate && contact) {
       for (const alt of vConfig.altKeys) {
         if (contact[alt]) {
           rawValidityDate = contact[alt];
@@ -876,148 +833,188 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
       }
     }
 
-    const truckClean = vehicleNo.toUpperCase().replace(/\s+/g, '');
-    const typeKey = vConfig.dbKey.replace(/\s+/g, '_');
-    const prefix = isJeet ? `${truckClean}_${typeKey}_JEET_PANJA` : `${truckClean}_${typeKey}`;
-    const keyMonthYear = isJeet ? `${truckClean}_${typeKey}_${targetMonthNum}_${targetYear}_JEET_PANJA` : `${truckClean}_${typeKey}_${targetMonthNum}_${targetYear}`;
+    const typeKey = (vConfig.dbKey || 'ROAD_TAX').replace(/\s+/g, '_');
+    const suffix = isJeet ? '_JEET_PANJA' : '';
+    const prefix = `${truckClean}_${typeKey}${suffix}`;
+    const keyMonthYear = `${truckClean}_${typeKey}_${targetMonthNum}_${targetYear}${suffix}`;
 
-    const typeRegex = new RegExp(`^(${vConfig.dbKey}|${vConfig.label})$`, 'i');
-    const baseQuery = {
-      truckNo: truckClean,
-      ...(isJeet
-        ? { creditor: 'JEET PANJA' }
-        : { $or: [{ creditor: 'BRINDA SHYAM' }, { creditor: { $exists: false } }, { creditor: null }] })
-    };
+    const rawTruck = String(contact?.["Truck No"] || contact?.["Truck No "] || contact?.truck_no || vehicleNo).trim().toUpperCase();
+    const rawPrefix = `${rawTruck}_${typeKey}${suffix}`;
+    const rawKeyMonthYear = `${rawTruck}_${typeKey}_${targetMonthNum}_${targetYear}${suffix}`;
+    const recordId = contact ? contact._id.toString() : '';
+
+    const allMatchingKeys = [
+      keyMonthYear,
+      prefix,
+      rawKeyMonthYear,
+      rawPrefix,
+      `${truckClean}_ROAD_TAX_${targetMonthNum}_${targetYear}`,
+      `${truckClean}_ROAD_TAX`
+    ];
+    if (isJeet) {
+      allMatchingKeys.push(
+        `${truckClean}_ROAD_TAX_${targetMonthNum}_${targetYear}_JEET_PANJA`,
+        `${truckClean}_ROAD_TAX_JEET_PANJA`
+      );
+    }
+
+    const typeRegex = new RegExp(`^(${vConfig.dbKey}|${vConfig.label}|ROAD TAX)$`, 'i');
+    const creditorFilter = isJeet
+      ? { creditor: 'JEET PANJA' }
+      : { $or: [{ creditor: 'BRINDA SHYAM' }, { creditor: { $exists: false } }, { creditor: null }] };
 
     let roadTaxDoc = await roadTaxCol.findOne({
-      ...baseQuery,
-      validityType: typeRegex,
-      month: targetMonthNum,
-      year: targetYear
-    }) || await roadTaxCol.findOne({
-      ...baseQuery,
-      validityType: typeRegex
-    }) || await roadTaxCol.findOne({
-      truckNo: truckClean,
-      ...(isJeet ? { creditor: 'JEET PANJA' } : {}),
-      key: { $in: [keyMonthYear, prefix] }
+      $or: [
+        { appliedBankBookTxIds: txIdStr },
+        { key: { $in: allMatchingKeys } },
+        { keyMonthYear: { $in: allMatchingKeys } },
+        {
+          truckNo: { $regex: vehicleRegex },
+          validityType: typeRegex,
+          month: targetMonthNum,
+          year: targetYear,
+          ...creditorFilter
+        },
+        ...(recordId ? [{
+          recordId: recordId,
+          validityType: typeRegex,
+          month: targetMonthNum,
+          year: targetYear,
+          ...creditorFilter
+        }] : [])
+      ]
     });
 
-    if (!roadTaxDoc && (!rawValidityDate || String(rawValidityDate).trim() === '-' || String(rawValidityDate).trim().toUpperCase() === 'N/A')) {
-      warnings.push("No matching validity record found for this Owner, Vehicle and Validity Type.");
-      continue;
+    if (!roadTaxDoc) {
+      roadTaxDoc = await roadTaxCol.findOne({
+        $or: [
+          { key: { $in: allMatchingKeys } },
+          {
+            truckNo: { $regex: vehicleRegex },
+            validityType: typeRegex,
+            ...creditorFilter
+          },
+          ...(recordId ? [{
+            recordId: recordId,
+            validityType: typeRegex,
+            ...creditorFilter
+          }] : [])
+        ]
+      });
     }
 
-    // If previously applied to a DIFFERENT validity type or vehicle, revert previous amount from old record
-    if (wasApplied && prevSync.validityDbKey && prevSync.validityDbKey !== vConfig.dbKey) {
-      const oldTypeKey = prevSync.validityDbKey.replace(/\s+/g, '_');
-      const oldTruckClean = (prevSync.vehicleNo || vehicleNo).toUpperCase().replace(/\s+/g, '');
-      const oldPrefix = isJeet ? `${oldTruckClean}_${oldTypeKey}_JEET_PANJA` : `${oldTruckClean}_${oldTypeKey}`;
-      const oldKeyMonthYear = isJeet ? `${oldTruckClean}_${oldTypeKey}_${targetMonthNum}_${targetYear}_JEET_PANJA` : `${oldTruckClean}_${oldTypeKey}_${targetMonthNum}_${targetYear}`;
-      const oldDoc = await roadTaxCol.findOne({
-        $or: [{ key: oldPrefix }, { keyMonthYear: oldKeyMonthYear }, { key: oldKeyMonthYear }]
-      });
-      if (oldDoc) {
-        const oldPaid = Math.max(0, num(oldDoc.paidAmount) - prevAmount);
-        const oldRec = num(oldDoc.receivableAmount);
-        const oldBal = Math.round(Math.abs(oldRec - oldPaid) * 100) / 100;
-        await roadTaxCol.updateMany(
-          { $or: [{ _id: oldDoc._id }, { key: oldPrefix }, { keyMonthYear: oldKeyMonthYear }] },
-          {
-            $set: { paidAmount: oldPaid, balance: oldBal, updatedAt: new Date() },
-            $pull: { appliedBankBookTxIds: txIdStr }
-          }
-        );
-      }
-    }
+    const targetKeys = [
+      roadTaxDoc?.key,
+      roadTaxDoc?.keyMonthYear,
+      prefix,
+      keyMonthYear,
+      rawPrefix,
+      rawKeyMonthYear
+    ].filter(Boolean);
+
+    const roadDocMatcher = roadTaxDoc ? {
+      $or: [
+        { _id: roadTaxDoc._id },
+        { key: { $in: targetKeys } },
+        { keyMonthYear: { $in: targetKeys } },
+        {
+          truckNo: { $regex: vehicleRegex },
+          validityType: typeRegex,
+          ...creditorFilter
+        }
+      ]
+    } : {
+      key: { $in: targetKeys }
+    };
 
     if (roadTaxDoc) {
       const appliedRoadTxIds = Array.isArray(roadTaxDoc.appliedBankBookTxIds) ? roadTaxDoc.appliedBankBookTxIds : [];
       const alreadyOnRoadTax = appliedRoadTxIds.includes(txIdStr);
 
-      const targetKeys = [roadTaxDoc.key, roadTaxDoc.keyMonthYear, prefix, keyMonthYear].filter(Boolean);
-      const roadDocMatcher = {
-        truckNo: truckClean,
-        $or: [
-          { _id: roadTaxDoc._id },
-          { key: { $in: targetKeys } },
-          { keyMonthYear: { $in: targetKeys } }
-        ]
-      };
+      if (!alreadyOnRoadTax) {
+        const existingPaid = num(roadTaxDoc.paidAmount);
+        const newPaid = existingPaid + delta;
+        const recAmt = num(roadTaxDoc.receivableAmount);
+        const newBalance = Math.round(Math.abs(recAmt - newPaid) * 100) / 100;
 
-      if (isDelete) {
-        if (alreadyOnRoadTax) {
-          const existingPaid = num(roadTaxDoc.paidAmount);
-          const newPaid = Math.max(0, existingPaid - prevAmount);
-          const recAmt = num(roadTaxDoc.receivableAmount);
-          const newBalance = Math.round(Math.abs(recAmt - newPaid) * 100) / 100;
-          await roadTaxCol.updateMany(
-            roadDocMatcher,
-            {
-              $set: {
-                paidAmount: newPaid,
-                balance: newBalance,
-                updatedAt: new Date()
-              },
-              $pull: { appliedBankBookTxIds: txIdStr }
+        await roadTaxCol.updateMany(
+          roadDocMatcher,
+          {
+            $set: {
+              paidAmount: newPaid,
+              balance: newBalance,
+              validityType: 'ROAD TAX',
+              creditor: creditorName,
+              month: targetMonthNum,
+              year: targetYear,
+              updatedAt: new Date()
+            },
+            $addToSet: { appliedBankBookTxIds: txIdStr }
+          }
+        );
+
+        // Ensure keyMonthYear doc is maintained
+        await roadTaxCol.updateOne(
+          { key: keyMonthYear },
+          {
+            $set: {
+              key: keyMonthYear,
+              keyMonthYear: keyMonthYear,
+              truckNo: truckClean,
+              recordId: recordId || roadTaxDoc.recordId || '',
+              validityType: 'ROAD TAX',
+              creditor: creditorName,
+              month: targetMonthNum,
+              year: targetYear,
+              paidAmount: newPaid,
+              balance: newBalance,
+              updatedAt: new Date()
+            },
+            $addToSet: { appliedBankBookTxIds: txIdStr },
+            $setOnInsert: {
+              renewStatus: roadTaxDoc.renewStatus || 'PENDING',
+              renewDate: roadTaxDoc.renewDate || '',
+              newValidityDate: roadTaxDoc.newValidityDate || '',
+              receivableAmount: recAmt
             }
-          );
-        }
-      } else {
-        if (!alreadyOnRoadTax) {
-          const existingPaid = num(roadTaxDoc.paidAmount);
-          const newPaid = existingPaid + delta;
-          const recAmt = num(roadTaxDoc.receivableAmount);
-          const newBalance = Math.round(Math.abs(recAmt - newPaid) * 100) / 100;
-          await roadTaxCol.updateMany(
-            roadDocMatcher,
-            {
-              $set: {
-                paidAmount: newPaid,
-                balance: newBalance,
-                validityType: vConfig.dbKey,
-                creditor: creditorName,
-                updatedAt: new Date()
-              },
-              $addToSet: { appliedBankBookTxIds: txIdStr }
+          },
+          { upsert: true }
+        );
+      } else if (delta !== 0) {
+        const existingPaid = num(roadTaxDoc.paidAmount);
+        const newPaid = Math.max(0, existingPaid + delta);
+        const recAmt = num(roadTaxDoc.receivableAmount);
+        const newBalance = Math.round(Math.abs(recAmt - newPaid) * 100) / 100;
+
+        await roadTaxCol.updateMany(
+          roadDocMatcher,
+          {
+            $set: {
+              paidAmount: newPaid,
+              balance: newBalance,
+              validityType: 'ROAD TAX',
+              creditor: creditorName,
+              updatedAt: new Date()
             }
-          );
-        } else if (delta !== 0) {
-          const existingPaid = num(roadTaxDoc.paidAmount);
-          const newPaid = Math.max(0, existingPaid + delta);
-          const recAmt = num(roadTaxDoc.receivableAmount);
-          const newBalance = Math.round(Math.abs(recAmt - newPaid) * 100) / 100;
-          await roadTaxCol.updateMany(
-            roadDocMatcher,
-            {
-              $set: {
-                paidAmount: newPaid,
-                balance: newBalance,
-                validityType: vConfig.dbKey,
-                creditor: creditorName,
-                updatedAt: new Date()
-              }
-            }
-          );
-        }
+          }
+        );
       }
-    } else if (!isDelete && delta > 0) {
-      const recordId = contact ? contact._id.toString() : '';
+    } else if (delta > 0) {
       const recAmt = 0;
       const newPaid = delta;
       const newBalance = Math.round(Math.abs(recAmt - newPaid) * 100) / 100;
 
       const initData = {
-        key: prefix,
-        keyMonthYear,
+        key: keyMonthYear,
+        keyMonthYear: keyMonthYear,
         truckNo: truckClean,
-        recordId,
-        validityType: vConfig.dbKey,
+        recordId: recordId || '',
+        validityType: 'ROAD TAX',
         creditor: creditorName,
         month: targetMonthNum,
         year: targetYear,
         renewStatus: 'PENDING',
-        renewDate: '',
+        renewDate: rawValidityDate ? formatDateToDDMMYYYY(parseDateForSync(rawValidityDate)) : '',
         newValidityDate: '',
         receivableAmount: recAmt,
         paidAmount: newPaid,
@@ -1027,48 +1024,49 @@ const syncCreditorWithdrawToCementAndValidity = async (affectedDocs, isDelete = 
       };
 
       await roadTaxCol.updateOne(
-        { key: prefix },
-        { $set: initData },
-        { upsert: true }
-      );
-      await roadTaxCol.updateOne(
         { key: keyMonthYear },
         { $set: initData },
         { upsert: true }
       );
+      await roadTaxCol.updateOne(
+        { key: prefix },
+        { $set: { ...initData, key: prefix } },
+        { upsert: true }
+      );
+      if (rawKeyMonthYear && rawKeyMonthYear !== keyMonthYear) {
+        await roadTaxCol.updateOne(
+          { key: rawKeyMonthYear },
+          { $set: { ...initData, key: rawKeyMonthYear } },
+          { upsert: true }
+        );
+      }
       roadTaxDoc = await roadTaxCol.findOne({ key: keyMonthYear });
     }
 
     // ── 3. PERSIST INTEGRATION RELATIONSHIP ON AccountDetail ──────
-    if (isDelete) {
-      await AccountDetail.updateOne(
-        { _id: doc._id },
-        { $unset: { _creditorSync: "" } }
-      );
-    } else {
-      await AccountDetail.updateOne(
-        { _id: doc._id },
-        {
-          $set: {
-            _creditorSync: {
-              applied: true,
-              appliedAt: new Date(),
-              txId: txIdStr,
-              cementTripId: latestTrip ? latestTrip._id.toString() : '',
-              cementTripDate: latestWrapper ? latestWrapper.rawDate : '',
-              roadTaxId: roadTaxDoc ? roadTaxDoc._id.toString() : '',
-              creditor: creditorName,
-              amount: withdrawAmount,
-              month: docMonth,
-              vehicle: vehicleNo,
-              names: ownerName,
-              validityType: vConfig.label,
-              validityDbKey: vConfig.dbKey
-            }
+    await AccountDetail.updateOne(
+      { _id: doc._id },
+      {
+        $set: {
+          _creditorSync: {
+            applied: true,
+            appliedAt: new Date(),
+            txId: txIdStr,
+            cementTripId: latestTrip ? latestTrip._id.toString() : '',
+            cementTripDate: latestWrapper ? latestWrapper.rawDate : '',
+            roadTaxId: roadTaxDoc ? roadTaxDoc._id.toString() : '',
+            creditor: creditorName,
+            amount: withdrawAmount,
+            month: docMonthStr,
+            selectedYear: targetYear,
+            vehicle: vehicleNo,
+            names: ownerName,
+            validityType: 'ROAD TAX',
+            validityDbKey: 'ROAD TAX'
           }
         }
-      );
-    }
+      }
+    );
   }
 
   try {
@@ -1442,19 +1440,21 @@ router.put('/bulk-update', async (req, res) => {
     const createdDocs = {};
     const updatedDocs = {};
 
-    for (const item of updates) {
+    for (const item of (updates || [])) {
       if (item.isNewRow) {
         const newDoc = {};
-        for (const [lbl, val] of Object.entries(item.changes)) {
+        for (const [lbl, val] of Object.entries(item.changes || {})) {
           if (keyMap[lbl]) newDoc[keyMap[lbl]] = val;
+          else newDoc[lbl] = val;
         }
         const createdDoc = await AccountDetail.create(newDoc);
         affectedDocsForSync.push(createdDoc);
         createdDocs[item.id || 'new'] = createdDoc;
       } else if (item.id) {
         const updateDoc = {};
-        for (const [lbl, val] of Object.entries(item.changes)) {
+        for (const [lbl, val] of Object.entries(item.changes || {})) {
           if (keyMap[lbl]) updateDoc[keyMap[lbl]] = val;
+          else updateDoc[lbl] = val;
         }
         const oldDoc = await AccountDetail.findById(item.id);
         if (oldDoc) affectedDocsForSync.push(oldDoc);
@@ -1498,6 +1498,12 @@ router.put('/bulk-update', async (req, res) => {
       await syncMainCashToCashBook(affectedDocsForSync);
     } catch (syncErr) {
       console.error('[accountDetailRoutes] syncMainCashToCashBook error:', syncErr.message);
+    }
+
+    try {
+      await syncBankBookDocsToIndirectExpense(affectedDocsForSync);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] syncBankBookDocsToIndirectExpense error:', syncErr.message);
     }
 
     try {
@@ -1669,9 +1675,13 @@ router.delete('/bulk-delete', async (req, res) => {
     }
 
     try {
-      await syncFreightAdvanceToCementRegister(docsToDelete);
+      for (const doc of docsToDelete) {
+        if (doc && isQualifyingBankBookFreightAdvance(doc)) {
+          await reverseBankBookFreightAdvanceContribution(doc);
+        }
+      }
     } catch (syncErr) {
-      console.error('[accountDetailRoutes] syncFreightAdvanceToCementRegister error on delete:', syncErr.message);
+      console.error('[accountDetailRoutes] reverseBankBookFreightAdvanceContribution error on delete:', syncErr.message);
     }
 
     try {
@@ -1690,6 +1700,12 @@ router.delete('/bulk-delete', async (req, res) => {
       await syncMainCashToCashBook(docsToDelete);
     } catch (syncErr) {
       console.error('[accountDetailRoutes] syncMainCashToCashBook error on delete:', syncErr.message);
+    }
+
+    try {
+      await reverseBankBookDocsFromIndirectExpense(docsToDelete);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] reverseBankBookDocsFromIndirectExpense error on delete:', syncErr.message);
     }
 
     try {
@@ -1779,6 +1795,12 @@ router.post('/upload-statement', statementUpload.single('statement'), async (req
 
     console.log(`[StatementUpload] Found ${transactions.length} transactions for file: ${req.file.originalname}`);
     await AccountDetail.insertMany(transactions);
+
+    try {
+      await syncBankBookDocsToIndirectExpense(transactions);
+    } catch (syncErr) {
+      console.error('[accountDetailRoutes] syncBankBookDocsToIndirectExpense on statement upload error:', syncErr.message);
+    }
 
     try {
       const io = getIO();

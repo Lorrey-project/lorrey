@@ -3,7 +3,8 @@ target_schema = {
     "invoice_number": "",
     "invoice_date": "",
     "invoice_time": "",
-    "reference_number": ""
+    "reference_number": "",
+    "invoice_type": ""
   },
 
   "seller_details": {
@@ -27,6 +28,7 @@ target_schema = {
   },
 
   "consignee_details": {
+    "consignee_name": "",
     "consignee_address": "",
     "consignee_state": "",
     "consignee_pincode": ""

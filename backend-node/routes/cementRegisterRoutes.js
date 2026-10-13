@@ -2,7 +2,13 @@ const express = require("express");
 const { getIO } = require("../socket");
 const router = express.Router();
 const { pushToInvoice, getTruckDetails } = require("../utils/syncManager");
-const { normalizeDate, getEffectivePartyMaster } = require("../utils/partyMasterHelper");
+const { normalizeDate, getEffectivePartyMaster, parseBasicFreightCommission } = require("../utils/partyMasterHelper");
+const { hookCheckMktTripsFromEntry } = require("../utils/mktCommissionManager");
+const {
+  hookCheckIncentiveEligibility,
+  evaluateVehicleIncentiveEligibility,
+  getMonthlyIncentiveEligibilities
+} = require("../utils/incentiveEligibilityManager");
 const mongoose = require("mongoose");
 const { ObjectId } = require("mongodb");
 const auth = require("../middleware/authMiddleware");
@@ -81,49 +87,19 @@ const formatDateToDDMMYY = (dStr) => {
   return `${day}.${month}.${year}`;
 };
 
-function parseBasicFreightCommission(doc) {
-  if (!doc) return null;
-  const rawComm = doc["basic_freight_commission"] || 
-                  doc["Basic Freight Commission"] || 
-                  doc["Basic Freight Comission Appliciability"] || 
-                  doc["Basic Freight Comission Applicability "] || 
-                  doc["basic_freight_commission "] ||
-                  doc["basicFreightComm"] ||
-                  doc["basic_freight_commission_applicability"];
-  if (rawComm === null || rawComm === undefined || rawComm === '') return null;
-  const str = String(rawComm).trim();
-  if (str === '' || str === '-' || str === '—' || str === 'N/A' || str === 'NA') return null;
-  const cleaned = str.replace(/%/g, '').replace(/,/g, '').trim();
-  const numVal = parseFloat(cleaned);
-  if (isNaN(numVal)) return null;
-
-  if (numVal > 0 && numVal < 1) {
-    return numVal;
-  }
-  if (numVal >= 1 && numVal <= 10) {
-    return numVal / 100;
-  }
-  if (numVal === 0) {
-    return 0;
-  }
-  if (numVal > 10 && numVal <= 100) {
-    return (100 - numVal) / 100;
-  }
-  return null;
-}
-
 function getBilling95PartyPayable(row) {
   if (!row) return 0;
-  const rawEr95 = row['BILLING @ 95% (PARTY PAYABLE)'] || row['BILLING ER 95%'] || row['BILLING ER 95% (PARTY PAYABLE)'] || row['Billing 95% Party Payable'];
+  const rawEr95 = row['BILLING @ 95% (PARTY PAYABLE)'] || row['BILLING ER 95%'] || row['BILLING ER 95% (PARTY PAYABLE)'] || row['Billing 95% Party Payable'] || row['PARTY RATE AMOUNT'];
   if (rawEr95 !== undefined && rawEr95 !== null && rawEr95 !== '') {
     const val = parseFloat(String(rawEr95).replace(/,/g, ''));
     if (!isNaN(val) && val > 0) return val;
   }
 
-  const comm = row._freight_commission;
-  const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
+  const comm = (row._freight_commission !== undefined && row._freight_commission !== null && row._freight_commission !== '' && !isNaN(Number(row._freight_commission)))
+    ? Number(row._freight_commission)
+    : null;
 
-  if (!isStd) {
+  if (comm !== null) {
     const rawErVar = row['BILLING ER VAR'] || row['BILLING ER (Variable %)'];
     if (rawErVar !== undefined && rawErVar !== null && rawErVar !== '') {
       const val = parseFloat(String(rawErVar).replace(/,/g, ''));
@@ -138,14 +114,12 @@ function getBilling95PartyPayable(row) {
     billingAmt = billingRate * mt;
   }
 
-  if (billingAmt > 0) {
-    return isStd
-      ? Math.round(billingAmt * 0.95 * 100) / 100
-      : Math.round(billingAmt * (1 - Number(comm)) * 100) / 100;
+  if (billingAmt > 0 && comm !== null) {
+    return Math.round(billingAmt * (1 - comm) * 100) / 100;
   }
 
   const rawAmt = parseFloat(String(row['AMOUNT'] || row.amount || 0).replace(/,/g, '')) || 0;
-  return isStd ? Math.round(rawAmt * 0.95 * 100) / 100 : rawAmt;
+  return rawAmt;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,7 +260,20 @@ router.get("/", async (req, res) => {
       return fallbackDamageRate;
     };
 
-    const combinedContacts = [...ownerDocs, ...truckDocs];
+    const combinedMap = new Map();
+    for (const doc of ownerDocs) {
+      const rawTruck = doc["Truck No"] || doc["Truck No "] || doc.truck_no || doc.vehicleNo || doc["Vehicle No"];
+      const key = rawTruck ? normVeh(rawTruck) : doc._id.toString();
+      combinedMap.set(key, doc);
+    }
+    for (const doc of truckDocs) {
+      const rawTruck = doc.truck_no || doc["Truck No "] || doc["Truck No"] || doc.vehicleNo || doc["Vehicle No"];
+      const key = rawTruck ? normVeh(rawTruck) : doc._id.toString();
+      if (!combinedMap.has(key)) {
+        combinedMap.set(key, doc);
+      }
+    }
+    const combinedContacts = Array.from(combinedMap.values());
 
     // Post-filter to guarantee strictly exact month and year match based on actual bill/record date
     let filteredEntries = entries;
@@ -365,19 +352,47 @@ router.get("/", async (req, res) => {
 
       // ── Resolve Basic Freight Commission & PARTY RATE (95-97%) ──
       let resolvedComm = null;
-      if (matchedContact && matchedContact.basicFreightCommission !== null && matchedContact.basicFreightCommission !== undefined) {
-        resolvedComm = matchedContact.basicFreightCommission;
+      if (matchedContact && matchedContact.basicFreightCommission !== null && matchedContact.basicFreightCommission !== undefined && !isNaN(Number(matchedContact.basicFreightCommission))) {
+        resolvedComm = Number(matchedContact.basicFreightCommission);
       } else if (entry["_freight_commission"] !== undefined && entry["_freight_commission"] !== null && entry["_freight_commission"] !== '' && !isNaN(Number(entry["_freight_commission"]))) {
         resolvedComm = Number(entry["_freight_commission"]);
       }
 
       entry["_freight_commission"] = resolvedComm;
       const billingVal = parseFloat(String(entry["BILLING"] || "0").replace(/,/g, "")) || 0;
-      const effectiveComm = (resolvedComm !== null && !isNaN(Number(resolvedComm))) ? Number(resolvedComm) : 0.05;
-      if (billingVal > 0) {
-        const rateVal = Math.round(billingVal * (1 - effectiveComm) * 100) / 100;
-        entry["PARTY RATE (95-97%)"] = rateVal;
-        entry["PARTY RATE"] = rateVal;
+      const mtVal = parseFloat(String(entry["MT"] || "0").replace(/,/g, "")) || 0;
+      let billingAmt = parseFloat(String(entry["Billing Amount"] || entry["BILLING AMOUNT"] || "0").replace(/,/g, "")) || 0;
+      if (!billingAmt && billingVal > 0 && mtVal > 0) {
+        billingAmt = Math.round(billingVal * mtVal * 100) / 100;
+        entry["Billing Amount"] = billingAmt;
+        entry["BILLING AMOUNT"] = billingAmt;
+      }
+
+      if (resolvedComm !== null && !isNaN(Number(resolvedComm))) {
+        const effectiveComm = Number(resolvedComm);
+        const partyRatePct = Math.round((1 - effectiveComm) * 100);
+        entry["PARTY RATE %"] = `${partyRatePct}%`;
+        entry["PARTY RATE PERCENT"] = partyRatePct;
+
+        if (billingVal > 0) {
+          const rateVal = Math.round(billingVal * (1 - effectiveComm) * 100) / 100;
+          entry["PARTY RATE (95-97%)"] = rateVal;
+          entry["PARTY RATE"] = rateVal;
+        } else if (billingAmt > 0) {
+          const partyRateAmount = Math.round(billingAmt * (1 - effectiveComm) * 100) / 100;
+          entry["PARTY RATE (95-97%)"] = partyRateAmount;
+          entry["PARTY RATE"] = partyRateAmount;
+        }
+
+        if (billingAmt > 0) {
+          const partyRateAmount = Math.round(billingAmt * (1 - effectiveComm) * 100) / 100;
+          entry["PARTY RATE AMOUNT"] = partyRateAmount;
+          entry["BILLING ER 95%"] = partyRateAmount;
+          entry["BILLING ER 95% (PARTY PAYABLE)"] = partyRateAmount;
+          entry["BILLING @ 95% (PARTY PAYABLE)"] = partyRateAmount;
+          entry["AMOUNT"] = partyRateAmount;
+          entry["PROFIT"] = Math.round(billingAmt * effectiveComm * 100) / 100;
+        }
       } else {
         const existing = entry["PARTY RATE (95-97%)"] || entry["PARTY RATE (95%)"] || entry["PARTY RATE"];
         if (typeof existing === 'number' && existing > 0) {
@@ -390,6 +405,8 @@ router.get("/", async (req, res) => {
           entry["PARTY RATE (95-97%)"] = "";
           entry["PARTY RATE"] = "";
         }
+        entry["_commission_status"] = "INVALID_OR_MISSING";
+        entry["_commission_error"] = "Missing or invalid Basic Freight Commission in Party Master";
       }
 
       if (matchedContact && matchedContact.ownerName && !entry["OWNER NAME"]) {
@@ -423,18 +440,30 @@ router.get("/", async (req, res) => {
       entry["_damage_deduction_rate"] = damageRate;
 
       const shortageBags = parseFloat(String(entry["SHORTAGE (BAG)"] || "0").replace(/,/g, "")) || 0;
+      let existingRate = parseFloat(String(entry["SHORTAGE (RATE)"] || "0").replace(/,/g, "")) || 0;
+      if (existingRate === 0) {
+        existingRate = damageRate;
+        entry["SHORTAGE (RATE)"] = existingRate;
+      }
+      const calculatedShortage = shortageBags > 0 ? Math.round(shortageBags * existingRate * 100) / 100 : 0;
+      const storedShortage = (entry["SHORTAGE (AMOUNT)"] !== undefined && entry["SHORTAGE (AMOUNT)"] !== null && entry["SHORTAGE (AMOUNT)"] !== '')
+        ? parseFloat(String(entry["SHORTAGE (AMOUNT)"]).replace(/,/g, "")) || 0
+        : 0;
+      const storedDamage = (entry["Damage Deduction"] !== undefined && entry["Damage Deduction"] !== null && entry["Damage Deduction"] !== '')
+        ? parseFloat(String(entry["Damage Deduction"]).replace(/,/g, "")) || 0
+        : 0;
+      const allocSum = (Array.isArray(entry.debitAllocations) ? entry.debitAllocations : [])
+        .filter(a => a.reason === 'Damage / Shortage' || a.reason === 'DAMAGE / SHORTAGE' || a.field === 'SHORTAGE (AMOUNT)' || a.field === 'Damage Deduction')
+        .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+      const effectiveAllocatedOrStored = Math.max(storedShortage, storedDamage, allocSum);
+
       if (shortageBags > 0) {
-        let existingRate = parseFloat(String(entry["SHORTAGE (RATE)"] || "0").replace(/,/g, "")) || 0;
-        if (existingRate === 0) {
-          existingRate = damageRate;
-          entry["SHORTAGE (RATE)"] = existingRate;
-        }
-        entry["SHORTAGE (AMOUNT)"] = Math.round(shortageBags * existingRate * 100) / 100;
+        entry["SHORTAGE (AMOUNT)"] = Math.max(calculatedShortage, effectiveAllocatedOrStored);
       } else {
         if (!entry["SHORTAGE (RATE)"] || entry["SHORTAGE (RATE)"] === 0) {
           entry["SHORTAGE (RATE)"] = damageRate;
         }
-        entry["SHORTAGE (AMOUNT)"] = 0;
+        entry["SHORTAGE (AMOUNT)"] = effectiveAllocatedOrStored;
       }
       
       return entry;
@@ -562,18 +591,30 @@ router.get("/pending-bills", async (req, res) => {
       entry["_damage_deduction_rate"] = damageRate;
 
       const shortageBags = parseFloat(String(entry["SHORTAGE (BAG)"] || "0").replace(/,/g, "")) || 0;
+      let existingRate = parseFloat(String(entry["SHORTAGE (RATE)"] || "0").replace(/,/g, "")) || 0;
+      if (existingRate === 0) {
+        existingRate = damageRate;
+        entry["SHORTAGE (RATE)"] = existingRate;
+      }
+      const calculatedShortage = shortageBags > 0 ? Math.round(shortageBags * existingRate * 100) / 100 : 0;
+      const storedShortage = (entry["SHORTAGE (AMOUNT)"] !== undefined && entry["SHORTAGE (AMOUNT)"] !== null && entry["SHORTAGE (AMOUNT)"] !== '')
+        ? parseFloat(String(entry["SHORTAGE (AMOUNT)"]).replace(/,/g, "")) || 0
+        : 0;
+      const storedDamage = (entry["Damage Deduction"] !== undefined && entry["Damage Deduction"] !== null && entry["Damage Deduction"] !== '')
+        ? parseFloat(String(entry["Damage Deduction"]).replace(/,/g, "")) || 0
+        : 0;
+      const allocSum = (Array.isArray(entry.debitAllocations) ? entry.debitAllocations : [])
+        .filter(a => a.reason === 'Damage / Shortage' || a.reason === 'DAMAGE / SHORTAGE' || a.field === 'SHORTAGE (AMOUNT)' || a.field === 'Damage Deduction')
+        .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+      const effectiveAllocatedOrStored = Math.max(storedShortage, storedDamage, allocSum);
+
       if (shortageBags > 0) {
-        let existingRate = parseFloat(String(entry["SHORTAGE (RATE)"] || "0").replace(/,/g, "")) || 0;
-        if (existingRate === 0) {
-          existingRate = damageRate;
-          entry["SHORTAGE (RATE)"] = existingRate;
-        }
-        entry["SHORTAGE (AMOUNT)"] = Math.round(shortageBags * existingRate * 100) / 100;
+        entry["SHORTAGE (AMOUNT)"] = Math.max(calculatedShortage, effectiveAllocatedOrStored);
       } else {
         if (!entry["SHORTAGE (RATE)"] || entry["SHORTAGE (RATE)"] === 0) {
           entry["SHORTAGE (RATE)"] = damageRate;
         }
-        entry["SHORTAGE (AMOUNT)"] = 0;
+        entry["SHORTAGE (AMOUNT)"] = effectiveAllocatedOrStored;
       }
 
       return entry;
@@ -834,6 +875,40 @@ router.delete("/incentive-state", auth, async (req, res) => {
   }
 });
 
+// ── GET /cement-register/incentive-eligibilities ─────────────────────────────
+// Returns centralized incentive eligibilities for all registered/active vehicles for given month & year
+router.get("/incentive-eligibilities", auth, async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    const eligibilities = await getMonthlyIncentiveEligibilities(month, year);
+    res.json({
+      success: true,
+      month: parseInt(month, 10) || (new Date().getMonth() + 1),
+      year: parseInt(year, 10) || new Date().getFullYear(),
+      count: Object.keys(eligibilities).length,
+      eligibilities
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── GET /cement-register/incentive-eligibility/:truckNo ───────────────────────
+// Returns centralized incentive eligibility for a single vehicle for given month & year
+router.get("/incentive-eligibility/:truckNo", auth, async (req, res) => {
+  try {
+    const { truckNo } = req.params;
+    const { month, year } = req.query;
+    const eligibility = await evaluateVehicleIncentiveEligibility(truckNo, month, year);
+    res.json({
+      success: true,
+      eligibility
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const col = getCollection();
@@ -854,6 +929,8 @@ router.post("/", auth, cementValidationRules, validateCement, async (req, res) =
     res.status(201).json({ success: true, entry: { _id: result.insertedId, ...req.body } });
     const io = getIO();
     io.emit('cementUpdates', { action: 'create', entry: { _id: result.insertedId, ...req.body } });
+    hookCheckMktTripsFromEntry(req.body).catch(e => console.warn('[mktCommission] Hook error:', e.message));
+    hookCheckIncentiveEligibility(req.body).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -872,6 +949,8 @@ router.post("/bulk", auth, async (req, res) => {
     res.status(201).json({ success: true, insertedCount: result.insertedCount });
     const io = getIO();
     io.emit('cementUpdates', { action: 'bulkCreate', count: result.insertedCount });
+    hookCheckMktTripsFromEntry(docs).catch(e => console.warn('[mktCommission] Hook error:', e.message));
+    hookCheckIncentiveEligibility(docs).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -941,6 +1020,9 @@ router.put("/bulk-update", auth, async (req, res) => {
 
     res.json({ success: true, updatedCount: updates.length });
     io.emit('cementUpdates', { action: 'bulkUpdate' });
+    const changedDocs = updates.map(u => u.changes);
+    hookCheckMktTripsFromEntry(changedDocs).catch(e => console.warn('[mktCommission] Hook error:', e.message));
+    hookCheckIncentiveEligibility(changedDocs).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1119,6 +1201,7 @@ router.delete("/bulk-delete", auth, async (req, res) => {
       return res.status(400).json({ success: false, error: "Provide an array of ids." });
     }
     const objectIds = ids.map(id => new ObjectId(id));
+    const toDeleteDocs = await col.find({ _id: { $in: objectIds } }).toArray();
     const result = await col.deleteMany({ _id: { $in: objectIds } });
 
     // Re-sequence SL NOs to stay gapless after deletion
@@ -1140,6 +1223,10 @@ router.delete("/bulk-delete", auth, async (req, res) => {
     io.emit("cementUpdates", { action: "bulkDelete", ids });
 
     res.json({ success: true, deletedCount: result.deletedCount });
+    if (toDeleteDocs && toDeleteDocs.length > 0) {
+      hookCheckMktTripsFromEntry(toDeleteDocs).catch(e => console.warn('[mktCommission] Hook error:', e.message));
+      hookCheckIncentiveEligibility(toDeleteDocs).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
+    }
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -1196,6 +1283,8 @@ router.put("/:id", auth, cementValidationRules, validateCement, async (req, res)
     res.json({ success: true, entry: result });
     const io = getIO();
     io.emit('cementUpdates', { action: 'update', entry: result });
+    hookCheckMktTripsFromEntry(result).catch(e => console.warn('[mktCommission] Hook error:', e.message));
+    hookCheckIncentiveEligibility(result).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -1205,6 +1294,7 @@ router.put("/:id", auth, cementValidationRules, validateCement, async (req, res)
 router.delete("/:id", auth, adminOnly, async (req, res) => {
   try {
     const col = getCollection();
+    const existingDoc = await col.findOne({ _id: new ObjectId(req.params.id) });
     const result = await col.deleteOne({ _id: new ObjectId(req.params.id) });
     if (result.deletedCount === 0) {
       return res.status(404).json({ success: false, error: "Entry not found." });
@@ -1212,6 +1302,10 @@ router.delete("/:id", auth, adminOnly, async (req, res) => {
     res.json({ success: true, message: "Entry deleted." });
     const io = getIO();
     io.emit('cementUpdates', { action: 'delete', id: req.params.id });
+    if (existingDoc) {
+      hookCheckMktTripsFromEntry(existingDoc).catch(e => console.warn('[mktCommission] Hook error:', e.message));
+      hookCheckIncentiveEligibility(existingDoc).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
+    }
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

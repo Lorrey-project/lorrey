@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import {
   Box, Typography, IconButton, Tabs, Tab, Paper, TextField, Chip,
   Button, Snackbar, Alert, CircularProgress, Tooltip
@@ -10,9 +10,19 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import PrintIcon from '@mui/icons-material/Print';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
+import B2BEntryDialog from '../components/B2BEntryDialog';
 import axios from 'axios';
 import { API_URL } from '../config';
+import { io } from 'socket.io-client';
 import { toIndianWords } from '../utils/toIndianWords';
+
+const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
+const socket = io(SOCKET_URL, {
+  autoConnect: true,
+  transports: ["websocket", "polling"]
+});
 
 const CREDITOR_TABS = [
   {
@@ -250,7 +260,7 @@ const fmtKm = (val) => {
   return n.toLocaleString('en-IN', { maximumFractionDigits: 6 });
 };
 
-function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
+const CreditorInvoiceSpreadsheet = forwardRef(function CreditorInvoiceSpreadsheet({ creditor, taxDetails }, ref) {
   const [breakdownData, setBreakdownData] = useState([]);
   const [editValues, setEditValues] = useState({});
   const [selectedVehicleNo, setSelectedVehicleNo] = useState('');
@@ -294,6 +304,22 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
 
   useEffect(() => {
     fetchBreakdown();
+  }, [fetchBreakdown]);
+
+  // Real-time dynamic updates when qualifying GST FCM records are created, edited, or deleted
+  useEffect(() => {
+    let timer = null;
+    const handler = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fetchBreakdown(), 150);
+    };
+    socket.on('truckContactUpdates', handler);
+    socket.on('freightCreditorGstUpdate', handler);
+    return () => {
+      socket.off('truckContactUpdates', handler);
+      socket.off('freightCreditorGstUpdate', handler);
+      clearTimeout(timer);
+    };
   }, [fetchBreakdown]);
 
   // Keep selected vehicle in sync with available rows
@@ -546,6 +572,47 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
     return toIndianWords(totalInvoiceAmount);
   }, [totalInvoiceAmount]);
 
+  useImperativeHandle(ref, () => ({
+    printInvoice: () => {
+      if (loading) {
+        setSnack({ type: 'info', text: 'Invoice data is currently loading. Please wait.' });
+        return;
+      }
+      if (!breakdownData || breakdownData.length === 0 || !activeVehicleRow) {
+        setSnack({
+          type: 'warning',
+          text: `No vehicle tax invoice is available to print for ${creditor.creditorTitle || creditor.name} for ${taxDetails.monthName || taxDetails.month} ${taxDetails.fullFy}.`
+        });
+        return;
+      }
+      if (taxableValue === null) {
+        setSnack({
+          type: 'warning',
+          text: `Invoice has no calculated taxable value for vehicle ${activeVehicleRow.vehicleNo}. Cannot print.`
+        });
+        return;
+      }
+      window.print();
+    },
+    isReady: !loading && Boolean(activeVehicleRow) && taxableValue !== null,
+    vehicleNo: activeVehicleRow?.vehicleNo,
+    getContext: () => ({
+      creditor,
+      taxDetails,
+      activeVehicleRow,
+      selectedVehicleNo,
+      taxableValue,
+      cgstValue,
+      sgstValue,
+      totalInvoiceAmount,
+      totalInWords,
+      loading,
+      hasVehicles: breakdownData.length > 0,
+      breakdownData
+    }),
+    refresh: fetchBreakdown
+  }), [loading, breakdownData, activeVehicleRow, taxableValue, cgstValue, sgstValue, totalInvoiceAmount, totalInWords, creditor, taxDetails, selectedVehicleNo, fetchBreakdown]);
+
   const tableHeaderStyle = {
     backgroundColor: '#f1f5f9',
     color: '#0f172a',
@@ -585,11 +652,13 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
   };
 
   return (
-    <Box sx={{ width: '100%', overflowX: 'auto', pb: 3 }}>
-      <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', minWidth: '1380px' }}>
+    <Box className="freight-creditor-scroll-container" sx={{ width: '100%', overflowX: 'auto', pb: 3 }}>
+      <Box className="freight-creditor-flex-row" sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', minWidth: '1380px' }}>
         
         {/* ── Main Invoice Document Form (Left / Primary Block) ── */}
         <Paper
+          id="freight-creditor-tax-invoice-printable"
+          className="freight-creditor-tax-invoice-printable"
           elevation={4}
           sx={{
             flex: '1 1 760px',
@@ -657,7 +726,7 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
                 Regd. Office: 1st Floor, Panja Hotel, Panagarh, G T Road, Darjeeling More, Debipur, Paschim Bardhaman, West Bengal, 713148
               </Typography>
               <Typography variant="caption" fontWeight="700" color="#0f172a" display="block" sx={{ mt: 0.5 }}>
-                GSTN: 19AATFD1733C1ZH
+                GSTIN: 19AATFD1733C1ZH
               </Typography>
             </Box>
 
@@ -676,7 +745,7 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
                 {creditor.address || '—'}
               </Typography>
               <Typography variant="caption" fontWeight="700" color="#0f172a" display="block" sx={{ mt: 0.5 }}>
-                GSTN: {creditor.gstn || '—'}
+                GSTIN: {creditor.gstn || '—'}
               </Typography>
             </Box>
           </Box>
@@ -684,6 +753,7 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
           {/* VEHICLE SELECTOR (When multiple vehicles exist) */}
           {displayRows.length > 1 && (
             <Box
+              className="no-print"
               sx={{
                 px: 2,
                 py: 1,
@@ -904,6 +974,7 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
 
         {/* ── Right-Side Working Breakdown & Incentive Reference (Authoritative Database-Driven) ── */}
         <Paper
+          className="no-print"
           elevation={3}
           sx={{
             flex: '0 0 540px',
@@ -1122,6 +1193,7 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
 
       {/* Snackbar Feedback */}
       <Snackbar
+        className="no-print"
         open={Boolean(snack)}
         autoHideDuration={4000}
         onClose={() => setSnack(null)}
@@ -1135,10 +1207,14 @@ function CreditorInvoiceSpreadsheet({ creditor, taxDetails }) {
       </Snackbar>
     </Box>
   );
-}
+});
 
 export default function FreightCreditorGst({ onBack }) {
   const [activeTab, setActiveTab] = useState(0);
+  const spreadsheetRef = useRef(null);
+  const [topSnack, setTopSnack] = useState(null);
+  const [b2bDialogOpen, setB2bDialogOpen] = useState(false);
+  const [b2bContext, setB2bContext] = useState(null);
 
   // Compute default FY and month from current calendar date
   const { defaultFy, defaultMonth } = useMemo(() => {
@@ -1187,8 +1263,54 @@ export default function FreightCreditorGst({ onBack }) {
 
   const currentCreditor = CREDITOR_TABS[activeTab] || CREDITOR_TABS[0];
 
+  const handlePrint = () => {
+    if (spreadsheetRef.current) {
+      spreadsheetRef.current.printInvoice();
+    } else {
+      setTopSnack({ type: 'warning', text: 'Invoice is loading. Please wait.' });
+    }
+  };
+
+  const handleOpenB2B = () => {
+    if (!spreadsheetRef.current) return;
+    const ctx = spreadsheetRef.current.getContext();
+    if (ctx.loading) {
+      setTopSnack({ type: 'info', text: 'Invoice data is currently loading. Please wait.' });
+      return;
+    }
+    if (!ctx.hasVehicles || !ctx.activeVehicleRow) {
+      setTopSnack({
+        type: 'warning',
+        text: `No vehicle tax invoice is available for ${currentCreditor.creditorTitle || currentCreditor.name} for ${taxDetails.monthName || taxDetails.month} ${taxDetails.fullFy}.`
+      });
+      return;
+    }
+    setB2bContext({
+      creditor: currentCreditor,
+      taxDetails,
+      activeVehicleRow: ctx.activeVehicleRow,
+      selectedVehicleNo: ctx.selectedVehicleNo,
+      taxableValue: ctx.taxableValue,
+      cgstValue: ctx.cgstValue,
+      sgstValue: ctx.sgstValue,
+      totalInvoiceAmount: ctx.totalInvoiceAmount
+    });
+    setB2bDialogOpen(true);
+  };
+
+  const handleB2BSaved = async (res) => {
+    setTopSnack({
+      type: 'success',
+      text: `B2B record ${res?.isNew ? 'created' : 'updated'} successfully into GST Portal database!`
+    });
+    if (spreadsheetRef.current?.refresh) {
+      spreadsheetRef.current.refresh();
+    }
+  };
+
   return (
     <Box
+      className="freight-creditor-page-container"
       sx={{
         minHeight: '100vh',
         bgcolor: '#0f172a',
@@ -1199,8 +1321,112 @@ export default function FreightCreditorGst({ onBack }) {
         flexDirection: 'column'
       }}
     >
+      <style>{`
+        @page {
+          size: A4 portrait;
+          margin: 8mm 10mm;
+        }
+        @media print {
+          html, body {
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #000000 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          canvas,
+          .no-print,
+          .no-print * {
+            display: none !important;
+          }
+
+          div[style*="z-index: -1"],
+          div[style*="zIndex: -1"] {
+            display: none !important;
+          }
+
+          body > *:not(#root) {
+            display: none !important;
+          }
+
+          #root,
+          #root > div,
+          body > div,
+          .freight-creditor-page-container,
+          .freight-creditor-content-wrapper,
+          .freight-creditor-scroll-container,
+          .freight-creditor-flex-row {
+            background: transparent !important;
+            background-color: transparent !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            min-height: auto !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            display: block !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+
+          #freight-creditor-tax-invoice-printable,
+          .freight-creditor-tax-invoice-printable {
+            flex: none !important;
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            border: 2px solid #0f172a !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          #freight-creditor-tax-invoice-printable table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          #freight-creditor-tax-invoice-printable th {
+            border: 1px solid #475569 !important;
+            background-color: #f1f5f9 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          #freight-creditor-tax-invoice-printable td {
+            border: 1px solid #64748b !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          .MuiSnackbar-root,
+          .MuiTooltip-popper {
+            display: none !important;
+          }
+        }
+      `}</style>
+
       {/* ── Top Bar / Header ─────────────────────────────────────────── */}
       <Box
+        className="no-print"
         sx={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -1238,7 +1464,7 @@ export default function FreightCreditorGst({ onBack }) {
           </Box>
         </Box>
 
-        {/* ── Financial Year & Month Selectors + Badges ── */}
+        {/* ── Financial Year & Month Selectors + Badges + Print Button ── */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
           {/* Financial Year Selector */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#1e293b', p: 0.6, px: 1.2, borderRadius: 2, border: '1px solid #334155' }}>
@@ -1310,11 +1536,68 @@ export default function FreightCreditorGst({ onBack }) {
             size="small"
             sx={{ bgcolor: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', fontWeight: 900, border: '1px solid rgba(236, 72, 153, 0.3)', letterSpacing: '0.5px' }}
           />
+
+          {/* ── DONE & B2B Button ── */}
+          <Button
+            id="done-b2b-btn"
+            variant="contained"
+            startIcon={<FactCheckIcon />}
+            onClick={handleOpenB2B}
+            sx={{
+              bgcolor: '#10b981',
+              color: '#ffffff',
+              fontWeight: 900,
+              fontSize: '12px',
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase',
+              px: 2,
+              py: 0.8,
+              borderRadius: 2,
+              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.35)',
+              border: '1px solid #34d399',
+              transition: 'all 0.2s',
+              '&:hover': {
+                bgcolor: '#059669',
+                boxShadow: '0 6px 16px rgba(16, 185, 129, 0.5)'
+              }
+            }}
+          >
+            DONE & B2B
+          </Button>
+
+          {/* ── PRINT TAX INVOICE Button ── */}
+          <Button
+            id="print-tax-invoice-btn"
+            variant="contained"
+            startIcon={<PrintIcon />}
+            onClick={handlePrint}
+            sx={{
+              bgcolor: '#0284c7',
+              color: '#ffffff',
+              fontWeight: 900,
+              fontSize: '12px',
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase',
+              px: 2,
+              py: 0.8,
+              borderRadius: 2,
+              boxShadow: '0 4px 12px rgba(2, 132, 199, 0.35)',
+              border: '1px solid #38bdf8',
+              transition: 'all 0.2s',
+              '&:hover': {
+                bgcolor: '#0369a1',
+                boxShadow: '0 6px 16px rgba(2, 132, 199, 0.5)'
+              }
+            }}
+          >
+            PRINT TAX INVOICE
+          </Button>
         </Box>
       </Box>
 
       {/* ── 3 Creditor Sub-Tabs ─────────────────────────────────────────── */}
       <Box
+        className="no-print"
         sx={{
           borderBottom: '1px solid #334155',
           mb: 3,
@@ -1373,9 +1656,33 @@ export default function FreightCreditorGst({ onBack }) {
       </Box>
 
       {/* ── Tab Content: Selected Creditor Spreadsheet Table ────────── */}
-      <Box sx={{ flex: 1 }}>
-        <CreditorInvoiceSpreadsheet creditor={currentCreditor} taxDetails={taxDetails} />
+      <Box className="freight-creditor-content-wrapper" sx={{ flex: 1 }}>
+        <CreditorInvoiceSpreadsheet ref={spreadsheetRef} creditor={currentCreditor} taxDetails={taxDetails} />
       </Box>
+
+      {/* ── B2B GST Entry Dialog ── */}
+      <B2BEntryDialog
+        open={b2bDialogOpen}
+        onClose={() => setB2bDialogOpen(false)}
+        isFreightCreditor={true}
+        freightContext={b2bContext}
+        invoiceNumber={b2bContext?.taxDetails?.invoiceNumber}
+        onSaved={handleB2BSaved}
+      />
+
+      {topSnack && (
+        <Snackbar
+          className="no-print"
+          open
+          autoHideDuration={4000}
+          onClose={() => setTopSnack(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert severity={topSnack.type} onClose={() => setTopSnack(null)} sx={{ fontWeight: 700 }}>
+            {topSnack.text}
+          </Alert>
+        </Snackbar>
+      )}
     </Box>
   );
 }

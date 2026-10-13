@@ -50,11 +50,12 @@ export const COLUMNS = [
     key: 'PARTY RATE (95-97%)', label: 'PARTY RATE\n(95-97%)', width: 110, type: 'calc', group: 'billing',
     hint: 'Party Rate (Freight / MT) = Billing × (1 - Basic Freight Commission)',
     formula: r => {
-      const comm = r._freight_commission;
+      const comm = (r._freight_commission !== undefined && r._freight_commission !== null && r._freight_commission !== '' && !isNaN(Number(r._freight_commission)))
+        ? Number(r._freight_commission)
+        : 0.05;
       const billingRate = num(r.BILLING);
-      if (comm !== undefined && comm !== null && comm !== '' && !isNaN(Number(comm))) {
-        const ratePct = 1 - Number(comm);
-        return billingRate > 0 ? fmt2(billingRate * ratePct) : '';
+      if (billingRate > 0) {
+        return fmt2(billingRate * (1 - comm));
       }
       const existing = r['PARTY RATE (95-97%)'] || r['PARTY RATE (95%)'] || r['PARTY RATE'];
       if (existing !== undefined && existing !== null && existing !== '') {
@@ -64,9 +65,6 @@ export const COLUMNS = [
           if (n > 0) return fmt2(n);
         }
       }
-      if (billingRate > 0) {
-        return fmt2(billingRate * 0.95);
-      }
       return '';
     }
   },
@@ -75,32 +73,59 @@ export const COLUMNS = [
     hint: 'Billing × (1 - variable commission). Shows 0 for standard 95% owners.',
     hidden: true,
     formula: r => {
-      const comm = r._freight_commission;
-      if (comm === undefined || comm === null || Number(comm) === 0.05) return 0;
-      return fmt2(num(r.BILLING) * (1 - Number(comm)));
+      const comm = (r._freight_commission !== undefined && r._freight_commission !== null && r._freight_commission !== '' && !isNaN(Number(r._freight_commission)))
+        ? Number(r._freight_commission)
+        : 0.05;
+      return fmt2(num(r.BILLING) * (1 - comm));
     }
   },
-  { key: 'Billing Amount', label: 'BILLING\nAMOUNT', width: 105, type: 'calc', group: 'billing', formula: r => fmt2(num(r.BILLING) * num(r.MT)) },
   {
-    key: 'BILLING ER 95%', label: 'BILLING ER 95%\n(PARTY PAYABLE)', width: 130, type: 'calc', group: 'billing',
-    hint: 'Billing Amount × 95%. Shows 0 for variable-commission owners.',
+    key: 'Billing Amount',
+    label: 'BILLING\nAMOUNT',
+    width: 105,
+    type: 'calc',
+    group: 'billing',
     formula: r => {
-      const comm = r._freight_commission;
-      const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
-      return isStd ? fmt2(num(r['Billing Amount']) * 0.95) : 0;
+      const derived = fmt2(num(r.BILLING) * num(r.MT));
+      if (derived > 0) return derived;
+      const stored = num(r['Billing Amount']) || num(r['BILLING AMOUNT']);
+      return stored > 0 ? fmt2(stored) : 0;
+    }
+  },
+  {
+    key: 'BILLING ER 95%', label: 'BILLING ER\n(PARTY PAYABLE)', width: 130, type: 'calc', group: 'billing',
+    hint: 'Party Payable = Billing Amount × (1 - Basic Freight Commission)',
+    formula: r => {
+      const comm = (r._freight_commission !== undefined && r._freight_commission !== null && r._freight_commission !== '' && !isNaN(Number(r._freight_commission)))
+        ? Number(r._freight_commission)
+        : 0.05;
+      const bAmt = num(r['Billing Amount']) || num(r['BILLING AMOUNT']) || (num(r.BILLING) * num(r.MT));
+      return fmt2(bAmt * (1 - comm));
     }
   },
   {
     key: 'BILLING ER VAR', label: 'BILLING ER\n(Variable %)', width: 130, type: 'calc', group: 'billing',
-    hint: 'Billing Amount × (1 - variable commission). Shows 0 for standard 95% owners.',
+    hint: 'Billing Amount × (1 - variable commission).',
     hidden: true,
     formula: r => {
-      const comm = r._freight_commission;
-      if (comm === undefined || comm === null || Number(comm) === 0.05) return 0;
-      return fmt2(num(r['Billing Amount']) * (1 - Number(comm)));
+      const comm = (r._freight_commission !== undefined && r._freight_commission !== null && r._freight_commission !== '' && !isNaN(Number(r._freight_commission)))
+        ? Number(r._freight_commission)
+        : 0.05;
+      const bAmt = num(r['Billing Amount']) || num(r['BILLING AMOUNT']) || (num(r.BILLING) * num(r.MT));
+      return fmt2(bAmt * (1 - comm));
     }
   },
-  { key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing', formula: r => fmt2(num(r['Billing Amount']) * 0.05) },
+  {
+    key: 'PROFIT', label: 'GROSS MARGIN', width: 100, type: 'calc', group: 'billing',
+    hint: 'Gross Margin = Billing Amount × Basic Freight Commission',
+    formula: r => {
+      const comm = (r._freight_commission !== undefined && r._freight_commission !== null && r._freight_commission !== '' && !isNaN(Number(r._freight_commission)))
+        ? Number(r._freight_commission)
+        : 0.05;
+      const bAmt = num(r['Billing Amount']) || num(r['BILLING AMOUNT']) || (num(r.BILLING) * num(r.MT));
+      return fmt2(bAmt * comm);
+    }
+  },
   {
     key: 'TDS', label: 'TDS', width: 80, type: 'manual', group: 'billing',
     hint: 'Calculated TDS Money Value (Billing Year 95% Party Payable × Owner Details TDS Rate) (Editable)'
@@ -112,7 +137,7 @@ export const COLUMNS = [
 
   // ── Group 3: Deductions ────────────────────────────────────────────────────
   { key: 'GPS Monitoring Charge', label: 'GPS MONITORING /\nTRIP CHARGE', width: 160, type: 'manual', group: 'deductions' },
-  { key: 'Give GPS DEVICE', label: 'GIVE GPS DEVICE', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
+  { key: 'Give GPS DEVICE', label: 'GIVE GPS DEVICE', width: 110, type: 'manual', group: 'deductions', hint: 'GPS Device charge (auto from invoice add-on or editable)' },
   { key: 'GPS Deviation Charges', label: 'GPS DEVIATION\nCHARGES', width: 150, type: 'manual', group: 'deductions' },
   { key: 'Suspense', label: 'SUSPENSE', width: 120, type: 'manual', group: 'deductions' },
   { key: 'Give RFID TAG', label: 'GIVE RFID TAG', width: 110, type: 'auto', group: 'deductions', hint: 'Auto from invoice add-on charges' },
@@ -191,9 +216,13 @@ export const COLUMNS = [
     key: 'SHORTAGE (AMOUNT)', label: 'SHORTAGE (AMOUNT)', width: 130, type: 'calc', group: 'hsd',
     formula: r => {
       const bags = num(r['SHORTAGE (BAG)']);
-      if (bags <= 0) return 0;
       const rate = num(r['SHORTAGE (RATE)']) || num(r._damage_deduction_rate) || num(r._damage_rate) || 476;
-      return fmt2(bags * rate);
+      const bagAmt = bags > 0 ? bags * rate : 0;
+      const manualAmt = num(r['SHORTAGE (AMOUNT)']);
+      const damageAmt = num(r['Damage Deduction']);
+      const effectiveAllocOrStored = Math.max(manualAmt, damageAmt);
+      const finalAmt = Math.max(bagAmt, effectiveAllocOrStored);
+      return finalAmt > 0 ? fmt2(finalAmt) : 0;
     }
   },
 
@@ -205,6 +234,9 @@ export const COLUMNS = [
       const isStd = comm === undefined || comm === null || Number(comm) === 0.05;
       const base = isStd ? num(r['BILLING ER 95%']) : num(r['BILLING ER VAR']);
       const finalTds = num(r['TDS']);
+      const damageAmt = num(r['Damage Deduction']);
+      const shortageAmt = num(r['SHORTAGE (AMOUNT)']);
+      const extraDamage = (damageAmt > 0 && damageAmt > shortageAmt) ? (damageAmt - shortageAmt) : 0;
       return fmt2(
         base
         - finalTds
@@ -214,7 +246,7 @@ export const COLUMNS = [
         - num(r['Bank TF'])
         - num(r['Others deduction'])
         - (num(r['GPS Monitoring Charge']) || num(r['GPS MONITORING / TRIP CHARGE']) || num(r['GPS Trip Charges']))
-        - num(r['Give GPS DEVICE'])
+        - (num(r['Give GPS DEVICE']) || num(r['GIVE GPS DEVICE']) || num(r['GPS DEVICE']) || num(r['GPS Device']) || 0)
         - num(r['GPS Deviation Charges'])
         - num(r['Suspense'])
         - num(r['Give RFID TAG'])
@@ -222,7 +254,8 @@ export const COLUMNS = [
         - num(r['FASTAG'])
         - num(r['HSD AMOUNT'])
         - num(r['TRAVELLING EXP'])
-        - num(r['SHORTAGE (AMOUNT)'])
+        - shortageAmt
+        - extraDamage
         - num(r['Other'])
       );
     }
@@ -476,17 +509,13 @@ export function applyCalcs(row, defaultDamageRate = 476) {
     : ((r._damage_rate !== undefined && r._damage_rate !== null && r._damage_rate !== '') ? num(r._damage_rate) : (num(defaultDamageRate) || 476));
 
   const shortageBags = num(r['SHORTAGE (BAG)']);
-  if (shortageBags > 0) {
-    if (!r['SHORTAGE (RATE)'] || num(r['SHORTAGE (RATE)']) === 0) {
-      r['SHORTAGE (RATE)'] = damageRate;
-    }
-    r['SHORTAGE (AMOUNT)'] = fmt2(shortageBags * num(r['SHORTAGE (RATE)']));
-  } else {
-    if (!r['SHORTAGE (RATE)']) {
-      r['SHORTAGE (RATE)'] = damageRate;
-    }
-    r['SHORTAGE (AMOUNT)'] = 0;
+  if (!r['SHORTAGE (RATE)'] || num(r['SHORTAGE (RATE)']) === 0) {
+    r['SHORTAGE (RATE)'] = damageRate;
   }
+  const calcShortageAmt = shortageBags > 0 ? shortageBags * num(r['SHORTAGE (RATE)']) : 0;
+  const currentShortageAmt = Math.max(num(r['SHORTAGE (AMOUNT)']), num(r['Damage Deduction']));
+  const finalShortageAmt = Math.max(calcShortageAmt, currentShortageAmt);
+  r['SHORTAGE (AMOUNT)'] = finalShortageAmt > 0 ? fmt2(finalShortageAmt) : 0;
 
   // Run calc columns in order (some depend on earlier calcs)
   for (const col of COLUMNS) {
@@ -537,7 +566,7 @@ export const VISIBLE_COLS = COLUMNS.filter((c, i, arr) =>
 export const NUMERIC_KEYS = new Set([
   'MT', 'Billing Amount', 'BILLING ER 95%', 'BILLING ER VAR', 'PROFIT', 'TDS',
   'ADVANCE', 'Site Cash', 'OFFICE CASH', 'Bank TF', 'Others deduction', 'Other',
-  'GPS Monitoring Charge', 'Give GPS DEVICE', 'GPS Deviation Charges', 'GPS Trip Charges', 'Suspense', 'Give RFID TAG', 'RFID REASSURANCE', 'FASTAG',
+  'GPS Monitoring Charge', 'Give GPS DEVICE', 'GPS Deviation Charges', 'GPS Trip Charges', 'Suspense', 'Damage Deduction', 'Give RFID TAG', 'RFID REASSURANCE', 'FASTAG',
   'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
   'FUEL REQUIRED', 'HSD (LTR)', 'ACTUAL EXTRA', 'HSD AMOUNT', 'TRAVELLING EXP',
   'SHORTAGE (BAG)', 'SHORTAGE (AMOUNT)', 'NET AMOUNT', 'UP TOLL', 'DOWN TOLL',

@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
+const {
+  isDedicatedVehicle,
+  isAtoaOrMkt,
+  isInvoiceSoAndNt,
+  normalizeWheelType,
+  getStandardTripThreshold,
+  getBillFreight,
+  getPartyFreight
+} = require('../utils/incentiveEligibilityManager');
 
 function num(v) {
   if (v === null || v === undefined || v === '') return 0;
@@ -165,60 +174,97 @@ async function computeCandidateIncentives(candidateMonths, cementCol, incStateCo
 
       if (!byTruck[truck]) {
         const contact = vehContactMap[truck];
-        const dbWheel = contact ? (contact['Type of vehicle '] || contact['Type of vehicle'] || contact.type_of_vehicle || '') : '';
+        const dbWheel = contact ? (contact['Type of vehicle '] || contact['Type of vehicle'] || contact.type_of_vehicle || contact.wheelType || '') : '';
         const owner = contact ? (contact['Owner Name '] || contact['Owner Name'] || contact.owner_name || '') : '';
+        const normW = normalizeWheelType(row['WHEEL'] || dbWheel || '');
+        const isDed = isDedicatedVehicle(contact);
+        const isEligibleRel = isAtoaOrMkt(contact);
+        const rawCust = contact ? (contact['TYPE OF CUSTOMER '] || contact.custType || contact.type_of_customer || '') : '';
+        const isAtoa = String(rawCust).trim().toUpperCase().startsWith('ATO');
+
         byTruck[truck] = {
           ownerName: (row['OWNER NAME'] || owner || vehToOwner[truck] || '').trim(),
           truckNo: truck,
-          wheel: row['WHEEL'] || dbWheel || '',
+          wheel: normW || row['WHEEL'] || dbWheel || '',
+          wheelNorm: normW,
+          isDedicated: isDed,
+          isEligibleRel,
+          isAtoa,
+          contact,
           tripsCount: 0,
+          seenInvoices: new Set(),
           nvl: { amt: 0 },
           nvcl: { amt: 0 },
           extra10W: 0,
+          extra6WPotential: 0,
           extra6W: 0
         };
       }
 
       const entry = byTruck[truck];
-      const cat = classifyCementRow(row);
-      const mt = num(row['MT']);
-      const billing = num(row['BILLING']);
-      const orgFreight = billing * mt;
+      const invNo = String(row['INVOICE NO'] || row['INVOICE NO.'] || '').trim().toUpperCase().replace(/\s+/g, '');
+      const isDummy = row.isDummy === true || row._isDummy === true || row._source === 'auto_dummy';
+      if (isDummy) continue;
+
+      if (invNo) {
+        if (entry.seenInvoices.has(invNo)) continue;
+        entry.seenInvoices.add(invNo);
+      }
       entry.tripsCount += 1;
-      const baseIncentive = orgFreight * 0.095;
+
+      const cat = classifyCementRow(row);
+      const billFreight = getBillFreight(row);
+      const partyFreight = getPartyFreight(row, entry.contact);
+      const sourceFreight = entry.isAtoa ? billFreight : partyFreight;
+
+      let standardRate = 0.095;
+      if (!entry.isAtoa && (entry.wheelNorm === '6WH' || entry.wheelNorm === '10WH')) {
+        standardRate = 0.085;
+      }
+      const tripStandardIncentive = sourceFreight * standardRate;
 
       if (cat === 'NVL') {
-        entry.nvl.amt += baseIncentive;
+        entry.nvl.amt += tripStandardIncentive;
       } else {
-        entry.nvcl.amt += baseIncentive;
+        entry.nvcl.amt += tripStandardIncentive;
       }
 
-      const bType = (row['Bill Type'] || '').toUpperCase();
-      const isSoOrNt = bType === 'SO' || bType === 'NT';
+      // Rule 2: 10W Extra Incentive (from 1st qualifying trip if 10WH + ATOA/MKT + SO + NT)
       const manualW10 = num(row['10W EXTRA 8.5%']);
       if (manualW10 > 0) {
         entry.extra10W += manualW10;
-      } else if (isSoOrNt) {
-        const wheelStr = String(entry.wheel).toLowerCase();
-        if (wheelStr.includes('10')) {
-          entry.extra10W += orgFreight * 0.085;
-        }
+      } else if (entry.wheelNorm === '10WH' && entry.isEligibleRel && isInvoiceSoAndNt(row)) {
+        const extra10Base = entry.isAtoa ? billFreight : partyFreight;
+        entry.extra10W += extra10Base * 0.085;
       }
-      if (isSoOrNt) {
-        const wheelStr = String(entry.wheel).toLowerCase();
-        if (wheelStr.includes('6')) {
-          entry.extra6W += orgFreight * 0.15;
-        }
+
+      // Rule 3: 6W Extra Incentive (15% if 6WH + ATOA/MKT, checked against >= 6 trips threshold)
+      if (entry.wheelNorm === '6WH' && entry.isEligibleRel) {
+        const extra6Base = entry.isAtoa ? billFreight : partyFreight;
+        entry.extra6WPotential = (entry.extra6WPotential || 0) + extra6Base * 0.15;
       }
     }
 
     const projectedMap = {};
     Object.values(byTruck).forEach(t => {
-      const metCriteria = t.tripsCount > 6;
-      if (!metCriteria) {
-        t.extra10W = 0;
+      // Rule 1: Standard Incentive requires Dedicated status + trip threshold
+      const reqStandard = getStandardTripThreshold(t.wheelNorm);
+      const isStandardEligible = t.isEligibleRel && t.isDedicated && reqStandard !== null && t.tripsCount >= reqStandard;
+      if (!isStandardEligible) {
+        t.nvl.amt = 0;
+        t.nvcl.amt = 0;
+      }
+
+      // Rule 3: 6-Wheel Extra Incentive requires >= 6 trips
+      const is6WEligible = t.wheelNorm === '6WH' && t.isEligibleRel && t.tripsCount >= 6;
+      if (is6WEligible) {
+        t.extra6W = t.extra6WPotential || 0;
+      } else {
         t.extra6W = 0;
       }
+
+      // Rule 2: 10-Wheel Extra Incentive requires NO minimum trip threshold (eligible from trip 1)
+
       const nvlNvclTotal = Math.round(t.nvl.amt) + Math.round(t.nvcl.amt);
       const totalFinal = nvlNvclTotal + Math.round(t.extra10W) + Math.round(t.extra6W);
       const tNo = normVeh(t.truckNo);
@@ -533,13 +579,21 @@ router.get('/party-tds', async (req, res) => {
 
       if (!byTruck[truck]) {
         const contact = vehContactMap[truck];
-        const dbWheel = contact ? (contact['Type of vehicle '] || contact['Type of vehicle'] || contact.type_of_vehicle || '') : '';
+        const dbWheel = contact ? (contact['Type of vehicle '] || contact['Type of vehicle'] || contact.type_of_vehicle || contact.wheelType || '') : '';
         const owner = contact ? (contact['Owner Name '] || contact['Owner Name'] || contact.owner_name || '') : '';
+        const normW = normalizeWheelType(row['WHEEL'] || dbWheel || '');
+        const isDed = isDedicatedVehicle(contact);
+        const isEligibleRel = isAtoaOrMkt(contact);
+
         byTruck[truck] = {
           ownerName: (row['OWNER NAME'] || owner || vehToOwner[truck] || '').trim(),
           truckNo: truck,
-          wheel: row['WHEEL'] || dbWheel || '',
+          wheel: normW || row['WHEEL'] || dbWheel || '',
+          wheelNorm: normW,
+          isDedicated: isDed,
+          isEligibleRel,
           tripsCount: 0,
+          seenInvoices: new Set(),
           nvl: { amt: 0 },
           nvcl: { amt: 0 },
           extra10W: 0,
@@ -548,11 +602,19 @@ router.get('/party-tds', async (req, res) => {
       }
 
       const entry = byTruck[truck];
+      const invNo = String(row['INVOICE NO'] || row['INVOICE NO.'] || '').trim().toUpperCase().replace(/\s+/g, '');
+      const isDummy = row.isDummy === true || row._isDummy === true;
+      if (!isDummy && invNo && !entry.seenInvoices.has(invNo)) {
+        entry.seenInvoices.add(invNo);
+        entry.tripsCount += 1;
+      } else if (!isDummy && !invNo) {
+        entry.tripsCount += 1;
+      }
+
       const cat = classifyCementRow(row);
       const mt = num(row['MT']);
       const billing = num(row['BILLING']);
       const orgFreight = billing * mt;
-      entry.tripsCount += 1;
       const baseIncentive = orgFreight * 0.095;
 
       if (cat === 'NVL') {
@@ -561,33 +623,39 @@ router.get('/party-tds', async (req, res) => {
         entry.nvcl.amt += baseIncentive;
       }
 
-      const bType = (row['Bill Type'] || '').toUpperCase();
-      const isSoOrNt = bType === 'SO' || bType === 'NT';
+      // Rule 2: 10W Extra Incentive (from 1st qualifying trip if 10WH + ATOA/MKT + SO + NT)
       const manualW10 = num(row['10W EXTRA 8.5%']);
       if (manualW10 > 0) {
         entry.extra10W += manualW10;
-      } else if (isSoOrNt) {
-        const wheelStr = String(entry.wheel).toLowerCase();
-        if (wheelStr.includes('10')) {
-          entry.extra10W += orgFreight * 0.085;
-        }
+      } else if (entry.wheelNorm === '10WH' && entry.isEligibleRel && isInvoiceSoAndNt(row)) {
+        entry.extra10W += orgFreight * 0.085;
       }
-      if (isSoOrNt) {
-        const wheelStr = String(entry.wheel).toLowerCase();
-        if (wheelStr.includes('6')) {
-          entry.extra6W += orgFreight * 0.15;
-        }
+
+      // Rule 3: 6W Extra Incentive (15% if 6WH + ATOA/MKT, checked against >= 6 trips threshold)
+      if (entry.wheelNorm === '6WH' && entry.isEligibleRel) {
+        entry.extra6W += orgFreight * 0.15;
       }
     }
 
     const vehicleIncentives = {};
     const ownerIncentives = {};
     Object.values(byTruck).forEach(t => {
-      const metCriteria = t.tripsCount > 6;
-      if (!metCriteria) {
-        t.extra10W = 0;
+      // Rule 1: Standard Incentive requires Dedicated status + trip threshold
+      const reqStandard = getStandardTripThreshold(t.wheelNorm);
+      const isStandardEligible = t.isEligibleRel && t.isDedicated && reqStandard !== null && t.tripsCount >= reqStandard;
+      if (!isStandardEligible) {
+        t.nvl.amt = 0;
+        t.nvcl.amt = 0;
+      }
+
+      // Rule 3: 6-Wheel Extra Incentive requires >= 6 trips
+      const is6WEligible = t.wheelNorm === '6WH' && t.isEligibleRel && t.tripsCount >= 6;
+      if (!is6WEligible) {
         t.extra6W = 0;
       }
+
+      // Rule 2: 10-Wheel Extra Incentive requires NO minimum trip threshold (eligible from trip 1)
+
       const nvlNvclTotal = Math.round(t.nvl.amt) + Math.round(t.nvcl.amt);
       const totalFinal = nvlNvclTotal + Math.round(t.extra10W) + Math.round(t.extra6W);
       const tNo = normVeh(t.truckNo);

@@ -13,42 +13,40 @@ const {
   syncVoucherOnUpdate,
   syncVoucherSlip
 } = require("../utils/voucherCementAdvanceManager");
+const {
+  syncVoucherToIndirectExpense,
+  reverseVoucherFromIndirectExpense,
+  syncVoucherOnUpdateIndirectExpense
+} = require("../utils/voucherIndirectExpenseManager");
 
 // Helper: compute expense totals for a specific date string and emit to all clients
 async function emitExpenseUpdate(dateIso) {
   try {
     const io = getIO();
     const voucherCol = Voucher.collection;
-    const cementCol = require('mongoose').connection.useDb('cement_register').collection('entries');
+    const { calculateSingleDateExpenses, normalizeDateToKey } = require("../utils/cashbookExpenseCalculator");
 
-    // Convert ISO date string to DD-MM-YYYY for matching stored dates
-    const d = new Date(dateIso);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    const normDate = `${day}-${month}-${year}`; // e.g. "24-04-2026"
+    const normDate = normalizeDateToKey(dateIso);
+    if (!normDate) return;
 
-    // Run aggregations for this specific date in parallel
+    const parts = normDate.split('-');
+    const day = parts[0];
+    const month = parts[1];
+    const year = parts[2];
+
     const startOfDay = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
     const endOfDay = new Date(`${year}-${month}-${day}T23:59:59.999Z`);
 
-    const [indirectRes, directRes, cementRes] = await Promise.all([
-      voucherCol.aggregate([
-        { $match: { voucherType: { $ne: 'CREDIT' }, expenseType: { $ne: 'Direct Expense' }, date: { $gte: startOfDay, $lte: endOfDay } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]).toArray(),
+    const [expenseRes, directRes] = await Promise.all([
+      calculateSingleDateExpenses(normDate),
       voucherCol.aggregate([
         { $match: { voucherType: { $ne: 'CREDIT' }, expenseType: 'Direct Expense', date: { $gte: startOfDay, $lte: endOfDay } } },
         { $group: { _id: null, total: { $sum: '$amount' }, details: { $push: { purpose: '$purpose', amount: '$amount' } } } }
-      ]).toArray(),
-      cementCol.aggregate([
-        { $match: { 'LOADING DT': { $in: [normDate, `${d.getDate()}-${d.getMonth() + 1}-${year}`] } } },
-        { $group: { _id: null, total: { $sum: { $convert: { input: '$ADVANCE', to: 'double', onError: 0, onNull: 0 } } } } }
-      ]).toArray(),
+      ]).toArray().catch(() => [])
     ]);
 
-    const sExpense = (indirectRes[0]?.total || 0) + (cementRes[0]?.total || 0);
-    const oExpense = directRes[0]?.total || 0;
+    const sExpense = expenseRes.sExpense || 0;
+    const oExpense = expenseRes.oExpense || 0;
     const oDetails = (directRes[0]?.details || []).map(d => `${d.purpose} (${d.amount})`).join(', ');
 
     io.emit('expenseUpdate', { date: normDate, sExpense, oExpense, oDetails });
@@ -194,7 +192,8 @@ router.post("/", auth, async (req, res) => {
       const vNum = await generateVoucherNumber();
 
       // ALWAYS derive the role from the verified JWT or explicit panelSource
-      const roleFromToken = panelSource || req.user?.role || "OFFICE";
+      const isSitePanel = panelSource === 'SITE' || String(req.user?.role || '').toUpperCase().includes('SITE');
+      const roleFromToken = isSitePanel ? 'SITE' : (panelSource || req.user?.role || "OFFICE");
 
       const finalOwnerName = (ownerName || name || "").trim();
       const finalVehicleNumber = vehicleNumber ? String(vehicleNumber).trim().toUpperCase() : "";
@@ -215,6 +214,7 @@ router.post("/", auth, async (req, res) => {
         remarks: remarks || "",
         invoiceId: invoiceId || null,
         createdByRole: roleFromToken,
+        panelSource: isSitePanel ? 'SITE' : (panelSource || roleFromToken),
       });
 
       await voucher.save();
@@ -227,6 +227,8 @@ router.post("/", auth, async (req, res) => {
         emitExpenseUpdate(voucher.date).catch(() => { });
         // Re-sync Cement Register so Site Cash column updates immediately
         resyncCementForVehicle(finalVehicleNumber, invoiceId || null, voucher._id.toString());
+        // Automatically sync Indirect Expense voucher to Indirect Expenses ledger
+        await syncVoucherToIndirectExpense(voucher);
       }
 
       // Notify Main Cashbook and Party Payment listeners that a new voucher was created
@@ -312,6 +314,10 @@ router.put("/:id", auth, async (req, res) => {
     if (name !== undefined) updateFields.name = name;
     if (reason !== undefined) updateFields.reason = reason;
     if (expenseType !== undefined) updateFields.expenseType = expenseType;
+    if (panelSource !== undefined) {
+      updateFields.panelSource = panelSource;
+      if (panelSource === 'SITE') updateFields.createdByRole = 'SITE';
+    }
 
     const updated = await Voucher.findByIdAndUpdate(
       req.params.id,
@@ -332,6 +338,9 @@ router.put("/:id", auth, async (req, res) => {
       await reverseVoucherFromCement(oldVoucher);
       emitExpenseUpdate(oldVoucher.date).catch(() => { });
     }
+
+    // Sync with Indirect Expenses
+    await syncVoucherOnUpdateIndirectExpense(oldVoucher, updated);
 
     try {
       const io = getIO();
@@ -359,6 +368,8 @@ router.delete("/:id", auth, async (req, res) => {
 
     // Reverse contribution from Cement Register
     await reverseVoucherFromCement(voucher);
+    // Reverse from Indirect Expenses
+    await reverseVoucherFromIndirectExpense(voucher);
 
     await Voucher.findByIdAndDelete(req.params.id);
 

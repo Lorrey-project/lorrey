@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { API_URL } from '../config';
-import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
+import { startRegistration } from '@simplewebauthn/browser';
 
 /**
  * Dedicated Client-Side Fingerprint Service

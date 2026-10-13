@@ -9,6 +9,11 @@ const {
   syncFreightAdvancesBatch,
   isQualifyingFreightAdvance
 } = require('../utils/monojCementAdvanceManager');
+const {
+  syncManojRowToIndirectExpense,
+  reverseManojRowFromIndirectExpense,
+  syncManojRowsBatch
+} = require('../utils/monojIndirectExpenseManager');
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return 0;
@@ -227,6 +232,11 @@ router.post('/', async (req, res) => {
     if (isManoj) {
       data.creditorName = 'MANOJ BANDHAN';
       data.credit = 0; // Manual creation cannot set credit; credit is system-generated only
+      if (String(data.expenseType || '').trim().toUpperCase() === 'INDIRECT EXPENSES') {
+        data.ledgerName = '';
+        data.names = '';
+        data.vehicleNo = '';
+      }
     }
 
     if (!data.slNo) {
@@ -241,6 +251,7 @@ router.post('/', async (req, res) => {
     let cementSyncResult = null;
     if (isManoj) {
       await recalculateMonojBandhanBalances();
+      await syncManojRowToIndirectExpense(entry);
     }
     if (isQualifyingFreightAdvance(entry)) {
       cementSyncResult = await applyFreightAdvanceToCement(entry);
@@ -278,6 +289,9 @@ router.put('/:id', async (req, res) => {
     let cementSyncResult = null;
     if (isQualifyingFreightAdvance(updated) || (existing._cementSync && existing._cementSync.applied)) {
       cementSyncResult = await applyFreightAdvanceToCement(updated);
+    }
+    if (isManojBandhan(updated.creditorName)) {
+      await syncManojRowToIndirectExpense(updated);
     }
 
     res.json({ success: true, entry: updated, cementSyncResult });
@@ -326,6 +340,11 @@ router.post('/bulk-save', async (req, res) => {
         r.creditorName = 'MANOJ BANDHAN';
         // Manual creation must never set credit directly; credit is system-generated only
         r.credit = 0;
+        if (String(r.expenseType || '').trim().toUpperCase() === 'INDIRECT EXPENSES') {
+          r.ledgerName = '';
+          r.names = '';
+          r.vehicleNo = '';
+        }
       }
       if (!r.slNo) {
         maxSl += 1;
@@ -350,6 +369,7 @@ router.post('/bulk-save', async (req, res) => {
       await recalculateMonojBandhanBalances();
     }
     const cementSyncResults = await syncFreightAdvancesBatch(saved);
+    await syncManojRowsBatch(saved);
 
     res.json({ success: true, count: saved.length, entries: saved, cementSyncResults });
   } catch (err) {
@@ -368,6 +388,17 @@ router.delete('/:id', async (req, res) => {
 
     if (isQualifyingFreightAdvance(docToDelete) || (docToDelete._cementSync && docToDelete._cementSync.applied)) {
       await reverseFreightAdvanceContribution(docToDelete);
+    }
+    if (isManojBandhan(docToDelete.creditorName)) {
+      await reverseManojRowFromIndirectExpense(docToDelete);
+      if (docToDelete.b2bEntryId && mongoose.Types.ObjectId.isValid(docToDelete.b2bEntryId)) {
+        try {
+          const col = mongoose.connection.useDb("gst_portal").collection("entries");
+          await col.deleteOne({ _id: new mongoose.Types.ObjectId(docToDelete.b2bEntryId) });
+        } catch (b2bErr) {
+          console.error('[OthersCreditor Delete] Error deleting linked B2B entry:', b2bErr);
+        }
+      }
     }
 
     const deleted = await OthersCreditor.findByIdAndDelete(req.params.id);
@@ -394,6 +425,17 @@ router.post('/bulk-delete', async (req, res) => {
       if (isQualifyingFreightAdvance(doc) || (doc._cementSync && doc._cementSync.applied)) {
         await reverseFreightAdvanceContribution(doc);
       }
+      if (isManojBandhan(doc.creditorName)) {
+        await reverseManojRowFromIndirectExpense(doc);
+        if (doc.b2bEntryId && mongoose.Types.ObjectId.isValid(doc.b2bEntryId)) {
+          try {
+            const col = mongoose.connection.useDb("gst_portal").collection("entries");
+            await col.deleteOne({ _id: new mongoose.Types.ObjectId(doc.b2bEntryId) });
+          } catch (b2bErr) {
+            console.error('[OthersCreditor Bulk Delete] Error deleting linked B2B entry:', b2bErr);
+          }
+        }
+      }
     }
 
     const result = await OthersCreditor.deleteMany({ _id: { $in: ids } });
@@ -405,29 +447,30 @@ router.post('/bulk-delete', async (req, res) => {
   }
 });
 
-// ── POST /api/others-creditors/upload-pdf ───────────────────────────────────
-router.post('/upload-pdf', truckContactUpload.single('pdf'), async (req, res) => {
+// ── POST /api/others-creditors/upload-pdf (Accepts PDF, JPG, JPEG) ──────────
+router.post('/upload-pdf', truckContactUpload.any(), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No PDF file uploaded.' });
+    const file = req.files?.[0] || req.file;
+    if (!file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded.' });
     }
     const { rowId } = req.body;
     let updatedEntry = null;
     if (rowId && mongoose.Types.ObjectId.isValid(rowId)) {
       updatedEntry = await OthersCreditor.findByIdAndUpdate(
         rowId,
-        { $set: { pdfUrl: req.file.location, pdfName: req.file.originalname } },
+        { $set: { pdfUrl: file.location, pdfName: file.originalname } },
         { new: true }
       );
     }
     res.json({
       success: true,
-      url: req.file.location,
-      fileName: req.file.originalname,
+      url: file.location,
+      fileName: file.originalname,
       entry: updatedEntry
     });
   } catch (err) {
-    console.error('[OthersCreditor] PDF Upload error:', err);
+    console.error('[OthersCreditor] File Upload error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

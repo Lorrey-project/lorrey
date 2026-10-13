@@ -139,10 +139,11 @@ const RAW_EXCEL_HEADER_MAP = {
   'others deduction reason': 'Other', 'other deduction reason': 'Other', 'others deduction': 'Others deduction', 'other deduction': 'Others deduction', 'deduction': 'Others deduction',
   'other': 'Other', 'others': 'Other',
   'gps monitoring charge': 'GPS Monitoring Charge', 'gps monitoring / trip charge': 'GPS Monitoring Charge', 'gps monitoring/trip charge': 'GPS Monitoring Charge', 'gps charge': 'GPS Monitoring Charge', 'gps': 'GPS Monitoring Charge', 'gps monitaring charge': 'GPS Monitoring Charge',
-  'gps device': 'Give GPS DEVICE',
+  'gps device': 'Give GPS DEVICE', 'give gps device': 'Give GPS DEVICE', 'give gps device charge': 'Give GPS DEVICE', 'gps device charges': 'Give GPS DEVICE', 'gps device charge': 'Give GPS DEVICE', 'give gps': 'Give GPS DEVICE',
   'gps deviation charges': 'GPS Deviation Charges', 'gps deviation': 'GPS Deviation Charges',
   'gps trip charges': 'GPS Monitoring Charge', 'gps trip charge': 'GPS Monitoring Charge', 'gps trip': 'GPS Monitoring Charge',
   'suspense': 'Suspense',
+  'damage deduction': 'Damage Deduction', 'damage': 'Damage Deduction', 'damage deduction charges': 'Damage Deduction',
   'fastag': 'FASTAG', 'fas tag': 'FASTAG',
   'sum of rfid & fastag & deviation & suspense & others deduction': 'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
   'sum of rfid & fastag & deviation & suspense & other deduction': 'SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION',
@@ -642,14 +643,15 @@ export default function CementRegister({ onBack }) {
 
     let dbRows = entries.filter(isRecordInSelectedPeriod).map(row => {
       const merged = { ...row, ...(localData[row._id] || {}) };
-      if (merged._freight_commission === undefined && contacts.length > 0) {
+      if (contacts.length > 0) {
         const veh = merged['VEHICLE NUMBER'] || merged['VEHICLE NO'];
         const owner = merged['OWNER NAME'] || merged['PARTY NAME'];
+        const contactId = merged._contactId || merged.owner_id || merged.ownerId;
         const rowDate = merged['LOADING DT'] || merged['LOADING DATE'] || merged['BILL DATE'] || merged['RECEIVING DATE'] || merged['INVOICE DATE'] || merged.date;
-        const contact = findContactForRecord(owner, veh, contacts, rowDate);
+        const contact = findContactForRecord(owner, veh, contacts, rowDate, contactId);
         if (contact) {
           const comm = parseContactCommission(contact, rowDate);
-          if (comm !== null) merged._freight_commission = comm;
+          if (comm !== null && comm !== undefined) merged._freight_commission = comm;
         }
       }
       return applyCalcs(merged, damageDeductionRate);
@@ -657,14 +659,15 @@ export default function CementRegister({ onBack }) {
 
     let previewRows = unsavedImportRows.filter(isRecordInSelectedPeriod).map(row => {
       const merged = { ...row, ...(localData[row._id] || {}) };
-      if (merged._freight_commission === undefined && contacts.length > 0) {
+      if (contacts.length > 0) {
         const veh = merged['VEHICLE NUMBER'] || merged['VEHICLE NO'];
         const owner = merged['OWNER NAME'] || merged['PARTY NAME'];
+        const contactId = merged._contactId || merged.owner_id || merged.ownerId;
         const rowDate = merged['LOADING DT'] || merged['LOADING DATE'] || merged['BILL DATE'] || merged['RECEIVING DATE'] || merged['INVOICE DATE'] || merged.date;
-        const contact = findContactForRecord(owner, veh, contacts, rowDate);
+        const contact = findContactForRecord(owner, veh, contacts, rowDate, contactId);
         if (contact) {
           const comm = parseContactCommission(contact, rowDate);
-          if (comm !== null) merged._freight_commission = comm;
+          if (comm !== null && comm !== undefined) merged._freight_commission = comm;
         }
       }
       return applyCalcs(merged, damageDeductionRate);
@@ -804,7 +807,12 @@ export default function CementRegister({ onBack }) {
         const currentRate = parseFloat(String(rowUpdates['SHORTAGE (RATE)'] || originalRow['SHORTAGE (RATE)'] || originalRow._damage_deduction_rate || damageDeductionRate || 476).replace(/,/g, '')) || damageDeductionRate || 476;
 
         rowUpdates['SHORTAGE (RATE)'] = currentRate;
-        rowUpdates['SHORTAGE (AMOUNT)'] = bags > 0 ? Math.round(bags * currentRate * 100) / 100 : 0;
+        const calcAmt = bags > 0 ? Math.round(bags * currentRate * 100) / 100 : 0;
+        const existingShortage = Math.max(
+          parseFloat(String(originalRow['SHORTAGE (AMOUNT)'] || '0').replace(/,/g, '')) || 0,
+          parseFloat(String(originalRow['Damage Deduction'] || '0').replace(/,/g, '')) || 0
+        );
+        rowUpdates['SHORTAGE (AMOUNT)'] = Math.max(calcAmt, existingShortage);
       }
       return {
         ...prev,

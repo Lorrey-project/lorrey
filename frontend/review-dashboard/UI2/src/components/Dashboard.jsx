@@ -134,13 +134,11 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
         fetchFuelRates();
         fetchTodayStats();
 
-        // Portal status poller for Head Office
-        if (user?.role === 'HEAD_OFFICE') {
-            fetchPortalStatuses();
-            fetchPending();
-            const intervalId = setInterval(() => { fetchPortalStatuses(); fetchPending(); }, 30000);
-            return () => clearInterval(intervalId);
-        }
+        // Portal status poller
+        fetchPortalStatuses();
+        fetchPending();
+        const intervalId = setInterval(() => { fetchPortalStatuses(); fetchPending(); }, 30000);
+        return () => clearInterval(intervalId);
     }, [user?.role]);
 
     // Listen for fuel rate applied — auto-regenerate affected PDFs
@@ -159,7 +157,6 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
     }, []);
 
     const fetchPending = async () => {
-        if (user?.role !== 'HEAD_OFFICE') return;
         try {
             const token = localStorage.getItem('token');
             const [authRes, truckRes] = await Promise.all([
@@ -555,9 +552,9 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                             Fingerprint Portal
                         </Button>
 
-                        {/* ── Pending Approvals Bell (HEAD_OFFICE only) ── */}
-                        {user?.role === 'HEAD_OFFICE' && (
-                            <Tooltip title={pendingCount > 0 ? `${pendingCount} pending approval request${pendingCount !== 1 ? 's' : ''}` : 'No pending approvals'}>
+                        {/* ── Pending Approvals Bell ── */}
+                        {onOpenAccountApprovals && (
+                            <Tooltip title={pendingCount > 0 ? `${pendingCount} pending approval request${pendingCount !== 1 ? 's' : ''}` : 'Account & Registration Approvals'}>
                                 <Badge badgeContent={pendingCount} color="error" max={99}
                                     sx={{ '& .MuiBadge-badge': { fontWeight: 900, fontSize: 10 } }}>
                                     <IconButton
@@ -775,7 +772,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <ActionCard title="BANK BOOK" subtitle="Transactions & Balances" icon={<AccountBalanceWalletIcon />} accentColor="#10b981" onClick={onOpenAccountDetails} />
                                     <ActionCard title="PAYMENT RECEIVE HISTORY" subtitle="Payment Receive History" icon={<ReceiptLongIcon />} accentColor="#10b981" onClick={onOpenPaymentReceiveHistory} />
                                     <ActionCard title="PRINTING & STATIONARY OR OTHERS NON_GST" subtitle="Printing & Stationary / Others Non_GST" icon={<PrintIcon />} accentColor="#f43f5e" onClick={onOpenPrintingStationary} />
-                                    <ActionCard title="INDIRECT EXPENCE" subtitle="Monthly Bank & Cash Ledger" icon={<PaymentsIcon />} accentColor="#f59e0b" onClick={onOpenIndirectExpense} />
+                                    <ActionCard title="INDIRECT EXPENSES" subtitle="Monthly Bank & Cash Ledger" icon={<PaymentsIcon />} accentColor="#f59e0b" onClick={onOpenIndirectExpense} />
                                     <ActionCard title="CASH BOOK" subtitle="Daily Cash Flow" icon={<DescriptionIcon />} accentColor="#06b6d4" onClick={onOpenMainCashbook} />
                                     <ActionCard title="PUMP PAYMENT DETAILS" subtitle="Clear Pump Dues" icon={<LocalGasStationIcon />} accentColor="#0ea5e9" onClick={onOpenPumpPayment} />
                                     <ActionCard title="PUMP PAYMENT REGISTER" subtitle="Payment Register" icon={<ReceiptLongIcon />} accentColor="#38bdf8" onClick={onOpenPumpPaymentRegister} />
@@ -794,9 +791,7 @@ const Dashboard = ({ onUploadNew, onOpenLorrySlip, onOpenFuelSlip, onOpenCementR
                                     <ActionCard title="PARTY MASTER" subtitle="Fleet Directory" icon={<LocalShippingIcon />} accentColor="#f59e0b" onClick={() => setTruckManagerOpen(true)} />
                                     <ActionCard title="VOUCHER HISTORY" subtitle="Approved Payouts" icon={<HistoryIcon />} accentColor="#f43f5e" onClick={() => { setVoucherDialogTab(1); setVoucherDialogOpen(true); }} />
                                     <ActionCard title="FUEL & DEDUCTION SETTINGS" subtitle="Fuel Pricing & Deductions" icon={<LocalGasStationIcon />} accentColor="#ef4444" onClick={onOpenFuelRateSettings} />
-                                    {user?.role === 'HEAD_OFFICE' && (
-                                        <ActionCard title="ACCOUNT APPROVALS" subtitle="Manage Staff Requests" icon={<PersonAddAlt1Icon />} accentColor="#10b981" onClick={onOpenAccountApprovals} />
-                                    )}
+                                    <ActionCard title="ACCOUNT APPROVALS" subtitle="Manage Staff Requests" icon={<PersonAddAlt1Icon />} accentColor="#10b981" onClick={onOpenAccountApprovals} />
                                     <ActionCard title="ATTENDANCE PANEL" subtitle="Daily Clock Ins" icon={<PersonIcon />} accentColor="#3b82f6" onClick={onOpenAttendancePanel} />
                                     <ActionCard title="FINGERPRINT BIOMETRIC SYSTEM" subtitle="Drivers, Office, Site & Devs" icon={<FingerprintIcon />} accentColor="#38bdf8" onClick={onOpenFingerprintManager} />
                                     <ActionCard title="TDS REPORTS" subtitle="TDS Ledger & Deductions" icon={<ReceiptLongIcon />} accentColor="#06b6d4" onClick={onOpenTdsReports} />

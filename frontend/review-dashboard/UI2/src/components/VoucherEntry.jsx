@@ -172,8 +172,9 @@ const VoucherSlipDocument = forwardRef(({ voucher, companyInfo }, ref) => {
 VoucherSlipDocument.displayName = 'VoucherSlipDocument';
 
 // ── Purpose meta ─────────────────────────────────────────────────────────────
-const INDIRECT_PURPOSES = ['Fuel', 'Advance', 'Repair', 'Toll', 'Others'];
-const DIRECT_PURPOSES = ['Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Others'];
+import { DIRECT_EXPENSE_REASONS, INDIRECT_EXPENSE_REASONS } from './VoucherDialog';
+const DIRECT_PURPOSES = DIRECT_EXPENSE_REASONS;
+const INDIRECT_PURPOSES = INDIRECT_EXPENSE_REASONS;
 
 const COMPANY_INFO = {
   name: 'DIPALI ASSOCIATES & CO.',
@@ -216,7 +217,7 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
     vehicleNumber: invoiceData?.human_verified_data?.supply_details?.vehicle_number || '',
     date: new Date().toISOString().split('T')[0],
     amount: '',
-    purpose: 'Fuel',
+    purpose: INDIRECT_EXPENSE_REASONS[0],
     reason: '',
     remarks: '',
   });
@@ -231,7 +232,7 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
     setForm(p => {
       let updates = { [name]: value };
       if (name === 'expenseType') {
-        updates.purpose = value === 'Direct Expense' ? 'Water' : 'Fuel';
+        updates.purpose = value === 'Direct Expense' ? DIRECT_EXPENSE_REASONS[0] : INDIRECT_EXPENSE_REASONS[0];
       }
       if (name === 'voucherType') {
         updates.name = '';
@@ -261,7 +262,7 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
       if (!form.reason.trim()) errs.reason = 'Reason is required';
       if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Must be a positive number';
     } else {
-      if (form.expenseType === 'Indirect Expense') {
+      if (form.expenseType === 'Direct Expense') {
         if (!form.vehicleNumber.trim()) errs.vehicleNumber = 'Required';
       }
       if (!form.date) errs.date = 'Required';
@@ -280,7 +281,9 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
 
     try {
       const token = localStorage.getItem('token');
-      const isSite = String(user?.role || '').toUpperCase().includes('SITE');
+      const isSite = String(user?.role || '').toUpperCase().includes('SITE') ||
+                     (user?.email || '').toLowerCase() === 'site@nuvoco.com' ||
+                     (typeof window !== 'undefined' && window.location.pathname.includes('/site'));
       const ownerId = contacts.ownerIdMap?.[form.name] || null;
       const vehicleId = contacts.vehicleIdMap?.[form.vehicleNumber] || null;
 
@@ -515,12 +518,12 @@ const VoucherEntry = ({ invoiceId, invoiceData, onBack, onDashboard }) => {
                     value={form.expenseType} onChange={handleChange}
                     InputProps={{ sx: { borderRadius: '14px' } }}
                   >
-                    <MenuItem value="Indirect Expense">Indirect Expense (Trucks/Logistics)</MenuItem>
-                    <MenuItem value="Direct Expense">Direct Expense (Office/Misc)</MenuItem>
+                    <MenuItem value="Direct Expense">DIRECT EXPENSES</MenuItem>
+                    <MenuItem value="Indirect Expense">INDIRECT EXPENSES</MenuItem>
                   </TextField>
                 </Grid>
 
-                {form.expenseType === 'Indirect Expense' && (
+                {form.expenseType === 'Direct Expense' && (
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth label="Vehicle Number" name="vehicleNumber"

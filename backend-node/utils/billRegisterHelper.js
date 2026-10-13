@@ -128,7 +128,7 @@ async function getBillRegisterData({ fy } = {}) {
     'BILL DATE': 1,
     'SITE': 1,
     'BILLING ER 95%': 1, 'BILLING @ 95% (PARTY PAYABLE)': 1,
-    'AMOUNT': 1, 'Billing Amount': 1,
+    'AMOUNT': 1, 'Billing Amount': 1, 'BILLING AMOUNT': 1,
     'VEHICLE NUMBER': 1, 'VEHICLE NO': 1,
     'PARTY NAME': 1,
     'CHALLAN STATUS': 1,

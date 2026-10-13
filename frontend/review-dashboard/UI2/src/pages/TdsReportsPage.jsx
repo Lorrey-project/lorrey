@@ -20,12 +20,6 @@ const MONTH_NAMES = [
   'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
 ];
 
-const num = (v) => {
-  if (v === null || v === undefined || v === '') return 0;
-  const n = parseFloat(String(v).replace(/,/g, ''));
-  return isNaN(n) ? 0 : n;
-};
-
 const formatAmt = (val) => {
   return Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };

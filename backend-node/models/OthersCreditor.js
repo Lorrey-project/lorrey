@@ -7,6 +7,9 @@ const othersCreditorSchema = new mongoose.Schema({
   invoiceNo: { type: String, default: '', trim: true },
   invoiceDate: { type: String, default: '' },
   date: { type: String, default: '' },
+  expenseType: { type: String, default: '', trim: true },
+  billType: { type: String, default: '', trim: true },
+  particulars: { type: String, default: '', trim: true },
   ledgerName: { type: String, default: '', trim: true },
   names: { type: String, default: '', trim: true },
   vehicleNo: { type: String, default: '', trim: true },
@@ -28,6 +31,7 @@ const othersCreditorSchema = new mongoose.Schema({
   pdfName: { type: String, default: '' },
   month: { type: Number },
   year: { type: String },
+  b2bEntryId: { type: String, default: '', trim: true },
   sourceBankBookTxId: { type: String, default: '', trim: true },
   appliedBankBookTxIds: { type: [String], default: [] }
 }, {

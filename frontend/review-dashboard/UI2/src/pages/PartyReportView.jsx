@@ -53,6 +53,45 @@ const BASE_FREIGHT_COLUMNS = [
 const COL_10WH = { key: '10WH_INCENTIVE', label: '10WH extra\n8.5% incentive', width: 110, type: 'readonly', isNumeric: true };
 const COL_6WH = { key: '6WH_INCENTIVE', label: '6WH extra\n15% incentive', width: 110, type: 'readonly', isNumeric: true };
 
+// Proportional weights for A4 landscape printing so all columns fit within 100% table width
+const COLUMN_PRINT_WEIGHTS = {
+  'SL NO': 22,
+  'LOADING DATE': 48,
+  'SITE': 30,
+  'CHALLAN STATUS': 46,
+  'DESTINATION': 66,
+  'PARTY NAME': 72,
+  'MT': 30,
+  'PARTY RATE': 48,
+  'AMOUNT': 70,
+  'ADVANCE': 54,
+  'HSD (LTR)': 40,
+  'HSD RATE': 40,
+  'HSD AMOUNT': 66,
+  'BASIC AMOUNT': 68,
+  'INCENTIVE': 50,
+  '10WH_INCENTIVE': 52,
+  '6WH_INCENTIVE': 52,
+  'EXTRA UNLOADING': 44,
+  'TOLL': 40,
+  'NET REALIZATION': 72,
+};
+
+// Clean number/text formatter specifically for printable views with zero truncation
+function formatPrintValue(col, value) {
+  if (value === undefined || value === null || value === '') return '-';
+  if (col.isNumeric) {
+    const num = parseNum(value);
+    if (!num && num !== 0) return '-';
+    if (num === 0) return '-';
+    if (col.key === 'HSD (LTR)' || col.key === 'MT') {
+      return fq(num);
+    }
+    return f(num);
+  }
+  return String(value);
+}
+
 
 
 /**
@@ -126,28 +165,34 @@ function isoToDdmmyyyy(str) {
 function DatePickerCell({ value, onChange, style }) {
   const isoVal = ddmmyyyyToIso(value);
   return (
-    <input
-      type="date"
-      value={isoVal}
-      onChange={e => onChange(isoToDdmmyyyy(e.target.value))}
-      style={{
-        width: '100%', height: '100%', border: 'none', background: 'transparent',
-        fontSize: '11px', padding: '4px 6px', cursor: 'pointer',
-        color: isoVal ? '#0f172a' : '#94a3b8', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box'
-      }}
-      onFocus={e => {
-        e.currentTarget.parentElement.style.boxShadow = 'inset 0 0 0 2px #3b82f6';
-        e.currentTarget.style.background = '#eff6ff';
-      }}
-      onBlur={e => {
-        e.currentTarget.parentElement.style.boxShadow = '';
-        e.currentTarget.style.background = 'transparent';
-      }}
-    />
+    <>
+      <span className="party-report-print-only" style={{ padding: '0 2px', fontSize: '7.2pt' }}>
+        {value || '-'}
+      </span>
+      <input
+        className="party-report-screen-only"
+        type="date"
+        value={isoVal}
+        onChange={e => onChange(isoToDdmmyyyy(e.target.value))}
+        style={{
+          width: '100%', height: '100%', border: 'none', background: 'transparent',
+          fontSize: '11px', padding: '4px 6px', cursor: 'pointer',
+          color: isoVal ? '#0f172a' : '#94a3b8', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box'
+        }}
+        onFocus={e => {
+          e.currentTarget.parentElement.style.boxShadow = 'inset 0 0 0 2px #3b82f6';
+          e.currentTarget.style.background = '#eff6ff';
+        }}
+        onBlur={e => {
+          e.currentTarget.parentElement.style.boxShadow = '';
+          e.currentTarget.style.background = 'transparent';
+        }}
+      />
+    </>
   );
 }
 
-function EditableCell({ value, onChange, style }) {
+function EditableCell({ value, onChange, style, className }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -167,6 +212,7 @@ function EditableCell({ value, onChange, style }) {
       contentEditable
       suppressContentEditableWarning
       onBlur={handleBlur}
+      className={`party-report-editable-cell ${className || ''}`}
       style={{
         ...style,
         outline: 'none', cursor: 'text', minHeight: '24px', display: 'flex',
@@ -206,11 +252,14 @@ function CellRenderer({ col, value, isDirty, onChange }) {
     textAlign: col.isNumeric ? 'right' : 'left',
   };
 
+  const printVal = formatPrintValue(col, value);
+
   if (col.type === 'auto') {
     const bg = isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(241,245,249,0.7)';
     return (
-      <td style={{ ...cellStyle, background: bg, color: '#1e293b', fontWeight: 400, cursor: 'default' }}>
-        {value || ''}
+      <td data-numeric={col.isNumeric ? "true" : "false"} style={{ ...cellStyle, background: bg, color: '#1e293b', fontWeight: 400, cursor: 'default' }}>
+        <span className="party-report-print-only">{printVal}</span>
+        <span className="party-report-screen-only">{value || ''}</span>
       </td>
     );
   }
@@ -219,7 +268,7 @@ function CellRenderer({ col, value, isDirty, onChange }) {
   if (col.type === 'readonly') {
     const hasValue = value && value !== 0;
     return (
-      <td style={{
+      <td data-numeric="true" style={{
         ...cellStyle,
         background: hasValue ? 'rgba(236,253,245,0.8)' : 'rgba(248,250,252,0.5)',
         color: hasValue ? '#065f46' : '#94a3b8',
@@ -228,7 +277,8 @@ function CellRenderer({ col, value, isDirty, onChange }) {
         cursor: 'default',
         borderLeft: hasValue ? '2px solid #10b981' : '1px solid #e2e8f0',
       }}>
-        {hasValue ? f(value) : '-'}
+        <span className="party-report-print-only">{printVal}</span>
+        <span className="party-report-screen-only">{hasValue ? f(value) : '-'}</span>
       </td>
     );
   }
@@ -236,12 +286,17 @@ function CellRenderer({ col, value, isDirty, onChange }) {
   if (col.type === 'calc') {
     const bg = isDirty ? 'rgba(254,243,199,0.5)' : 'rgba(220,252,231,0.5)';
     return (
-      <td style={{ ...cellStyle, padding: 0 }}>
-        <EditableCell
-          value={value}
-          onChange={onChange}
-          style={{ ...cellStyle, background: bg, color: '#065f46', fontWeight: 600, width: '100%' }}
-        />
+      <td data-numeric={col.isNumeric ? "true" : "false"} style={{ ...cellStyle, padding: 0 }}>
+        <span className="party-report-print-only" style={{ padding: '0 2px' }}>
+          {printVal}
+        </span>
+        <Box className="party-report-screen-only" sx={{ width: '100%', height: '100%' }}>
+          <EditableCell
+            value={value}
+            onChange={onChange}
+            style={{ ...cellStyle, background: bg, color: '#065f46', fontWeight: 600, width: '100%' }}
+          />
+        </Box>
       </td>
     );
   }
@@ -252,43 +307,53 @@ function CellRenderer({ col, value, isDirty, onChange }) {
       bgColor = value === 'STAMP' ? '#dcfce7' : value === 'NON STAMP' ? '#fee2e2' : 'inherit';
     }
     return (
-      <td style={{ ...cellStyle, padding: 0, background: bgColor }}>
-        <SearchableSelect
-          value={value || ''}
-          onChange={e => onChange(e.target.value)}
-          variant="standard"
-          sx={{
-            width: '100%', height: '100%',
-            '.MuiInputBase-input': {
-              fontSize: '11px', cursor: 'pointer', padding: '4px 5px !important',
-              color: value ? '#0f172a' : '#94a3b8', fontWeight: 600
-            },
-            '.MuiInput-underline:before': { borderBottom: 'none' },
-            '.MuiInput-underline:hover:not(.Mui-disabled):before': { borderBottom: 'none' },
-            '.MuiInput-underline:after': { borderBottom: 'none' },
-            background: 'transparent'
-          }}
-        >
-          <option value="" disabled>(none)</option>
-          {(col.options || []).map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </SearchableSelect>
+      <td data-numeric="false" style={{ ...cellStyle, padding: 0, background: bgColor }}>
+        <span className="party-report-print-only" style={{ padding: '0 2px', fontSize: '7.2pt', fontWeight: 600 }}>
+          {printVal}
+        </span>
+        <Box className="party-report-screen-only" sx={{ width: '100%', height: '100%' }}>
+          <SearchableSelect
+            value={value || ''}
+            onChange={e => onChange(e.target.value)}
+            variant="standard"
+            sx={{
+              width: '100%', height: '100%',
+              '.MuiInputBase-input': {
+                fontSize: '11px', cursor: 'pointer', padding: '4px 5px !important',
+                color: value ? '#0f172a' : '#94a3b8', fontWeight: 600
+              },
+              '.MuiInput-underline:before': { borderBottom: 'none' },
+              '.MuiInput-underline:hover:not(.Mui-disabled):before': { borderBottom: 'none' },
+              '.MuiInput-underline:after': { borderBottom: 'none' },
+              background: 'transparent'
+            }}
+          >
+            <option value="" disabled>(none)</option>
+            {(col.options || []).map(opt => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </SearchableSelect>
+        </Box>
       </td>
     );
   }
 
   if (col.isDate) {
     return (
-      <td style={{ ...cellStyle, padding: 0, background: isDirty ? 'rgba(254,243,199,0.75)' : 'rgba(255,247,237,0.04)' }}>
+      <td data-numeric="false" style={{ ...cellStyle, padding: 0, background: isDirty ? 'rgba(254,243,199,0.75)' : 'rgba(255,247,237,0.04)' }}>
         <DatePickerCell value={value} onChange={onChange} style={cellStyle} />
       </td>
     );
   }
 
   return (
-    <td style={{ ...cellStyle, padding: 0 }}>
-      <EditableCell value={value} onChange={onChange} style={{ ...cellStyle, width: '100%' }} />
+    <td data-numeric={col.isNumeric ? "true" : "false"} style={{ ...cellStyle, padding: 0 }}>
+      <span className="party-report-print-only" style={{ padding: '0 2px' }}>
+        {printVal}
+      </span>
+      <Box className="party-report-screen-only" sx={{ width: '100%', height: '100%' }}>
+        <EditableCell value={value} onChange={onChange} style={{ ...cellStyle, width: '100%' }} />
+      </Box>
     </td>
   );
 }
@@ -353,6 +418,25 @@ export default function PartyReportView({
     () => new Set(activeColumns.filter(c => c.isNumeric).map(c => c.key)),
     [activeColumns]
   );
+
+  const totalPrintWeight = useMemo(() => {
+    return activeColumns.reduce((sum, col) => sum + (COLUMN_PRINT_WEIGHTS[col.key] || 50), 0);
+  }, [activeColumns]);
+
+  const colPrintStyles = useMemo(() => {
+    return activeColumns.map(c => {
+      const w = ((COLUMN_PRINT_WEIGHTS[c.key] || 50) / totalPrintWeight * 100).toFixed(2);
+      const safeKey = c.key.replace(/[^a-zA-Z0-9]/g, '_');
+      return `
+        .party-report-table col.col-${safeKey},
+        .party-report-table th.th-${safeKey} {
+          width: ${w}% !important;
+          min-width: ${w}% !important;
+          max-width: ${w}% !important;
+        }
+      `;
+    }).join('\n');
+  }, [activeColumns, totalPrintWeight]);
 
   const fetchReportData = useCallback(async () => {
     if (!financialYear || !month) return;
@@ -565,6 +649,65 @@ export default function PartyReportView({
     let incentiveNum = 0;
     let incentiveDisplay = '';
 
+    // Authoritative dedicated status and relationship from Party Master
+    const isDedicated = String(
+      ownerDetails?.dedicated_type ||
+      ownerDetails?.dedicatedType ||
+      ownerDetails?.['Dedicated Type'] ||
+      ownerDetails?.['Dedicated Type '] ||
+      ''
+    ).trim().toLowerCase() === 'dedicated';
+
+    const relStr = String(
+      ownerDetails?.custType ||
+      ownerDetails?.['TYPE OF CUSTOMER '] ||
+      originalRow['TYPE'] ||
+      ''
+    ).toUpperCase().trim();
+    const isAtoaOrMkt = (
+      relStr === 'ATOA' ||
+      relStr === 'ATO' ||
+      relStr === 'MKT' ||
+      relStr === 'MKTA' ||
+      relStr.startsWith('MKT') ||
+      relStr.startsWith('ATO')
+    );
+
+    // ── Wheel-type-specific incentive calculations ───────────────────────────
+    const vehicleKey = selectedVehicle || originalRow['VEHICLE NUMBER'] || '';
+    const wheelFromMap = vehicleWheelMap[vehicleKey] || '';
+    const wheelFromRow = String(originalRow['WHEEL'] || '').trim();
+    const effectiveWheel = (wheelFromMap || wheelFromRow).toUpperCase();
+
+    const rowIs10Wheel = effectiveWheel.includes('10');
+    const rowIs6Wheel = !rowIs10Wheel && !effectiveWheel.includes('12') && !effectiveWheel.includes('14') && effectiveWheel.includes('6');
+
+    // Count qualifying completed trips in this dataset
+    let qualifyingTripCount = 0;
+    const seenInvs = new Set();
+    data.forEach(r => {
+      if (r.isDummy === true || r._isDummy === true) return;
+      const rVeh = String(r['VEHICLE NUMBER'] || r['VEHICLE NO'] || selectedVehicle || '').trim().toUpperCase();
+      if (vehicleKey && rVeh !== vehicleKey.toUpperCase()) return;
+      const rInv = String(r['INVOICE NO'] || r['INVOICE NO.'] || '').trim().toUpperCase().replace(/\s+/g, '');
+      if (rInv) {
+        if (!seenInvs.has(rInv)) {
+          seenInvs.add(rInv);
+          qualifyingTripCount++;
+        }
+      } else {
+        qualifyingTripCount++;
+      }
+    });
+
+    // Rule 1: Standard Incentive (Dedicated + Wheel-wise trip threshold)
+    // 6WH: 10 trips | 10WH/12WH/14WH: 6 trips
+    let reqStandardTrips = null;
+    if (rowIs6Wheel) reqStandardTrips = 10;
+    else if (rowIs10Wheel || effectiveWheel.includes('12') || effectiveWheel.includes('14')) reqStandardTrips = 6;
+
+    const standardEligible = isAtoaOrMkt && isDedicated && reqStandardTrips !== null && qualifyingTripCount >= reqStandardTrips;
+
     if (isManualIncentive) {
       if (manualIncentiveVal === '' || manualIncentiveVal === null) {
         incentiveNum = 0;
@@ -573,11 +716,14 @@ export default function PartyReportView({
         incentiveNum = parseNum(manualIncentiveVal);
         incentiveDisplay = manualIncentiveVal;
       }
-    } else {
+    } else if (standardEligible) {
       incentiveNum = originalIncentiveDedicated;
       incentiveDisplay = originalIncentiveDedicated > 0
         ? originalIncentiveDedicated
         : (originalRow['DEDICATED'] !== undefined || originalRow['INCENTIVE'] !== undefined ? originalIncentiveDedicated : '');
+    } else {
+      incentiveNum = 0;
+      incentiveDisplay = '';
     }
 
     const incentive = incentiveNum;
@@ -588,32 +734,37 @@ export default function PartyReportView({
     let toll = changes['_PR_TOLL'] !== undefined ? parseNum(changes['_PR_TOLL']) :
       (originalRow['_PR_TOLL'] !== undefined ? parseNum(originalRow['_PR_TOLL']) : dbToll);
 
-    // ── Wheel-type-specific incentive calculations ───────────────────────────
-    // Determine wheel type from Owner & Vehicle Directory (vehicleWheelMap) or row WHEEL field.
-    const vehicleKey = selectedVehicle || originalRow['VEHICLE NUMBER'] || '';
-    const wheelFromMap = vehicleWheelMap[vehicleKey] || '';
-    const wheelFromRow = String(originalRow['WHEEL'] || '').trim();
-    const effectiveWheel = (wheelFromMap || wheelFromRow).toUpperCase();
-
-    const rowIs10Wheel = effectiveWheel.includes('10');
-    const rowIs6Wheel = !rowIs10Wheel && !effectiveWheel.includes('12') && !effectiveWheel.includes('14') && effectiveWheel.includes('6');
-
     // Applicable incentive base from corresponding vehicle/trip
-    const billingRate = parseNum(originalRow['BILLING'] || originalRow['BILLING RATE'] || originalRow['PARTY RATE'] || 0);
-    const incentiveBase = billingRate > 0 ? (billingRate * mt) : amount;
+    // For ATOA: Bill Freight. For MKT: Party Rate / Party Freight.
+    const isAtoaParty = String(ownerDetails?.['TYPE OF CUSTOMER '] || ownerDetails?.type_of_customer || ownerDetails?.custType || '').toUpperCase().startsWith('ATO');
+    const billFreightRow = (parseNum(originalRow['BILLING'] || originalRow['BILLING RATE']) * mt) || parseNum(originalRow['Billing Amount'] || originalRow['BILLING AMOUNT']);
+    const partyFreightRow = parseNum(originalRow['BILLING ER 95%'] || originalRow['BILLING @ 95% (PARTY PAYABLE)'] || originalRow['PARTY RATE AMOUNT']) || (parseNum(originalRow['PARTY RATE'] || originalRow['PARTY RATE (95-97%)']) * mt) || amount;
+    const incentiveBase = isAtoaParty ? (billFreightRow > 0 ? billFreightRow : amount) : (partyFreightRow > 0 ? partyFreightRow : amount);
 
+    // Rule 2: 10-Wheel Extra Incentive (from 1st qualifying trip if 10W + ATOA/MKT + SO + NT)
     let incentive10WH = 0;
-    if (rowIs10Wheel) {
+    if (rowIs10Wheel && isAtoaOrMkt) {
       const stored10W = parseNum(originalRow['10W EXTRA 8.5%'] || originalRow['10WH EXTRA 8.5%'] || originalRow['10W EXTRA 8']);
       if (stored10W > 0) {
         incentive10WH = stored10W;
       } else {
-        incentive10WH = incentiveBase > 0 ? round2(incentiveBase * 0.085) : 0;
+        const bType = String(originalRow['Bill Type'] || originalRow['BILL TYPE'] || '').trim().toUpperCase();
+        const isSo = bType === 'SO';
+        const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
+        const isNt = originalRow._is_nt_invoice === true || originalRow._is_nt_invoice === 'true' ||
+                     originalRow._source_nt_unloading === true ||
+                     ntWordRegex.test(String(originalRow.classification || '')) ||
+                     (originalRow['EXTRA UNLOADING'] && parseNum(originalRow['EXTRA UNLOADING']) > 0) ||
+                     ntWordRegex.test(String(originalRow['UNLOADING STATUS NOTE'] || originalRow['UNLOADING STATUS'] || ''));
+        if (isSo && isNt) {
+          incentive10WH = incentiveBase > 0 ? round2(incentiveBase * 0.085) : 0;
+        }
       }
     }
 
+    // Rule 3: 6-Wheel Extra Incentive (15% if 6WH + ATOA/MKT and qualifying completed trips >= 6)
     let incentive6WH = 0;
-    if (rowIs6Wheel) {
+    if (rowIs6Wheel && isAtoaOrMkt && qualifyingTripCount >= 6) {
       incentive6WH = incentiveBase > 0 ? round2(incentiveBase * 0.15) : 0;
     }
 
@@ -752,10 +903,362 @@ export default function PartyReportView({
   }
 
   return (
-    <Box sx={{ bgcolor: 'background.paper', minHeight: '100vh', pb: 8, display: 'flex', flexDirection: 'column' }}>
+    <Box className="party-report-page-container" sx={{ bgcolor: 'background.paper', minHeight: '100vh', pb: 8, display: 'flex', flexDirection: 'column' }}>
+      <style>{`
+        @page {
+          size: A4 landscape;
+          margin: 6mm 8mm;
+        }
+        @media print {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            width: 100% !important;
+            min-width: 100% !important;
+          }
+          #root, #root > div, body > div {
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            display: block !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          canvas {
+            display: none !important;
+          }
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            box-sizing: border-box !important;
+          }
+          .no-print,
+          .party-report-screen-only {
+            display: none !important;
+          }
+          .party-report-print-only {
+            display: block !important;
+            width: 100% !important;
+            text-align: inherit !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
+            font-size: 6.8pt !important;
+            font-weight: 600 !important;
+            line-height: 1.15 !important;
+          }
+          .party-report-page-container {
+            min-height: auto !important;
+            height: auto !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: #fff !important;
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            display: block !important;
+          }
+          .party-report-printable-area {
+            padding: 0 !important;
+            margin: 0 !important;
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            display: block !important;
+          }
+          .party-report-header-grid {
+            display: flex !important;
+            flex-direction: row !important;
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            gap: 6mm !important;
+            margin-bottom: 2mm !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .party-report-header-grid > .MuiGrid-item {
+            width: 50% !important;
+            max-width: 50% !important;
+            flex-basis: 50% !important;
+            padding: 0 !important;
+          }
+          .party-report-header-card {
+            border: 1px solid #64748b !important;
+            border-radius: 4px !important;
+            box-shadow: none !important;
+            height: auto !important;
+            background: #fff !important;
+          }
+          .party-report-card-title-bar {
+            padding: 2.5px 8px !important;
+            font-size: 7.5pt !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .party-report-card-content {
+            padding: 4px 8px !important;
+            font-size: 7.5pt !important;
+            line-height: 1.2 !important;
+          }
+          .party-report-card-content h6 {
+            font-size: 9pt !important;
+            margin-bottom: 2px !important;
+            line-height: 1.2 !important;
+          }
+          .party-report-card-content p {
+            font-size: 7.2pt !important;
+            line-height: 1.2 !important;
+            margin: 0 !important;
+          }
+          .party-report-card-content .MuiGrid-container {
+            margin: 0 !important;
+            width: 100% !important;
+          }
+          .party-report-card-content .MuiGrid-item {
+            padding: 1px 2px !important;
+          }
+
+          /* Title Section */
+          .party-report-title-section {
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            margin-bottom: 2mm !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            border-bottom: 1.5pt solid #0f172a !important;
+            padding-bottom: 1.5mm !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .party-report-title-section h5 {
+            font-size: 10.5pt !important;
+            margin-bottom: 0 !important;
+            font-weight: 900 !important;
+          }
+          .party-report-title-section > div {
+            display: flex !important;
+            flex-direction: row !important;
+            gap: 4mm !important;
+          }
+          .party-report-title-section > div > div {
+            padding: 1px 4px !important;
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            display: flex !important;
+            gap: 3px !important;
+          }
+          .party-report-title-section span,
+          .party-report-title-section p {
+            font-size: 8pt !important;
+            line-height: 1.2 !important;
+          }
+
+          /* Table Container & Table */
+          .party-report-table-container {
+            overflow: visible !important;
+            max-height: none !important;
+            min-height: auto !important;
+            height: auto !important;
+            border: none !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            display: block !important;
+          }
+          .party-report-table {
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            table-layout: fixed !important;
+            border-collapse: collapse !important;
+            border-spacing: 0 !important;
+            font-size: 6.8pt !important;
+            page-break-inside: auto !important;
+          }
+          .party-report-table thead {
+            display: table-header-group !important;
+          }
+          .party-report-table tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .party-report-table th {
+            background: #0f172a !important;
+            color: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            padding: 3px 1px !important;
+            font-size: 6.5pt !important;
+            border: 0.5pt solid #475569 !important;
+            text-align: center !important;
+            vertical-align: middle !important;
+            line-height: 1.1 !important;
+            position: static !important;
+            box-shadow: none !important;
+            overflow: hidden !important;
+          }
+          .party-report-table th div.header-badge {
+            display: none !important;
+          }
+          .party-report-table td {
+            min-width: 0 !important;
+            max-width: none !important;
+            padding: 2px 2px !important;
+            font-size: 6.8pt !important;
+            border: 0.5pt solid #cbd5e1 !important;
+            vertical-align: middle !important;
+            line-height: 1.15 !important;
+            overflow: visible !important;
+          }
+          .party-report-table td[data-numeric="true"] {
+            text-align: right !important;
+            white-space: nowrap !important;
+          }
+          .party-report-table td[data-numeric="true"] .party-report-print-only {
+            text-align: right !important;
+            white-space: nowrap !important;
+          }
+          .party-report-table td[data-numeric="false"] {
+            text-align: left !important;
+            white-space: normal !important;
+            word-break: break-word !important;
+          }
+          .party-report-table td[data-numeric="false"] .party-report-print-only {
+            text-align: left !important;
+            white-space: normal !important;
+            word-break: break-word !important;
+          }
+          .party-report-editable-cell {
+            min-height: 0 !important;
+            height: auto !important;
+            padding: 0 !important;
+            display: block !important;
+            text-align: inherit !important;
+            font-size: inherit !important;
+            line-height: inherit !important;
+            box-shadow: none !important;
+            background: transparent !important;
+          }
+
+          /* Gross Total Row */
+          .party-report-table .gross-total-row {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            font-weight: 800 !important;
+          }
+          .party-report-table .gross-total-row td {
+            background: #e2e8f0 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            border-top: 1.5pt solid #0f172a !important;
+            border-bottom: 1.5pt solid #0f172a !important;
+            padding: 3px 2px !important;
+            font-size: 7pt !important;
+            position: static !important;
+            box-shadow: none !important;
+          }
+
+          /* Manual Summary Deductions Section */
+          .party-report-summary-container {
+            display: flex !important;
+            justify-content: flex-end !important;
+            margin-top: 2.5mm !important;
+            margin-bottom: 0 !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .party-report-summary-box {
+            width: 95mm !important;
+            border: 1pt solid #475569 !important;
+            border-radius: 4px !important;
+            box-shadow: none !important;
+            background: #fff !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .party-report-summary-header {
+            padding: 2.5px 6px !important;
+            background: #0f172a !important;
+            color: #fff !important;
+            text-align: center !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .party-report-summary-header h6,
+          .party-report-summary-header p,
+          .party-report-summary-header span {
+            font-size: 7.5pt !important;
+            font-weight: 800 !important;
+            color: #fff !important;
+          }
+          .party-report-summary-table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            font-size: 7.2pt !important;
+          }
+          .party-report-summary-table tr {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .party-report-summary-table td {
+            padding: 2px 5px !important;
+            font-size: 7.2pt !important;
+            border-bottom: 0.5pt solid #cbd5e1 !important;
+            line-height: 1.15 !important;
+          }
+          .party-report-summary-table .amount-box {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            min-width: 0 !important;
+            font-size: 7.2pt !important;
+            font-weight: 800 !important;
+            color: #0f172a !important;
+          }
+          .party-report-summary-table .net-payable-row {
+            background: #0f172a !important;
+            color: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            font-weight: 900 !important;
+          }
+          .party-report-summary-table .net-payable-row td {
+            color: #ffffff !important;
+            border-bottom: none !important;
+            padding: 3px 5px !important;
+            font-size: 7.8pt !important;
+          }
+          .party-report-summary-table .net-payable-row .amount-box {
+            color: #ffffff !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            font-size: 7.8pt !important;
+          }
+
+          ${colPrintStyles}
+        }
+        @media screen {
+          .party-report-print-only {
+            display: none !important;
+          }
+        }
+      `}</style>
 
       {/* ── Toolbar & Quick Filters (Print hidden) ────────────────────────────────────── */}
-      <Box sx={{
+      <Box className="no-print" sx={{
         '@media print': { display: 'none' },
         px: { xs: 2, md: 4 }, py: 2,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -827,12 +1330,12 @@ export default function PartyReportView({
       </Box>
 
       {/* Printable Report Container */}
-      <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, display: 'flex', flexDirection: 'column', '@media print': { p: 0, m: 0 } }}>
+      <Box className="party-report-printable-area" sx={{ p: { xs: 2, md: 4 }, flex: 1, display: 'flex', flexDirection: 'column', '@media print': { p: 0, m: 0 } }}>
 
         {/* Header Section Redesigned */}
-        <Grid container spacing={3} mb={4} sx={{ '@media print': { display: 'flex', gap: '20px' } }}>
+        <Grid container spacing={3} mb={4} className="party-report-header-grid" sx={{ '@media print': { display: 'flex', gap: '20px' } }}>
           <Grid item xs={12} md={6}>
-            <Card sx={{
+            <Card className="party-report-header-card" sx={{
               height: '100%',
               borderRadius: '16px',
               boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
@@ -840,12 +1343,12 @@ export default function PartyReportView({
               overflow: 'hidden',
               '@media print': { border: '1px solid #000', boxShadow: 'none' }
             }}>
-              <Box sx={{ bgcolor: '#0f172a', py: 1.5, px: 2.5, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box className="party-report-card-title-bar" sx={{ bgcolor: '#0f172a', py: 1.5, px: 2.5, display: 'flex', alignItems: 'center', gap: 1.5 }}>
                 <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#fff', letterSpacing: '0.5px' }}>
                   🏢 COMPANY DETAILS
                 </Typography>
               </Box>
-              <CardContent sx={{ p: 3 }}>
+              <CardContent className="party-report-card-content" sx={{ p: 3 }}>
                 <Typography variant="h6" fontWeight={800} color="#1e293b" mb={1.5}>DIPALI ASSOCIATES & CO.</Typography>
                 <Box display="flex" flexDirection="column" gap={0.5}>
                   <Typography variant="body2" color="#475569" fontWeight={500}>PANJA HOTEL 1st FLOOR</Typography>
@@ -857,7 +1360,7 @@ export default function PartyReportView({
           </Grid>
 
           <Grid item xs={12} md={6}>
-            <Card sx={{
+            <Card className="party-report-header-card" sx={{
               height: '100%',
               borderRadius: '16px',
               boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
@@ -865,12 +1368,12 @@ export default function PartyReportView({
               overflow: 'hidden',
               '@media print': { border: '1px solid #000', boxShadow: 'none' }
             }}>
-              <Box sx={{ bgcolor: '#4f46e5', py: 1.5, px: 2.5, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box className="party-report-card-title-bar" sx={{ bgcolor: '#4f46e5', py: 1.5, px: 2.5, display: 'flex', alignItems: 'center', gap: 1.5 }}>
                 <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#fff', letterSpacing: '0.5px' }}>
                   👤 OWNER DETAILS
                 </Typography>
               </Box>
-              <CardContent sx={{ p: 3 }}>
+              <CardContent className="party-report-card-content" sx={{ p: 3 }}>
                 <Typography variant="h6" fontWeight={800} color="#1e293b" mb={2}>{partyName}</Typography>
                 <Grid container spacing={1.5}>
                   <Grid item xs={4}><Typography variant="body2" color="#64748b" fontWeight={700}>PAN NO</Typography></Grid>
@@ -888,7 +1391,7 @@ export default function PartyReportView({
         </Grid>
 
         {/* Vehicle & Title Section */}
-        <Box display="flex" flexDirection="column" alignItems="center" mb={4}>
+        <Box className="party-report-title-section" display="flex" flexDirection="column" alignItems="center" mb={4}>
           <Typography variant="h5" fontWeight={900} sx={{ color: '#0f172a', letterSpacing: '-0.5px', mb: 2 }}>
             FREIGHT SUMMARY <span style={{ color: '#4f46e5' }}>{titleMonth}</span>
           </Typography>
@@ -913,20 +1416,30 @@ export default function PartyReportView({
         ) : (
           <>
             {/* Table Container exactly like Cement Register */}
-            <Box ref={tableContainerRef} sx={{ overflow: 'auto', maxHeight: { xs: '72vh', md: 'calc(100vh - 215px)' }, minHeight: '400px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: 'background.paper', position: 'relative', '@media print': { borderRadius: 0, border: 'none', boxShadow: 'none' } }}>
-              <table style={{
+            <Box ref={tableContainerRef} className="party-report-table-container" sx={{ overflow: 'auto', maxHeight: { xs: '72vh', md: 'calc(100vh - 215px)' }, minHeight: '400px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', bgcolor: 'background.paper', position: 'relative', '@media print': { borderRadius: 0, border: 'none', boxShadow: 'none' } }}>
+              <table className="party-report-table" style={{
                 borderCollapse: 'separate',
                 borderSpacing: 0,
                 minWidth: '100%',
                 tableLayout: 'auto', fontFamily: 'Inter, system-ui, sans-serif', fontSize: '11px'
               }}>
                 <colgroup>
-                  {activeColumns.map(c => <col key={c.key} style={{ width: c.width, minWidth: c.width }} />)}
+                  {activeColumns.map(c => {
+                    const safeKey = c.key.replace(/[^a-zA-Z0-9]/g, '_');
+                    return (
+                      <col
+                        key={c.key}
+                        className={`col-${safeKey}`}
+                        style={{ width: c.width, minWidth: c.width }}
+                      />
+                    );
+                  })}
                 </colgroup>
 
                 <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                   <tr>
                     {activeColumns.map((col) => {
+                      const safeKey = col.key.replace(/[^a-zA-Z0-9]/g, '_');
                       const typeStyle = col.type === 'auto'
                         ? { background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', color: '#e2e8f0' } // Slate
                         : col.type === 'calc'
@@ -938,7 +1451,7 @@ export default function PartyReportView({
                               : { background: 'linear-gradient(180deg, #1e3a8a 0%, #172554 100%)', color: '#bfdbfe' }; // Blue (Manual)
 
                       return (
-                        <th key={col.key} style={{
+                        <th key={col.key} className={`th-${safeKey}`} style={{
                           position: 'sticky', top: 0, zIndex: 10,
                           ...typeStyle,
                           padding: '10px 6px',
@@ -952,9 +1465,9 @@ export default function PartyReportView({
                           '@media print': { background: '#f1f5f9', color: '#000', border: '1px solid #000' }
                         }}>
                           {col.label}
-                          {col.type === 'auto' && <div style={{ fontSize: '7px', opacity: 0.6, marginTop: 4, letterSpacing: '1px' }}>AUTO</div>}
-                          {col.type === 'calc' && <div style={{ fontSize: '7px', opacity: 0.7, marginTop: 4, letterSpacing: '1px' }}>CALC</div>}
-                          {col.type === 'readonly' && <div style={{ fontSize: '7px', opacity: 0.7, marginTop: 4, letterSpacing: '1px' }}>AUTO</div>}
+                          {col.type === 'auto' && <div className="header-badge" style={{ fontSize: '7px', opacity: 0.6, marginTop: 4, letterSpacing: '1px' }}>AUTO</div>}
+                          {col.type === 'calc' && <div className="header-badge" style={{ fontSize: '7px', opacity: 0.7, marginTop: 4, letterSpacing: '1px' }}>CALC</div>}
+                          {col.type === 'readonly' && <div className="header-badge" style={{ fontSize: '7px', opacity: 0.7, marginTop: 4, letterSpacing: '1px' }}>AUTO</div>}
                         </th>
                       );
                     })}
@@ -997,7 +1510,7 @@ export default function PartyReportView({
 
                   {/* GROSS TOTAL ROW */}
                   {rows.length > 0 && (
-                    <tr style={{ fontWeight: 900, borderBottom: '2px solid #e2e8f0', '@media print': { border: '1px solid #000' } }}>
+                    <tr className="gross-total-row" style={{ fontWeight: 900, borderBottom: '2px solid #e2e8f0', '@media print': { border: '1px solid #000' } }}>
                       {activeColumns.map((col, idx) => {
                         const isFirst = idx === 0;
                         const isNumeric = NUMERIC_KEYS.has(col.key);
@@ -1008,7 +1521,7 @@ export default function PartyReportView({
                         else if (isNumeric) display = col.key === 'HSD (LTR)' || col.key === 'MT' ? fq(val) : f(val);
 
                         return (
-                          <td key={`total-${col.key}`} colSpan={isFirst ? 6 : 1} style={{
+                          <td key={`total-${col.key}`} colSpan={isFirst ? 6 : 1} data-numeric={isNumeric ? "true" : "false"} style={{
                             display: (idx > 0 && idx < 6) ? 'none' : 'table-cell', // Merging first 6 cols
                             border: '1px solid #e2e8f0', padding: '14px 10px', fontSize: '12px',
                             color: isFirst ? '#0f172a' : '#1e293b', textAlign: isNumeric ? 'right' : 'center',
@@ -1029,8 +1542,8 @@ export default function PartyReportView({
             </Box>
 
             {/* Manual Summary Deductions Section */}
-            <Box display="flex" justifyContent="flex-end" mt={5} mb={3}>
-              <Box sx={{
+            <Box className="party-report-summary-container" display="flex" justifyContent="flex-end" mt={5} mb={3}>
+              <Box className="party-report-summary-box" sx={{
                 width: 440,
                 border: '1px solid #e2e8f0',
                 borderRadius: '16px',
@@ -1039,12 +1552,12 @@ export default function PartyReportView({
                 boxShadow: '0 8px 24px -4px rgba(79, 70, 229, 0.12)',
                 '@media print': { border: '1px solid #000', boxShadow: 'none', background: '#fff' }
               }}>
-                <Box sx={{ bgcolor: '#4f46e5', py: 2, px: 2.5, textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>
+                <Box className="party-report-summary-header" sx={{ bgcolor: '#4f46e5', py: 2, px: 2.5, textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>
                   <Typography variant="subtitle2" fontWeight={800} sx={{ color: '#fff', letterSpacing: '0.5px' }}>
                     ✦ MANUAL SUMMARY / ADJUSTMENTS
                   </Typography>
                 </Box>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13.5px', fontFamily: 'Inter, sans-serif', fontWeight: 700, color: '#334155' }}>
+                <table className="party-report-summary-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13.5px', fontFamily: 'Inter, sans-serif', fontWeight: 700, color: '#334155' }}>
                   <tbody>
                     {/* 1. TDS DEDUCTION @ 1% */}
                     <tr style={{ transition: 'background 0.2s', '&:hover': { background: '#f8fafc' } }}>
@@ -1055,6 +1568,7 @@ export default function PartyReportView({
                           <EditableCell
                             value={displayTds}
                             onChange={(v) => handleManualSummaryChange('TDS', v)}
+                            className="amount-box"
                             style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#0f172a', fontWeight: 800, transition: 'all 0.2s' }}
                           />
                         </div>
@@ -1067,7 +1581,7 @@ export default function PartyReportView({
                       <td style={{ padding: '10px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           <span style={{ color: '#64748b' }}>₹</span>
-                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                          <div className="amount-box" style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
                             {globalGPS}
                           </div>
                         </div>
@@ -1082,7 +1596,7 @@ export default function PartyReportView({
                       <td style={{ padding: '8px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           <span style={{ color: '#64748b' }}>₹</span>
-                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                          <div className="amount-box" style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
                             {damageRecovery > 0 ? f(damageRecovery) : '0.00'}
                           </div>
                         </div>
@@ -1097,7 +1611,7 @@ export default function PartyReportView({
                       <td style={{ padding: '8px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           <span style={{ color: '#64748b' }}>₹</span>
-                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                          <div className="amount-box" style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
                             {cashBankOthers > 0 ? f(cashBankOthers) : '0.00'}
                           </div>
                         </div>
@@ -1112,7 +1626,7 @@ export default function PartyReportView({
                       <td style={{ padding: '8px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           <span style={{ color: '#64748b' }}>₹</span>
-                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                          <div className="amount-box" style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
                             {gpsDevice > 0 ? f(gpsDevice) : '0.00'}
                           </div>
                         </div>
@@ -1127,7 +1641,7 @@ export default function PartyReportView({
                       <td style={{ padding: '8px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           <span style={{ color: '#64748b' }}>₹</span>
-                          <div style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
+                          <div className="amount-box" style={{ background: '#e2e8f0', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', minWidth: '90px', textAlign: 'right', color: '#475569', fontWeight: 800 }}>
                             {otherDeduction > 0 ? f(otherDeduction) : '0.00'}
                           </div>
                         </div>
@@ -1140,7 +1654,7 @@ export default function PartyReportView({
                       <td style={{ padding: '12px 20px', borderBottom: '1px dashed #cbd5e1', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           <span style={{ fontWeight: 800, color: '#0f172a' }}>₹</span>
-                          <div style={{ background: '#fff', border: '2px solid #cbd5e1', padding: '8px 10px', borderRadius: '8px', minWidth: '100px', textAlign: 'right', fontWeight: 900, color: '#0f172a', fontSize: '14.5px' }}>
+                          <div className="amount-box" style={{ background: '#fff', border: '2px solid #cbd5e1', padding: '8px 10px', borderRadius: '8px', minWidth: '100px', textAlign: 'right', fontWeight: 900, color: '#0f172a', fontSize: '14.5px' }}>
                             {netBalanceCalc ? f(netBalanceCalc) : (netBalanceCalc === 0 ? '0.00' : f(netBalanceCalc))}
                           </div>
                         </div>
@@ -1148,12 +1662,12 @@ export default function PartyReportView({
                     </tr>
 
                     {/* ── NET PAYABLE ── */}
-                    <tr style={{ background: '#0f172a', color: '#fff' }}>
+                    <tr className="net-payable-row" style={{ background: '#0f172a', color: '#fff' }}>
                       <td style={{ padding: '20px', borderRight: '1px solid #334155', fontSize: '16px', fontWeight: 900, letterSpacing: '0.5px' }}>NET PAYABLE</td>
                       <td style={{ padding: '14px 20px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           <span style={{ fontWeight: 900, fontSize: '16px', color: '#94a3b8' }}>₹</span>
-                          <div style={{ background: '#1e293b', border: '2px solid #6366f1', padding: '8px 10px', borderRadius: '8px', minWidth: '100px', textAlign: 'right', fontWeight: 900, fontSize: '16px', color: '#fff', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+                          <div className="amount-box" style={{ background: '#1e293b', border: '2px solid #6366f1', padding: '8px 10px', borderRadius: '8px', minWidth: '100px', textAlign: 'right', fontWeight: 900, fontSize: '16px', color: '#fff', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
                             {netPayableCalc ? f(netPayableCalc) : (netPayableCalc === 0 ? '0.00' : f(netPayableCalc))}
                           </div>
                         </div>

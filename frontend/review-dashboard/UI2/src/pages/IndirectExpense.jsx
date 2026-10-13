@@ -3,7 +3,7 @@ import {
   Box, Button, CircularProgress, Typography, IconButton,
   Snackbar, Alert, Checkbox, Dialog, DialogTitle, DialogContent,
   DialogContentText, DialogActions, Tooltip, Chip, Paper, Grid,
-  Card, CardContent, TextField, MenuItem, Select, FormControl, InputLabel
+  Card, CardContent, TextField, MenuItem, Select, FormControl
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
@@ -14,7 +14,6 @@ import DownloadIcon from '@mui/icons-material/Download';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import PaymentsIcon from '@mui/icons-material/Payments';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import SearchIcon from '@mui/icons-material/Search';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -25,6 +24,33 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || API_URL;
 
 const FY_OPTIONS = ['FY 2026-27', 'FY 2025-26', 'FY 2024-25', 'FY 2027-28', 'FY 2023-24'];
+
+const BILL_TYPE_OPTIONS = ['GST', 'NON GST'];
+
+// Exact 21 options from reference specification
+const PARTICULARS_OPTIONS = [
+  'SALARY',
+  'BANK CHARGES',
+  'BANK GUARANTEE CHARGES',
+  'BONUS',
+  'COURIER CHARGERS',
+  'DEPRECIATION',
+  'ENTERTENMENT EXP',
+  'Interest on Partners Capital',
+  'INTEREST ON PUNJAB & SIND BANK (CC)',
+  'Late Fees on TDS',
+  'MISC EXPENSES',
+  'OFFICE EXPENSES',
+  'Partner Salary',
+  'PRINTING & STATIONERY',
+  'PROFESSIONAL CHARGES',
+  'P TAX',
+  'RENT EXP',
+  'SERVICES CHARGES',
+  'Software development Expenses',
+  'SUBSCRIPTION',
+  'TRAVELLING & CONVANCE'
+];
 
 const MONTHS = [
   { key: 'april', label: 'APRIL' },
@@ -95,9 +121,15 @@ export default function IndirectExpense({ onBack }) {
           const monthsData = {};
           MONTHS.forEach(m => {
             const mObj = item.months?.[m.key] || {};
+            const officeCash = mObj.officeCash !== undefined && mObj.officeCash !== null && mObj.officeCash !== ''
+              ? mObj.officeCash
+              : (mObj.cash !== undefined && mObj.cash !== null && mObj.cash !== '' ? mObj.cash : '');
+            const siteCash = mObj.siteCash !== undefined && mObj.siteCash !== null && mObj.siteCash !== '' ? mObj.siteCash : '';
+
             monthsData[m.key] = {
               bank: mObj.bank !== undefined && mObj.bank !== null && mObj.bank !== '' ? mObj.bank : '',
-              cash: mObj.cash !== undefined && mObj.cash !== null && mObj.cash !== '' ? mObj.cash : ''
+              cash: officeCash,
+              siteCash: siteCash
             };
           });
 
@@ -105,6 +137,7 @@ export default function IndirectExpense({ onBack }) {
             _id: item._id,
             slNo: item.slNo !== undefined ? item.slNo : idx + 1,
             date: item.date || '',
+            billType: item.billType || '',
             particulars: item.particulars || '',
             financialYear: item.financialYear || selectedFy,
             months: monthsData,
@@ -117,7 +150,7 @@ export default function IndirectExpense({ onBack }) {
       }
     } catch (err) {
       console.error('[IndirectExpense] Fetch error:', err);
-      setSnack({ severity: 'error', message: `Failed to load Indirect Expense data: ${err.message}` });
+      setSnack({ severity: 'error', message: `Failed to load Indirect Expenses data: ${err.message}` });
     } finally {
       if (showSpinner) setLoading(false);
     }
@@ -155,14 +188,15 @@ export default function IndirectExpense({ onBack }) {
     const nextSl = rows.length > 0 ? Math.max(...rows.map(r => Number(r.slNo) || 0)) + 1 : 1;
     const emptyMonths = {};
     MONTHS.forEach(m => {
-      emptyMonths[m.key] = { bank: '', cash: '' };
+      emptyMonths[m.key] = { bank: '', cash: '', siteCash: '' };
     });
 
     const newRow = {
       _id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       slNo: nextSl,
       date: new Date().toISOString().split('T')[0],
-      particulars: '',
+      billType: 'NON GST',
+      particulars: PARTICULARS_OPTIONS[0] || 'SALARY',
       financialYear: selectedFy,
       months: emptyMonths,
       remarks: '',
@@ -192,6 +226,7 @@ export default function IndirectExpense({ onBack }) {
         await axios.post(`${API_URL}/indirect-expense`, {
           slNo: item.slNo,
           date: item.date,
+          billType: item.billType,
           particulars: item.particulars,
           financialYear: selectedFy,
           months: item.months,
@@ -208,6 +243,7 @@ export default function IndirectExpense({ onBack }) {
           changes: {
             slNo: item.slNo,
             date: item.date,
+            billType: item.billType,
             particulars: item.particulars,
             financialYear: selectedFy,
             months: item.months,
@@ -306,6 +342,7 @@ export default function IndirectExpense({ onBack }) {
     return rows.filter(r =>
       String(r.slNo).includes(term) ||
       String(r.date).toLowerCase().includes(term) ||
+      String(r.billType || '').toLowerCase().includes(term) ||
       String(r.particulars).toLowerCase().includes(term) ||
       String(r.remarks).toLowerCase().includes(term)
     );
@@ -315,31 +352,38 @@ export default function IndirectExpense({ onBack }) {
   const totals = useMemo(() => {
     const monthTotals = {};
     MONTHS.forEach(m => {
-      monthTotals[m.key] = { bank: 0, cash: 0, total: 0 };
+      monthTotals[m.key] = { bank: 0, officeCash: 0, siteCash: 0, total: 0 };
     });
 
     let overallBank = 0;
-    let overallCash = 0;
+    let overallOfficeCash = 0;
+    let overallSiteCash = 0;
     let grandTotal = 0;
 
     rows.forEach(r => {
       MONTHS.forEach(m => {
         const b = num(r.months?.[m.key]?.bank);
-        const c = num(r.months?.[m.key]?.cash);
+        const oc = num(r.months?.[m.key]?.cash);
+        const sc = num(r.months?.[m.key]?.siteCash);
+
         monthTotals[m.key].bank += b;
-        monthTotals[m.key].cash += c;
-        monthTotals[m.key].total += (b + c);
+        monthTotals[m.key].officeCash += oc;
+        monthTotals[m.key].siteCash += sc;
+        monthTotals[m.key].total += (b + oc + sc);
 
         overallBank += b;
-        overallCash += c;
-        grandTotal += (b + c);
+        overallOfficeCash += oc;
+        overallSiteCash += sc;
+        grandTotal += (b + oc + sc);
       });
     });
 
     return {
       monthTotals,
       overallBank,
-      overallCash,
+      overallOfficeCash,
+      overallSiteCash,
+      overallCash: overallOfficeCash + overallSiteCash,
       grandTotal
     };
   }, [rows]);
@@ -353,27 +397,33 @@ export default function IndirectExpense({ onBack }) {
 
     const excelRows = rows.map((r, idx) => {
       let rowBankTotal = 0;
-      let rowCashTotal = 0;
+      let rowOfficeCashTotal = 0;
+      let rowSiteCashTotal = 0;
 
       const obj = {
         'SL NO': r.slNo || idx + 1,
         'DATE': r.date || '',
+        'BILL TYPE': r.billType || '',
         'PARTICULARS': r.particulars || ''
       };
 
       MONTHS.forEach(m => {
         const b = num(r.months?.[m.key]?.bank);
-        const c = num(r.months?.[m.key]?.cash);
+        const oc = num(r.months?.[m.key]?.cash);
+        const sc = num(r.months?.[m.key]?.siteCash);
         rowBankTotal += b;
-        rowCashTotal += c;
+        rowOfficeCashTotal += oc;
+        rowSiteCashTotal += sc;
 
         obj[`${m.label} BANK`] = b || 0;
-        obj[`${m.label} CASH`] = c || 0;
+        obj[`${m.label} OFFICE CASH`] = oc || 0;
+        obj[`${m.label} SITE CASH`] = sc || 0;
       });
 
       obj['TOTAL BANK'] = rowBankTotal;
-      obj['TOTAL CASH'] = rowCashTotal;
-      obj['TOTAL AMOUNT'] = rowBankTotal + rowCashTotal;
+      obj['TOTAL OFFICE CASH'] = rowOfficeCashTotal;
+      obj['TOTAL SITE CASH'] = rowSiteCashTotal;
+      obj['TOTAL AMOUNT'] = rowBankTotal + rowOfficeCashTotal + rowSiteCashTotal;
       obj['REMARKS'] = r.remarks || '';
 
       return obj;
@@ -383,22 +433,25 @@ export default function IndirectExpense({ onBack }) {
     const summaryRow = {
       'SL NO': 'TOTAL',
       'DATE': '',
+      'BILL TYPE': '',
       'PARTICULARS': 'MONTHLY TOTAL'
     };
     MONTHS.forEach(m => {
       summaryRow[`${m.label} BANK`] = totals.monthTotals[m.key].bank;
-      summaryRow[`${m.label} CASH`] = totals.monthTotals[m.key].cash;
+      summaryRow[`${m.label} OFFICE CASH`] = totals.monthTotals[m.key].officeCash;
+      summaryRow[`${m.label} SITE CASH`] = totals.monthTotals[m.key].siteCash;
     });
     summaryRow['TOTAL BANK'] = totals.overallBank;
-    summaryRow['TOTAL CASH'] = totals.overallCash;
+    summaryRow['TOTAL OFFICE CASH'] = totals.overallOfficeCash;
+    summaryRow['TOTAL SITE CASH'] = totals.overallSiteCash;
     summaryRow['TOTAL AMOUNT'] = totals.grandTotal;
     summaryRow['REMARKS'] = '';
     excelRows.push(summaryRow);
 
     const worksheet = XLSX.utils.json_to_sheet(excelRows);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'INDIRECT EXPENCE');
-    XLSX.writeFile(workbook, `INDIRECT_EXPENCE_${selectedFy.replace(/\s+/g, '_')}.xlsx`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'INDIRECT EXPENSES');
+    XLSX.writeFile(workbook, `INDIRECT_EXPENSES_${selectedFy.replace(/\s+/g, '_')}.xlsx`);
   };
 
   const hasDirty = rows.some(r => r.isDirty);
@@ -420,14 +473,14 @@ export default function IndirectExpense({ onBack }) {
           </IconButton>
           <Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Typography variant="h4" sx={{ fontWeight: 900, color: '#0f172a', letterSpacing: '-0.5px' }}>
-                INDIRECT EXPENCE
+              <Typography variant="h4" sx={{ fontWeight: 900, color: '#ffffff', letterSpacing: '-0.5px' }}>
+                INDIRECT EXPENSES
               </Typography>
               <Chip
                 label={selectedFy}
                 color="primary"
                 size="small"
-                sx={{ fontWeight: 700, borderRadius: '8px', bgcolor: '#2563eb' }}
+                sx={{ fontWeight: 700, borderRadius: '8px', bgcolor: '#2563eb', color: '#ffffff' }}
               />
               {hasDirty && (
                 <Chip
@@ -438,7 +491,7 @@ export default function IndirectExpense({ onBack }) {
                 />
               )}
             </Box>
-            <Typography variant="body2" sx={{ color: '#64748b', mt: 0.2 }}>
+            <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.2 }}>
               Monthly Bank & Cash Ledger Breakdown for Indirect Logistics & Operational Expenses
             </Typography>
           </Box>
@@ -587,10 +640,10 @@ export default function IndirectExpense({ onBack }) {
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-                    Cash Expenses
+                    Office Cash
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 900, color: '#d97706', mt: 0.5 }}>
-                    {fmtCurrency(totals.overallCash)}
+                    {fmtCurrency(totals.overallOfficeCash)}
                   </Typography>
                 </Box>
                 <Box sx={{ p: 1.5, bgcolor: '#fffbeb', borderRadius: '12px', color: '#f59e0b' }}>
@@ -607,14 +660,14 @@ export default function IndirectExpense({ onBack }) {
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-                    Total Entries
+                    Site Cash
                   </Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 900, color: '#334155', mt: 0.5 }}>
-                    {rows.length} Rows
+                  <Typography variant="h5" sx={{ fontWeight: 900, color: '#0284c7', mt: 0.5 }}>
+                    {fmtCurrency(totals.overallSiteCash)}
                   </Typography>
                 </Box>
-                <Box sx={{ p: 1.5, bgcolor: '#f1f5f9', borderRadius: '12px', color: '#64748b' }}>
-                  <TableChartIcon fontSize="medium" />
+                <Box sx={{ p: 1.5, bgcolor: '#f0f9ff', borderRadius: '12px', color: '#0ea5e9' }}>
+                  <PaymentsIcon fontSize="medium" />
                 </Box>
               </Box>
             </CardContent>
@@ -640,7 +693,7 @@ export default function IndirectExpense({ onBack }) {
           }}
         />
         {searchTerm && (
-          <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+          <Typography variant="caption" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
             Showing {filteredRows.length} of {rows.length} rows
           </Typography>
         )}
@@ -684,6 +737,8 @@ export default function IndirectExpense({ onBack }) {
                   style={{
                     padding: '10px 8px',
                     width: 44,
+                    minWidth: 44,
+                    maxWidth: 44,
                     textAlign: 'center',
                     borderRight: '1px solid #334155',
                     borderBottom: '1px solid #334155',
@@ -707,6 +762,8 @@ export default function IndirectExpense({ onBack }) {
                   style={{
                     padding: '12px 10px',
                     width: 65,
+                    minWidth: 65,
+                    maxWidth: 65,
                     textAlign: 'center',
                     fontWeight: 800,
                     letterSpacing: '0.5px',
@@ -726,6 +783,8 @@ export default function IndirectExpense({ onBack }) {
                   style={{
                     padding: '12px 10px',
                     width: 110,
+                    minWidth: 110,
+                    maxWidth: 110,
                     textAlign: 'center',
                     fontWeight: 800,
                     letterSpacing: '0.5px',
@@ -743,14 +802,37 @@ export default function IndirectExpense({ onBack }) {
                 <th
                   rowSpan={2}
                   style={{
-                    padding: '12px 12px',
-                    width: 220,
+                    padding: '12px 10px',
+                    width: 120,
+                    minWidth: 120,
+                    maxWidth: 120,
+                    textAlign: 'center',
+                    fontWeight: 800,
+                    letterSpacing: '0.5px',
+                    borderRight: '1px solid #334155',
+                    borderBottom: '1px solid #334155',
+                    position: 'sticky',
+                    left: 219,
+                    zIndex: 4,
+                    background: '#0f172a'
+                  }}
+                >
+                  BILL TYPE
+                </th>
+
+                <th
+                  rowSpan={2}
+                  style={{
+                    padding: '12px 14px',
+                    width: 340,
+                    minWidth: 340,
+                    maxWidth: 340,
                     fontWeight: 800,
                     letterSpacing: '0.5px',
                     borderRight: '2px solid #475569',
                     borderBottom: '1px solid #334155',
                     position: 'sticky',
-                    left: 219,
+                    left: 339,
                     zIndex: 4,
                     background: '#0f172a'
                   }}
@@ -762,7 +844,7 @@ export default function IndirectExpense({ onBack }) {
                 {MONTHS.map(m => (
                   <th
                     key={m.key}
-                    colSpan={2}
+                    colSpan={3}
                     style={{
                       padding: '10px 6px',
                       textAlign: 'center',
@@ -779,7 +861,7 @@ export default function IndirectExpense({ onBack }) {
 
                 {/* Total Group Header */}
                 <th
-                  colSpan={3}
+                  colSpan={4}
                   style={{
                     padding: '10px 8px',
                     textAlign: 'center',
@@ -791,7 +873,7 @@ export default function IndirectExpense({ onBack }) {
                     color: '#c7d2fe'
                   }}
                 >
-                  TOTAL EXPENCE
+                  TOTAL EXPENSES
                 </th>
 
                 <th
@@ -823,14 +905,14 @@ export default function IndirectExpense({ onBack }) {
                 </th>
               </tr>
 
-              {/* Row 2: Sub Headers (BANK | CASH) */}
+              {/* Row 2: Sub Headers (BANK | OFFICE CASH | SITE CASH) */}
               <tr style={{ background: '#1e293b', color: '#94a3b8', fontSize: '11px' }}>
                 {MONTHS.map(m => (
                   <React.Fragment key={`${m.key}_sub`}>
                     <th
                       style={{
                         padding: '6px 4px',
-                        width: 95,
+                        width: 85,
                         textAlign: 'center',
                         fontWeight: 700,
                         borderRight: '1px solid #334155',
@@ -846,12 +928,25 @@ export default function IndirectExpense({ onBack }) {
                         width: 95,
                         textAlign: 'center',
                         fontWeight: 700,
-                        borderRight: '1px solid #475569',
+                        borderRight: '1px solid #334155',
                         borderBottom: '2px solid #475569',
                         color: '#fde047'
                       }}
                     >
-                      CASH
+                      OFFICE CASH
+                    </th>
+                    <th
+                      style={{
+                        padding: '6px 4px',
+                        width: 90,
+                        textAlign: 'center',
+                        fontWeight: 700,
+                        borderRight: '1px solid #475569',
+                        borderBottom: '2px solid #475569',
+                        color: '#38bdf8'
+                      }}
+                    >
+                      SITE CASH
                     </th>
                   </React.Fragment>
                 ))}
@@ -860,7 +955,7 @@ export default function IndirectExpense({ onBack }) {
                 <th
                   style={{
                     padding: '6px 4px',
-                    width: 105,
+                    width: 95,
                     textAlign: 'center',
                     fontWeight: 800,
                     borderRight: '1px solid #334155',
@@ -874,7 +969,7 @@ export default function IndirectExpense({ onBack }) {
                 <th
                   style={{
                     padding: '6px 4px',
-                    width: 105,
+                    width: 100,
                     textAlign: 'center',
                     fontWeight: 800,
                     borderRight: '1px solid #334155',
@@ -883,12 +978,26 @@ export default function IndirectExpense({ onBack }) {
                     color: '#fde047'
                   }}
                 >
-                  CASH
+                  OFFICE CASH
                 </th>
                 <th
                   style={{
                     padding: '6px 4px',
-                    width: 115,
+                    width: 95,
+                    textAlign: 'center',
+                    fontWeight: 800,
+                    borderRight: '1px solid #334155',
+                    borderBottom: '2px solid #475569',
+                    background: '#2e1065',
+                    color: '#38bdf8'
+                  }}
+                >
+                  SITE CASH
+                </th>
+                <th
+                  style={{
+                    padding: '6px 4px',
+                    width: 105,
                     textAlign: 'center',
                     fontWeight: 900,
                     borderRight: '1px solid #475569',
@@ -906,7 +1015,7 @@ export default function IndirectExpense({ onBack }) {
             <tbody>
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={32} style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
+                  <td colSpan={47} style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
                     <Typography variant="body1" sx={{ fontWeight: 600 }}>
                       No Indirect Expense entries found for {selectedFy}.
                     </Typography>
@@ -918,15 +1027,24 @@ export default function IndirectExpense({ onBack }) {
               ) : (
                 filteredRows.map((row, rIdx) => {
                   let rowBankSum = 0;
-                  let rowCashSum = 0;
+                  let rowOfficeCashSum = 0;
+                  let rowSiteCashSum = 0;
 
                   MONTHS.forEach(m => {
                     rowBankSum += num(row.months?.[m.key]?.bank);
-                    rowCashSum += num(row.months?.[m.key]?.cash);
+                    rowOfficeCashSum += num(row.months?.[m.key]?.cash);
+                    rowSiteCashSum += num(row.months?.[m.key]?.siteCash);
                   });
-                  const rowTotalSum = rowBankSum + rowCashSum;
+                  const rowTotalSum = rowBankSum + rowOfficeCashSum + rowSiteCashSum;
 
                   const isSelected = selectedIds.has(row._id);
+
+                  // Ensure row particulars is in options or preserved
+                  const currentParticulars = row.particulars || '';
+                  const optionsList = [...PARTICULARS_OPTIONS];
+                  if (currentParticulars && !optionsList.includes(currentParticulars)) {
+                    optionsList.unshift(currentParticulars);
+                  }
 
                   return (
                     <tr
@@ -941,6 +1059,9 @@ export default function IndirectExpense({ onBack }) {
                       <td
                         style={{
                           padding: '6px 8px',
+                          width: 44,
+                          minWidth: 44,
+                          maxWidth: 44,
                           textAlign: 'center',
                           borderRight: '1px solid #e2e8f0',
                           position: 'sticky',
@@ -961,6 +1082,9 @@ export default function IndirectExpense({ onBack }) {
                       <td
                         style={{
                           padding: '4px',
+                          width: 65,
+                          minWidth: 65,
+                          maxWidth: 65,
                           textAlign: 'center',
                           borderRight: '1px solid #e2e8f0',
                           position: 'sticky',
@@ -990,6 +1114,9 @@ export default function IndirectExpense({ onBack }) {
                       <td
                         style={{
                           padding: '4px',
+                          width: 110,
+                          minWidth: 110,
+                          maxWidth: 110,
                           borderRight: '1px solid #e2e8f0',
                           position: 'sticky',
                           left: 109,
@@ -1014,35 +1141,88 @@ export default function IndirectExpense({ onBack }) {
                         />
                       </td>
 
-                      {/* PARTICULARS */}
+                      {/* BILL TYPE (READ-ONLY SYSTEM DISPLAY) */}
                       <td
                         style={{
-                          padding: '4px 8px',
-                          borderRight: '2px solid #cbd5e1',
+                          padding: '4px 6px',
+                          width: 120,
+                          minWidth: 120,
+                          maxWidth: 120,
+                          borderRight: '1px solid #e2e8f0',
                           position: 'sticky',
                           left: 219,
+                          zIndex: 2,
+                          textAlign: 'center',
+                          background: row.isDirty ? '#fefce8' : isSelected ? '#eff6ff' : rIdx % 2 === 0 ? '#ffffff' : '#f8fafc'
+                        }}
+                      >
+                        {row.billType ? (
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              letterSpacing: '0.3px',
+                              background: String(row.billType).toUpperCase() === 'GST' ? '#eff6ff' : '#f1f5f9',
+                              color: String(row.billType).toUpperCase() === 'GST' ? '#1d4ed8' : '#475569',
+                              border: String(row.billType).toUpperCase() === 'GST' ? '1px solid #bfdbfe' : '1px solid #cbd5e1'
+                            }}
+                          >
+                            {String(row.billType).toUpperCase()}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: '12px' }}>—</span>
+                        )}
+                      </td>
+
+                      {/* PARTICULARS DROPDOWN */}
+                      <td
+                        style={{
+                          padding: '3px 6px',
+                          width: 340,
+                          minWidth: 340,
+                          maxWidth: 340,
+                          borderRight: '2px solid #cbd5e1',
+                          position: 'sticky',
+                          left: 339,
                           zIndex: 2,
                           background: row.isDirty ? '#fefce8' : isSelected ? '#eff6ff' : rIdx % 2 === 0 ? '#ffffff' : '#f8fafc'
                         }}
                       >
-                        <input
-                          type="text"
-                          value={row.particulars}
-                          placeholder="Expense Particulars..."
+                        <select
+                          value={currentParticulars}
                           onChange={(e) => handleCellChange(rIdx, 'particulars', e.target.value)}
+                          title={currentParticulars}
                           style={{
                             width: '100%',
-                            border: 'none',
+                            height: '32px',
+                            border: '1px solid rgba(203, 213, 225, 0.6)',
+                            borderRadius: '6px',
                             outline: 'none',
-                            background: 'transparent',
-                            fontWeight: 600,
-                            color: '#0f172a',
-                            fontSize: '13px'
+                            background: '#ffffff',
+                            fontWeight: 700,
+                            color: currentParticulars ? '#0f172a' : '#94a3b8',
+                            fontSize: '12.5px',
+                            fontFamily: '"Outfit", "Inter", sans-serif',
+                            padding: '2px 8px',
+                            cursor: 'pointer',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
                           }}
-                        />
+                        >
+                          <option value="" disabled style={{ color: '#94a3b8' }}>
+                            Select Particular...
+                          </option>
+                          {optionsList.map(opt => (
+                            <option key={opt} value={opt} style={{ color: '#0f172a', fontWeight: 600, padding: '4px 8px' }}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
                       </td>
 
-                      {/* 12 Months: Bank & Cash */}
+                      {/* 12 Months: Bank, Office Cash & Site Cash */}
                       {MONTHS.map(m => (
                         <React.Fragment key={`${row._id}_${m.key}`}>
                           {/* BANK */}
@@ -1071,11 +1251,11 @@ export default function IndirectExpense({ onBack }) {
                             />
                           </td>
 
-                          {/* CASH */}
+                          {/* OFFICE CASH */}
                           <td
                             style={{
                               padding: '4px',
-                              borderRight: '1px solid #cbd5e1',
+                              borderRight: '1px solid #e2e8f0',
                               background: num(row.months?.[m.key]?.cash) > 0 ? '#fffbeb' : 'transparent'
                             }}
                           >
@@ -1092,6 +1272,32 @@ export default function IndirectExpense({ onBack }) {
                                 textAlign: 'right',
                                 fontWeight: num(row.months?.[m.key]?.cash) > 0 ? 700 : 400,
                                 color: num(row.months?.[m.key]?.cash) > 0 ? '#b45309' : '#94a3b8',
+                                fontSize: '13px'
+                              }}
+                            />
+                          </td>
+
+                          {/* SITE CASH */}
+                          <td
+                            style={{
+                              padding: '4px',
+                              borderRight: '1px solid #cbd5e1',
+                              background: num(row.months?.[m.key]?.siteCash) > 0 ? '#f0f9ff' : 'transparent'
+                            }}
+                          >
+                            <input
+                              type="text"
+                              value={row.months?.[m.key]?.siteCash ?? ''}
+                              placeholder="—"
+                              onChange={(e) => handleCellChange(rIdx, null, e.target.value, m.key, 'siteCash')}
+                              style={{
+                                width: '100%',
+                                border: 'none',
+                                outline: 'none',
+                                background: 'transparent',
+                                textAlign: 'right',
+                                fontWeight: num(row.months?.[m.key]?.siteCash) > 0 ? 700 : 400,
+                                color: num(row.months?.[m.key]?.siteCash) > 0 ? '#0284c7' : '#94a3b8',
                                 fontSize: '13px'
                               }}
                             />
@@ -1113,7 +1319,7 @@ export default function IndirectExpense({ onBack }) {
                         {fmtCurrency(rowBankSum)}
                       </td>
 
-                      {/* TOTAL CASH */}
+                      {/* TOTAL OFFICE CASH */}
                       <td
                         style={{
                           padding: '6px 8px',
@@ -1124,7 +1330,21 @@ export default function IndirectExpense({ onBack }) {
                           background: '#fffbeb'
                         }}
                       >
-                        {fmtCurrency(rowCashSum)}
+                        {fmtCurrency(rowOfficeCashSum)}
+                      </td>
+
+                      {/* TOTAL SITE CASH */}
+                      <td
+                        style={{
+                          padding: '6px 8px',
+                          textAlign: 'right',
+                          fontWeight: 800,
+                          color: '#0284c7',
+                          borderRight: '1px solid #e2e8f0',
+                          background: '#f0f9ff'
+                        }}
+                      >
+                        {fmtCurrency(rowSiteCashSum)}
                       </td>
 
                       {/* ROW TOTAL */}
@@ -1188,7 +1408,7 @@ export default function IndirectExpense({ onBack }) {
                 }}
               >
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   style={{
                     padding: '12px 16px',
                     textAlign: 'right',
@@ -1219,11 +1439,21 @@ export default function IndirectExpense({ onBack }) {
                       style={{
                         padding: '10px 6px',
                         textAlign: 'right',
-                        borderRight: '1px solid #475569',
+                        borderRight: '1px solid #334155',
                         color: '#fde047'
                       }}
                     >
-                      {fmtCurrency(totals.monthTotals[m.key].cash)}
+                      {fmtCurrency(totals.monthTotals[m.key].officeCash)}
+                    </td>
+                    <td
+                      style={{
+                        padding: '10px 6px',
+                        textAlign: 'right',
+                        borderRight: '1px solid #475569',
+                        color: '#38bdf8'
+                      }}
+                    >
+                      {fmtCurrency(totals.monthTotals[m.key].siteCash)}
                     </td>
                   </React.Fragment>
                 ))}
@@ -1251,7 +1481,19 @@ export default function IndirectExpense({ onBack }) {
                     fontWeight: 900
                   }}
                 >
-                  {fmtCurrency(totals.overallCash)}
+                  {fmtCurrency(totals.overallOfficeCash)}
+                </td>
+                <td
+                  style={{
+                    padding: '10px 8px',
+                    textAlign: 'right',
+                    borderRight: '1px solid #334155',
+                    background: '#075985',
+                    color: '#38bdf8',
+                    fontWeight: 900
+                  }}
+                >
+                  {fmtCurrency(totals.overallSiteCash)}
                 </td>
                 <td
                   style={{

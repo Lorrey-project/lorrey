@@ -101,6 +101,43 @@ function parseTdsField(doc) {
   return null;
 }
 
+function getGpsDeviceAmount(row) {
+  if (!row || typeof row !== 'object') return 0;
+  const numVal = (v) => {
+    if (v === null || v === undefined || v === '') return 0;
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      return Object.values(v).reduce((s, x) => s + numVal(x), 0);
+    }
+    const n = parseFloat(String(v).replace(/,/g, ''));
+    return isNaN(n) ? 0 : n;
+  };
+
+  const gpsDeviceKeys = [
+    'Give GPS DEVICE',
+    'GIVE GPS DEVICE',
+    'Give GPS Device',
+    'GIVE GPS Device',
+    'GPS DEVICE',
+    'GPS Device',
+    'GPS_DEVICE',
+    'GPS  DEVICE',
+    'Gps Device',
+    'Give GPS device',
+    'GIVE GPS device',
+    'GPS Device Charges',
+    'GPS Device Charge',
+    'GPS DEVICE CHARGES'
+  ];
+
+  for (const k of gpsDeviceKeys) {
+    if (row[k] !== undefined && row[k] !== null && row[k] !== '') {
+      const val = numVal(row[k]);
+      if (val > 0) return val;
+    }
+  }
+  return 0;
+}
+
 // Authoritative Creditor to Party Payment mapping configuration
 const PARTY_TO_CREDITOR_CONFIG = [
   {
@@ -428,7 +465,9 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         const shortageAmt = getF('SHORTAGE (AMOUNT)', 'SHORTAGE AMOUNT', 'DAMAGE RECOVERY');
         const shortageBags = getF('SHORTAGE (BAG)', 'SHORTAGE BAG');
         const shortageRate = getF('SHORTAGE (RATE)', 'SHORTAGE RATE');
-        a['DAMAGE RECOVERY'] += shortageAmt || (shortageBags * shortageRate);
+        const dAmt = getF('Damage Deduction', 'DAMAGE DEDUCTION', 'Damage');
+        const extraDamage = (dAmt > 0 && dAmt !== shortageAmt) ? dAmt : 0;
+        a['DAMAGE RECOVERY'] += (shortageAmt || (shortageBags * shortageRate)) + extraDamage;
 
         // ⑨ Cash/Bank TF/Others
         a['CASH_BANK_OTHERS'] += getF('BANK TF', 'BANK TF ', 'Bank TF', 'BANK_TF') + getF('Site Cash', 'SITE CASH', 'SITE_CASH') + getF('OFFICE CASH', 'Office Cash', 'OFFICE_CASH');
@@ -451,7 +490,7 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         a['cementOtherDeduction'] = (a['cementOtherDeduction'] || 0) + cementTripSum;
 
         // ⑫ GPS Device
-        a['GPS DEVICE'] += getF('GPS DEVICE', 'GPS  DEVICE', 'GPS_DEVICE');
+        a['GPS DEVICE'] += getGpsDeviceAmount(row);
       });
 
       // Ensure all vehicles with Credit Vouchers in this month are in agg
@@ -516,18 +555,27 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         const rowOwnerName = (ag['OWNER NAME'] || '').trim().toUpperCase();
         const expectedCreditorKey = getCreditorKeyForPartyOwner(rowOwnerName);
 
-        // ── Authoritative 100% Automatic Resolution from Freight Creditor GST TOTAL ──
+        // ── Authoritative 100% Automatic Resolution from Freight Creditor GST TOTAL / PartyPayment ──
         const gstRecord = gstVehicleTotals[vKey];
         let authoritativeGstFcm = null;
 
-        if (gstRecord && gstRecord.total !== null && gstRecord.total !== undefined) {
-          if (expectedCreditorKey) {
-            if (gstRecord.creditorKey === expectedCreditorKey) {
-              authoritativeGstFcm = Number(gstRecord.total);
+        if (saved.gstFcm !== undefined && saved.gstFcm !== null && num(saved.gstFcm) !== 0) {
+          authoritativeGstFcm = Number(saved.gstFcm);
+        } else if (gstRecord && (gstRecord.gstAmount !== null && gstRecord.gstAmount !== undefined || gstRecord.cgst !== undefined || gstRecord.total !== null)) {
+          const recGst = gstRecord.gstAmount !== undefined && gstRecord.gstAmount !== null
+            ? Number(gstRecord.gstAmount)
+            : ((gstRecord.cgst !== undefined || gstRecord.sgst !== undefined)
+                ? Math.round((Number(gstRecord.cgst || 0) + Number(gstRecord.sgst || 0)) * 100) / 100
+                : null);
+          if (recGst !== null) {
+            if (expectedCreditorKey) {
+              if (gstRecord.creditorKey === expectedCreditorKey) {
+                authoritativeGstFcm = recGst;
+              }
+            } else {
+              // Direct vehicle total if matched to one of the 3 authoritative creditors
+              authoritativeGstFcm = recGst;
             }
-          } else {
-            // Direct vehicle total if matched to one of the 3 authoritative creditors
-            authoritativeGstFcm = Number(gstRecord.total);
           }
         }
 

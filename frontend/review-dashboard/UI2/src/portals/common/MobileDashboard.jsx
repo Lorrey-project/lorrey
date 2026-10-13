@@ -56,18 +56,14 @@ const MobileDashboard = ({
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [truckManagerOpen, setTruckManagerOpen] = useState(false);
     const [voucherDialogOpen, setVoucherDialogOpen] = useState(false);
+    const [filterStatus, setFilterStatus] = useState('all'); // 'all' | 'approved' | 'pending'
     const [filterMonth, setFilterMonth] = useState('');
     const [filterYear, setFilterYear] = useState('');
     const [page, setPage] = useState(0);
     const [selectedInvoices, setSelectedInvoices] = useState(new Set());
-    const [portalStatuses, setPortalStatuses] = useState([]);
 
     const [, setPumpVerifications] = useState([]);
     const [, setPumpStats] = useState({ totalLitresToday: 0, verifiedTodayCount: 0, pendingCount: 0 });
-    const [, setBillingRows] = useState([]);
-    const [, setPeriodStatus] = useState('Unpaid');
-    const [, setVerificationCodes] = useState({});
-    const [, setBillingLoading] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [pendingApprovals, setPendingApprovals] = useState(0);
 
@@ -91,9 +87,8 @@ const MobileDashboard = ({
         return () => clearInterval(intervalId);
     }, [user?.role]);
 
-    // Pending Approvals fetch (HEAD_OFFICE only)
+    // Pending Approvals fetch
     useEffect(() => {
-        if (user?.role !== 'HEAD_OFFICE') return;
         const fetchPending = async () => {
             try {
                 const token = localStorage.getItem('token');
@@ -289,6 +284,9 @@ const MobileDashboard = ({
 
     // Filter logic
     const filteredInvoices = invoices.filter(inv => {
+        if (filterStatus === 'approved' && inv.status !== 'approved') return false;
+        if (filterStatus === 'pending' && inv.status !== 'pending') return false;
+
         if (!filterMonth && !filterYear) return true;
 
         let dateStr = inv.human_verified_data?.invoice_details?.invoice_date ||
@@ -606,7 +604,7 @@ const MobileDashboard = ({
                         sx={{
                             borderRadius: 4,
                             p: 3,
-                            mb: 3.5,
+                            mb: 2.5,
                             background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 50%, #0f172a 100%)',
                             color: '#ffffff',
                             position: 'relative',
@@ -618,40 +616,165 @@ const MobileDashboard = ({
                         {/* Decorative radial background glow */}
                         <Box sx={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle, rgba(56, 189, 248, 0.3) 0%, rgba(0,0,0,0) 70%)', pointerEvents: 'none' }} />
 
-                        <Typography variant="caption" sx={{ textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 800, color: 'rgba(255, 255, 255, 0.75)', fontSize: '0.7rem' }}>
-                            {(filterMonth || filterYear) ? 'FILTERED RESULTS' : 'TOTAL INVOICES'}
-                        </Typography>
+                        <Box 
+                            onClick={() => { setFilterStatus('all'); setPage(0); }}
+                            sx={{ cursor: 'pointer', display: 'inline-block' }}
+                        >
+                            <Typography variant="caption" sx={{ textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 800, color: filterStatus === 'all' ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.7)', fontSize: '0.7rem' }}>
+                                {(filterMonth || filterYear) ? 'FILTERED RESULTS' : 'TOTAL INVOICES'} {filterStatus !== 'all' && `(${filterStatus.toUpperCase()})`}
+                            </Typography>
+                        </Box>
 
                         <Box display="flex" justifyContent="space-between" alignItems="flex-end" mt={1}>
-                            <Typography variant="h2" fontWeight="900" sx={{ letterSpacing: '-1.5px', lineHeight: 1, color: '#ffffff' }}>
-                                {(filterMonth || filterYear) ? filteredInvoices.length : invoices.length}
+                            <Typography 
+                                variant="h2" 
+                                fontWeight="900" 
+                                onClick={() => { setFilterStatus('all'); setPage(0); }}
+                                sx={{ letterSpacing: '-1.5px', lineHeight: 1, color: '#ffffff', cursor: 'pointer' }}
+                            >
+                                {filteredInvoices.length}
                             </Typography>
 
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-end' }}>
                                 {/* Approved Pill */}
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'rgba(34, 197, 94, 0.25)', border: '1px solid rgba(74, 222, 128, 0.4)', borderRadius: '20px', px: 1.5, py: 0.4 }}>
+                                <Box 
+                                    onClick={() => { setFilterStatus(prev => prev === 'approved' ? 'all' : 'approved'); setPage(0); }}
+                                    sx={{ 
+                                        display: 'flex', alignItems: 'center', gap: 1, 
+                                        bgcolor: filterStatus === 'approved' ? 'rgba(34, 197, 94, 0.45)' : 'rgba(34, 197, 94, 0.25)', 
+                                        border: filterStatus === 'approved' ? '2px solid #4ade80' : '1px solid rgba(74, 222, 128, 0.4)', 
+                                        boxShadow: filterStatus === 'approved' ? '0 0 12px rgba(74, 222, 128, 0.5)' : 'none',
+                                        borderRadius: '20px', px: 1.5, py: 0.4,
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        '&:hover': { transform: 'scale(1.03)', bgcolor: 'rgba(34, 197, 94, 0.4)' },
+                                        '&:active': { transform: 'scale(0.97)' }
+                                    }}
+                                >
                                     <CheckCircleIcon sx={{ fontSize: 14, color: '#4ade80' }} />
                                     <Typography variant="caption" fontWeight="800" sx={{ color: '#ffffff', fontSize: '0.72rem' }}>
                                         APPROVED
                                     </Typography>
                                     <Typography variant="caption" fontWeight="900" sx={{ color: '#ffffff', fontSize: '0.8rem', ml: 0.5 }}>
-                                        {filteredInvoices.filter(i => i.status === 'approved').length}
+                                        {invoices.filter(i => {
+                                            if (filterMonth || filterYear) {
+                                                let dateStr = i.human_verified_data?.invoice_details?.invoice_date || i.ai_data?.invoice_data?.invoice_details?.invoice_date || i.ai_data?.invoice_details?.invoice_date;
+                                                let m, y;
+                                                if (dateStr) {
+                                                    const parts = dateStr.replace(/[./]/g, '-').split('-');
+                                                    if (parts.length === 3) {
+                                                        const p0 = parseInt(parts[0]); const p1 = parseInt(parts[1]); const p2 = parseInt(parts[2]);
+                                                        if (p0 > 1000) { y = p0; m = p1; } else if (p2 > 1000) { y = p2; m = p1; } else { y = p2 < 50 ? 2000 + p2 : 1900 + p2; m = p1; }
+                                                    }
+                                                }
+                                                if ((!m || !y) && i.created_at) { const d = new Date(i.created_at); m = d.getMonth() + 1; y = d.getFullYear(); }
+                                                if (!m || !y) return false;
+                                                if (filterMonth && m !== parseInt(filterMonth)) return false;
+                                                if (filterYear) { const invoiceFy = m >= 4 ? `${y}-${y + 1}` : `${y - 1}-${y}`; if (invoiceFy !== filterYear) return false; }
+                                            }
+                                            return i.status === 'approved';
+                                        }).length}
                                     </Typography>
                                 </Box>
 
                                 {/* Pending Pill */}
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'rgba(245, 158, 11, 0.25)', border: '1px solid rgba(251, 191, 36, 0.4)', borderRadius: '20px', px: 1.5, py: 0.4 }}>
+                                <Box 
+                                    onClick={() => { setFilterStatus(prev => prev === 'pending' ? 'all' : 'pending'); setPage(0); }}
+                                    sx={{ 
+                                        display: 'flex', alignItems: 'center', gap: 1, 
+                                        bgcolor: filterStatus === 'pending' ? 'rgba(245, 158, 11, 0.45)' : 'rgba(245, 158, 11, 0.25)', 
+                                        border: filterStatus === 'pending' ? '2px solid #fbbf24' : '1px solid rgba(251, 191, 36, 0.4)', 
+                                        boxShadow: filterStatus === 'pending' ? '0 0 12px rgba(251, 191, 36, 0.5)' : 'none',
+                                        borderRadius: '20px', px: 1.5, py: 0.4,
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        '&:hover': { transform: 'scale(1.03)', bgcolor: 'rgba(245, 158, 11, 0.4)' },
+                                        '&:active': { transform: 'scale(0.97)' }
+                                    }}
+                                >
                                     <HourglassTopIcon sx={{ fontSize: 14, color: '#fbbf24' }} />
                                     <Typography variant="caption" fontWeight="800" sx={{ color: '#ffffff', fontSize: '0.72rem' }}>
                                         PENDING
                                     </Typography>
                                     <Typography variant="caption" fontWeight="900" sx={{ color: '#ffffff', fontSize: '0.8rem', ml: 0.5 }}>
-                                        {filteredInvoices.filter(i => i.status === 'pending').length}
+                                        {invoices.filter(i => {
+                                            if (filterMonth || filterYear) {
+                                                let dateStr = i.human_verified_data?.invoice_details?.invoice_date || i.ai_data?.invoice_data?.invoice_details?.invoice_date || i.ai_data?.invoice_details?.invoice_date;
+                                                let m, y;
+                                                if (dateStr) {
+                                                    const parts = dateStr.replace(/[./]/g, '-').split('-');
+                                                    if (parts.length === 3) {
+                                                        const p0 = parseInt(parts[0]); const p1 = parseInt(parts[1]); const p2 = parseInt(parts[2]);
+                                                        if (p0 > 1000) { y = p0; m = p1; } else if (p2 > 1000) { y = p2; m = p1; } else { y = p2 < 50 ? 2000 + p2 : 1900 + p2; m = p1; }
+                                                    }
+                                                }
+                                                if ((!m || !y) && i.created_at) { const d = new Date(i.created_at); m = d.getMonth() + 1; y = d.getFullYear(); }
+                                                if (!m || !y) return false;
+                                                if (filterMonth && m !== parseInt(filterMonth)) return false;
+                                                if (filterYear) { const invoiceFy = m >= 4 ? `${y}-${y + 1}` : `${y - 1}-${y}`; if (invoiceFy !== filterYear) return false; }
+                                            }
+                                            return i.status === 'pending';
+                                        }).length}
                                     </Typography>
                                 </Box>
                             </Box>
                         </Box>
                     </Paper>
+                )}
+
+                {/* ── Account Approvals Mobile Banner ─── */}
+                {onOpenAccountApprovals && (
+                    <Box
+                        onClick={onOpenAccountApprovals}
+                        sx={{
+                            mb: 3, borderRadius: 4, overflow: 'hidden', cursor: 'pointer',
+                            background: 'linear-gradient(135deg, #1e0a3c 0%, #3b0764 55%, #6d28d9 100%)',
+                            boxShadow: pendingApprovals > 0 ? '0 10px 30px rgba(109,40,217,0.35)' : '0 4px 15px rgba(109,40,217,0.15)',
+                            border: pendingApprovals > 0 ? '1.5px solid rgba(251,191,36,0.4)' : '1.5px solid rgba(109,40,217,0.2)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            p: 2.5, gap: 2,
+                            transition: 'all 0.2s',
+                            '&:active': { transform: 'scale(0.98)' },
+                            position: 'relative',
+                        }}
+                    >
+                        {/* Decorative blobs */}
+                        <Box sx={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.05)', pointerEvents: 'none' }} />
+
+                        <Box display="flex" alignItems="center" gap={2}>
+                            <Box sx={{
+                                width: 46, height: 46, borderRadius: '14px',
+                                bgcolor: pendingApprovals > 0 ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.12)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                            }}>
+                                <PersonAddAlt1Icon sx={{ color: pendingApprovals > 0 ? '#fbbf24' : 'rgba(255,255,255,0.7)', fontSize: 24 }} />
+                            </Box>
+                            <Box>
+                                <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: 14, letterSpacing: '-0.3px', lineHeight: 1 }}>
+                                    Account Approvals
+                                </Typography>
+                                <Typography sx={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 600, mt: 0.4 }}>
+                                    {pendingApprovals > 0
+                                        ? `${pendingApprovals} request${pendingApprovals !== 1 ? 's' : ''} waiting for review`
+                                        : 'No pending approvals'}
+                                </Typography>
+                            </Box>
+                        </Box>
+
+                        {/* Right count badge */}
+                        <Box sx={{
+                            minWidth: 42, height: 42, borderRadius: '12px',
+                            bgcolor: pendingApprovals > 0 ? '#fbbf24' : 'rgba(255,255,255,0.1)',
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                        }}>
+                            <Typography sx={{ color: pendingApprovals > 0 ? '#1e0a3c' : 'rgba(255,255,255,0.5)', fontWeight: 900, fontSize: 18, lineHeight: 1 }}>
+                                {pendingApprovals}
+                            </Typography>
+                            <Typography sx={{ color: pendingApprovals > 0 ? '#3b0764' : 'rgba(255,255,255,0.35)', fontWeight: 700, fontSize: 8, letterSpacing: 0.5 }}>
+                                REQUESTS
+                            </Typography>
+                        </Box>
+                    </Box>
                 )}
 
                 {/* ── Actionable Blocks Launcher ────────────────── */}
@@ -685,7 +808,12 @@ const MobileDashboard = ({
                     <>
                         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5}>
                             <Typography variant="overline" sx={{ letterSpacing: 1.5, color: '#94a3b8', fontWeight: 800, fontSize: '0.7rem' }}>
-                                {(!filterMonth && !filterYear) ? '10 RECENT SLIPS' : 'FILTERED SLIPS'}
+                                {(!filterMonth && !filterYear && filterStatus === 'all') ? '10 RECENT SLIPS' : 'FILTERED SLIPS'}
+                                {filterStatus !== 'all' && (
+                                    <span style={{ color: filterStatus === 'approved' ? '#4ade80' : '#fbbf24', marginLeft: 6 }}>
+                                        ({filterStatus.toUpperCase()} ONLY)
+                                    </span>
+                                )}
                             </Typography>
 
                             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, fontSize: '0.72rem' }}>
@@ -1120,7 +1248,13 @@ const MobileDashboard = ({
 
             {/* ── MODALS ─────────────────────────────────────────────────── */}
             <TruckContactManager open={truckManagerOpen} onClose={() => setTruckManagerOpen(false)} />
-            <VoucherDialog open={voucherDialogOpen} onClose={() => setVoucherDialogOpen(false)} initialTab={0} />
+            <VoucherDialog
+                open={voucherDialogOpen}
+                onClose={() => setVoucherDialogOpen(false)}
+                initialTab={0}
+                panelSource={isSite ? 'SITE' : 'OFFICE'}
+                isSite={isSite}
+            />
         </Box>
     );
 };

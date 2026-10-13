@@ -9,6 +9,15 @@ const gstAttachUpload = require("../middleware/gstAttachUpload");
 
 const FinancialYearRow = require('../models/FinancialYearRow');
 
+function safeEmit(event, payload) {
+  try {
+    const io = getIO();
+    if (io) io.emit(event, payload);
+  } catch (e) {
+    // Socket.io not initialized (e.g. in tests)
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Database  : gst_portal
 // Collection: entries
@@ -174,7 +183,7 @@ router.post("/sync-liabilities", auth, async (req, res) => {
     }
 
     res.json({ success: true, count: syncRows.length });
-    getIO().emit('gstPortalUpdates', { action: 'syncLiabilities' });
+    safeEmit('gstPortalUpdates', { action: 'syncLiabilities' });
   } catch (error) {
     console.error('[GST Sync] error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -198,9 +207,60 @@ router.post("/", auth, async (req, res) => {
   try {
     const col = getCollection();
     const result = await col.insertOne(req.body);
-    res.status(201).json({ success: true, entry: { _id: result.insertedId, ...req.body } });
-    const io = getIO();
-    io.emit('gstPortalUpdates', { action: 'create', entry: { _id: result.insertedId, ...req.body } });
+    const newEntry = { _id: result.insertedId, ...req.body };
+
+    // Two-way synchronization if B2B purchase is linked to Manoj Bandhan
+    if (req.body.manojRowId && mongoose.Types.ObjectId.isValid(req.body.manojRowId)) {
+      try {
+        const OthersCreditor = require('../models/OthersCreditor');
+        const { syncManojRowToIndirectExpense } = require('../utils/monojIndirectExpenseManager');
+        const { recalculateMonojBandhanBalances } = require('./othersCreditorRoutes');
+
+        const invoiceVal = (req.body['Invoice Value'] !== undefined && req.body['Invoice Value'] !== null && req.body['Invoice Value'] !== '' && !isNaN(Number(req.body['Invoice Value'])))
+          ? Number(req.body['Invoice Value'])
+          : (
+              (Number(req.body['Taxable Value']) || 0) +
+              (Number(req.body['CGST']) || 0) +
+              (Number(req.body['SGST']) || 0) +
+              (Number(req.body['Integrated Tax']) || 0) +
+              (Number(req.body['Cess']) || 0)
+            );
+        const updatedManoj = await OthersCreditor.findByIdAndUpdate(
+          req.body.manojRowId,
+          {
+            $set: {
+              debit: invoiceVal,
+              b2bEntryId: result.insertedId.toString(),
+              invoiceNo: req.body['Invoice Number'] || ''
+            }
+          },
+          { returnDocument: "after" }
+        );
+        if (updatedManoj) {
+          await recalculateMonojBandhanBalances();
+          await syncManojRowToIndirectExpense(updatedManoj);
+        }
+      } catch (syncErr) {
+        console.error('[GST Portal POST] Error syncing to Manoj Bandhan:', syncErr);
+      }
+    }
+
+    // Two-way synchronization if Freight Creditor GST B2B entry
+    if (req.body.sourceModule === 'FREIGHT_CREDITOR_GST' || req.body.Source === 'Freight Creditor GST' || (req.body.Reason && String(req.body.Reason).includes('Freight Creditor GST'))) {
+      try {
+        const { syncFreightGstToPartyPayment, getCalendarMonthYear } = require('../utils/freightGstPartyPaymentSync');
+        const cal = getCalendarMonthYear(req.body);
+        const veh = req.body.vehicleNo;
+        if (veh && cal.month && cal.year) {
+          await syncFreightGstToPartyPayment({ vehicleNo: veh, month: cal.month, year: cal.year });
+        }
+      } catch (syncErr) {
+        console.error('[GST Portal POST] Error syncing to Party Payment Details:', syncErr);
+      }
+    }
+
+    res.status(201).json({ success: true, entry: newEntry });
+    safeEmit('gstPortalUpdates', { action: 'create', entry: newEntry });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -216,8 +276,7 @@ router.post("/bulk", auth, async (req, res) => {
     }
     const result = await col.insertMany(docs, { ordered: false });
     res.status(201).json({ success: true, insertedCount: result.insertedCount });
-    const io = getIO();
-    io.emit('gstPortalUpdates', { action: 'bulkCreate', count: result.insertedCount });
+    safeEmit('gstPortalUpdates', { action: 'bulkCreate', count: result.insertedCount });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -231,7 +290,6 @@ router.put("/bulk-update", auth, async (req, res) => {
     if (!updates || !Array.isArray(updates)) {
       return res.status(400).json({ success: false, error: "Invalid updates payload" });
     }
-    const io = getIO();
     const bulkOps = updates.map(u => ({
       updateOne: {
         filter: { _id: new ObjectId(u.id) },
@@ -240,8 +298,50 @@ router.put("/bulk-update", auth, async (req, res) => {
     }));
     if (bulkOps.length > 0) await col.bulkWrite(bulkOps);
 
+    // Two-way sync to linked Manoj Bandhan transactions if applicable
+    try {
+      const updatedIds = updates.map(u => new ObjectId(u.id));
+      const affectedDocs = await col.find({ _id: { $in: updatedIds }, manojRowId: { $exists: true, $ne: '' } }).toArray();
+      if (affectedDocs.length > 0) {
+        const OthersCreditor = require('../models/OthersCreditor');
+        const { syncManojRowToIndirectExpense } = require('../utils/monojIndirectExpenseManager');
+        const { recalculateMonojBandhanBalances } = require('./othersCreditorRoutes');
+
+        for (const doc of affectedDocs) {
+          if (doc.manojRowId && mongoose.Types.ObjectId.isValid(doc.manojRowId)) {
+            const invVal = (doc['Invoice Value'] !== undefined && doc['Invoice Value'] !== null && doc['Invoice Value'] !== '' && !isNaN(Number(doc['Invoice Value'])))
+              ? Number(doc['Invoice Value'])
+              : (
+                  (Number(doc['Taxable Value']) || 0) +
+                  (Number(doc['CGST']) || 0) +
+                  (Number(doc['SGST']) || 0) +
+                  (Number(doc['Integrated Tax']) || 0) +
+                  (Number(doc['Cess']) || 0)
+                );
+
+            const updatedManoj = await OthersCreditor.findByIdAndUpdate(
+              doc.manojRowId,
+              {
+                $set: {
+                  debit: invVal,
+                  invoiceNo: doc['Invoice Number'] || ''
+                }
+              },
+              { returnDocument: "after" }
+            );
+            if (updatedManoj) {
+              await syncManojRowToIndirectExpense(updatedManoj);
+            }
+          }
+        }
+        await recalculateMonojBandhanBalances();
+      }
+    } catch (syncErr) {
+      console.error('[GST Portal Bulk Update] Sync error:', syncErr);
+    }
+
     res.json({ success: true, updatedCount: updates.length });
-    io.emit('gstPortalUpdates', { action: 'bulkUpdate' });
+    safeEmit('gstPortalUpdates', { action: 'bulkUpdate' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -256,7 +356,51 @@ router.delete("/bulk-delete", auth, async (req, res) => {
       return res.status(400).json({ success: false, error: "Provide an array of ids." });
     }
     const objectIds = ids.map(id => new ObjectId(id));
+
+    // Handle any linked Manoj Bandhan reversals
+    let freightGstToSync = [];
+    try {
+      const docsToDelete = await col.find({ _id: { $in: objectIds } }).toArray();
+      const OthersCreditor = require('../models/OthersCreditor');
+      const { reverseManojRowFromIndirectExpense } = require('../utils/monojIndirectExpenseManager');
+      const { recalculateMonojBandhanBalances } = require('./othersCreditorRoutes');
+      const { getCalendarMonthYear } = require('../utils/freightGstPartyPaymentSync');
+
+      for (const doc of docsToDelete) {
+        if (doc.manojRowId && mongoose.Types.ObjectId.isValid(doc.manojRowId)) {
+          const manojDoc = await OthersCreditor.findById(doc.manojRowId);
+          if (manojDoc) {
+            await reverseManojRowFromIndirectExpense(manojDoc);
+            await OthersCreditor.findByIdAndUpdate(doc.manojRowId, {
+              $set: { debit: 0, b2bEntryId: '' }
+            });
+            await recalculateMonojBandhanBalances();
+          }
+        }
+        if (doc.sourceModule === 'FREIGHT_CREDITOR_GST' || doc.Source === 'Freight Creditor GST' || (doc.Reason && String(doc.Reason).includes('Freight Creditor GST'))) {
+          const cal = getCalendarMonthYear(doc);
+          if (doc.vehicleNo && cal.month && cal.year) {
+            freightGstToSync.push({ vehicleNo: doc.vehicleNo, month: cal.month, year: cal.year });
+          }
+        }
+      }
+    } catch (revErr) {
+      console.error('[GST Portal Bulk Delete] Error inspecting docs to delete:', revErr);
+    }
+
     const result = await col.deleteMany({ _id: { $in: objectIds } });
+
+    // Reverse/update Party Payment Details for deleted Freight Creditor GST entries
+    if (freightGstToSync.length > 0) {
+      try {
+        const { syncFreightGstToPartyPayment } = require('../utils/freightGstPartyPaymentSync');
+        for (const item of freightGstToSync) {
+          await syncFreightGstToPartyPayment(item);
+        }
+      } catch (syncErr) {
+        console.error('[GST Portal Bulk Delete] Error updating Party Payment Details:', syncErr);
+      }
+    }
 
     // Re-sequence SL NOs to stay gapless after deletion
     const remaining = await col.find({}).sort({ "SL NO": 1, "_auto_updated_at": 1 }).toArray();
@@ -265,8 +409,7 @@ router.delete("/bulk-delete", auth, async (req, res) => {
     }));
     if (bulkOps.length > 0) await col.bulkWrite(bulkOps);
 
-    const io = getIO();
-    io.emit("gstPortalUpdates", { action: "bulkDelete", ids });
+    safeEmit("gstPortalUpdates", { action: "bulkDelete", ids });
 
     res.json({ success: true, deletedCount: result.deletedCount });
   } catch (error) {
@@ -302,8 +445,7 @@ router.post("/gstr1/delete-rows", auth, async (req, res) => {
       await col.bulkWrite(bulkOps);
     }
 
-    const io = getIO();
-    io.emit("gstPortalUpdates", { action: "gstr1Delete", invoiceNumbers });
+    safeEmit("gstPortalUpdates", { action: "gstr1Delete", invoiceNumbers });
 
     res.json({ success: true, deletedCount: invoiceNumbers.length });
   } catch (error) {
@@ -336,10 +478,7 @@ router.post("/b2b/mark-done", auth, async (req, res) => {
       { $set: { status: 'DONE', doneAt: now } }
     );
 
-    const io = getIO();
-    if (io) {
-      io.emit("gstPortalUpdates", { action: "b2bMarkDone", ids });
-    }
+    safeEmit("gstPortalUpdates", { action: "b2bMarkDone", ids });
 
     res.json({ success: true, modifiedCount: result.modifiedCount });
   } catch (error) {
@@ -357,9 +496,62 @@ router.put("/:id", auth, async (req, res) => {
       { returnDocument: "after" }
     );
     if (!result) return res.status(404).json({ success: false, error: "Entry not found." });
+
+    // Two-way synchronization if B2B purchase is linked to Manoj Bandhan
+    const manojRowId = result.manojRowId || req.body.manojRowId;
+    if (manojRowId && mongoose.Types.ObjectId.isValid(manojRowId)) {
+      try {
+        const OthersCreditor = require('../models/OthersCreditor');
+        const { syncManojRowToIndirectExpense } = require('../utils/monojIndirectExpenseManager');
+        const { recalculateMonojBandhanBalances } = require('./othersCreditorRoutes');
+
+        const invoiceVal = (result['Invoice Value'] !== undefined && result['Invoice Value'] !== null && result['Invoice Value'] !== '' && !isNaN(Number(result['Invoice Value'])))
+          ? Number(result['Invoice Value'])
+          : (
+              (Number(result['Taxable Value']) || 0) +
+              (Number(result['CGST']) || 0) +
+              (Number(result['SGST']) || 0) +
+              (Number(result['Integrated Tax']) || 0) +
+              (Number(result['Cess']) || 0)
+            );
+        const updatedManoj = await OthersCreditor.findByIdAndUpdate(
+          manojRowId,
+          {
+            $set: {
+              debit: invoiceVal,
+              b2bEntryId: result._id.toString(),
+              invoiceNo: result['Invoice Number'] || ''
+            }
+          },
+          { returnDocument: "after" }
+        );
+        if (updatedManoj) {
+          await recalculateMonojBandhanBalances();
+          await syncManojRowToIndirectExpense(updatedManoj);
+        }
+      } catch (syncErr) {
+        console.error('[GST Portal PUT] Error syncing to Manoj Bandhan:', syncErr);
+      }
+    }
+
+    // Two-way synchronization if Freight Creditor GST B2B entry
+    const isFreightGst = (result.sourceModule === 'FREIGHT_CREDITOR_GST' || req.body.sourceModule === 'FREIGHT_CREDITOR_GST' || result.Source === 'Freight Creditor GST' || req.body.Source === 'Freight Creditor GST');
+    if (isFreightGst) {
+      try {
+        const { syncFreightGstToPartyPayment, getCalendarMonthYear } = require('../utils/freightGstPartyPaymentSync');
+        const merged = { ...result, ...req.body };
+        const cal = getCalendarMonthYear(merged);
+        const veh = merged.vehicleNo || result.vehicleNo || req.body.vehicleNo;
+        if (veh && cal.month && cal.year) {
+          await syncFreightGstToPartyPayment({ vehicleNo: veh, month: cal.month, year: cal.year });
+        }
+      } catch (syncErr) {
+        console.error('[GST Portal PUT] Error syncing to Party Payment Details:', syncErr);
+      }
+    }
+
     res.json({ success: true, entry: result });
-    const io = getIO();
-    io.emit('gstPortalUpdates', { action: 'update', entry: result });
+    safeEmit('gstPortalUpdates', { action: 'update', entry: result });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -385,8 +577,7 @@ router.post("/attach/:rowId/:attachType", auth, (req, res, next) => {
       { $set: { [field]: url } }
     );
 
-    const io = getIO();
-    io.emit("gstPortalUpdates", { action: "attach", rowId, field, url });
+    safeEmit("gstPortalUpdates", { action: "attach", rowId, field, url });
 
     res.json({ success: true, url, field });
   } catch (err) {

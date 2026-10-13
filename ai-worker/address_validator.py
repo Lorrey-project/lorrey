@@ -44,13 +44,7 @@ def validate_addresses(invoice_json):
     if not buyer.get("buyer_pincode"):
         buyer["buyer_pincode"] = extract_pincode(buyer_addr)
 
-    if not consignee.get("consignee_pincode"):
-        consignee["consignee_pincode"] = extract_pincode(consignee_addr)
-
-    # prevent identical address
-    if buyer_addr.lower() == consignee_addr.lower():
-        consignee["consignee_address"] = ""
-
+    # Normalize addresses
     invoice_json["buyer_details"] = buyer
     invoice_json["consignee_details"] = consignee
 

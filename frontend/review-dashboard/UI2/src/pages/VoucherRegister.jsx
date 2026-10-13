@@ -71,7 +71,6 @@ export default function VoucherRegister({ onBack }) {
   const [localData, setLocalData]   = useState({});
   const [loading, setLoading]       = useState(true);
   const [saving, setSaving]         = useState(false);
-  const now = new Date();
   const tableContainerRef = useRef(null);
   useTableNavigation(tableContainerRef);
 

@@ -118,22 +118,23 @@ const formatDateForInput = (dateStr) => {
   return '';
 };
 
-const DEBIT_REASONS = [
+export const PERMITTED_DEBIT_REASONS = [
   'Damage / Shortage',
-  'GPS Deviation Charges',
+  'GPS Deviation Charge',
   'GPS Monitoring / Trip Charges',
-  'Device Installation Charges',
+  'GPS Installation Charges',
   'RFID Deduction / Charges',
   'Suspense',
-  'TDS Provision',
+  'TDS PROVISION',
   'Site office Rent',
-  'Safty violation charges'
+  'Safty Violation Charges'
 ];
+const DEBIT_REASONS = PERMITTED_DEBIT_REASONS;
 
 export const isB2BEligibleDebitReason = (reason) => {
   if (!reason || typeof reason !== 'string') return false;
   const clean = reason.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (clean.includes('device installation')) return true;
+  if (clean.includes('gps installation') || clean.includes('device installation')) return true;
   if (clean.includes('rfid')) return true;
   if (clean.includes('site office rent')) return true;
   return false;
@@ -156,7 +157,11 @@ export default function FinancialYearDetails({ onBack }) {
   const [selectedIds, setSelectedIds] = useState([]);
 
   // Deduction Allocation States
-  const FY_OPTIONS = ['FY 2024-25', 'FY 2025-26', 'FY 2026-27', 'FY 2027-28', '2024-2025', '2025-2026', '2026-2027', '2027-2028'];
+  const FY_OPTIONS = [
+    'FY 2024-25', 'FY 2025-26', 'FY 2026-27', 'FY 2027-28',
+    'FY 2024-2025', 'FY 2025-2026', 'FY 2026-2027', 'FY 2027-2028',
+    '2024-2025', '2025-2026', '2026-2027', '2027-2028'
+  ];
   const ALL_MONTHS_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const [damageModalOpen, setDamageModalOpen] = useState(false);
   const [damageTarget, setDamageTarget] = useState(null); // { invoiceNumber, groupId }
@@ -177,6 +182,9 @@ export default function FinancialYearDetails({ onBack }) {
   const [damageVehicleAmounts, setDamageVehicleAmounts] = useState({});
   const [damageManualRemarks, setDamageManualRemarks] = useState('');
   const [b2bDialogOpen, setB2bDialogOpen] = useState(false);
+  const [editingAllocationId, setEditingAllocationId] = useState(null);
+  const [isDraftRestored, setIsDraftRestored] = useState(false);
+  const getDebitDraftKey = useCallback((invNo) => `lorrey_debit_draft_${String(invNo || '').trim()}`, []);
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ id: '', paymentAmount: '', paymentDate: '', referenceNo: '', debitAmount: '', remarks: '' });
@@ -809,6 +817,51 @@ export default function FinancialYearDetails({ onBack }) {
     }
   };
 
+  // Auto-save unfinished draft while Debit Reason Allocation modal is open
+  useEffect(() => {
+    if (!damageModalOpen || !damageTarget?.invoiceNumber) return;
+    const inv = damageTarget.invoiceNumber;
+    if (editingAllocationId) return;
+
+    const hasAnyInput = damageYear ||
+      (damageSelectedMonths && damageSelectedMonths.length > 0) ||
+      (damageSelectedVehicles && damageSelectedVehicles.length > 0) ||
+      (selectedTripIds && selectedTripIds.length > 0) ||
+      (tripAllocAmounts && Object.values(tripAllocAmounts).some(v => parseFloat(v) > 0)) ||
+      (damageAllocateAmount && parseFloat(damageAllocateAmount) > 0);
+
+    if (!hasAnyInput) return;
+
+    try {
+      const draftData = {
+        invoiceNumber: inv,
+        damageYear,
+        damageSelectedMonths,
+        damageSelectedVehicles,
+        damageDebitReason,
+        selectedTripIds,
+        tripAllocAmounts,
+        damageAllocateAmount,
+        updatedAt: Date.now()
+      };
+      localStorage.setItem(getDebitDraftKey(inv), JSON.stringify(draftData));
+    } catch (err) {
+      console.warn('[Draft] Failed to autosave allocation draft:', err);
+    }
+  }, [
+    damageModalOpen,
+    damageTarget?.invoiceNumber,
+    editingAllocationId,
+    damageYear,
+    damageSelectedMonths,
+    damageSelectedVehicles,
+    damageDebitReason,
+    selectedTripIds,
+    tripAllocAmounts,
+    damageAllocateAmount,
+    getDebitDraftKey
+  ]);
+
   const handleDamageYearChange = async (e) => {
     const newYear = e.target.value;
     setDamageYear(newYear);
@@ -908,7 +961,10 @@ export default function FinancialYearDetails({ onBack }) {
     const calculatedGroupDiff = Math.max(0, groupTotalRecv - num(computedTargetRow?.groupData?.paymentAmount) - num(computedTargetRow?.groupData?.tdsProvision));
     const baseOriginalDebit = targetRow?.originalDebitAmount != null ? targetRow.originalDebitAmount : calculatedGroupDiff;
     const currentAllocations = targetRow?.deductionAllocations || [];
-    const currentTotalAlloc = currentAllocations.reduce((s, a) => s + (parseFloat(a.allocatedAmount) || 0), 0);
+    const otherAllocations = editingAllocationId
+      ? currentAllocations.filter(a => a.allocationId !== editingAllocationId && String(a._id) !== editingAllocationId)
+      : currentAllocations;
+    const currentTotalAlloc = otherAllocations.reduce((s, a) => s + (parseFloat(a.allocatedAmount) || 0), 0);
     const currentRemaining = Math.max(0, baseOriginalDebit - currentTotalAlloc);
 
     if (currentRemaining <= 0) {
@@ -966,7 +1022,8 @@ export default function FinancialYearDetails({ onBack }) {
         originalDebitAmount: baseOriginalDebit,
         allocatedAmount: allocAmt,
         allocationDate: new Date().toISOString().split('T')[0],
-        tripAllocations: parsedTripAllocs
+        tripAllocations: parsedTripAllocs,
+        allocationId: editingAllocationId || undefined
       };
 
       const res = await axios.post(`${API_URL}/fy-details/allocate-deduction`, payload);
@@ -996,6 +1053,14 @@ export default function FinancialYearDetails({ onBack }) {
         setSelectedTripIds([]);
         setTripAllocAmounts({});
         setDamageAllocateAmount('');
+        setEditingAllocationId(null);
+        try {
+          localStorage.removeItem(getDebitDraftKey(inv));
+        } catch (e) {}
+        setIsDraftRestored(false);
+        if (damageSelectedMonths.length > 0 && damageSelectedVehicles.length > 0 && damageYear) {
+          fetchTripsForSelection(damageSelectedMonths, damageSelectedVehicles, damageYear);
+        }
         setSnack({
           severity: 'success',
           msg: `Allocated ₹${allocAmt.toLocaleString('en-IN')} to ${damageDebitReason} across ${parsedTripAllocs.length} trip(s) successfully! Bank Book debit updated to ₹${res.data.remainingDebitAmount.toLocaleString('en-IN')}.`
@@ -1007,6 +1072,42 @@ export default function FinancialYearDetails({ onBack }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditAllocation = (alloc) => {
+    setEditingAllocationId(alloc.allocationId || alloc._id);
+    const matchedReason = PERMITTED_DEBIT_REASONS.find(p => p.toLowerCase() === (alloc.debitReason || '').trim().toLowerCase())
+      || alloc.debitReason;
+    setDamageDebitReason(matchedReason);
+    if (alloc.financialYear) {
+      setDamageYear(alloc.financialYear);
+    }
+    const monthsArr = alloc.months || [];
+    setDamageSelectedMonths(monthsArr);
+    if (monthsArr.length === 1) setDamageMonth(monthsArr[0]);
+    const vehArr = alloc.vehicles || [];
+    setDamageSelectedVehicles(vehArr);
+
+    if (alloc.tripAllocations && alloc.tripAllocations.length > 0) {
+      const ids = [];
+      const amounts = {};
+      alloc.tripAllocations.forEach(t => {
+        const key = String(t.tripRecordId || t.tripId || `${t.invoiceNo}-${t.loadingDate}`);
+        ids.push(key);
+        amounts[key] = String(t.allocatedAmount || t.tripAllocateAmount || '');
+      });
+      setSelectedTripIds(ids);
+      setTripAllocAmounts(amounts);
+    }
+
+    if (alloc.financialYear && monthsArr.length > 0 && vehArr.length > 0) {
+      fetchTripsForSelection(monthsArr, vehArr, alloc.financialYear);
+    }
+
+    setSnack({
+      severity: 'info',
+      msg: `Editing allocation for ${alloc.debitReason}. Update amounts and click Update Allocation.`
+    });
   };
 
   const handleDeleteAllocation = async (allocationId) => {
@@ -1036,6 +1137,9 @@ export default function FinancialYearDetails({ onBack }) {
           return p;
         }));
 
+        if (damageSelectedMonths.length > 0 && damageSelectedVehicles.length > 0 && damageYear) {
+          fetchTripsForSelection(damageSelectedMonths, damageSelectedVehicles, damageYear);
+        }
         setSnack({ severity: 'info', msg: 'Allocation removed. Bank Book debit updated.' });
       }
     } catch (err) {
@@ -1489,7 +1593,7 @@ export default function FinancialYearDetails({ onBack }) {
   // Reset page when filter changes
   const handleSiteFilter = useCallback((f) => { setSiteFilter(f); setPage(0); }, []);
 
-  const openDeductionModal = useCallback((invNo, specificReason = '') => {
+  const openDeductionModal = useCallback((invNo, specificReason = '', forceClean = false) => {
     const r = rows.find(x => x.invoiceNumber === invNo);
     const computedR = computedRows.find(x => x.invoiceNumber === invNo);
     if (!r || !computedR) return;
@@ -1515,50 +1619,105 @@ export default function FinancialYearDetails({ onBack }) {
       remainingDebitAmount: remDebit
     });
 
-    let activeFy = r.damageYear || (selYear ? (selYear.startsWith('FY') ? selYear : `FY ${selYear}`) : 'FY 2026-27');
-    if (activeFy && !activeFy.startsWith('FY') && activeFy.includes('-')) {
-      activeFy = `FY ${activeFy}`;
+    let savedDraft = null;
+    if (!forceClean) {
+      try {
+        const raw = localStorage.getItem(getDebitDraftKey(invNo));
+        if (raw) savedDraft = JSON.parse(raw);
+      } catch (e) {
+        savedDraft = null;
+      }
     }
-    setDamageYear(activeFy);
 
-    let initMonths = [];
-    if (r.damageMonth) {
-      const matchMonth = ALL_MONTHS_NAMES.find(m => m.toLowerCase().startsWith(String(r.damageMonth).toLowerCase().slice(0, 3))) || r.damageMonth;
-      initMonths = [matchMonth];
-    } else if (r.month) {
-      const matchMonth = ALL_MONTHS_NAMES.find(m => m.toLowerCase().startsWith(String(r.month).toLowerCase().slice(0, 3)));
-      if (matchMonth) initMonths = [matchMonth];
-    }
-    setDamageSelectedMonths(initMonths);
-    setDamageMonth(initMonths.length === 1 ? initMonths[0] : '');
+    if (savedDraft && savedDraft.invoiceNumber === invNo) {
+      const draftFy = savedDraft.damageYear || 'FY 2026-27';
+      const draftMonths = Array.isArray(savedDraft.damageSelectedMonths) ? savedDraft.damageSelectedMonths : [];
+      const draftVehicles = Array.isArray(savedDraft.damageSelectedVehicles) ? savedDraft.damageSelectedVehicles : [];
+      const draftReason = savedDraft.damageDebitReason || selectedReason;
+      const draftTripIds = Array.isArray(savedDraft.selectedTripIds) ? savedDraft.selectedTripIds : [];
+      const draftTripAmounts = savedDraft.tripAllocAmounts || {};
+      const draftAllocAmt = savedDraft.damageAllocateAmount || '';
 
-    const initVehicles = r.damageVehicles || [];
-    setDamageSelectedVehicles(initVehicles);
+      setDamageYear(draftFy);
+      setDamageSelectedMonths(draftMonths);
+      setDamageMonth(draftMonths.length === 1 ? draftMonths[0] : '');
+      setDamageSelectedVehicles(draftVehicles);
+      const matchedReason = PERMITTED_DEBIT_REASONS.find(p => p.toLowerCase() === (draftReason || '').trim().toLowerCase()) || draftReason;
+      setDamageDebitReason(matchedReason);
+      setSelectedTripIds(draftTripIds);
+      setTripAllocAmounts(draftTripAmounts);
+      setDamageAllocateAmount(draftAllocAmt);
+      setIsDraftRestored(true);
 
-    setDamageDebitReason(selectedReason);
-    setDamageAllocateAmount('');
-    setSelectedTripIds([]);
-    setTripAllocAmounts({});
-
-    if (initMonths.length > 0 && activeFy) {
-      axios.get(`${API_URL}/fy-details/vehicles?months=${initMonths.join(',')}&fy=${activeFy}`)
-        .then(res => {
-          const vList = res.data || [];
-          const combined = [...new Set([...vList, ...initVehicles])].filter(Boolean).sort();
-          setDamageVehicles(combined);
-          if (initVehicles.length > 0) {
-            fetchTripsForSelection(initMonths, initVehicles, activeFy);
-          } else {
+      if (draftMonths.length > 0 && draftFy) {
+        axios.get(`${API_URL}/fy-details/vehicles?months=${draftMonths.join(',')}&fy=${draftFy}`)
+          .then(res => {
+            const vList = res.data || [];
+            const combined = [...new Set([...vList, ...draftVehicles])].filter(Boolean).sort();
+            setDamageVehicles(combined);
+            if (draftVehicles.length > 0) {
+              fetchTripsForSelection(draftMonths, draftVehicles, draftFy);
+            } else {
+              setLoadedTrips([]);
+            }
+          })
+          .catch(() => {
+            setDamageVehicles(draftVehicles);
             setLoadedTrips([]);
-          }
-        })
-        .catch(() => {
-          setDamageVehicles(initVehicles);
-          setLoadedTrips([]);
-        });
+          });
+      } else {
+        setDamageVehicles(draftVehicles);
+        setLoadedTrips([]);
+      }
     } else {
-      setDamageVehicles(initVehicles);
-      setLoadedTrips([]);
+      setIsDraftRestored(false);
+      let activeFy = r.damageYear || (selYear ? (selYear.startsWith('FY') ? selYear : `FY ${selYear}`) : 'FY 2026-27');
+      if (activeFy && !activeFy.startsWith('FY') && activeFy.includes('-')) {
+        activeFy = `FY ${activeFy}`;
+      }
+      setDamageYear(activeFy);
+
+      let initMonths = [];
+      if (r.damageMonth) {
+        const matchMonth = ALL_MONTHS_NAMES.find(m => m.toLowerCase().startsWith(String(r.damageMonth).toLowerCase().slice(0, 3))) || r.damageMonth;
+        initMonths = [matchMonth];
+      } else if (r.month) {
+        const matchMonth = ALL_MONTHS_NAMES.find(m => m.toLowerCase().startsWith(String(r.month).toLowerCase().slice(0, 3)));
+        if (matchMonth) initMonths = [matchMonth];
+      }
+      setDamageSelectedMonths(initMonths);
+      setDamageMonth(initMonths.length === 1 ? initMonths[0] : '');
+
+      const initVehicles = r.damageVehicles || [];
+      setDamageSelectedVehicles(initVehicles);
+
+      const matchedReason = PERMITTED_DEBIT_REASONS.find(p => p.toLowerCase() === (selectedReason || '').trim().toLowerCase())
+        || (PERMITTED_DEBIT_REASONS.includes(selectedReason) ? selectedReason : (PERMITTED_DEBIT_REASONS[0] || ''));
+      setDamageDebitReason(matchedReason);
+      setDamageAllocateAmount('');
+      setSelectedTripIds([]);
+      setTripAllocAmounts({});
+
+      if (initMonths.length > 0 && activeFy) {
+        axios.get(`${API_URL}/fy-details/vehicles?months=${initMonths.join(',')}&fy=${activeFy}`)
+          .then(res => {
+            const vList = res.data || [];
+            const combined = [...new Set([...vList, ...initVehicles])].filter(Boolean).sort();
+            setDamageVehicles(combined);
+            if (initVehicles.length > 0) {
+              fetchTripsForSelection(initMonths, initVehicles, activeFy);
+            } else {
+              setLoadedTrips([]);
+            }
+          })
+          .catch(() => {
+            setDamageVehicles(initVehicles);
+            setLoadedTrips([]);
+          });
+      } else {
+        setDamageVehicles(initVehicles);
+        setLoadedTrips([]);
+      }
     }
 
     setDamageTrips(r.damageTrips || []);
@@ -1570,7 +1729,22 @@ export default function FinancialYearDetails({ onBack }) {
     setDamageManualRemarks(sepIdx !== -1 ? existingRemarks.slice(sepIdx + 5) : '');
 
     setDamageModalOpen(true);
-  }, [rows, computedRows, selYear]);
+  }, [rows, computedRows, selYear, getDebitDraftKey]);
+
+  const handleDiscardDraft = useCallback((targetInv) => {
+    const inv = targetInv || damageTarget?.invoiceNumber;
+    if (inv) {
+      try {
+        localStorage.removeItem(getDebitDraftKey(inv));
+      } catch (err) {
+        console.warn('[Draft] Failed to clear draft from localStorage:', err);
+      }
+    }
+    setIsDraftRestored(false);
+    if (inv) {
+      openDeductionModal(inv, '', true);
+    }
+  }, [damageTarget?.invoiceNumber, getDebitDraftKey, openDeductionModal]);
 
   const handleRowEdit = useCallback((invoiceNumber, field, value) => {
     if (field === 'debitReasons') {
@@ -2575,10 +2749,58 @@ export default function FinancialYearDetails({ onBack }) {
           const getTripsForMonth = (m) => loadedTrips.filter(t => (t.month || '').toLowerCase() === (m || '').toLowerCase());
           const getTripsForVehicle = (v) => loadedTrips.filter(t => (t.vehicleNumber || t.vehicle || '').toLowerCase() === (v || '').toLowerCase());
 
+          const getExistingDeductionForTrip = (trip, reason) => {
+            if (!trip) return 0;
+            if (trip.existingDeductions) {
+              if (trip.existingDeductions[reason] != null) {
+                return Number(trip.existingDeductions[reason]) || 0;
+              }
+              const canonical = PERMITTED_DEBIT_REASONS.find(p => p.toLowerCase() === (reason || '').trim().toLowerCase());
+              if (canonical && trip.existingDeductions[canonical] != null) {
+                return Number(trip.existingDeductions[canonical]) || 0;
+              }
+            }
+            const clean = (reason || '').trim().toLowerCase();
+            const numVal = (v) => {
+              if (v === undefined || v === null || v === '') return 0;
+              const n = parseFloat(String(v).replace(/,/g, ''));
+              return isNaN(n) ? 0 : n;
+            };
+            if (clean.includes('damage') || clean.includes('shortage')) {
+              return numVal(trip['SHORTAGE (AMOUNT)']) || numVal(trip['Damage Deduction']) || numVal(trip.rawDeductions?.['SHORTAGE (AMOUNT)']) || numVal(trip.rawDeductions?.['Damage Deduction']);
+            }
+            if (clean.includes('gps deviation')) {
+              return numVal(trip['GPS Deviation Charges']) || numVal(trip['GPS DEVIATION']) || numVal(trip.rawDeductions?.['GPS Deviation Charges']);
+            }
+            if (clean.includes('gps monitoring') || clean.includes('gps trip')) {
+              return numVal(trip['GPS Monitoring Charge']) || numVal(trip['GPS MONITORING / TRIP CHARGE']) || numVal(trip.rawDeductions?.['GPS Monitoring Charge']);
+            }
+            if (clean.includes('gps installation') || clean.includes('device installation')) {
+              return numVal(trip['Give GPS DEVICE']) || numVal(trip['GPS Installation Charges']) || numVal(trip.rawDeductions?.['Give GPS DEVICE']);
+            }
+            if (clean.includes('rfid')) {
+              return numVal(trip['Give RFID TAG']) || numVal(trip['RFID Deduction / Charges']) || numVal(trip.rawDeductions?.['Give RFID TAG']);
+            }
+            if (clean.includes('suspense')) {
+              return numVal(trip['Suspense']) || numVal(trip.rawDeductions?.['Suspense']);
+            }
+            if (clean.includes('tds')) {
+              return numVal(trip['TDS']) || numVal(trip['TDS Provision']) || numVal(trip.rawDeductions?.['TDS']);
+            }
+            if (clean.includes('site office rent') || clean.includes('rent')) {
+              return numVal(trip['Site office Rent']) || numVal(trip.rawDeductions?.['Site office Rent']);
+            }
+            if (clean.includes('safty') || clean.includes('safety')) {
+              return numVal(trip['Safty Violation Charges']) || numVal(trip.rawDeductions?.['Safty Violation Charges']);
+            }
+            return 0;
+          };
+
           const renderTripCard = (trip) => {
             const tripKey = String(trip._id || trip.tripId || `${trip.invoiceNo}-${trip.loadingDate}`);
             const isSelected = selectedTripIds.includes(tripKey);
             const tripAmt = tripAllocAmounts[tripKey] ?? '';
+            const existingDed = getExistingDeductionForTrip(trip, damageDebitReason);
 
             return (
               <Box
@@ -2646,43 +2868,82 @@ export default function FinancialYearDetails({ onBack }) {
                     </Box>
                   </Box>
 
-                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
-                    <Typography sx={{ fontSize: 10, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      ALLOCATE AMOUNT
-                    </Typography>
-                    <Box
-                      onClick={(e) => e.stopPropagation()}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        bgcolor: isSelected ? '#ffffff' : '#f8fafc',
-                        border: isSelected ? '1.5px solid #6366f1' : '1px solid #cbd5e1',
-                        borderRadius: '8px',
-                        px: 1,
-                        py: 0.5,
-                        boxShadow: isSelected ? '0 2px 4px rgba(99, 102, 241, 0.15)' : 'none'
-                      }}
-                    >
-                      <span style={{ fontSize: '13px', fontWeight: 800, color: isSelected ? '#4338ca' : '#94a3b8', marginRight: '4px' }}>₹</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        placeholder="0.00"
-                        value={tripAmt}
-                        disabled={!isSelected}
-                        onChange={(e) => handleTripAmountChange(trip, e.target.value)}
-                        style={{
-                          width: '110px',
-                          border: 'none',
-                          outline: 'none',
-                          fontSize: '13px',
-                          fontWeight: 800,
-                          color: isSelected ? '#0f172a' : '#94a3b8',
-                          background: 'transparent',
-                          fontFamily: 'monospace'
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {/* EXISTING DEDUCTION */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+                      <Typography sx={{ fontSize: 10, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        EXISTING DEDUCTION
+                      </Typography>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          bgcolor: existingDed > 0 ? '#fef3c7' : '#f8fafc',
+                          border: existingDed > 0 ? '1.5px solid #fde68a' : '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          px: 1.25,
+                          py: 0.5,
+                          minWidth: '95px',
+                          justifyContent: 'flex-end',
+                          boxShadow: existingDed > 0 ? '0 1px 2px rgba(245, 158, 11, 0.1)' : 'none'
                         }}
-                      />
+                      >
+                        {tripsLoading ? (
+                          <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#94a3b8' }}>Loading…</Typography>
+                        ) : (
+                          <Typography
+                            sx={{
+                              fontSize: '13px',
+                              fontWeight: 800,
+                              color: existingDed > 0 ? '#b45309' : '#64748b',
+                              fontFamily: 'monospace'
+                            }}
+                          >
+                            ₹{existingDed.toFixed(2)}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+
+                    {/* ALLOCATE AMOUNT */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+                      <Typography sx={{ fontSize: 10, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        ALLOCATE AMOUNT
+                      </Typography>
+                      <Box
+                        onClick={(e) => e.stopPropagation()}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          bgcolor: isSelected ? '#ffffff' : '#f8fafc',
+                          border: isSelected ? '1.5px solid #6366f1' : '1px solid #cbd5e1',
+                          borderRadius: '8px',
+                          px: 1,
+                          py: 0.5,
+                          boxShadow: isSelected ? '0 2px 4px rgba(99, 102, 241, 0.15)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '13px', fontWeight: 800, color: isSelected ? '#4338ca' : '#94a3b8', marginRight: '4px' }}>₹</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          placeholder="0.00"
+                          value={tripAmt}
+                          disabled={!isSelected}
+                          onChange={(e) => handleTripAmountChange(trip, e.target.value)}
+                          style={{
+                            width: '110px',
+                            border: 'none',
+                            outline: 'none',
+                            fontSize: '13px',
+                            fontWeight: 800,
+                            color: isSelected ? '#0f172a' : '#94a3b8',
+                            background: 'transparent',
+                            fontFamily: 'monospace'
+                          }}
+                        />
+                      </Box>
                     </Box>
                   </Box>
                 </Box>
@@ -2696,9 +2957,32 @@ export default function FinancialYearDetails({ onBack }) {
                 <Box display="flex" alignItems="center" gap={1.5}>
                   <span style={{ fontSize: '22px' }}>⚖️</span>
                   <Box>
-                    <Typography variant="h6" fontWeight={800} color="#0f172a" sx={{ lineHeight: 1.2 }}>
-                      Debit Reasons (Deduction) Allocation
-                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="h6" fontWeight={800} color="#0f172a" sx={{ lineHeight: 1.2 }}>
+                        Debit Reasons (Deduction) Allocation
+                      </Typography>
+                      {isDraftRestored && (
+                        <Box sx={{
+                          display: 'inline-flex', alignItems: 'center', gap: 1, bgcolor: '#fef3c7',
+                          border: '1px solid #fde68a', px: 1, py: 0.25, borderRadius: '6px'
+                        }}>
+                          <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#92400e' }}>
+                            Draft Restored
+                          </Typography>
+                          <button
+                            type="button"
+                            onClick={() => handleDiscardDraft(inv)}
+                            style={{
+                              background: 'none', border: 'none', padding: 0,
+                              fontSize: '10px', fontWeight: 800, color: '#dc2626',
+                              cursor: 'pointer', textDecoration: 'underline'
+                            }}
+                          >
+                            Reset
+                          </button>
+                        </Box>
+                      )}
+                    </Box>
                     <Typography variant="caption" color="text.secondary" fontWeight={600}>
                       Invoice: <span style={{ color: '#4f46e5', fontFamily: 'monospace' }}>{inv || '—'}</span>
                     </Typography>
@@ -2887,8 +3171,9 @@ export default function FinancialYearDetails({ onBack }) {
                               fontSize: '12px', fontWeight: 700, color: '#1e293b', background: '#f8fafc', outline: 'none'
                             }}
                           >
-                            {DEBIT_REASONS.filter(r => r !== 'None').map(reason => (
-                              <option key={reason} value={reason}>{reason.toUpperCase()}</option>
+                            <option value="">-- Select Deduction Reason --</option>
+                            {PERMITTED_DEBIT_REASONS.map(reason => (
+                              <option key={reason} value={reason}>{reason}</option>
                             ))}
                           </select>
                         </Box>
@@ -3194,6 +3479,23 @@ export default function FinancialYearDetails({ onBack }) {
                                 B2B
                               </Button>
                             )}
+                            {editingAllocationId && (
+                              <Button
+                                variant="outlined"
+                                onClick={() => {
+                                  setEditingAllocationId(null);
+                                  setSelectedTripIds([]);
+                                  setTripAllocAmounts({});
+                                }}
+                                sx={{
+                                  borderColor: '#94a3b8', color: '#64748b', '&:hover': { borderColor: '#64748b', bgcolor: '#f1f5f9' },
+                                  px: 2, py: 1.25, fontWeight: 700, fontSize: '13px', textTransform: 'none',
+                                  borderRadius: '8px'
+                                }}
+                              >
+                                Cancel Edit
+                              </Button>
+                            )}
                             <Button
                               variant="contained"
                               onClick={handleConfirmAllocation}
@@ -3206,12 +3508,12 @@ export default function FinancialYearDetails({ onBack }) {
                                 !condition
                               }
                               sx={{
-                                bgcolor: '#4f46e5', '&:hover': { bgcolor: '#4338ca' },
+                                bgcolor: editingAllocationId ? '#059669' : '#4f46e5', '&:hover': { bgcolor: editingAllocationId ? '#047857' : '#4338ca' },
                                 px: 3, py: 1.25, fontWeight: 800, fontSize: '13px', textTransform: 'none',
-                                borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.2)'
+                                borderRadius: '8px', boxShadow: editingAllocationId ? '0 4px 6px -1px rgba(5, 150, 105, 0.2)' : '0 4px 6px -1px rgba(79, 70, 229, 0.2)'
                               }}
                             >
-                              {loading ? 'Allocating…' : 'CONFIRM ALLOCATION'}
+                              {loading ? 'Allocating…' : (editingAllocationId ? 'UPDATE ALLOCATION' : 'CONFIRM ALLOCATION')}
                             </Button>
                           </Box>
                         </Box>
@@ -3305,16 +3607,28 @@ export default function FinancialYearDetails({ onBack }) {
                                   {alloc.allocationDate || (alloc.createdAt && String(alloc.createdAt).slice(0, 10)) || '—'}
                                 </td>
                                 <td style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteAllocation(alloc.allocationId || alloc._id)}
-                                    style={{
-                                      background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
-                                      borderRadius: '4px', padding: '3px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
-                                    }}
-                                  >
-                                    ✕ Remove
-                                  </button>
+                                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditAllocation(alloc)}
+                                      style={{
+                                        background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0',
+                                        borderRadius: '4px', padding: '3px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                                      }}
+                                    >
+                                      ✎ Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteAllocation(alloc.allocationId || alloc._id)}
+                                      style={{
+                                        background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+                                        borderRadius: '4px', padding: '3px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                                      }}
+                                    >
+                                      ✕ Remove
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             );

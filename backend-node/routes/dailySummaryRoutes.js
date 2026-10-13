@@ -738,7 +738,8 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
       truckContactMap[c.normKey] = {
         vehType: c.wheel || "",
         custType: c.custType || "",
-        owner: c.ownerName || ""
+        owner: c.ownerName || "",
+        dedicatedType: c.dedicatedType || ""
       };
     });
 
@@ -801,10 +802,8 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
         else if (rawWheel.includes("6")) wheelKey = "6W";
 
         const rawDedicated = String(row["DEDICATED"] || "").trim();
-        const billType = String(row["Bill Type"] || row["BILL TYPE"] || "").trim().toUpperCase();
-        const custType = String(contact.custType || "").toUpperCase();
         const hasDedicatedAmt = rawDedicated && rawDedicated !== "-" && parseNum(rawDedicated) > 0;
-        const isDedicatedType = billType === "NT" || custType === "ATOA" || custType === "ATO" || custType === "DEDICATED";
+        const isDedicatedParty = String(contact.dedicatedType || "").trim().toLowerCase() === "dedicated";
 
         // Standard MT capacity mapping: 6W -> 13 MT, 10W -> 19 MT, 12W -> 25 MT, 14W -> 30 MT
         let standardCapMT = 0;
@@ -831,7 +830,7 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
           wheelPattern: wheelKey,
           capacityMT: standardCapMT,
           capacity: standardCapMT > 0 ? `${standardCapMT} MT` : "-",
-          isDedicatedInitial: Boolean(hasDedicatedAmt || isDedicatedType),
+          isDedicatedInitial: Boolean(hasDedicatedAmt || isDedicatedParty),
           contactOwner: (row["OWNER NAME"] || contact.owner || "").trim(),
           distinctMTs: new Set(),
           dailyMT: {},
@@ -1023,7 +1022,9 @@ async function getAllRegisteredVehicles() {
           vehicleNo: rawNo,
           normKey,
           ownerName: (doc["Owner Name"] || doc["Owner Name "] || doc.owner_name || doc.owner || "").trim(),
-          wheel: (doc["Type of vehicle"] || doc["Type of vehicle "] || doc.veh_type || doc.wheel || "").trim()
+          wheel: (doc["Type of vehicle"] || doc["Type of vehicle "] || doc.veh_type || doc.wheel || "").trim(),
+          custType: (doc["TYPE OF CUSTOMER "] || doc["TYPE OF CUSTOMER"] || doc.custType || doc.type_of_customer || "").trim(),
+          dedicatedType: (doc["Dedicated Type"] || doc["Dedicated Type "] || doc.dedicated_type || doc.dedicatedType || "").trim()
         });
       }
     }
@@ -1037,7 +1038,9 @@ async function getAllRegisteredVehicles() {
           vehicleNo: rawNo,
           normKey,
           ownerName: (doc["Owner Name "] || doc["Owner Name"] || doc.owner_name || doc.owner || "").trim(),
-          wheel: (doc["Type of vehicle "] || doc["Type of vehicle"] || doc.veh_type || doc.wheel || "").trim()
+          wheel: (doc["Type of vehicle "] || doc["Type of vehicle"] || doc.veh_type || doc.wheel || "").trim(),
+          custType: (doc["TYPE OF CUSTOMER "] || doc["TYPE OF CUSTOMER"] || doc.custType || doc.type_of_customer || "").trim(),
+          dedicatedType: (doc["Dedicated Type"] || doc["Dedicated Type "] || doc.dedicated_type || doc.dedicatedType || "").trim()
         });
       }
     }
@@ -1051,7 +1054,9 @@ async function getAllRegisteredVehicles() {
           vehicleNo: rawNo,
           normKey,
           ownerName: (doc["Owner Name "] || doc["Owner Name"] || doc.owner_name || doc.owner || "").trim(),
-          wheel: (doc["Type of vehicle "] || doc["Type of vehicle"] || doc.veh_type || doc.wheel || "").trim()
+          wheel: (doc["Type of vehicle "] || doc["Type of vehicle"] || doc.veh_type || doc.wheel || "").trim(),
+          custType: (doc["TYPE OF CUSTOMER "] || doc["TYPE OF CUSTOMER"] || doc.custType || doc.type_of_customer || "").trim(),
+          dedicatedType: (doc["Dedicated Type"] || doc["Dedicated Type "] || doc.dedicated_type || doc.dedicatedType || "").trim()
         });
       }
     }
@@ -1533,16 +1538,13 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       const totalDaysInMonth = new Date(mYear, selectedMonthNum, 0).getDate();
       const mStart = new Date(mYear, selectedMonthNum - 1, 1, 0, 0, 0, 0);
 
-      let mEndDay = totalDaysInMonth;
-      if (mYear === currentCalYear && selectedMonthNum === currentCalMonth) {
-        mEndDay = Math.min(currentCalDay, totalDaysInMonth);
-      } else if (mYear > currentCalYear || (mYear === currentCalYear && selectedMonthNum > currentCalMonth)) {
-        mEndDay = 0; // Future month
-      }
+      const mEndDay = (mYear === currentCalYear && selectedMonthNum === currentCalMonth)
+        ? Math.min(currentCalDay, totalDaysInMonth)
+        : totalDaysInMonth;
 
-      const mEnd = new Date(mYear, selectedMonthNum - 1, Math.max(1, mEndDay), 23, 59, 59, 999);
+      const mEnd = new Date(mYear, selectedMonthNum - 1, mEndDay, 23, 59, 59, 999);
       rangeStartMs = mStart.getTime();
-      rangeEndMs = mEndDay === 0 ? mStart.getTime() - 1 : mEnd.getTime();
+      rangeEndMs = mEnd.getTime();
 
       const mmStr = String(selectedMonthNum).padStart(2, '0');
       formattedStartDate = `01-${mmStr}-${mYear}`;
@@ -1552,7 +1554,7 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       // Month = ALL, Date = ALL
       const fyStart = new Date(startYear, 3, 1, 0, 0, 0, 0);
       const fyEnd = new Date(endYear, 2, 31, 23, 59, 59, 999);
-      const cutoff = (isCurrentFY || todayEnd.getTime() < fyEnd.getTime()) ? todayEnd : fyEnd;
+      const cutoff = isCurrentFY ? todayEnd : fyEnd;
 
       rangeStartMs = fyStart.getTime();
       rangeEndMs = cutoff.getTime();
@@ -1617,7 +1619,60 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       }
     };
 
-    // 6. Aggregate billRows by Site
+    // Helper to match a bill row with payment billNos list
+    const isBillMatch = (billRow, billNoList) => {
+      if (!Array.isArray(billNoList) || billNoList.length === 0) return false;
+      const invNo = String(billRow.invoiceNumber || '').trim().toUpperCase();
+      const dispInvNo = String(billRow.displayInvoiceNumber || '').trim().toUpperCase();
+      const rawBillNo = String(billRow.billNo || '').trim().toUpperCase();
+
+      const cleanInvNo = invNo.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-').trim();
+      const cleanDispNo = dispInvNo.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-').trim();
+
+      return billNoList.some(bn => {
+        if (!bn) return false;
+        const b = String(bn).trim().toUpperCase();
+        const cleanB = b.replace(/^(DAC|NVCL)[\/\-]/i, '').replace(/\//g, '-').trim();
+        return b === invNo || b === dispInvNo || b === rawBillNo ||
+          cleanB === cleanInvNo || (cleanDispNo && cleanB === cleanDispNo) ||
+          (rawBillNo && cleanB === rawBillNo);
+      });
+    };
+
+    // Map each bill to its total payments received across all linked payments
+    const billPaidMap = new Map();
+
+    for (const p of payments) {
+      const pAmt = Number(p.paymentAmount) || 0;
+      const dAmt = Number(p.debitAmount) || 0;
+      const tdsAmt = Number(p.tdsProvision) || 0;
+      const groupPaidTotal = pAmt + dAmt + tdsAmt;
+
+      if (groupPaidTotal <= 0) continue;
+
+      const matchedBills = billRows.filter(br => isBillMatch(br, p.billNos));
+      if (matchedBills.length === 0) continue;
+
+      const groupTotalAmt = matchedBills.reduce((sum, gb) => sum + (Number(gb.amount) || 0), 0);
+
+      matchedBills.forEach(gb => {
+        const bAmt = Number(gb.amount) || 0;
+        let individualPaid = 0;
+        if (groupTotalAmt > 0) {
+          if (groupPaidTotal >= groupTotalAmt - 1) {
+            individualPaid = bAmt;
+          } else {
+            individualPaid = bAmt * (groupPaidTotal / groupTotalAmt);
+          }
+        } else if (matchedBills.length === 1) {
+          individualPaid = groupPaidTotal;
+        }
+        const currentPaid = billPaidMap.get(gb) || 0;
+        billPaidMap.set(gb, currentPaid + individualPaid);
+      });
+    }
+
+    // 6. Aggregate billRows by Site (only include bills with an outstanding balance > 0)
     billRows.forEach(r => {
       const bDateObj = parseDateToCalendar(r.invoiceDate || r.billDate || r.date);
       if (!bDateObj) return;
@@ -1627,8 +1682,17 @@ router.get("/revenue-nvl-nvcl", auth, async (req, res) => {
       const site = normalizeSite(r.site);
       if (site !== "NVL" && site !== "NVCL") return;
 
-      const amt = Number(r.amount) || 0;
-      summary[site].billedRevenue += amt;
+      const originalAmt = Number(r.amount) || 0;
+      const paidAmt = billPaidMap.get(r) || 0;
+      let outstanding = originalAmt - paidAmt;
+
+      if (outstanding < 1) {
+        outstanding = 0;
+      }
+
+      if (outstanding > 0) {
+        summary[site].billedRevenue += outstanding;
+      }
     });
 
     // 7. Aggregate unbilled entries by Site & Exact Daily Summary alert logic

@@ -56,11 +56,19 @@ const normalizeDate = (dStr) => {
   if (!dStr) return '';
   const parts = String(dStr).trim().split(/[-\/\.]/);
   if (parts.length >= 3) {
-    const d = String(parseInt(parts[0], 10)).padStart(2, '0');
-    const m = String(parseInt(parts[1], 10)).padStart(2, '0');
-    let y = parseInt(parts[2], 10);
-    if (y < 100) y += 2000;
-    return `${d}-${m}-${y}`;
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      const y = parseInt(parts[0], 10);
+      const m = String(parseInt(parts[1], 10)).padStart(2, '0');
+      const d = String(parseInt(parts[2], 10)).padStart(2, '0');
+      return `${d}-${m}-${y}`;
+    } else {
+      const d = String(parseInt(parts[0], 10)).padStart(2, '0');
+      const m = String(parseInt(parts[1], 10)).padStart(2, '0');
+      let y = parseInt(parts[2], 10);
+      if (y < 100) y += 2000;
+      return `${d}-${m}-${y}`;
+    }
   }
   return String(dStr).trim();
 };
@@ -111,7 +119,7 @@ const COLUMNS = [
   { key: 'O_RECV_HFS', label: 'Office\nCash\nreceive\nfrom hfs', width: 115, type: 'manual', group: 'office' },
   { key: 'O_RECV_SITE', label: 'Office Cash\nreceive\nfrom site', width: 115, type: 'calc', group: 'office' },
   { key: 'O_TOTAL', label: 'Total\nOffice\nCash', width: 105, type: 'calc', group: 'office' },
-  { key: 'O_EXPENSE', label: 'Office\nExp', width: 95, type: 'manual', group: 'office' },
+  { key: 'O_EXPENSE', label: 'Office\nExp', width: 95, type: 'calc', group: 'office' },
   { key: 'O_TRANS_SITE', label: 't/f to\nsite\ncash', width: 95, type: 'manual', group: 'office' },
   { key: 'O_CLOSING', label: 'Closing\nBalance', width: 105, type: 'calc', group: 'office' },
   { key: 'DIFFERENCE', label: 'Difference', width: 95, type: 'manual', group: 'office', isDiff: true },
@@ -258,7 +266,7 @@ export default function MainCashbook({ onBack }) {
     fetchPrevClosing(selMonth, selYear);
   }, [selMonth, selYear, fetchData, fetchPrevClosing]);
 
-  // Socket: re-fetch silently on cashbook updates & vouchers (debounced)
+  // Socket: re-fetch silently on cashbook updates, vouchers, cement, and indirect expenses (debounced)
   useEffect(() => {
     let timer = null;
     const handler = () => {
@@ -269,11 +277,15 @@ export default function MainCashbook({ onBack }) {
     socket.on('voucherCreated', handler);
     socket.on('voucherUpdate', handler);
     socket.on('voucherDeleted', handler);
+    socket.on('cementUpdates', handler);
+    socket.on('indirectExpenseUpdates', handler);
     return () => {
       socket.off('mainCashbookUpdates', handler);
       socket.off('voucherCreated', handler);
       socket.off('voucherUpdate', handler);
       socket.off('voucherDeleted', handler);
+      socket.off('cementUpdates', handler);
+      socket.off('indirectExpenseUpdates', handler);
       clearTimeout(timer);
     };
   }, [selMonth, selYear, fetchData]);

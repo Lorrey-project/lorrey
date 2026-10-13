@@ -314,26 +314,26 @@ async function ensureAiWorkerReady(aiWorkerUrl, onProgress) {
     const healthEndpoints = [`${aiWorkerUrl}/health`, `${aiWorkerUrl}/`];
     const axios = require("axios");
 
-    // Fast check: If worker is already awake, return immediately with 0 delay
-    for (const ep of healthEndpoints) {
-        try {
-            const probe = await axios.get(ep, { timeout: 3500 });
-            if (probe.status === 200) {
-                console.log(`[AI Worker Health] Worker is already awake at ${ep}`);
-                return true;
-            }
-        } catch (_) {}
-    }
+    // Fast parallel probe: If worker is already awake, return immediately
+    try {
+        const probe = await Promise.any(
+            healthEndpoints.map(ep => axios.get(ep, { timeout: 2500 }))
+        );
+        if (probe && (probe.status === 200 || probe.status === 204)) {
+            console.log(`[AI Worker Health] Worker is already awake`);
+            return true;
+        }
+    } catch (_) {}
 
     // Worker is asleep / cold-starting on Render
     console.log(`[AI Worker Health] Worker cold start detected for ${aiWorkerUrl}. Waking up...`);
     if (onProgress) onProgress("AI service is waking up, please wait (Render cold-start)...");
 
     // Ping root to trigger Render boot
-    axios.get(`${aiWorkerUrl}/`, { timeout: 5000 }).catch(() => {});
+    axios.get(`${aiWorkerUrl}/`, { timeout: 4000 }).catch(() => {});
 
-    const maxWaitMs = 85000;
-    const pollIntervalMs = 3500;
+    const maxWaitMs = 60000;
+    const pollIntervalMs = 2500;
     const startTime = Date.now();
 
     while (Date.now() - startTime < maxWaitMs) {
@@ -345,21 +345,14 @@ async function ensureAiWorkerReady(aiWorkerUrl, onProgress) {
         }
 
         try {
-            const check = await axios.get(`${aiWorkerUrl}/health`, { timeout: 4000 });
-            if (check.status === 200) {
+            const probe = await Promise.any(
+                healthEndpoints.map(ep => axios.get(ep, { timeout: 3000 }))
+            );
+            if (probe && (probe.status === 200 || probe.status === 204)) {
                 console.log(`[AI Worker Health] Worker is ready after ${elapsedSec}s!`);
                 return true;
             }
-        } catch (err) {
-            try {
-                const rootCheck = await axios.get(`${aiWorkerUrl}/`, { timeout: 4000 });
-                if (rootCheck.status === 200) {
-                    console.log(`[AI Worker Health] Worker root ready after ${elapsedSec}s!`);
-                    return true;
-                }
-            } catch (_) {}
-            console.log(`[AI Worker Wake Poll] Elapsed: ${elapsedSec}s (Status: ${err.response?.status || err.code || err.message})`);
-        }
+        } catch (_) {}
     }
 
     throw new Error(`AI extraction service failed to wake up within ${Math.round(maxWaitMs / 1000)}s. Please try again.`);
@@ -409,7 +402,7 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
                 const aiResponse = await require("axios").post(
                     targetProcessUrl,
                     { file: fileUrl },
-                    { timeout: 120000 }
+                    { timeout: 180000 }
                 );
                 aiData = aiResponse.data;
 
@@ -437,10 +430,12 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
             }
         }
 
-        emitStatus("validating", { message: "Saving extracted data..." });
-        await Invoice.findByIdAndUpdate(invoiceId, { processing_message: "Saving extracted data..." }).catch(() => {});
+        emitStatus("validating", { message: "Mapping & saving to Cement Register..." });
+        await Invoice.findByIdAndUpdate(invoiceId, { processing_message: "Mapping & saving to Cement Register..." }).catch(() => {});
 
-        const consignee_name = aiData?.invoice_data?.consignee_details?.consignee_name || '';
+        const consignee_name = aiData?.invoice_data?.consignee_details?.consignee_name ||
+                               aiData?.invoice_data?.buyer_details?.buyer_name ||
+                               aiData?.consignee_name || '';
 
         // Update the existing placeholder invoice
         const updatedInvoice = await Invoice.findByIdAndUpdate(
@@ -449,24 +444,27 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
                 ai_data: aiData,
                 consignee_name,
                 status: "pending",
-                processing_message: "AI Extraction complete!"
+                processing_message: "AI Extraction complete! Data saved."
             },
             { new: true }
         );
 
         if (!updatedInvoice) throw new Error("Invoice record disappeared during processing");
 
+        // Authoritative pipeline step: synchronously calculate and persist ONE complete Cement Register record
+        try {
+            await pushToRegister(invoiceId);
+            console.log(`[Background Task] Successfully saved and synced invoice ${invoiceId} to Cement Register`);
+        } catch (syncErr) {
+            console.error(`[Background Task] Error propagating invoice ${invoiceId} to Cement Register:`, syncErr);
+        }
+
         emitStatus("success", { 
-            message: "AI Extraction complete!",
+            message: "AI Extraction complete! Data saved to Cement Register.",
             ai_data: aiData,
             invoice: updatedInvoice
         });
         console.log(`[Background Task] Successfully processed invoice ${invoiceId}`);
-
-        // Propagate to Cement Register asynchronously without blocking UI updates
-        pushToRegister(invoiceId).catch(err => {
-            console.error(`[Background Task] Error propagating invoice ${invoiceId} to Cement Register:`, err);
-        });
 
     } catch (error) {
         console.error(`[Background Task Error] Invoice ${invoiceId}:`, error);

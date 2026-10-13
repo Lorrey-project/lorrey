@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Invoice = require("../models/Invoice");
 const Voucher = require("../models/Voucher");
+const { getAccumulatedFreightAdvance, isSameCalendarDate } = require("./monojCementAdvanceManager");
 
 function safeGetIO() {
   try { const { getIO } = require("../socket"); return getIO(); }
@@ -47,6 +48,7 @@ function parseTdsField(doc) {
 }
 
 const { normalizeDate, getEffectivePartyMaster, parseBasicFreightCommission } = require("./partyMasterHelper");
+const { hookCheckMktTripsFromEntry } = require("./mktCommissionManager");
 
 // ─── Shared Truck Contact Lookup ──────────────────────────────────────────────
 async function getTruckDetails(vehicleNumber, ownerName = "", recordDate = null) {
@@ -136,8 +138,8 @@ async function getTruckDetails(vehicleNumber, ownerName = "", recordDate = null)
     });
   }
 
-  // 5. Owner alone if vehicle wasn't found
-  if (!rawTruck && ownerRegex) {
+  // 5. Owner alone only if vehicle wasn't specified
+  if (!rawTruck && !vehicleNumber && ownerRegex) {
     rawTruck = await ownerCol.findOne({
       $or: [
         { "Owner Name": { $regex: ownerRegex } },
@@ -415,17 +417,18 @@ async function pushToRegister(invoiceId, overrides) {
     const ewbDetails = hvd.ewb_details || {};
     const items = hvd.items || [];
     const sellerDetails = hvd.seller_details || {};
+    const buyerDetails = hvd.buyer_details || {};
+    const amountSummary = hvd.amount_summary || {};
 
-    const vehicleNumber = safe(supplyDetails.vehicle_number);
-    const destination = safe(supplyDetails.destination);
-    const invoiceNo = safe(invoiceDetails.invoice_number);
-    const billType = safe(invoiceDetails.invoice_type);
-    const shipmentNo = safe(supplyDetails.shipment_number);
-    const partyName = safe(consigneeDetails.consignee_name || invoice.consignee_name);
+    const vehicleNumber = safe(supplyDetails.vehicle_number || hvd.vehicle_number).toUpperCase().replace(/\s+/g, ' ').trim();
+    const destination = safe(supplyDetails.destination || hvd.destination).trim();
+    const invoiceNo = safe(invoiceDetails.invoice_number || hvd.invoice_number).replace(/^\.+/, '').trim();
+    const billType = safe(invoiceDetails.invoice_type || invoiceDetails.bill_type || hvd.invoice_type || invoice.invoice_type).trim();
+    const shipmentNo = safe(supplyDetails.shipment_number || hvd.shipment_number).replace(/^\.+/, '').trim();
+    const partyName = safe(consigneeDetails.consignee_name || buyerDetails.buyer_name || invoice.consignee_name || hvd.party_name).trim();
 
     // Site determination logic
-    const buyerDetails = hvd.buyer_details || {};
-    const rawSite = safe(sellerDetails.seller_name) || safe(buyerDetails.buyer_name) || "";
+    const rawSite = safe(sellerDetails.seller_name) || safe(buyerDetails.buyer_name) || safe(invoice.site) || "";
     const rawSiteUpper = rawSite.toUpperCase();
     let site = "";
     if (rawSiteUpper.includes("NUVOCO") || rawSiteUpper === "NVCL") site = "NVCL";
@@ -433,10 +436,14 @@ async function pushToRegister(invoiceId, overrides) {
     else site = rawSiteUpper.includes("DIPALI") ? "" : rawSite;
 
     // Prioritize extracted invoice_date over system created_at
-    const loadingDate = invoiceDetails.invoice_date || invoice.created_at;
+    const loadingDate = invoiceDetails.invoice_date || hvd.invoice_date || invoice.created_at;
 
-    // MT = total quantity from items
-    const mt = fmt2(items.reduce((sum, item) => sum + num(item.quantity), 0));
+    // MT = total quantity from items (fallback to total_quantity if present)
+    let totalMt = items.reduce((sum, item) => sum + num(item.quantity || item.wt || item.weight), 0);
+    if (totalMt === 0) {
+      totalMt = num(hvd.total_quantity || amountSummary.total_quantity || supplyDetails.quantity || 0);
+    }
+    const mt = totalMt > 0 ? fmt2(totalMt) : "";
 
     // ── Add-on Charges (from invoice form) ──────────────────────────────
     const addonCharges = Array.isArray(hvd.addon_charges) ? hvd.addon_charges : (Array.isArray(invoice.addon_charges) ? invoice.addon_charges : []);
@@ -451,7 +458,7 @@ async function pushToRegister(invoiceId, overrides) {
     const totalRfid = (addonRfidTag || 0) + (addonRfidReassurance || 0);
 
     // ── NT Details & Unloading Charges ─────────────────────────────────
-    const invoiceType = safe(invoiceDetails.invoice_type || hvd.invoice_type || invoice.invoice_type);
+    const invoiceType = safe(billType || invoiceDetails.invoice_type || hvd.invoice_type || invoice.invoice_type);
     const isNTInvoice = invoiceType.toUpperCase().trim() === "NT" || (items && items.some(i => (i.description_of_product || '').toUpperCase().includes('UNLOADING')));
     const ntDetails = hvd.nt_details || invoice.nt_details || {};
     let ntExtraUnloading = "";
@@ -460,21 +467,7 @@ async function pushToRegister(invoiceId, overrides) {
       ntExtraUnloading = parsedUnloading > 0 ? parsedUnloading : (parsedUnloading === 0 ? 0 : "");
     }
 
-    // ── Truck Contact lookup ─────────────────────────────────────────────
-    let wheel = "", ownerName = "", tdsPercent = 0, isATO = false, driverNo = "", hasStO = false;
-    let basicFreightCommission = 0.05; // default — owner gets 5% deducted (party gets 95%)
-    
-    if (vehicleNumber) {
-      const truckDetails = await getTruckDetails(vehicleNumber, partyName, loadingDate);
-      wheel = truckDetails.wheel;
-      ownerName = truckDetails.ownerName;
-      tdsPercent = truckDetails.tdsPercent;
-      isATO = truckDetails.isATO;
-      driverNo = truckDetails.driverNo;
-      hasStO = truckDetails.hasStO;
-      basicFreightCommission = truckDetails.basicFreightCommission;
-    }
-    // ── Freight lookup — match by destination against DEST ZONE DESC ────
+    // ── STEP 1: Freight / Billing lookup & Billing Amount derivation ──────
     let billing = 0, distanceKm = 0;
     if (destination) {
       const freightCol = getInvoiceSystemDb().db.collection("freight_data");
@@ -517,7 +510,87 @@ async function pushToRegister(invoiceId, overrides) {
       }
     }
 
-    // ── Site Cash — bind explicitly to exact calendar date to prevent history overlap ──
+    // Fallback: If billing rate is not in freight_data, check invoice item rate or amount summary
+    if (billing === 0 && items.length > 0 && num(items[0].rate) > 0) {
+      billing = num(items[0].rate);
+    }
+
+    // Derive Billing Amount FIRST
+    let billingAmt = (billing > 0 && num(mt) > 0) ? fmt2(billing * num(mt)) : 0;
+    if (billingAmt === 0) {
+      const itemTaxable = items.reduce((sum, item) => sum + num(item.taxable_value), 0);
+      const summaryNet = num(amountSummary.net_value || amountSummary.net_payable);
+      if (itemTaxable > 0) {
+        billingAmt = fmt2(itemTaxable);
+        if (num(mt) > 0 && billing === 0) billing = fmt2(billingAmt / num(mt));
+      } else if (summaryNet > 0) {
+        billingAmt = fmt2(summaryNet);
+        if (num(mt) > 0 && billing === 0) billing = fmt2(billingAmt / num(mt));
+      }
+    }
+
+    // ── STEP 2: Truck Contact & Party Master lookup (After Billing Amount) ──
+    let wheel = "", ownerName = "", tdsPercent = 0, isATO = false, driverNo = "", hasStO = false;
+    let basicFreightCommission = null;
+    let commissionError = null;
+    
+    if (vehicleNumber) {
+      const invoiceOwnerName = safe(supplyDetails.transporter_name || supplyDetails.owner_name || hvd.owner_name || "").trim();
+      const truckDetails = await getTruckDetails(vehicleNumber, invoiceOwnerName, loadingDate);
+      wheel = truckDetails.wheel;
+      ownerName = truckDetails.ownerName || invoiceOwnerName;
+      tdsPercent = truckDetails.tdsPercent;
+      isATO = truckDetails.isATO;
+      driverNo = truckDetails.driverNo;
+      hasStO = truckDetails.hasStO;
+      if (truckDetails.basicFreightCommission !== null && truckDetails.basicFreightCommission !== undefined && !isNaN(Number(truckDetails.basicFreightCommission))) {
+        basicFreightCommission = Number(truckDetails.basicFreightCommission);
+      } else {
+        commissionError = `Missing or invalid Basic Freight Commission in Party Master for vehicle: ${vehicleNumber}`;
+        console.warn(`[syncManager] ${commissionError}`);
+      }
+    } else {
+      commissionError = "Missing vehicle number on invoice for Party Master commission lookup";
+    }
+
+    // ── STEP 3: Dynamic Party Rate & Payable calculation ────────────────
+    const hasValidCommission = (basicFreightCommission !== null && basicFreightCommission !== undefined && !isNaN(basicFreightCommission));
+    const effectiveComm = hasValidCommission ? basicFreightCommission : null;
+    const isStandard95 = effectiveComm === 0.05;
+
+    let partyRateVal = "";
+    let partyRateAmount = 0;
+    let partyRatePct = null;
+    let partyRatePctStr = "";
+    let billingEr95 = 0;
+    let billingErVar = 0;
+    let amount = 0;
+    let profit = 0;
+
+    if (hasValidCommission) {
+      // Party Rate Percentage = 100% - (Basic Freight Commission × 100)
+      partyRatePct = Math.round((1 - effectiveComm) * 100);
+      partyRatePctStr = `${partyRatePct}%`;
+
+      // Party Rate Amount = Billing Amount × (1 - Basic Freight Commission)
+      if (billingAmt > 0) {
+        partyRateAmount = fmt2(billingAmt * (1 - effectiveComm));
+      }
+      
+      // Party Rate (per MT) = Billing Freight Rate × (1 - Basic Freight Commission)
+      if (billing > 0) {
+        partyRateVal = fmt2(billing * (1 - effectiveComm));
+      } else if (partyRateAmount > 0) {
+        partyRateVal = partyRateAmount;
+      }
+
+      billingEr95 = partyRateAmount;
+      billingErVar = partyRateAmount;
+      amount = partyRateAmount;
+      profit = billingAmt > 0 ? fmt2(billingAmt * effectiveComm) : 0;
+    }
+
+    // ── Site Cash & Office Cash Vouchers (strict date matching) ─────────
     let siteCash = 0;
     let officeCash = 0;
     let siteCashProofUrl = "";
@@ -533,9 +606,6 @@ async function pushToRegister(invoiceId, overrides) {
         date: { $gte: vStart, $lte: vEnd }
       };
 
-      // STRICT: always match by vehicle number + exact date only.
-      // Never use invoiceId as an $or alternative — that bypasses the date window
-      // and causes vouchers from different days to contaminate this row.
       const voucherQuery = baseQuery;
 
       // Pick the most recently created voucher from site admin (SITE)
@@ -551,7 +621,7 @@ async function pushToRegister(invoiceId, overrides) {
 
       if (siteVoucher) {
         siteCash = num(siteVoucher.amount);
-        siteCashProofUrl = siteVoucher.slip_url || "";  // S3 PDF URL of the voucher slip
+        siteCashProofUrl = siteVoucher.slip_url || "";
       }
 
       // Pick the most recently created voucher from office admin (OFFICE / HEAD_OFFICE)
@@ -580,7 +650,6 @@ async function pushToRegister(invoiceId, overrides) {
 
     // Fetch historical rate based on pump and loading date
     const hsdRate = await getFuelRate(pumpName, loadingDate);
-    // HSD AMOUNT is always LTR * RATE as per user request for automatic updates
     const hsdAmount = fmt2(hsdLtr * hsdRate);
 
     // Fetch cash discount rate based on pump and loading date
@@ -593,6 +662,9 @@ async function pushToRegister(invoiceId, overrides) {
     // ── SL NO & GCN NO ───────────────────────────────────────────────────
     const col = getCementCol();
     const slNo = await getOrAssignSlNo(col, invoiceId);
+
+    // Fetch existing record to guard immutable manual fields
+    const existing = await col.findOne({ _invoiceId: invoiceId.toString() });
 
     // ── Delete any existing dummy voucher rows for this truck on this exact date ────
     const vDateStr = fmtDate(loadingDate);
@@ -620,44 +692,94 @@ async function pushToRegister(invoiceId, overrides) {
       finalGcnNo = await getOrAssignGcnNo(col, invoiceId, loadingDate);
     }
 
-    // Always keep central Invoice doc and cement register GCN number in sync
     if (finalGcnNo && (!gcn.gcn_no || gcn.gcn_no !== finalGcnNo)) {
       await Invoice.findByIdAndUpdate(invoiceId, {
         $set: { "gcn_data.gcn_no": finalGcnNo }
       });
     }
 
-    // ── Calculated fields ────────────────────────────────────────────────
-    // Commission-aware rate logic:
-    // If basic_freight_commission == 0.05 → standard 95% path
-    // Else → variable path (e.g. 0.04 → 96%, 0 → 100%)
-    const effectiveComm = basicFreightCommission !== null && basicFreightCommission !== undefined ? basicFreightCommission : 0.05;
-    const isStandard95 = effectiveComm === 0.05;
-    const varPartyPct = fmt2(1 - effectiveComm); // e.g. 0.96, 1.0
-
-    const partyRateVal = billing > 0 ? fmt2(billing * (1 - effectiveComm)) : "";
-
-    const billingAmt = fmt2(billing * mt);
-    const billingEr95 = isStandard95 ? fmt2(billingAmt * 0.95) : 0;       // BILLING ER 95%
-    const billingErVar = isStandard95 ? 0 : fmt2(billingAmt * varPartyPct);// BILLING ER (VAR%)
-
-    const amount = isStandard95 ? billingEr95 : billingErVar;        // effective payable
-    const profit = fmt2(billingAmt * 0.05);
-    const tdsAmount = fmt2(amount * tdsPercent);
+    const tdsAmount = amount > 0 ? fmt2(amount * tdsPercent) : 0;
     const balance = fmt2(hsdLtr - fuelRequired);
     const pctAdv = amount > 0 ? fmt2(((advance + hsdAmount) / amount) * 100) : 0;
-    const dedicated = isATO ? fmt2(billingAmt * 0.095) : fmt2(billing * (1 - effectiveComm) * mt * 0.085);
+    const dedicated = isATO ? fmt2(billingAmt * 0.095) : (effectiveComm !== null ? fmt2(billing * (1 - effectiveComm) * num(mt) * 0.085) : 0);
     const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(billingAmt * 0.085) : 0;
 
+    // ── Deductions & Net Amount Calculation ──────────────────────────────
+    const existingGpsDev = num(existing?.["GPS Deviation Charges"] || existing?.["GPS DEVIATION CHARGES"] || 0);
+    const existingSusp = num(existing?.["Suspense"] || existing?.["SUSPENSE"] || 0);
+    const existingOthDed = num(existing?.["Others deduction"] || existing?.["OTHERS DEDUCTION"] || 0);
+    const existingOthReason = existing?.["Other"] || existing?.["OTHERS DEDUCTION REASON"] || "";
+    const existingGpsMonitoring = num(existing?.["GPS Monitoring Charge"] || existing?.["GPS MONITORING / TRIP CHARGE"] || 0);
+    const existingBankTf = num(existing?.["Bank TF"] || existing?.["BANK TF"] || 0);
+    const existingShortageAmt = num(existing?.["SHORTAGE (AMOUNT)"] || 0);
+    const existingDamageDed = num(existing?.["Damage Deduction"] || existing?.["DAMAGE DEDUCTION"] || 0);
+    const existingTravelExp = num(existing?.["TRAVELLING EXP"] || 0);
+    const existingUpToll = num(existing?.["UP TOLL"] || 0);
+    const existingDownToll = num(existing?.["DOWN TOLL"] || 0);
+
+    let totalAccumulatedBankTf = 0;
+    let freightContributions = [];
+    try {
+      const advRes = await getAccumulatedFreightAdvance(vehicleNumber, ownerName, loadingDate);
+      if (advRes) {
+        totalAccumulatedBankTf = advRes.totalBankTf || 0;
+        freightContributions = advRes.contributions || [];
+      }
+    } catch (advErr) {
+      console.warn('[syncManager] getAccumulatedFreightAdvance error:', advErr.message);
+    }
+
+    const existingRoadTaxTotal = existing && Array.isArray(existing._roadTaxContributions)
+      ? existing._roadTaxContributions.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0)
+      : 0;
+
+    let effectiveBankTf = existingBankTf;
+    if (totalAccumulatedBankTf > 0 || existingRoadTaxTotal > 0) {
+      effectiveBankTf = totalAccumulatedBankTf + existingRoadTaxTotal;
+    }
+
+    const sumOfDeductions = fmt2(
+      (totalRfid > 0 ? totalRfid : 0) +
+      (addonFastag > 0 ? addonFastag : 0) +
+      existingGpsDev +
+      existingSusp +
+      existingOthDed
+    );
+
+    const netAmount = (amount > 0) ? fmt2(
+      amount
+      - tdsAmount
+      - advance
+      - siteCash
+      - officeCash
+      - effectiveBankTf
+      - existingOthDed
+      - existingGpsMonitoring
+      - (addonGpsDevice > 0 ? addonGpsDevice : 0)
+      - existingGpsDev
+      - existingSusp
+      - (totalRfid > 0 ? totalRfid : 0)
+      - (addonFastag > 0 ? addonFastag : 0)
+      - hsdAmount
+      - existingTravelExp
+      - existingShortageAmt
+      - (existingDamageDed > 0 && existingDamageDed !== existingShortageAmt ? existingDamageDed : 0)
+      - num(existingOthReason)
+    ) : 0;
+
+    const grossAmount = (netAmount !== 0) ? fmt2(
+      netAmount
+      + existingUpToll
+      + existingDownToll
+      + (num(ntExtraUnloading) > 0 ? num(ntExtraUnloading) : num(existing?.["EXTRA UNLOADING"] || 0))
+    ) : 0;
+
     // ── Derive month/year from loadingDate for Cement Register filter ─────
-    // These fields are REQUIRED: the GET /cement-register endpoint filters by
-    // { month: X, year: Y }. Without them, auto-synced invoices are invisible.
     const loadingDateObj = parseToDate(loadingDate);
-    // Use calendar month/year (not financial year)
     const entryMonth = loadingDateObj.getMonth() + 1; // 1-12
     const entryYear = loadingDateObj.getFullYear();
 
-    // ── Compose final document ───────────────────────────────────────────
+    // ── Compose final authoritative document ─────────────────────────────
     const payload = {
       "_invoiceId": invoiceId.toString(),
       "SL NO": slNo,
@@ -665,7 +787,7 @@ async function pushToRegister(invoiceId, overrides) {
       "SITE": site,
       "VEHICLE NUMBER": vehicleNumber,
       "WHEEL": wheel,
-      "E-WAY BILL NO": safe(ewbDetails.ewb_number),
+      "E-WAY BILL NO": safe(ewbDetails.ewb_number).replace(/^\.+/, ''),
       "E-WAY BILL VALIDITY": safe(ewbDetails.ewb_valid_date ? fmtDate(ewbDetails.ewb_valid_date) : ""),
       "GCN NO": finalGcnNo,
       "INVOICE NO": invoiceNo,
@@ -674,44 +796,56 @@ async function pushToRegister(invoiceId, overrides) {
       "DN": driverNo,
       "DESTINATION": destination,
       "PARTY NAME": partyName,
-      "MT": mt || "",
-      "BILLING": billing || "",
+      "MT": mt !== "" ? mt : "",
+      "BILLING": billing > 0 ? billing : "",
       "PARTY RATE": partyRateVal,
       "PARTY RATE (95-97%)": partyRateVal,
+      "PARTY RATE %": partyRatePctStr,
+      "PARTY RATE PERCENT": partyRatePct,
+      "PARTY RATE AMOUNT": partyRateAmount > 0 ? partyRateAmount : "",
       "PARTY RATE VAR": isStandard95 ? "" : partyRateVal,
-      "Billing Amount": billingAmt || "",
-      "BILLING ER 95%": billingEr95 !== undefined ? billingEr95 : "",
-      "BILLING ER VAR": billingErVar !== undefined ? billingErVar : "",
-      "AMOUNT": amount || "",
-      "PROFIT": profit || "",
-      "TDS": (tdsPercent !== undefined && tdsPercent !== null) ? tdsAmount : 0,
+      "Billing Amount": billingAmt > 0 ? billingAmt : "",
+      "BILLING AMOUNT": billingAmt > 0 ? billingAmt : "",
+      "BILLING ER 95%": billingEr95 > 0 ? billingEr95 : "",
+      "BILLING ER VAR": billingErVar > 0 ? billingErVar : "",
+      "AMOUNT": amount > 0 ? amount : "",
+      "PROFIT": profit > 0 ? profit : "",
+      "TDS": (tdsPercent !== undefined && tdsPercent !== null && amount > 0) ? tdsAmount : 0,
       "_freight_commission": basicFreightCommission,
-      "ADVANCE": advance || "",
-      "Site Cash": siteCash || "",
-      "OFFICE CASH": officeCash || "",
-      "SITE_CASH_PROOF_URL": siteCashProofUrl,  // auto-fetched from voucher slip PDF
+      "_commission_status": hasValidCommission ? "VALID" : "INVALID_OR_MISSING",
+      "_commission_error": commissionError,
+      "ADVANCE": advance > 0 ? advance : "",
+      "Bank TF": effectiveBankTf > 0 ? effectiveBankTf : "",
+      "BANK TF": effectiveBankTf > 0 ? effectiveBankTf : "",
+      "ADVANCE (BANK TF)": effectiveBankTf > 0 ? effectiveBankTf : "",
+      "Site Cash": siteCash > 0 ? siteCash : "",
+      "OFFICE CASH": officeCash > 0 ? officeCash : "",
+      "SITE_CASH_PROOF_URL": siteCashProofUrl,
       "OFFICE_CASH_PROOF_URL": officeCashProofUrl,
       "PUMP NAME": pumpName,
       "HSD SLIP NO": hsdSlipNo,
       "HSD BILL NO": hsdBillNo,
       "KM AS PER RATE CHART": distanceKm > 0 ? distanceKm : "",
-      "FUEL REQUIRED": fuelRequired || "",
-      "HSD (LTR)": hsdLtr || "",
+      "FUEL REQUIRED": fuelRequired > 0 ? fuelRequired : "",
+      "HSD (LTR)": hsdLtr > 0 ? hsdLtr : "",
       "BALANCE": balance,
-      "HSD RATE": hsdRate || "",
-      "HSD AMOUNT": hsdAmount || "",
-      "CASH DISCOUNT RATE": cashDiscountRate || "",
-      "CASH DISCOUNT": cashDiscountAmount || "",
-      "% OF ADV": pctAdv || "",
-      "DEDICATED": dedicated || "",
-      "10W EXTRA 8.5%": tenWExtra || "",
+      "HSD RATE": hsdRate > 0 ? hsdRate : "",
+      "HSD AMOUNT": hsdAmount > 0 ? hsdAmount : "",
+      "CASH DISCOUNT RATE": cashDiscountRate > 0 ? cashDiscountRate : "",
+      "CASH DISCOUNT": cashDiscountAmount > 0 ? cashDiscountAmount : "",
+      "% OF ADV": pctAdv > 0 ? pctAdv : "",
+      "DEDICATED": dedicated > 0 ? dedicated : "",
+      "10W EXTRA 8.5%": tenWExtra > 0 ? tenWExtra : "",
       "OWNER NAME": ownerName,
       "GIVE GPS DEVICE": addonGpsDevice > 0 ? addonGpsDevice : "",
       "Give GPS DEVICE": addonGpsDevice > 0 ? addonGpsDevice : "",
       "GIVE RFID TAG": totalRfid > 0 ? totalRfid : "",
       "Give RFID TAG": totalRfid > 0 ? totalRfid : "",
       "FASTAG": addonFastag > 0 ? addonFastag : "",
-      "EXTRA UNLOADING": isNTInvoice ? (ntExtraUnloading !== "" ? ntExtraUnloading : "") : "",
+      "EXTRA UNLOADING": isNTInvoice ? (ntExtraUnloading !== "" ? ntExtraUnloading : "") : (existing?.["EXTRA UNLOADING"] || ""),
+      "SUM OF RFID & FASTAG & DEVIATION & SUSPENSE & OTHERS DEDUCTION": sumOfDeductions > 0 ? sumOfDeductions : "",
+      "NET AMOUNT": netAmount !== 0 ? netAmount : "",
+      "GROSS AMOUNT": grossAmount !== 0 ? grossAmount : "",
       "_is_nt_invoice": isNTInvoice,
       "_source_nt_unloading": isNTInvoice && ntExtraUnloading !== "",
       "VERIFICATION STATUS": invoice.is_hsd_verified ? "Verified" : "Not Verified",
@@ -720,10 +854,18 @@ async function pushToRegister(invoiceId, overrides) {
       "_is_ato": isATO,
       "_source": "auto",
       "_auto_updated_at": new Date(),
-      // ── CRITICAL: month/year required for Cement Register GET filter ──
       "month": entryMonth,
       "year": entryYear,
     };
+
+    if (freightContributions.length > 0) {
+      payload._freightAdvanceContributions = freightContributions;
+      payload._monojDebitContributions = freightContributions;
+    }
+
+    if (existing && Array.isArray(existing._roadTaxContributions) && existing._roadTaxContributions.length > 0) {
+      payload._roadTaxContributions = existing._roadTaxContributions;
+    }
 
     // Keep existing manually-entered fields — only overwrite non-empty auto values
     const clean = {};
@@ -738,9 +880,6 @@ async function pushToRegister(invoiceId, overrides) {
     clean["Give RFID TAG"] = totalRfid > 0 ? totalRfid : "";
     clean["GIVE RFID TAG"] = totalRfid > 0 ? totalRfid : "";
     clean["FASTAG"] = addonFastag > 0 ? addonFastag : "";
-
-    // Fetch existing record to guard immutable fields
-    const existing = await col.findOne({ _invoiceId: invoiceId.toString() });
 
     if (isNTInvoice) {
       clean["EXTRA UNLOADING"] = ntExtraUnloading !== "" ? ntExtraUnloading : "";
@@ -765,9 +904,47 @@ async function pushToRegister(invoiceId, overrides) {
       clean["tds_manual"] = true;
     }
 
-    // PAYMENT STATUS, PAYMENT PROOF URL, PAYMENT DATE, PAYMENT REF: never overwrite from auto-sync
-    // These are managed exclusively by paymentMapper.js when Account Details deposits are saved.
+    // Preserve manual fields from existing document
     if (existing) {
+      if (existing["RECEIVING DATE"]) clean["RECEIVING DATE"] = existing["RECEIVING DATE"];
+      if (existing["UNLOADING STATUS"]) clean["UNLOADING STATUS"] = existing["UNLOADING STATUS"];
+      if (existing["BILL NO"]) clean["BILL NO"] = existing["BILL NO"];
+      if (existing["BILL DATE"]) clean["BILL DATE"] = existing["BILL DATE"];
+      if (existing["UNLOADING BILL NO"]) clean["UNLOADING BILL NO"] = existing["UNLOADING BILL NO"];
+      if (existing["UNLOADING BILL DATE"]) clean["UNLOADING BILL DATE"] = existing["UNLOADING BILL DATE"];
+      if (existing["By Portal"]) clean["By Portal"] = existing["By Portal"];
+      if (existing["CHALLAN STATUS"]) clean["CHALLAN STATUS"] = existing["CHALLAN STATUS"];
+      if (existing["challan_proof"]) clean["challan_proof"] = existing["challan_proof"];
+      if (effectiveBankTf > 0) {
+        clean["Bank TF"] = effectiveBankTf;
+        clean["BANK TF"] = effectiveBankTf;
+        clean["ADVANCE (BANK TF)"] = effectiveBankTf;
+      } else if (existing["Bank TF"]) {
+        clean["Bank TF"] = existing["Bank TF"];
+      }
+      if (existing["GPS Monitoring Charge"]) clean["GPS Monitoring Charge"] = existing["GPS Monitoring Charge"];
+      if (existing["GPS Deviation Charges"]) clean["GPS Deviation Charges"] = existing["GPS Deviation Charges"];
+      if (existing["Give GPS DEVICE"]) clean["Give GPS DEVICE"] = existing["Give GPS DEVICE"];
+      if (existing["Give RFID TAG"]) clean["Give RFID TAG"] = existing["Give RFID TAG"];
+      if (existing["Damage Deduction"]) clean["Damage Deduction"] = existing["Damage Deduction"];
+      if (existing["Suspense"]) clean["Suspense"] = existing["Suspense"];
+      if (existing["Others deduction"]) clean["Others deduction"] = existing["Others deduction"];
+      if (existing["Other"]) clean["Other"] = existing["Other"];
+      if (existing["EXTRA ALLOWED"]) clean["EXTRA ALLOWED"] = existing["EXTRA ALLOWED"];
+      if (existing["ACTUAL EXTRA"]) clean["ACTUAL EXTRA"] = existing["ACTUAL EXTRA"];
+      if (existing["TRAVELLING EXP"]) clean["TRAVELLING EXP"] = existing["TRAVELLING EXP"];
+      if (existing["SHORTAGE (BAG)"]) clean["SHORTAGE (BAG)"] = existing["SHORTAGE (BAG)"];
+      if (existing["SHORTAGE (RATE)"]) clean["SHORTAGE (RATE)"] = existing["SHORTAGE (RATE)"];
+      if (existing["SHORTAGE (AMOUNT)"]) clean["SHORTAGE (AMOUNT)"] = existing["SHORTAGE (AMOUNT)"];
+      if (existing["deductionsOverride"]) clean["deductionsOverride"] = existing["deductionsOverride"];
+      if (existing["debitAllocations"]) clean["debitAllocations"] = existing["debitAllocations"];
+      if (existing["baseDeductions"]) clean["baseDeductions"] = existing["baseDeductions"];
+      if (existing["UP TOLL"]) clean["UP TOLL"] = existing["UP TOLL"];
+      if (existing["DOWN TOLL"]) clean["DOWN TOLL"] = existing["DOWN TOLL"];
+      if (existing["Duration"]) clean["Duration"] = existing["Duration"];
+      if (existing["Detention"]) clean["Detention"] = existing["Detention"];
+      if (existing["Transporting Coast"]) clean["Transporting Coast"] = existing["Transporting Coast"];
+
       if (existing["PAYMENT STATUS"]) clean["PAYMENT STATUS"] = existing["PAYMENT STATUS"];
       if (existing["PAYMENT PROOF URL"]) clean["PAYMENT PROOF URL"] = existing["PAYMENT PROOF URL"];
       if (existing["PAYMENT DATE"]) clean["PAYMENT DATE"] = existing["PAYMENT DATE"];
@@ -785,8 +962,46 @@ async function pushToRegister(invoiceId, overrides) {
       { $set: clean },
       { upsert: true }
     );
+
+    // Clean up any dummy rows created for this vehicle + loadingDate
+    if (vehicleNumber && loadingDate) {
+      try {
+        const strippedVeh = String(vehicleNumber).replace(/[^a-zA-Z0-9]/g, '');
+        if (strippedVeh) {
+          const vehRegex = new RegExp(`^[^a-zA-Z0-9]*${strippedVeh.split('').join('[^a-zA-Z0-9]*')}[^a-zA-Z0-9]*$`, 'i');
+          const dummyRows = await col.find({
+            $and: [
+              {
+                $or: [
+                  { "VEHICLE NUMBER": vehRegex },
+                  { "VEHICLE NO": vehRegex },
+                  { "VEHICLE NO.": vehRegex }
+                ]
+              },
+              {
+                $or: [
+                  { isDummy: true },
+                  { _isDummy: true },
+                  { sourceType: { $in: ['FREIGHT_ADVANCE', 'BANK_BOOK_FREIGHT_ADVANCE', 'MONOJ_DEBIT', 'MONOJ_BANDHAN_DEBIT'] } }
+                ]
+              }
+            ]
+          }).toArray();
+
+          for (const dRow of dummyRows) {
+            const dRowDate = dRow["LOADING DT"] || dRow["LOADING DATE"] || dRow["BILL DATE"] || dRow.date;
+            if (isSameCalendarDate(dRowDate, loadingDate)) {
+              await col.deleteOne({ _id: dRow._id });
+            }
+          }
+        }
+      } catch (cleanDummyErr) {
+        console.warn('[syncManager] dummy cleanup error:', cleanDummyErr.message);
+      }
+    }
     console.log(`[syncManager] pushToRegister OK for invoice ${invoiceId} (SL:${slNo})`);
     emitCementUpdate({ action: "upsert", invoiceId: invoiceId.toString() });
+    hookCheckMktTripsFromEntry(clean).catch(e => console.warn('[mktCommission] Hook error:', e.message));
   } catch (e) {
     console.error("[syncManager] pushToRegister failed:", e.message);
   }

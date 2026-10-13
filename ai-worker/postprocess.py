@@ -36,15 +36,8 @@ def validate_invoice(invoice_json):
 
     # Fix invoice time
     invoice_json["invoice_details"]["invoice_time"] = normalize_time(
-        invoice_json["invoice_details"]["invoice_time"]
+        invoice_json["invoice_details"].get("invoice_time", "")
     )
-
-    # Prevent buyer and consignee address being identical
-    buyer_addr = invoice_json["buyer_details"]["buyer_address"]
-    consignee_addr = invoice_json["consignee_details"]["consignee_address"]
-
-    if buyer_addr == consignee_addr:
-        invoice_json["consignee_details"]["consignee_address"] = ""
 
     # Normalize seller name to NVCL or NVL for frontend compatibility
     seller_name = invoice_json.get("seller_details", {}).get("seller_name", "").upper()

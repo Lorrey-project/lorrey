@@ -31,6 +31,38 @@ const COMPANY = {
   gst: '19AATFD1733C1ZH',
 };
 
+export const DIRECT_EXPENSE_REASONS = [
+  'Service Road Maintenance',
+  'Service/Maintenance',
+  'Extra wages',
+  'Extra(Additional) Toll',
+  'Others'
+];
+
+export const INDIRECT_EXPENSE_REASONS = [
+  'SALARY',
+  'BANK CHARGES',
+  'BANK GUARANTEE CHARGES',
+  'BONUS',
+  'COURIER CHARGERS',
+  'DEPRECIATION',
+  'ENTERTENMENT EXP',
+  'Interest on Partners Capital',
+  'INTEREST ON PUNJAB & SIND BANK (CC)',
+  'Late Fees on TDS',
+  'MISC EXPENSES',
+  'OFFICE EXPENSES',
+  'Partner Salary',
+  'PRINTING & STATIONERY',
+  'PROFESSIONAL CHARGES',
+  'P TAX',
+  'RENT EXP',
+  'SERVICES CHARGES',
+  'Software development Expenses',
+  'SUBSCRIPTION',
+  'TRAVLLING & CONVANCE'
+];
+
 // ── Amount in words ───────────────────────────────────────────────────────────
 function amountInWords(num) {
   return toIndianWords(num);
@@ -95,13 +127,13 @@ const VoucherSlipDoc = forwardRef(({ voucher }, ref) => {
           <tbody>
             {[
               { label: 'Voucher Type', value: headerTitle, bold: true },
-              { label: isCredit ? 'Owner Name' : 'Name', value: voucher.ownerName || voucher.name || '—', bold: true },
-              ...(voucher.expenseType === 'Direct Expense' && !isCredit ? [] : [
+              { label: isCredit ? 'Owner Name' : 'Name', value: voucher.ownerName || voucher.name || (voucher.expenseType === 'Indirect Expense' ? COMPANY.name : '—'), bold: true },
+              ...((voucher.expenseType === 'Indirect Expense' && !isCredit) || !voucher.vehicleNumber ? [] : [
                 { label: 'Vehicle Number', value: voucher.vehicleNumber || '—', mono: true }
               ]),
               {
                 label: isCredit ? 'Reason' : (voucher.expenseType === 'Direct Expense' ? 'Expense Category' : 'Reason / Purpose'),
-                value: isCredit ? (voucher.reason || '—') : (voucher.expenseType === 'Direct Expense' ? `${voucher.purpose || ''} - ${voucher.reason || ''}` : voucher.reason || voucher.purpose || '—')
+                value: isCredit ? (voucher.reason || '—') : (voucher.expenseType === 'Direct Expense' ? `${voucher.purpose || ''}${voucher.reason && voucher.reason !== voucher.purpose ? ' - ' + voucher.reason : ''}` : voucher.reason || voucher.purpose || '—')
               },
               { label: 'Date & Time', value: `${fmtDate(voucher.date)}  |  ${fmtTime(voucher.createdAt || new Date())}` },
             ].map(({ label, value, bold, mono }, i) => (
@@ -160,13 +192,16 @@ function TabPanel({ value, index, children }) {
 }
 
 // ── Main VoucherDialog ────────────────────────────────────────────────────────
-const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
+const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0, panelSource, isSite: propIsSite }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { user } = useAuth();
-  const isSite = String(user?.role || '').toUpperCase().includes('SITE') ||
+  const isSite = propIsSite !== undefined ? propIsSite :
+                 (panelSource === 'SITE') ||
+                 String(user?.role || '').toUpperCase().includes('SITE') ||
                  (user?.email || '').toLowerCase() === 'site@nuvoco.com' ||
-                 import.meta.env.VITE_PORTAL === 'site';
+                 import.meta.env.VITE_PORTAL === 'site' ||
+                 (typeof window !== 'undefined' && window.location.pathname.includes('/site'));
 
   const slipRef = useRef();
   const [tab, setTab] = useState(initialTab);          // 0=New, 1=Previous, 2=Download
@@ -301,12 +336,12 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
       if (!form.reason || !form.reason.trim()) errs.reason = 'Reason is required';
       if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Enter a positive numeric amount';
     } else {
-      if (form.expenseType === 'Indirect Expense') {
+      if (form.expenseType === 'Direct Expense') {
         if (!form.name) errs.name = 'Select a truck owner';
         if (!form.vehicleNumber) errs.vehicleNumber = 'Select a vehicle';
       }
-      if (form.expenseType === 'Direct Expense' && !form.reasonCategory) errs.reasonCategory = 'Select an expense category';
-      if (!form.reason.trim()) errs.reason = 'Reason is required';
+      if (!form.reasonCategory) errs.reasonCategory = 'Select a reason category';
+      if (!form.reason || !form.reason.trim()) errs.reason = 'Reason is required';
       if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Enter a positive amount';
     }
     setErrors(errs);
@@ -319,23 +354,25 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
-      const ownerId = contacts.ownerIdMap?.[form.name] || contacts.ownerDetails?.[form.name]?.ownerId || null;
-      const vehicleId = contacts.vehicleIdMap?.[form.vehicleNumber] || null;
+      const isCredit = form.voucherType === 'CREDIT';
+      const isDirect = form.expenseType === 'Direct Expense' && !isCredit;
+      const ownerId = (isCredit || isDirect) ? (contacts.ownerIdMap?.[form.name] || contacts.ownerDetails?.[form.name]?.ownerId || null) : null;
+      const vehicleId = (isCredit || isDirect) ? (contacts.vehicleIdMap?.[form.vehicleNumber] || null) : null;
 
       const payload = {
         voucherType: form.voucherType,
         ownerId,
-        ownerName: form.name || '',
+        ownerName: (isCredit || isDirect) ? (form.name || '') : '',
         vehicleId,
-        vehicleNumber: form.vehicleNumber ? String(form.vehicleNumber).trim().toUpperCase() : undefined,
-        date: new Date().toISOString(),
+        vehicleNumber: (isCredit || isDirect) && form.vehicleNumber ? String(form.vehicleNumber).trim().toUpperCase() : undefined,
+        date: form.date || new Date().toISOString(),
         amount: parseFloat(form.amount),
-        purpose: form.voucherType === 'CREDIT'
+        purpose: isCredit
           ? 'Credit Voucher'
-          : (form.expenseType === 'Direct Expense' ? (form.reasonCategory || 'Direct Expense') : (form.reasonCategory || 'Others')),
-        name: form.name || (form.expenseType === 'Indirect Expense' ? '' : 'Dipali Associates & Co.'),
+          : (form.reasonCategory || form.reason || 'Others'),
+        name: (isCredit || isDirect) ? (form.name || COMPANY.name) : COMPANY.name,
         reason: form.reason,
-        expenseType: form.voucherType === 'CREDIT' ? 'Credit Voucher' : form.expenseType,
+        expenseType: isCredit ? 'Credit Voucher' : form.expenseType,
         panelSource: isSite ? 'SITE' : 'OFFICE',
       };
 
@@ -435,12 +472,12 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
   const previewVoucher = {
     voucherNumber: savedVoucher?.voucherNumber || '—',
     voucherType: form.voucherType,
-    ownerName: form.name || '',
+    ownerName: (form.voucherType === 'CREDIT' || form.expenseType === 'Direct Expense') ? (form.name || '') : '',
     expenseType: form.voucherType === 'CREDIT' ? 'Credit Voucher' : form.expenseType,
-    vehicleNumber: form.expenseType === 'Direct Expense' && form.voucherType !== 'CREDIT' ? undefined : (form.vehicleNumber || ''),
+    vehicleNumber: (form.voucherType === 'CREDIT' || form.expenseType === 'Direct Expense') ? (form.vehicleNumber || '') : undefined,
     date: new Date(),
-    name: form.name || (form.expenseType === 'Indirect Expense' ? '' : 'Dipali Associates & Co.'),
-    purpose: form.voucherType === 'CREDIT' ? 'Credit Voucher' : (form.expenseType === 'Direct Expense' ? form.reasonCategory : 'Others'),
+    name: (form.voucherType === 'CREDIT' || form.expenseType === 'Direct Expense') ? (form.name || COMPANY.name) : COMPANY.name,
+    purpose: form.voucherType === 'CREDIT' ? 'Credit Voucher' : (form.reasonCategory || form.reason || 'Others'),
     reason: form.reason,
     amount: parseFloat(form.amount) || 0,
     createdAt: new Date().toISOString(),
@@ -784,96 +821,110 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                           fullWidth
                           label="Expense Type *"
                           value={form.expenseType}
-                          onChange={(e) => setForm(p => ({ ...p, expenseType: e.target.value, reasonCategory: null, reason: '' }))}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setForm(p => ({
+                              ...p,
+                              expenseType: val,
+                              name: val === 'Direct Expense' ? p.name : '',
+                              vehicleNumber: val === 'Direct Expense' ? p.vehicleNumber : null,
+                              reasonCategory: null,
+                              reason: ''
+                            }));
+                            setErrors({});
+                          }}
                           InputProps={{ sx: { borderRadius: '14px' } }}
                         >
-                          <MenuItem value="Indirect Expense">Indirect Expense (Trucks/Logistics)</MenuItem>
-                          <MenuItem value="Direct Expense">Direct Expense (Office/Misc)</MenuItem>
+                          <MenuItem value="Direct Expense">DIRECT EXPENSES</MenuItem>
+                          <MenuItem value="Indirect Expense">INDIRECT EXPENSES</MenuItem>
                         </TextField>
                       </Box>
 
-                      {/* Owner Name dropdown */}
-                      <Box>
-                        <Autocomplete
-                          fullWidth
-                          options={contacts.names}
-                          value={form.name}
-                          onChange={handleOwnerChange}
-                          loading={contactsLoading}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              label={`Truck Owner Name ${form.expenseType === 'Indirect Expense' ? '*' : '(Optional)'}`}
-                              error={!!errors.name}
-                              helperText={errors.name || `${contacts.names.length} owners in DB`}
-                              InputProps={{
-                                ...params.InputProps,
-                                sx: { borderRadius: '14px' },
-                                startAdornment: <PersonIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                                endAdornment: (
-                                  <>
-                                    {contactsLoading && <CircularProgress size={16} />}
-                                    {params.InputProps.endAdornment}
-                                  </>
-                                ),
-                              }}
+                      {/* Only show Truck Owner Name and Vehicle Number when Expense Type is DIRECT EXPENSES */}
+                      {form.expenseType === 'Direct Expense' && (
+                        <>
+                          {/* Owner Name dropdown */}
+                          <Box>
+                            <Autocomplete
+                              fullWidth
+                              options={contacts.names}
+                              value={form.name}
+                              onChange={handleOwnerChange}
+                              loading={contactsLoading}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  label="Truck Owner Name *"
+                                  error={!!errors.name}
+                                  helperText={errors.name || `${contacts.names.length} owners in DB`}
+                                  InputProps={{
+                                    ...params.InputProps,
+                                    sx: { borderRadius: '14px' },
+                                    startAdornment: <PersonIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
+                                    endAdornment: (
+                                      <>
+                                        {contactsLoading && <CircularProgress size={16} />}
+                                        {params.InputProps.endAdornment}
+                                      </>
+                                    ),
+                                  }}
+                                />
+                              )}
+                              renderOption={(props, option) => (
+                                <li {...props} key={option}>
+                                  <Box>
+                                    <Typography variant="body2" fontWeight={700}>{option}</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                      {(contacts.ownerMap?.[option] || []).length} vehicle(s)
+                                    </Typography>
+                                  </Box>
+                                </li>
+                              )}
                             />
-                          )}
-                          renderOption={(props, option) => (
-                            <li {...props} key={option}>
-                              <Box>
-                                <Typography variant="body2" fontWeight={700}>{option}</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {(contacts.ownerMap?.[option] || []).length} vehicle(s)
-                                </Typography>
-                              </Box>
-                            </li>
-                          )}
-                        />
-                      </Box>
+                          </Box>
 
-                      {/* Vehicle Number dropdown — filtered by owner */}
-                      <Box>
-                        <Autocomplete
-                          fullWidth
-                          options={filteredVehicles}
-                          value={form.vehicleNumber}
-                          onChange={handleVehicleChange}
-                          loading={contactsLoading}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              label={`Vehicle Number ${form.expenseType === 'Indirect Expense' ? '*' : '(Optional)'}`}
-                              error={!!errors.vehicleNumber}
-                              helperText={errors.vehicleNumber || (form.name ? `${filteredVehicles.length} vehicle(s) for this owner` : 'All vehicles')}
-                              InputProps={{
-                                ...params.InputProps,
-                                sx: { borderRadius: '14px' },
-                                startAdornment: <LocalShippingIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
-                                endAdornment: (
-                                  <>
-                                    {contactsLoading && <CircularProgress size={16} />}
-                                    {params.InputProps.endAdornment}
-                                  </>
-                                ),
-                              }}
+                          {/* Vehicle Number dropdown — filtered by owner */}
+                          <Box>
+                            <Autocomplete
+                              fullWidth
+                              options={filteredVehicles}
+                              value={form.vehicleNumber}
+                              onChange={handleVehicleChange}
+                              loading={contactsLoading}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  label="Vehicle Number *"
+                                  error={!!errors.vehicleNumber}
+                                  helperText={errors.vehicleNumber || (form.name ? `${filteredVehicles.length} vehicle(s) for this owner` : 'All vehicles')}
+                                  InputProps={{
+                                    ...params.InputProps,
+                                    sx: { borderRadius: '14px' },
+                                    startAdornment: <LocalShippingIcon sx={{ color: '#7b1fa2', mr: 0.5, fontSize: 20 }} />,
+                                    endAdornment: (
+                                      <>
+                                        {contactsLoading && <CircularProgress size={16} />}
+                                        {params.InputProps.endAdornment}
+                                      </>
+                                    ),
+                                  }}
+                                />
+                              )}
+                              renderOption={(props, option) => (
+                                <li {...props} key={option}>
+                                  <Typography variant="body2" fontWeight={700} sx={{ fontFamily: 'monospace' }}>{option}</Typography>
+                                </li>
+                              )}
                             />
-                          )}
-                          renderOption={(props, option) => (
-                            <li {...props} key={option}>
-                              <Typography variant="body2" fontWeight={700} sx={{ fontFamily: 'monospace' }}>{option}</Typography>
-                            </li>
-                          )}
-                        />
-                      </Box>
+                          </Box>
+                        </>
+                      )}
 
                       {/* Reason Category Dropdown & Reason Input */}
                       <Box display="flex" flexDirection="column" gap={2}>
                         <Autocomplete
                           fullWidth
-                          options={form.expenseType === 'Direct Expense'
-                            ? ['Water', 'Cleaning', 'WiFi Recharge', 'Salary', 'Others']
-                            : ['Service Road Maintanance', 'Service/Maintanance', 'Extra wages', 'Extra(Additional) Toll', 'Others']}
+                          options={form.expenseType === 'Direct Expense' ? DIRECT_EXPENSE_REASONS : INDIRECT_EXPENSE_REASONS}
                           value={form.reasonCategory}
                           onChange={(_, val) => {
                             setForm(p => ({
@@ -881,10 +932,17 @@ const VoucherDialog = ({ open, onClose, onVoucherCreated, initialTab = 0 }) => {
                               reasonCategory: val,
                               reason: val === 'Others' ? '' : (val || '')
                             }));
+                            if (errors.reasonCategory) setErrors(p => ({ ...p, reasonCategory: '' }));
                             if (errors.reason) setErrors(p => ({ ...p, reason: '' }));
                           }}
                           renderInput={(params) => (
-                            <TextField {...params} label="Reason Category *" InputProps={{ ...params.InputProps, sx: { borderRadius: '14px' } }} />
+                            <TextField
+                              {...params}
+                              label="Reason Category *"
+                              error={!!errors.reasonCategory}
+                              helperText={errors.reasonCategory}
+                              InputProps={{ ...params.InputProps, sx: { borderRadius: '14px' } }}
+                            />
                           )}
                         />
                         <TextField

@@ -32,9 +32,15 @@ function sanitizeMonths(inputMonths = {}) {
   const res = {};
   for (const m of MONTH_KEYS) {
     const item = inputMonths[m] || {};
+    const bankVal = item.bank !== undefined && item.bank !== null && item.bank !== '' ? Number(item.bank) || 0 : '';
+    const cashRaw = item.officeCash !== undefined && item.officeCash !== null && item.officeCash !== '' ? item.officeCash : item.cash;
+    const cashVal = cashRaw !== undefined && cashRaw !== null && cashRaw !== '' ? Number(cashRaw) || 0 : '';
+    const siteCashVal = item.siteCash !== undefined && item.siteCash !== null && item.siteCash !== '' ? Number(item.siteCash) || 0 : '';
+
     res[m] = {
-      bank: item.bank !== undefined && item.bank !== null && item.bank !== '' ? Number(item.bank) || 0 : '',
-      cash: item.cash !== undefined && item.cash !== null && item.cash !== '' ? Number(item.cash) || 0 : ''
+      bank: bankVal,
+      cash: cashVal,
+      siteCash: siteCashVal
     };
   }
   return res;
@@ -68,10 +74,17 @@ router.post('/', optionalAuth, async (req, res) => {
     const doc = {
       slNo,
       date: req.body.date || new Date().toISOString().split('T')[0],
+      billType: req.body.billType || '',
       particulars: req.body.particulars || '',
       financialYear: fy,
       months: sanitizeMonths(req.body.months),
       remarks: req.body.remarks || '',
+      sourceType: req.body.sourceType || 'MANUAL',
+      sourceManojBandhanId: req.body.sourceManojBandhanId || '',
+      sourceBankBookId: req.body.sourceBankBookId || '',
+      sourceVoucherId: req.body.sourceVoucherId || '',
+      panelSource: req.body.panelSource || '',
+      voucherIds: Array.isArray(req.body.voucherIds) ? req.body.voucherIds : (req.body.sourceVoucherId ? [req.body.sourceVoucherId] : []),
       created_at: new Date(),
       updated_at: new Date()
     };
@@ -79,8 +92,10 @@ router.post('/', optionalAuth, async (req, res) => {
     const result = await col.insertOne(doc);
     const newEntry = { _id: result.insertedId, ...doc };
 
-    const io = getIO();
-    if (io) io.emit('indirectExpenseUpdates', { action: 'create', entry: newEntry });
+    try {
+      const io = getIO();
+      if (io) io.emit('indirectExpenseUpdates', { action: 'create', entry: newEntry });
+    } catch (_) {}
 
     res.status(201).json({ success: true, entry: newEntry });
   } catch (error) {
@@ -103,9 +118,15 @@ router.put('/bulk-update', optionalAuth, async (req, res) => {
       const setObj = {};
       if (changes.slNo !== undefined) setObj.slNo = Number(changes.slNo);
       if (changes.date !== undefined) setObj.date = String(changes.date);
+      if (changes.billType !== undefined) setObj.billType = String(changes.billType);
       if (changes.particulars !== undefined) setObj.particulars = String(changes.particulars);
       if (changes.financialYear !== undefined) setObj.financialYear = String(changes.financialYear);
       if (changes.remarks !== undefined) setObj.remarks = String(changes.remarks);
+      if (changes.sourceType !== undefined) setObj.sourceType = String(changes.sourceType);
+      if (changes.sourceManojBandhanId !== undefined) setObj.sourceManojBandhanId = String(changes.sourceManojBandhanId);
+      if (changes.sourceBankBookId !== undefined) setObj.sourceBankBookId = String(changes.sourceBankBookId);
+      if (changes.sourceVoucherId !== undefined) setObj.sourceVoucherId = String(changes.sourceVoucherId);
+      if (changes.panelSource !== undefined) setObj.panelSource = String(changes.panelSource);
       if (changes.months !== undefined) {
         setObj.months = sanitizeMonths(changes.months);
       }
@@ -122,8 +143,10 @@ router.put('/bulk-update', optionalAuth, async (req, res) => {
 
     const result = await col.bulkWrite(bulkOps, { ordered: false });
 
-    const io = getIO();
-    if (io) io.emit('indirectExpenseUpdates', { action: 'bulkUpdate' });
+    try {
+      const io = getIO();
+      if (io) io.emit('indirectExpenseUpdates', { action: 'bulkUpdate' });
+    } catch (_) {}
 
     res.json({ success: true, modifiedCount: result.modifiedCount });
   } catch (error) {
@@ -144,8 +167,10 @@ router.delete('/bulk-delete', optionalAuth, async (req, res) => {
     const objectIds = ids.map(id => new ObjectId(id));
     const result = await col.deleteMany({ _id: { $in: objectIds } });
 
-    const io = getIO();
-    if (io) io.emit('indirectExpenseUpdates', { action: 'bulkDelete', ids });
+    try {
+      const io = getIO();
+      if (io) io.emit('indirectExpenseUpdates', { action: 'bulkDelete', ids });
+    } catch (_) {}
 
     res.json({ success: true, deletedCount: result.deletedCount });
   } catch (error) {
@@ -165,8 +190,10 @@ router.delete('/:id', optionalAuth, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Row not found' });
     }
 
-    const io = getIO();
-    if (io) io.emit('indirectExpenseUpdates', { action: 'delete', id });
+    try {
+      const io = getIO();
+      if (io) io.emit('indirectExpenseUpdates', { action: 'delete', id });
+    } catch (_) {}
 
     res.json({ success: true, message: 'Row deleted' });
   } catch (error) {

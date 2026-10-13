@@ -1,8 +1,9 @@
 const mongoose = require("mongoose");
 const { ObjectId } = require("mongodb");
 const OthersCreditor = require("../models/OthersCreditor");
+const AccountDetail = require("../models/AccountDetail");
 const { getIO } = require("../socket");
-const { isDummyRow } = require("./dummyCementRowManager");
+const { syncDummyCementRow, deleteDummyRowBySource, isDummyRow } = require("./dummyCementRowManager");
 
 function getCementCollection() {
   return mongoose.connection.useDb("cement_register").collection("entries");
@@ -52,28 +53,6 @@ function makeSpaceAgnosticRegex(str) {
   return new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
 }
 
-function escapeRegex(text) {
-  if (!text) return '';
-  return String(text).replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
-}
-
-/**
- * Check if an Others Creditor row qualifies for Freight Advance -> Cement Register sync.
- * Strictly limited to: OTHER CREDITOR -> MONOJ BANDHAN with LEDGER NAME = FREIGHT ADVANCE.
- */
-function isQualifyingFreightAdvance(doc) {
-  if (!doc) return false;
-  const creditor = String(doc.creditorName || '').trim().toUpperCase();
-  if (creditor !== 'MONOJ BANDHAN' && creditor !== 'MANOJ BANDHAN') return false;
-
-  const ledger = String(doc.ledgerName || '').trim().toLowerCase();
-  const isFreightLedger = !ledger || ledger === 'freight advance' || ledger === 'freight_advance' || ledger.replace(/\s+/g, '') === 'freightadvance';
-
-  return isFreightLedger;
-}
-
-const { syncDummyCementRow, deleteDummyRowBySource } = require("./dummyCementRowManager");
-
 /**
  * Checks if two date inputs correspond to the exact same calendar date (Day, Month, Year).
  */
@@ -89,9 +68,37 @@ function isSameCalendarDate(d1, d2) {
 }
 
 /**
+ * Check if an Others Creditor row qualifies for Freight Advance -> Cement Register sync.
+ * Strictly limited to: OTHER CREDITOR -> MONOJ BANDHAN with LEDGER NAME = FREIGHT ADVANCE.
+ */
+function isQualifyingManojFreightAdvance(doc) {
+  if (!doc) return false;
+  const creditor = String(doc.creditorName || '').trim().toUpperCase();
+  if (creditor !== 'MONOJ BANDHAN' && creditor !== 'MANOJ BANDHAN') return false;
+
+  const ledger = String(doc.ledgerName || '').trim().toLowerCase();
+  const isFreightLedger = !ledger || ledger === 'freight advance' || ledger === 'freight_advance' || ledger.replace(/\s+/g, '') === 'freightadvance';
+
+  return isFreightLedger;
+}
+
+/**
+ * Check if a Bank Book row qualifies for Freight Advance -> Cement Register sync.
+ * Strictly limited to: BANK BOOK with LEDGER NAME = FREIGHT ADVANCE.
+ */
+function isQualifyingBankBookFreightAdvance(doc) {
+  if (!doc) return false;
+  const ledger = String(doc.ledgerName || '').trim().toLowerCase();
+  return ledger === 'freight advance' || ledger === 'freight_advance' || ledger.replace(/\s+/g, '') === 'freightadvance';
+}
+
+function isQualifyingFreightAdvance(doc) {
+  return isQualifyingManojFreightAdvance(doc) || isQualifyingBankBookFreightAdvance(doc);
+}
+
+/**
  * Find the SAME-DATE real Cement Register trip/invoice record for the selected OWNER + VEHICLE + EXACT DATE.
  * Strictly excludes dummy rows.
- * Only returns a record if its business/loading date matches the exact transaction date.
  */
 async function findSameDateCementRecord(vehicleNumber, ownerName = "", txDate = null) {
   if (!vehicleNumber || !txDate) return null;
@@ -154,22 +161,32 @@ async function findSameDateCementRecord(vehicleNumber, ownerName = "", txDate = 
 }
 
 /**
- * Reverses a Freight Advance debit transaction's contribution from the Cement Register.
+ * Reverses a Freight Advance contribution (from Manoj Bandhan OR Bank Book) from Cement Register.
  */
-async function reverseFreightAdvanceContribution(docOrId) {
+async function reverseFreightAdvanceContribution(docOrId, sourceHint = null) {
   try {
     const col = getCementCollection();
     let doc = null;
+    let source = sourceHint;
+
     if (typeof docOrId === 'string' || docOrId instanceof ObjectId) {
       doc = await OthersCreditor.findById(docOrId).lean();
+      if (doc) source = 'MONOJ_BANDHAN';
+      else {
+        doc = await AccountDetail.findById(docOrId).lean();
+        if (doc) source = 'BANK_BOOK';
+      }
     } else {
       doc = docOrId;
+      if (!source) {
+        source = doc.creditorName ? 'MONOJ_BANDHAN' : 'BANK_BOOK';
+      }
     }
 
     if (!doc || !doc._id) return { success: false, notFound: true };
     const txIdStr = String(doc._id);
 
-    // 1. Locate the cement record either by _cementSync.cementRecordId or by contribution txId
+    // Locate the cement record
     let cementRecord = null;
     if (doc._cementSync && doc._cementSync.cementRecordId) {
       try {
@@ -186,8 +203,10 @@ async function reverseFreightAdvanceContribution(docOrId) {
       });
     }
 
-    // Also clean up any dummy row explicitly tied to this source transaction id
+    // Clean up any dummy row explicitly tied to this source transaction id
     await deleteDummyRowBySource('MONOJ_BANDHAN_FREIGHT_ADVANCE', txIdStr);
+    await deleteDummyRowBySource('BANK_BOOK_FREIGHT_ADVANCE', txIdStr);
+    await deleteDummyRowBySource('FREIGHT_ADVANCE', txIdStr);
 
     if (!cementRecord) {
       return { success: true, notLinked: true };
@@ -201,8 +220,8 @@ async function reverseFreightAdvanceContribution(docOrId) {
     const revAmount = matchContrib ? num(matchContrib.amount) : (doc._cementSync ? num(doc._cementSync.amount) : 0);
     const remainingContributions = contributions.filter(c => String(c.txId) !== txIdStr);
 
-    const currentBankTf = num(cementRecord["Bank TF"]);
-    const newBankTf = Math.max(0, Math.round((currentBankTf - revAmount) * 100) / 100);
+    // Sum of remaining contributions
+    const newBankTf = Math.round(remainingContributions.reduce((sum, c) => sum + num(c.amount), 0) * 100) / 100;
 
     // If cementRecord is a dummy row
     if (cementRecord.isDummy === true || cementRecord._isDummy === true) {
@@ -231,18 +250,16 @@ async function reverseFreightAdvanceContribution(docOrId) {
         } catch (_) {}
       }
 
-      await OthersCreditor.updateOne(
-        { _id: doc._id },
-        { $unset: { _cementSync: "" } }
-      );
+      if (source === 'MONOJ_BANDHAN') {
+        await OthersCreditor.updateOne({ _id: doc._id }, { $unset: { _cementSync: "" } });
+      } else {
+        await AccountDetail.updateOne({ _id: doc._id }, { $unset: { _cementSync: "" } });
+      }
 
       return { success: true, reversedAmount: revAmount, isDummy: true };
     }
 
-    const appliedTxIds = Array.isArray(cementRecord.appliedMonojDebitTxIds)
-      ? cementRecord.appliedMonojDebitTxIds.filter(id => String(id) !== txIdStr)
-      : [];
-
+    // Real trip: update accumulated Bank TF and remaining contributions
     await col.updateOne(
       { _id: cementRecord._id },
       {
@@ -251,17 +268,16 @@ async function reverseFreightAdvanceContribution(docOrId) {
           "BANK TF": newBankTf,
           "ADVANCE (BANK TF)": newBankTf,
           _freightAdvanceContributions: remainingContributions,
-          _monojDebitContributions: remainingContributions,
-          appliedMonojDebitTxIds: appliedTxIds
+          _monojDebitContributions: remainingContributions
         }
       }
     );
 
-    // Update OthersCreditor doc to clear _cementSync
-    await OthersCreditor.updateOne(
-      { _id: doc._id },
-      { $unset: { _cementSync: "" } }
-    );
+    if (source === 'MONOJ_BANDHAN') {
+      await OthersCreditor.updateOne({ _id: doc._id }, { $unset: { _cementSync: "" } });
+    } else {
+      await AccountDetail.updateOne({ _id: doc._id }, { $unset: { _cementSync: "" } });
+    }
 
     try {
       const io = getIO();
@@ -283,116 +299,112 @@ async function reverseFreightAdvanceContribution(docOrId) {
 }
 
 /**
- * Applies a Freight Advance debit transaction from Others Creditor to the SAME-DATE Cement Register invoice or creates a SAME-DATE dummy row.
+ * Universal applicator: Applies a Freight Advance transaction (from Manoj Bandhan OR Bank Book)
+ * into CEMENT REGISTER -> ADVANCE BANK TF for the exact Owner + Vehicle + Same Date.
  */
-async function applyFreightAdvanceToCement(doc) {
+async function applyFreightAdvanceToCement(doc, sourceOverride = null) {
   try {
     if (!doc || !doc._id) return { success: false, error: "No document provided" };
-    if (!isQualifyingFreightAdvance(doc)) {
+
+    const isManoj = isQualifyingManojFreightAdvance(doc);
+    const isBankBook = isQualifyingBankBookFreightAdvance(doc);
+
+    if (!isManoj && !isBankBook && !sourceOverride) {
       if (doc._cementSync && doc._cementSync.applied) {
         await reverseFreightAdvanceContribution(doc);
       }
       return { success: true, skipped: true, reason: "Not a qualifying Freight Advance transaction" };
     }
 
-    const debitAmount = num(doc.debit !== undefined ? doc.debit : doc.amount);
-    const vehicleNo = String(doc.vehicleNo || '').trim();
-    const ownerName = String(doc.names || '').trim();
+    const source = sourceOverride || (isManoj ? 'MONOJ_BANDHAN' : 'BANK_BOOK');
+    const advanceAmount = num(doc.debit !== undefined ? doc.debit : (doc.withdraw !== undefined ? doc.withdraw : doc.amount));
+    const vehicleNo = String(doc.vehicleNo || doc.vehicle || '').trim();
+    const ownerName = String(doc.names || doc.party || '').trim();
+    const rawDate = doc.date || doc.transactionDate || doc['Transaction Date'];
     const txIdStr = String(doc._id);
 
-    // If debit <= 0 or vehicle is empty or owner is empty, reverse any existing contribution and return
-    if (debitAmount <= 0 || !vehicleNo || !ownerName) {
+    // If amount <= 0 or missing vehicle/owner/date: reverse and skip
+    if (advanceAmount <= 0 || !vehicleNo || !ownerName || !rawDate) {
       if (doc._cementSync && doc._cementSync.applied) {
-        await reverseFreightAdvanceContribution(doc);
+        await reverseFreightAdvanceContribution(doc, source);
       }
-      return { success: true, skipped: true, reason: "No positive debit or missing vehicle/owner" };
+      return { success: true, skipped: true, reason: "Zero amount or missing vehicle/owner/date" };
     }
 
     const col = getCementCollection();
 
-    // Check if previously applied
+    // Check if previously applied with exact same parameters
     const prevSync = doc._cementSync;
     if (prevSync && prevSync.applied) {
       const isSameVeh = String(prevSync.vehicleNo || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === vehicleNo.toUpperCase().replace(/[^A-Z0-9]/g, '');
       const isSameOwner = String(prevSync.ownerName || '').trim().toLowerCase() === ownerName.trim().toLowerCase();
-      const isSameAmt = num(prevSync.amount) === debitAmount;
-      const isSameDateVal = isSameCalendarDate(prevSync.date, doc.date);
+      const isSameAmt = num(prevSync.amount) === advanceAmount;
+      const isSameDateVal = isSameCalendarDate(prevSync.date, rawDate);
 
       if (isSameVeh && isSameOwner && isSameAmt && isSameDateVal && prevSync.cementRecordId) {
-        // Verify it already exists intact in that target cement record
         const curCement = await col.findOne({ _id: new ObjectId(prevSync.cementRecordId) });
         if (curCement) {
           const contribs = curCement._freightAdvanceContributions || curCement._monojDebitContributions || [];
-          const hasContrib = contribs.some(c => String(c.txId) === txIdStr && num(c.amount) === debitAmount);
+          const hasContrib = contribs.some(c => String(c.txId) === txIdStr && num(c.amount) === advanceAmount);
           if (hasContrib) {
             return {
               success: true,
               alreadyApplied: true,
               cementRecordId: prevSync.cementRecordId,
-              message: `₹${debitAmount.toLocaleString('en-IN')} already applied to Advance Bank TF for ${ownerName} (${vehicleNo}) on ${doc.date}.`
+              message: `₹${advanceAmount.toLocaleString('en-IN')} already accumulated in Advance Bank TF for ${ownerName} (${vehicleNo}) on ${rawDate}.`
             };
           }
         }
       }
-      // If anything changed (amount, vehicle, owner, or date), reverse previous contribution first
-      await reverseFreightAdvanceContribution(doc);
+      await reverseFreightAdvanceContribution(doc, source);
     }
 
-    // 1. Search Cement Register for OWNER + VEHICLE + SAME DATE
-    const targetRecord = await findSameDateCementRecord(vehicleNo, ownerName, doc.date);
+    // 1. Search for SAME-DATE real Cement Register trip for OWNER + VEHICLE + EXACT DATE
+    const targetRecord = await findSameDateCementRecord(vehicleNo, ownerName, rawDate);
+
     if (!targetRecord) {
-      // CASE 2 / CASE 3: NO same-date real trip exists -> check if an existing dummy row exists for this vehicle on this SAME DATE
+      // CASE 2: No real trip exists -> find or create a same-date dummy row for this vehicle + owner
       const strippedVeh = vehicleNo.replace(/[^a-zA-Z0-9]/g, '');
       const vehRegex = new RegExp(strippedVeh.split('').join('[^a-zA-Z0-9]*'), 'i');
 
       const allDummyRows = await col.find({
         isDummy: true,
-        sourceType: 'MONOJ_BANDHAN_FREIGHT_ADVANCE',
         "VEHICLE NUMBER": { $regex: vehRegex }
       }).toArray();
 
       const existingSameDateDummy = allDummyRows.find(d => {
-        const rawDate = d["LOADING DT"] || d["LOADING DATE"] || d["DATE"] || d.date;
-        return isSameCalendarDate(rawDate, doc.date);
+        const dDate = d["LOADING DT"] || d["LOADING DATE"] || d["DATE"] || d.date;
+        return isSameCalendarDate(dDate, rawDate);
       });
 
       let dummyRecordId = null;
-      let totalDummyBankTf = debitAmount;
+      let totalDummyBankTf = advanceAmount;
 
       if (existingSameDateDummy) {
-        const dummyContribs = Array.isArray(existingSameDateDummy._freightAdvanceContributions) ? existingSameDateDummy._freightAdvanceContributions : [];
+        const dummyContribs = Array.isArray(existingSameDateDummy._freightAdvanceContributions)
+          ? existingSameDateDummy._freightAdvanceContributions
+          : [];
         const existingIdx = dummyContribs.findIndex(c => String(c.txId) === txIdStr);
         let newContribs = [...dummyContribs];
-        let curBank = num(existingSameDateDummy["Bank TF"]);
+
+        const newEntry = {
+          txId: txIdStr,
+          source,
+          amount: advanceAmount,
+          vehicleNo,
+          ownerName,
+          date: rawDate,
+          ledgerName: 'FREIGHT ADVANCE',
+          appliedAt: new Date()
+        };
 
         if (existingIdx >= 0) {
-          const prevAmt = num(dummyContribs[existingIdx].amount);
-          curBank = Math.max(0, curBank - prevAmt + debitAmount);
-          newContribs[existingIdx] = {
-            txId: txIdStr,
-            amount: debitAmount,
-            vehicleNo,
-            ownerName,
-            date: doc.date || '',
-            creditorName: doc.creditorName || '',
-            ledgerName: doc.ledgerName || '',
-            appliedAt: new Date()
-          };
+          newContribs[existingIdx] = newEntry;
         } else {
-          curBank = curBank + debitAmount;
-          newContribs.push({
-            txId: txIdStr,
-            amount: debitAmount,
-            vehicleNo,
-            ownerName,
-            date: doc.date || '',
-            creditorName: doc.creditorName || '',
-            ledgerName: doc.ledgerName || '',
-            appliedAt: new Date()
-          });
+          newContribs.push(newEntry);
         }
 
-        totalDummyBankTf = Math.round(curBank * 100) / 100;
+        totalDummyBankTf = Math.round(newContribs.reduce((sum, c) => sum + num(c.amount), 0) * 100) / 100;
         dummyRecordId = existingSameDateDummy._id.toString();
 
         await col.updateOne(
@@ -409,13 +421,13 @@ async function applyFreightAdvanceToCement(doc) {
         );
       } else {
         const syncRes = await syncDummyCementRow({
-          sourceType: 'MONOJ_BANDHAN_FREIGHT_ADVANCE',
+          sourceType: 'FREIGHT_ADVANCE',
           sourceTransactionId: txIdStr,
           vehicleNumber: vehicleNo,
           ownerName,
-          date: doc.date,
+          date: rawDate,
           field: 'Bank TF',
-          amount: debitAmount
+          amount: advanceAmount
         });
         dummyRecordId = syncRes.recordId;
 
@@ -426,12 +438,12 @@ async function applyFreightAdvanceToCement(doc) {
               $set: {
                 _freightAdvanceContributions: [{
                   txId: txIdStr,
-                  amount: debitAmount,
+                  source,
+                  amount: advanceAmount,
                   vehicleNo,
                   ownerName,
-                  date: doc.date || '',
-                  creditorName: doc.creditorName || '',
-                  ledgerName: doc.ledgerName || '',
+                  date: rawDate,
+                  ledgerName: 'FREIGHT ADVANCE',
                   appliedAt: new Date()
                 }]
               }
@@ -440,23 +452,28 @@ async function applyFreightAdvanceToCement(doc) {
         }
       }
 
-      await OthersCreditor.updateOne(
-        { _id: doc._id },
-        {
-          $set: {
-            _cementSync: {
-              applied: true,
-              isDummy: true,
-              cementRecordId: dummyRecordId || null,
-              vehicleNo,
-              ownerName,
-              date: doc.date,
-              amount: debitAmount,
-              appliedAt: new Date()
-            }
-          }
-        }
-      );
+      const syncMeta = {
+        applied: true,
+        isDummy: true,
+        source,
+        cementRecordId: dummyRecordId || null,
+        vehicleNo,
+        ownerName,
+        date: rawDate,
+        amount: advanceAmount,
+        appliedAt: new Date()
+      };
+
+      if (source === 'MONOJ_BANDHAN') {
+        await OthersCreditor.updateOne({ _id: doc._id }, { $set: { _cementSync: syncMeta } });
+      } else {
+        await AccountDetail.updateOne({ _id: doc._id }, { $set: { _cementSync: syncMeta } });
+      }
+
+      try {
+        const io = getIO();
+        if (io) io.emit('cementUpdates', { action: 'freightAdvanceApplied', recordId: dummyRecordId, isDummy: true, bankTf: totalDummyBankTf });
+      } catch (_) {}
 
       return {
         success: true,
@@ -464,97 +481,81 @@ async function applyFreightAdvanceToCement(doc) {
         isDummy: true,
         vehicleNo,
         ownerName,
-        date: doc.date,
-        amount: debitAmount,
+        date: rawDate,
+        amount: advanceAmount,
         cementRecordId: dummyRecordId,
         totalBankTf: totalDummyBankTf,
-        message: `₹${debitAmount.toLocaleString('en-IN')} added to Same-Date Dummy Advance Bank TF for ${ownerName} (${vehicleNo}) on ${doc.date}.`
+        message: `₹${advanceAmount.toLocaleString('en-IN')} accumulated in Same-Date Dummy Advance Bank TF for ${ownerName} (${vehicleNo}) on ${rawDate}.`
       };
     }
 
-    // CASE 1: Real SAME-DATE trip exists -> Apply to that same-date row
+    // CASE 1: Real SAME-DATE trip exists -> Accumulate onto that real row
     await deleteDummyRowBySource('MONOJ_BANDHAN_FREIGHT_ADVANCE', txIdStr);
+    await deleteDummyRowBySource('BANK_BOOK_FREIGHT_ADVANCE', txIdStr);
+    await deleteDummyRowBySource('FREIGHT_ADVANCE', txIdStr);
 
     const existingContributions = Array.isArray(targetRecord._freightAdvanceContributions)
       ? targetRecord._freightAdvanceContributions
       : (Array.isArray(targetRecord._monojDebitContributions) ? targetRecord._monojDebitContributions : []);
 
     const existingIdx = existingContributions.findIndex(c => String(c.txId) === txIdStr);
-
-    let currentBankTf = num(targetRecord["Bank TF"]);
     let newContributions = [...existingContributions];
 
+    const newContrib = {
+      txId: txIdStr,
+      source,
+      amount: advanceAmount,
+      vehicleNo,
+      ownerName,
+      date: rawDate,
+      ledgerName: 'FREIGHT ADVANCE',
+      appliedAt: new Date()
+    };
+
     if (existingIdx >= 0) {
-      const prevAmt = num(existingContributions[existingIdx].amount);
-      currentBankTf = Math.max(0, currentBankTf - prevAmt + debitAmount);
-      newContributions[existingIdx] = {
-        txId: txIdStr,
-        amount: debitAmount,
-        vehicleNo,
-        ownerName,
-        date: doc.date || '',
-        creditorName: doc.creditorName || '',
-        ledgerName: doc.ledgerName || '',
-        appliedAt: new Date()
-      };
+      newContributions[existingIdx] = newContrib;
     } else {
-      currentBankTf = currentBankTf + debitAmount;
-      newContributions.push({
-        txId: txIdStr,
-        amount: debitAmount,
-        vehicleNo,
-        ownerName,
-        date: doc.date || '',
-        creditorName: doc.creditorName || '',
-        ledgerName: doc.ledgerName || '',
-        appliedAt: new Date()
-      });
+      newContributions.push(newContrib);
     }
 
-    currentBankTf = Math.round(currentBankTf * 100) / 100;
-
-    const appliedTxIds = Array.isArray(targetRecord.appliedMonojDebitTxIds) ? [...targetRecord.appliedMonojDebitTxIds] : [];
-    if (!appliedTxIds.includes(txIdStr)) {
-      appliedTxIds.push(txIdStr);
-    }
+    // Exact accumulation: Sum of all contributions for this row
+    const totalAccumulatedBankTf = Math.round(newContributions.reduce((sum, c) => sum + num(c.amount), 0) * 100) / 100;
 
     await col.updateOne(
       { _id: targetRecord._id },
       {
         $set: {
-          "Bank TF": currentBankTf,
-          "BANK TF": currentBankTf,
-          "ADVANCE (BANK TF)": currentBankTf,
+          "Bank TF": totalAccumulatedBankTf,
+          "BANK TF": totalAccumulatedBankTf,
+          "ADVANCE (BANK TF)": totalAccumulatedBankTf,
           _freightAdvanceContributions: newContributions,
-          _monojDebitContributions: newContributions,
-          appliedMonojDebitTxIds: appliedTxIds
+          _monojDebitContributions: newContributions
         }
       }
     );
 
-    // Update OthersCreditor document linkage
-    await OthersCreditor.updateOne(
-      { _id: doc._id },
-      {
-        $set: {
-          _cementSync: {
-            applied: true,
-            isDummy: false,
-            cementRecordId: targetRecord._id.toString(),
-            vehicleNo,
-            ownerName,
-            date: doc.date,
-            amount: debitAmount,
-            appliedAt: new Date()
-          }
-        }
-      }
-    );
+    const syncMeta = {
+      applied: true,
+      isDummy: false,
+      source,
+      cementRecordId: targetRecord._id.toString(),
+      vehicleNo,
+      ownerName,
+      date: rawDate,
+      amount: advanceAmount,
+      appliedAt: new Date()
+    };
+
+    if (source === 'MONOJ_BANDHAN') {
+      await OthersCreditor.updateOne({ _id: doc._id }, { $set: { _cementSync: syncMeta } });
+    } else {
+      await AccountDetail.updateOne({ _id: doc._id }, { $set: { _cementSync: syncMeta } });
+    }
 
     try {
       const io = getIO();
       if (io) {
-        io.emit('cementUpdates', { action: 'freightAdvanceApplied', recordId: targetRecord._id.toString(), bankTf: currentBankTf });
+        io.emit('cementUpdates', { action: 'freightAdvanceApplied', recordId: targetRecord._id.toString(), bankTf: totalAccumulatedBankTf });
       }
     } catch (_) {}
 
@@ -564,18 +565,17 @@ async function applyFreightAdvanceToCement(doc) {
       isDummy: false,
       vehicleNo,
       ownerName,
-      date: doc.date,
-      amount: debitAmount,
+      date: rawDate,
+      amount: advanceAmount,
       cementRecordId: targetRecord._id.toString(),
-      totalBankTf: currentBankTf,
-      message: `₹${debitAmount.toLocaleString('en-IN')} added to Same-Date Advance Bank TF for ${ownerName} (${vehicleNo}) on ${doc.date}.`
+      totalBankTf: totalAccumulatedBankTf,
+      message: `₹${advanceAmount.toLocaleString('en-IN')} accumulated in Advance Bank TF for ${ownerName} (${vehicleNo}) on ${rawDate}. Total Bank TF: ₹${totalAccumulatedBankTf}`
     };
   } catch (err) {
     console.error('[monojCementAdvanceManager] applyFreightAdvanceToCement error:', err);
     return { success: false, error: err.message };
   }
 }
-
 
 /**
  * Syncs a batch of Others Creditor rows against Cement Register.
@@ -584,12 +584,87 @@ async function syncFreightAdvancesBatch(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
   const results = [];
   for (const row of rows) {
-    if (row && isQualifyingFreightAdvance(row)) {
-      const res = await applyFreightAdvanceToCement(row);
+    if (row && isQualifyingManojFreightAdvance(row)) {
+      const res = await applyFreightAdvanceToCement(row, 'MONOJ_BANDHAN');
       results.push(res);
     }
   }
   return results;
+}
+
+/**
+ * Syncs a batch of Bank Book rows against Cement Register.
+ */
+async function syncBankBookFreightAdvancesBatch(docs) {
+  if (!Array.isArray(docs) || docs.length === 0) return [];
+  const results = [];
+  for (const doc of docs) {
+    if (doc && isQualifyingBankBookFreightAdvance(doc)) {
+      const res = await applyFreightAdvanceToCement(doc, 'BANK_BOOK');
+      results.push(res);
+    }
+  }
+  return results;
+}
+
+/**
+ * Helper to fetch all accumulated Freight Advances (Manoj Bandhan + Bank Book) for a Vehicle and Date.
+ */
+async function getAccumulatedFreightAdvance(vehicleNo, ownerName, recordDate) {
+  if (!vehicleNo || !recordDate) return { totalBankTf: 0, contributions: [] };
+
+  const vehRegex = makeSpaceAgnosticRegex(vehicleNo);
+  if (!vehRegex) return { totalBankTf: 0, contributions: [] };
+
+  const [manojDocs, bankDocs] = await Promise.all([
+    OthersCreditor.find({
+      creditorName: { $in: ['MANOJ BANDHAN', 'MONOJ BANDHAN'] },
+      vehicleNo: { $regex: vehRegex }
+    }).lean().catch(() => []),
+    AccountDetail.find({
+      vehicle: { $regex: vehRegex }
+    }).lean().catch(() => [])
+  ]);
+
+  const contributions = [];
+
+  manojDocs.forEach(d => {
+    if (isQualifyingManojFreightAdvance(d) && isSameCalendarDate(d.date, recordDate)) {
+      const amt = num(d.debit !== undefined ? d.debit : d.amount);
+      if (amt > 0) {
+        contributions.push({
+          txId: String(d._id),
+          source: 'MONOJ_BANDHAN',
+          amount: amt,
+          vehicleNo,
+          ownerName: d.names || ownerName,
+          date: d.date,
+          ledgerName: 'FREIGHT ADVANCE'
+        });
+      }
+    }
+  });
+
+  bankDocs.forEach(d => {
+    const rawD = d.transactionDate || d['Transaction Date'] || d.date;
+    if (isQualifyingBankBookFreightAdvance(d) && isSameCalendarDate(rawD, recordDate)) {
+      const amt = num(d.withdraw);
+      if (amt > 0) {
+        contributions.push({
+          txId: String(d._id),
+          source: 'BANK_BOOK',
+          amount: amt,
+          vehicleNo,
+          ownerName: d.names || d.party || ownerName,
+          date: rawD,
+          ledgerName: 'FREIGHT ADVANCE'
+        });
+      }
+    }
+  });
+
+  const totalBankTf = Math.round(contributions.reduce((sum, c) => sum + num(c.amount), 0) * 100) / 100;
+  return { totalBankTf, contributions };
 }
 
 module.exports = {
@@ -598,11 +673,17 @@ module.exports = {
   findLatestCementRecordForVehicle: findSameDateCementRecord,
   applyFreightAdvanceToCement,
   applyMonojDebitToCement: applyFreightAdvanceToCement,
+  applyBankBookFreightAdvanceToCement: (doc) => applyFreightAdvanceToCement(doc, 'BANK_BOOK'),
   reverseFreightAdvanceContribution,
   reverseMonojDebitContribution: reverseFreightAdvanceContribution,
+  reverseBankBookFreightAdvanceContribution: (doc) => reverseFreightAdvanceContribution(doc, 'BANK_BOOK'),
   syncFreightAdvancesBatch,
   syncMonojDebitsBatch: syncFreightAdvancesBatch,
+  syncBankBookFreightAdvancesBatch,
+  getAccumulatedFreightAdvance,
   isQualifyingFreightAdvance,
+  isQualifyingManojFreightAdvance,
+  isQualifyingBankBookFreightAdvance,
   isSameCalendarDate
 };
 

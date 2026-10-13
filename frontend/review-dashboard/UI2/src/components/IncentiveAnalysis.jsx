@@ -15,6 +15,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import * as XLSX from 'xlsx';
+import UploadIncentiveExcelDialog from './UploadIncentiveExcelDialog';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 function num(val, fb = 0) {
@@ -150,10 +151,12 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
     if (!truck) continue;
 
     if (!byTruck[truck]) {
-      // Find contact info from MongoDB
+      // Find contact info from MongoDB using normalized vehicle registration
+      const normT = (truck || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
       const contact = truckContacts.find(c => {
-        const dbNo = (c['Truck No '] || c['Truck No'] || c.truck_no || '').trim().toUpperCase();
-        return dbNo === truck;
+        const rawNo = c['Truck No '] || c['Truck No'] || c.truck_no || c.vehicleNo || c['Vehicle No'] || '';
+        const dbNo = String(rawNo).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+        return dbNo === normT;
       });
 
       const dbWheel = contact ? (
@@ -161,6 +164,8 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
         contact['Type of vehicle'] ||
         contact['type_of_vehicle'] ||
         contact.veh_type ||
+        contact.wheelType ||
+        contact.wheel_type ||
         ''
       ) : '';
 
@@ -173,13 +178,14 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
         contact['type_of_customers'] ||
         contact.cust_type ||
         contact.type ||
+        contact.relationshipType ||
         ''
       ) : '';
       let displayType = truckDisplayType(row); // fallback to trip logic
       if (dbCustType) {
         const upper = String(dbCustType).toUpperCase().trim();
-        if (upper === 'ATOA' || upper === 'ATO') displayType = 'ATOA';
-        else if (upper === 'MKT') displayType = 'MKT';
+        if (upper === 'ATOA' || upper === 'ATO' || upper.startsWith('ATO')) displayType = 'ATOA';
+        else if (upper === 'MKT' || upper === 'MKTA' || upper.startsWith('MKT')) displayType = 'MKT';
       }
 
       const commApp = contact ? (contact['Incentive Comission Appliciability '] || contact.incentive_commission_applicability || '') : '';
@@ -190,15 +196,40 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
       }
       commValue = commValue / 100;
 
+      const rawDedicated = contact ? (
+        contact.dedicated_type ||
+        contact.dedicatedType ||
+        contact['Dedicated Type'] ||
+        contact['Dedicated Type '] ||
+        contact.dedicated ||
+        ''
+      ) : '';
+      const isDedicated = String(rawDedicated).trim().toLowerCase() === 'dedicated';
+
+      let normWheel = 'OTHER';
+      const wheelRaw = String(dbWheel || row['WHEEL'] || '').toUpperCase();
+      if (wheelRaw.includes('6')) normWheel = '6WH';
+      else if (wheelRaw.includes('10')) normWheel = '10WH';
+      else if (wheelRaw.includes('12')) normWheel = '12WH';
+      else if (wheelRaw.includes('14')) normWheel = '14WH';
+
+      const isAtoaOrMktRel = (displayType === 'ATOA' || displayType === 'MKT');
+
       byTruck[truck] = {
         type: displayType,
         ownerName: row['OWNER NAME'] || owner || '',
         truckNo: truck,
-        wheel: row['WHEEL'] || dbWheel || '',
+        wheel: row['WHEEL'] || dbWheel || normWheel,
+        normWheel,
+        isDedicated,
+        isAtoaOrMkt: isAtoaOrMktRel,
+        contact,
         tripsCount: 0,
-        nvl: { invQty: 0, orgFreight: 0, amt: 0 },
-        nvcl: { invQty: 0, orgFreight: 0, amt: 0 },
+        seenInvoices: new Set(),
+        nvl: { invQty: 0, orgFreight: 0, amt: 0, sourceAmt: 0 },
+        nvcl: { invQty: 0, orgFreight: 0, amt: 0, sourceAmt: 0 },
         extra10W: 0,
+        extra6WPotential: 0,
         extra6W: 0,
         commission: 0,
         hasComm: String(commApp).toUpperCase().includes('YES'),
@@ -207,60 +238,171 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
     }
 
     const entry = byTruck[truck];
-    const cat = classifyRow(row);
-    const mt = num(row['MT']);
-    const billing = num(row['BILLING']);
-    const orgFreight = billing * mt;
 
-    // Track actual trip count (number of loading entries)
+    // Check dummy / incomplete entries
+    const isDummy = row.isDummy === true || row._isDummy === true || row._source === 'auto_dummy';
+    if (isDummy) continue;
+
+    const invNo = String(row['INVOICE NO'] || row['INVOICE NO.'] || '').trim().toUpperCase().replace(/\s+/g, '');
+    const shipmentNo = String(row['SHIPMENT NO'] || row['SHIPMENT NUMBER'] || '').trim();
+    const mt = num(row['MT']);
+    const billingRate = num(row['BILLING'] || row['BILLING RATE']);
+    const bAmt = num(row['Billing Amount'] || row['BILLING AMOUNT']);
+
+    if (mt === 0 && billingRate === 0 && bAmt === 0 && !invNo && !shipmentNo) continue;
+
+    if (
+      invNo.includes('DUMMY') ||
+      invNo.includes('CASHVOUCHER') ||
+      invNo === 'NOSLIP' ||
+      invNo === '-' ||
+      invNo === '—' ||
+      invNo === 'N/A' ||
+      invNo === 'NA'
+    ) {
+      continue;
+    }
+
+    // Deduplicate duplicate invoice references so trips and amounts are not double-counted
+    if (invNo) {
+      if (entry.seenInvoices.has(invNo)) {
+        continue;
+      }
+      entry.seenInvoices.add(invNo);
+    }
     entry.tripsCount += 1;
 
-    // Rule 1: 9.5% Base Incentive on all wheels/bills (SO/STO/NT)
-    const baseIncentive = orgFreight * 0.095;
+    const isAtoa = (entry.type === 'ATOA' || entry.type === 'ATO');
+
+    // Bill Freight for ATOA (from Cement Register)
+    let billFreight = billingRate > 0 && mt > 0 ? billingRate * mt : bAmt;
+    if (billFreight === 0 && billingRate > 0) billFreight = billingRate;
+
+    // Party Freight for MKT (from Cement Register)
+    let partyFreight = 0;
+    const storedPartyFreight = num(row['BILLING ER 95%'] || row['BILLING @ 95% (PARTY PAYABLE)']);
+    const storedPartyRateAmt = num(row['PARTY RATE AMOUNT'] || row['PARTY FREIGHT']);
+    const storedPartyRate = num(row['PARTY RATE (95-97%)'] || row['PARTY RATE (95%)'] || row['PARTY RATE']);
+    const storedAmount = num(row['AMOUNT']);
+
+    if (storedPartyFreight > 0) {
+      partyFreight = storedPartyFreight;
+    } else if (storedPartyRateAmt > 0) {
+      partyFreight = storedPartyRateAmt;
+    } else if (storedPartyRate > 0 && mt > 0) {
+      partyFreight = storedPartyRate * mt;
+    } else if (storedAmount > 0) {
+      partyFreight = storedAmount;
+    } else if (billFreight > 0) {
+      let comm = 0.05;
+      if (entry.contact) {
+        const rawComm = entry.contact.freight_commission ?? entry.contact._freight_commission ?? entry.contact['Basic Freight Commission'];
+        if (rawComm !== undefined && rawComm !== null && rawComm !== '') {
+          const cNum = num(rawComm);
+          comm = cNum > 1 ? cNum / 100 : cNum;
+        }
+      }
+      partyFreight = billFreight * (1 - comm);
+    }
+
+    // Source Freight:
+    // ATOA: Bill Freight | MKT: Party Freight
+    const sourceFreight = isAtoa ? billFreight : partyFreight;
+
+    const cat = classifyRow(row);
+    const rawDed = row['DEDICATED'] ?? row['Dedicated'] ?? row['dedicated'] ?? '';
+    const dedAmt = parseExcelNum(rawDed);
 
     if (cat === 'NVL') {
       entry.nvl.invQty = Math.round(entry.nvl.invQty + mt);
-      entry.nvl.orgFreight += orgFreight;
-      entry.nvl.amt += baseIncentive;
+      entry.nvl.orgFreight += sourceFreight;
+      if (dedAmt > 0) {
+        entry.nvl.sourceAmt += dedAmt;
+      }
     } else {
       entry.nvcl.invQty = Math.round(entry.nvcl.invQty + mt);
-      entry.nvcl.orgFreight += orgFreight;
-      entry.nvcl.amt += baseIncentive;
+      entry.nvcl.orgFreight += sourceFreight;
+      if (dedAmt > 0) {
+        entry.nvcl.sourceAmt += dedAmt;
+      }
     }
 
-    // Rule 2 & 3: Wheel Bonuses (Only on SO/NT)
-    const bType = (row['Bill Type'] || '').toUpperCase();
-    const isSoOrNt = bType === 'SO' || bType === 'NT';
+    // Rule 2: 10-Wheel Extra Incentive from first qualifying trip (SO + NT)
+    // Both conditions required: Bill Type = SO (NOT STO) AND NT classification
+    const bType = String(row['Bill Type'] || row['BILL TYPE'] || '').trim().toUpperCase();
+    const isSo = bType === 'SO';
+    const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
+    const isNt = row._is_nt_invoice === true || row._is_nt_invoice === 'true' ||
+                 row._source_nt_unloading === true || row._source_nt_unloading === 'true' ||
+                 ntWordRegex.test(String(row.classification || row.category || row.invoice_type_classification || '')) ||
+                 (row['EXTRA UNLOADING'] && parseExcelNum(row['EXTRA UNLOADING']) > 0) ||
+                 ntWordRegex.test(String(row['UNLOADING STATUS NOTE'] || row['UNLOADING STATUS'] || row.notes || ''));
+    const isSoAndNt = isSo && isNt;
 
     const manualW10 = num(row['10W EXTRA 8.5%']);
     if (manualW10 > 0) {
       entry.extra10W += manualW10;
-    } else if (isSoOrNt) {
-      const wheelStr = String(entry.wheel).toLowerCase();
-      if (wheelStr.includes('10')) {
-        entry.extra10W += orgFreight * 0.085;
-      }
+    } else if (entry.normWheel === '10WH' && entry.isAtoaOrMkt && isSoAndNt) {
+      const extra10Base = isAtoa ? billFreight : partyFreight;
+      entry.extra10W += extra10Base * 0.085;
     }
 
-    if (isSoOrNt) {
-      const wheelStr = String(entry.wheel).toLowerCase();
-      if (wheelStr.includes('6')) {
-        entry.extra6W += orgFreight * 0.15;
-      }
+    // Rule 3: 6-Wheel Extra Incentive (15% if 6WH + ATOA/MKT, requires >= 6 completed trips)
+    if (entry.normWheel === '6WH' && entry.isAtoaOrMkt) {
+      const extra6Base = isAtoa ? billFreight : partyFreight;
+      entry.extra6WPotential += extra6Base * 0.15;
     }
-
-    // Commission calculation moved to final aggregation (based on total incentive)
   }
+
   // 3. Final Aggregation with Achievement Criteria
   return Object.values(byTruck).map(t => {
-    const metCriteria = t.tripsCount > 6;
+    // Rule 1: Standard Incentive (Base NVL/NVCL)
+    // Eligible ONLY when ALL conditions are satisfied:
+    // 1. Vehicle is DEDICATED in Party Master
+    // 2. Relationship is ATOA or MKT
+    // 3. Completed required qualifying trips:
+    //    6WH: 10 trips | 10WH: 6 trips | 12WH: 6 trips | 14WH: 6 trips
+    let reqStandardTrips = null;
+    if (t.normWheel === '6WH') reqStandardTrips = 10;
+    else if (t.normWheel === '10WH' || t.normWheel === '12WH' || t.normWheel === '14WH') reqStandardTrips = 6;
 
-    // PERFORMANCE RULE: Base 9.5% incentive (NVL/NVCL) is always shown.
-    // However, 10W (8.5%) and 6W (15%) bonuses are ONLY paid if the truck makes > 6 trips.
-    if (!metCriteria) {
-      t.extra10W = 0;
+    const standardEligible = t.isAtoaOrMkt && t.isDedicated && reqStandardTrips !== null && t.tripsCount >= reqStandardTrips;
+
+    // Standard Dedicated Incentive Rate:
+    // ATOA (all wheels 6W, 10W, 12W, 14W): 9.5%
+    // MKT (12W & 14W): 9.5%
+    // MKT (6W & 10W): 8.5%
+    const isAtoa = (t.type === 'ATOA' || t.type === 'ATO');
+    let standardRate = 0.095;
+    if (!isAtoa && (t.normWheel === '6WH' || t.normWheel === '10WH')) {
+      standardRate = 0.085;
+    }
+
+    // Map source amounts / calculate standard incentive for display in NVL and NVCL columns:
+    // - For standard-eligible vehicles, preserve the authoritative calculation logic (orgFreight * standardRate).
+    // - For non-eligible vehicles, map authoritative non-zero source amounts from Cement Register ('DEDICATED').
+    // - Vehicles with no matching source amount retain 0 (rendered blank).
+    if (standardEligible) {
+      t.nvl.amt = t.nvl.orgFreight > 0 ? Math.round(t.nvl.orgFreight * standardRate) : (t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0);
+      t.nvcl.amt = t.nvcl.orgFreight > 0 ? Math.round(t.nvcl.orgFreight * standardRate) : (t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0);
+    } else {
+      t.nvl.amt = t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0;
+      t.nvcl.amt = t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0;
+    }
+
+    // Rule 3: 6-Wheel Extra Incentive
+    // Eligible when vehicle completes at least 6 qualifying trips (Dedicated NOT required)
+    const extra6WEligible = t.normWheel === '6WH' && t.isAtoaOrMkt && t.tripsCount >= 6;
+    if (extra6WEligible) {
+      t.extra6W = t.extra6WPotential;
+    } else {
       t.extra6W = 0;
     }
+
+    // Rule 2: 10-Wheel Extra Incentive
+    // Eligible from 1st qualifying SO+NT trip! No minimum trip threshold required. Dedicated not required.
+    // (Already accumulated only for qualifying SO+NT trips above).
+    const extra10WEligible = t.extra10W > 0;
 
     // Round the sub-amounts for visual consistency
     t.nvl.amt = Math.round(t.nvl.amt);
@@ -268,17 +410,25 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
     t.extra10W = Math.round(t.extra10W);
     t.extra6W = Math.round(t.extra6W);
 
+    // Total = NVL Sum of Amt + NVCL Sum Amt
     const nvlNvclTotal = t.nvl.amt + t.nvcl.amt;
-    const totalIncentiveWithBonus = nvlNvclTotal + t.extra10W + t.extra6W;
-    
+
+    // Total (Projected) = standard incentive + 10W extra + 6W extra
+    const totalFinal = nvlNvclTotal + t.extra10W + t.extra6W;
+
     // Incentive Commission Amount = Incentive Amount × (Incentive Commission % ÷ 100)
     if (t.hasComm) {
-      t.commission = Math.round(totalIncentiveWithBonus * num(t.commRate, 0.05));
+      t.commission = Math.round(totalFinal * num(t.commRate, 0.05));
     }
-    
-    const totalFinal = totalIncentiveWithBonus; // Final Settlement (Removed commission subtraction as per plan)
 
-    return { ...t, total: nvlNvclTotal, totalFinal };
+    return {
+      ...t,
+      standardEligible,
+      extra10WEligible,
+      extra6WEligible,
+      total: nvlNvclTotal,
+      totalFinal
+    };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.ownerName.localeCompare(b.ownerName));
 }
 
@@ -451,9 +601,9 @@ export function parseHeadlineInfo(headlineText) {
   const text = raw.toLowerCase().replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
 
   // Look for signature keywords in headline
-  const isDedicatedKeyword = text.includes('dedicated') || text.includes('dedi');
+  const isDedicatedKeyword = text.includes('dedicated') || text.includes('dedi') || text.includes('qualified') || text.includes('extra freight');
   const isExtraKeyword = text.includes('extra') || text.includes('8.5%') || text.includes('15%') || text.includes('10wh') || text.includes('10w') || text.includes('6wh') || text.includes('6w');
-  const isSiteKeyword = text.includes('nvl') || text.includes('nvcl') || text.includes('dispatch') || text.includes('wb so') || text.includes('so of');
+  const isSiteKeyword = text.includes('nvl') || text.includes('nvcl') || text.includes('dispatch') || text.includes('wb so') || text.includes('so of') || text.includes('plant') || text.includes('9214');
 
   if (!((isDedicatedKeyword || isExtraKeyword) && isSiteKeyword)) {
     return null;
@@ -462,7 +612,7 @@ export function parseHeadlineInfo(headlineText) {
   // Determine Category & Target Field
   // 1. Check NVCL vs NVL
   const isNVCL = text.includes('nvcl') || text.includes('mkt') || text.includes('market');
-  const isNVL = (text.includes('nvl') || text.includes('ato') || text.includes('atoa')) && !isNVCL;
+  const isNVL = (text.includes('nvl') || text.includes('ato') || text.includes('atoa') || text.includes('plant') || text.includes('9214')) && !isNVCL;
 
   // 2. Check 10WH vs 6WH vs Normal Dedicated
   const is10W = text.includes('10wh') || text.includes('10w') || text.includes('8.5%') || text.includes('10 wheel') || text.includes('10-wheel');
@@ -559,6 +709,26 @@ export function parseIncentiveWorkbook(wb, systemTrucks = []) {
   let globalDetectedMonthIndex = null;
   let globalDetectedYear = null;
   let globalDetectedFY = null;
+
+  const monthRegex = /(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember))[\s'_/-]*(\d{2,4})/i;
+  const mIdxMap = {
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+  };
+
+  // Inspect sheet names first for period
+  for (const s of wb.SheetNames) {
+    const m = s.match(monthRegex);
+    if (m) {
+      globalDetectedMonthIndex = mIdxMap[m[1].toLowerCase().slice(0, 3)];
+      let yNum = parseInt(m[2], 10);
+      globalDetectedYear = yNum < 100 ? 2000 + yNum : yNum;
+      globalDetectedFY = globalDetectedMonthIndex >= 3
+        ? `FY ${globalDetectedYear}–${String(globalDetectedYear + 1).slice(-2)}`
+        : `FY ${globalDetectedYear - 1}–${String(globalDetectedYear).slice(-2)}`;
+      break;
+    }
+  }
 
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
@@ -703,27 +873,34 @@ export function parseIncentiveWorkbook(wb, systemTrucks = []) {
     }
   }
 
-  // Construct actuals map: { [truckNo]: { nvl, nvcl, w10, w6, w10_nvl, w10_nvcl, w6_nvcl, w6_nvl } }
+  // Construct actuals map with difference field
   const actuals = {};
+  const truckDiffs = {};
+  const truckBreakdowns = {};
+
   normalizedRecords.forEach(rec => {
     const t = rec.truckNo;
-    if (!actuals[t]) {
-      actuals[t] = { nvl: '', nvcl: '', w10: '', w6: '', w10_nvl: 0, w10_nvcl: 0, w6_nvcl: 0, w6_nvl: 0 };
-    }
-    if (rec.targetField === 'nvl') {
-      actuals[t].nvl = rec.amount;
-    } else if (rec.targetField === 'nvcl') {
-      actuals[t].nvcl = rec.amount;
-    } else if (rec.targetField === 'w10') {
-      if (rec.subField === 'w10_nvl') actuals[t].w10_nvl = rec.amount;
-      if (rec.subField === 'w10_nvcl') actuals[t].w10_nvcl = rec.amount;
-      actuals[t].w10 = (Number(actuals[t].w10_nvl) || 0) + (Number(actuals[t].w10_nvcl) || 0);
-    } else if (rec.targetField === 'w6') {
-      if (rec.subField === 'w6_nvl') actuals[t].w6_nvl = rec.amount;
-      if (rec.subField === 'w6_nvcl') actuals[t].w6_nvcl = rec.amount;
-      actuals[t].w6 = (Number(actuals[t].w6_nvl) || 0) + (Number(actuals[t].w6_nvcl) || 0);
-    }
+    const diffVal = rec.differenceAmount !== undefined ? rec.differenceAmount : rec.amount;
+    truckDiffs[t] = (truckDiffs[t] || 0) + diffVal;
+    if (!truckBreakdowns[t]) truckBreakdowns[t] = [];
+    truckBreakdowns[t].push({
+      category: rec.category,
+      targetField: rec.targetField,
+      subField: rec.subField,
+      amount: diffVal
+    });
   });
+
+  for (const [t, diffSum] of Object.entries(truckDiffs)) {
+    actuals[t] = {
+      nvl: '',
+      nvcl: '',
+      w10: '',
+      w6: '',
+      difference: diffSum,
+      diffBreakdown: truckBreakdowns[t] || []
+    };
+  }
 
   // System trucks matching comparison
   const systemTruckSet = new Set((systemTrucks || []).map(st => extractTruckNo(st.truckNo)).filter(Boolean));
@@ -1089,7 +1266,7 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
     'TYPE', 'Owner Name', 'Truck No',
     'Sum of Inv Qty', 'Sum of ORG FREIGHT', 'Sum of Amt',
     'Sum of Inv Qty', 'Sum of ORG FREIGHT', 'Sum Amt',
-    'Total', '10W EXTRA 8.5%', 'TOTAL'
+    'Total', '10WH extra 8.5% incentive', '6WH extra 15% incentive', 'Total (Projected)'
   ];
   for (let i = 0; i < ourHeaders.length; i++) aoa[2][OUR_START_COL + i] = ourHeaders[i];
 
@@ -1140,7 +1317,8 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
       row[OUR_START_COL + 8] = Math.round(m.nvcl.amt) || 0;
       row[OUR_START_COL + 9] = Math.round(m.total) || 0;
       row[OUR_START_COL + 10] = Math.round(m.extra10W) || 0;
-      row[OUR_START_COL + 11] = Math.round(m.totalFinal) || 0;
+      row[OUR_START_COL + 11] = Math.round(m.extra6W) || 0;
+      row[OUR_START_COL + 12] = Math.round(m.totalFinal) || 0;
     }
   }
 
@@ -1161,13 +1339,14 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
       newRow[OUR_START_COL + 8] = Math.round(m.nvcl.amt) || 0;
       newRow[OUR_START_COL + 9] = Math.round(m.total) || 0;
       newRow[OUR_START_COL + 10] = Math.round(m.extra10W) || 0;
-      newRow[OUR_START_COL + 11] = Math.round(m.totalFinal) || 0;
+      newRow[OUR_START_COL + 11] = Math.round(m.extra6W) || 0;
+      newRow[OUR_START_COL + 12] = Math.round(m.totalFinal) || 0;
       aoa.push(newRow);
     }
   }
 
   const merges = [
-    { s: { r: 0, c: OUR_START_COL }, e: { r: 0, c: OUR_START_COL + 11 } },
+    { s: { r: 0, c: OUR_START_COL }, e: { r: 0, c: OUR_START_COL + 12 } },
     { s: { r: 1, c: OUR_START_COL + 3 }, e: { r: 1, c: OUR_START_COL + 5 } },
     { s: { r: 1, c: OUR_START_COL + 6 }, e: { r: 1, c: OUR_START_COL + 8 } },
     { s: { r: 1, c: OUR_START_COL + 0 }, e: { r: 2, c: OUR_START_COL + 0 } },
@@ -1175,7 +1354,8 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
     { s: { r: 1, c: OUR_START_COL + 2 }, e: { r: 2, c: OUR_START_COL + 2 } },
     { s: { r: 1, c: OUR_START_COL + 9 }, e: { r: 2, c: OUR_START_COL + 9 } },
     { s: { r: 1, c: OUR_START_COL + 10 }, e: { r: 2, c: OUR_START_COL + 10 } },
-    { s: { r: 1, c: OUR_START_COL + 11 }, e: { r: 2, c: OUR_START_COL + 11 } }
+    { s: { r: 1, c: OUR_START_COL + 11 }, e: { r: 2, c: OUR_START_COL + 11 } },
+    { s: { r: 1, c: OUR_START_COL + 12 }, e: { r: 2, c: OUR_START_COL + 12 } }
   ];
 
   // 4. Map of normalizedTruckNo -> Array<{ rowIndex, row }>
@@ -1493,8 +1673,10 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
     const act = (typeof rawAct === 'object' && rawAct !== null)
       ? (num(rawAct.nvl) + num(rawAct.nvcl) + num(rawAct.w10) + num(rawAct.w6))
       : (parseFloat(rawAct) || 0);
-    const diff = act - t.totalFinal;
-    const settled = (act > 0 && act > t.totalFinal) ? t.totalFinal : act;
+    const hasImportedDiff = rawAct && typeof rawAct === 'object' && rawAct.difference !== undefined && rawAct.difference !== null && rawAct.difference !== '';
+    const diff = hasImportedDiff ? Number(rawAct.difference) : (act - t.totalFinal);
+    const effectiveActual = hasImportedDiff ? (t.totalFinal + Number(rawAct.difference)) : act;
+    const settled = (effectiveActual > 0 && effectiveActual > t.totalFinal) ? t.totalFinal : (effectiveActual > 0 ? effectiveActual : 0);
     aoa.push([
       t.type,
       t.ownerName,
@@ -1509,7 +1691,7 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
       t.total || 0,
       t.extra10W ? Math.round(t.extra10W) : 0,
       t.totalFinal || 0,
-      act || 0,
+      effectiveActual || 0,
       diff || 0,
       settled || 0
     ]);
@@ -1530,9 +1712,13 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
     const act = (typeof rawAct === 'object' && rawAct !== null)
       ? (num(rawAct.nvl) + num(rawAct.nvcl) + num(rawAct.w10) + num(rawAct.w6))
       : (parseFloat(rawAct) || 0);
-    acc.actual += act;
-    acc.diff += act - t.totalFinal;
-    acc.settled += (act > 0 && act > t.totalFinal) ? t.totalFinal : act;
+    const hasImportedDiff = rawAct && typeof rawAct === 'object' && rawAct.difference !== undefined && rawAct.difference !== null && rawAct.difference !== '';
+    const diff = hasImportedDiff ? Number(rawAct.difference) : (act - t.totalFinal);
+    const effectiveActual = hasImportedDiff ? (t.totalFinal + Number(rawAct.difference)) : act;
+    const settled = (effectiveActual > 0 && effectiveActual > t.totalFinal) ? t.totalFinal : (effectiveActual > 0 ? effectiveActual : 0);
+    acc.actual += effectiveActual;
+    acc.diff += diff;
+    acc.settled += settled;
     return acc;
   }, { nvlQty: 0, nvlFreight: 0, nvlAmt: 0, nvclQty: 0, nvclFreight: 0, nvclAmt: 0, total: 0, w10: 0, grand: 0, actual: 0, diff: 0, settled: 0 });
 
@@ -1618,6 +1804,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   const [comparisonModalOpen, setComparisonModalOpen] = useState(false);
   const [uploadSummaryModalOpen, setUploadSummaryModalOpen] = useState(false);
   const [uploadSummaryData, setUploadSummaryData] = useState(null);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [importingExcel, setImportingExcel] = useState(false);
   const [mailNvlTotal, setMailNvlTotal] = useState('');
   const [mailW10Total, setMailW10Total] = useState('');
@@ -1817,6 +2004,42 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     }
   };
 
+  // ── Authoritative Callback for Redesigned Upload Dialog ─────────────────────
+  const handleConfirmExcelImport = ({
+    targetYear,
+    targetMonth,
+    newActuals,
+    normalizedRecords,
+    uploadSummary,
+    excelName,
+    excelData
+  }) => {
+    // If target period is different from currently active view, align UI view
+    if (targetYear !== year || targetMonth !== month) {
+      setYear(targetYear);
+      setMonth(targetMonth);
+      if (onPeriodChange) onPeriodChange(targetYear, targetMonth + 1);
+    }
+
+    // Merge imported vehicle difference records into actuals state
+    setActuals(prev => ({
+      ...prev,
+      ...newActuals
+    }));
+    setUploadedExcelName(excelName);
+    setUploadedExcelData(excelData);
+    setUploadSummaryData(uploadSummary);
+    setHasNewUpload(true);
+    setPendingExcelRemoval(false);
+    setSaveCompleted(false);
+    setUploadDialogOpen(false);
+
+    setSnack({
+      severity: 'success',
+      msg: `Excel imported: ${uploadSummary.matchedCount} vehicles updated (Total Difference: ₹${Math.round(uploadSummary.totalDifference || 0).toLocaleString('en-IN')}). Click SAVE to persist.`
+    });
+  };
+
   // Auto-initialize month/year based on latest record date if not provided
   useEffect(() => {
     if ((year === undefined || month === undefined) && rows && rows.length > 0) {
@@ -1881,11 +2104,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           setSaveCompleted(!!st.excelName);
           setHasNewUpload(false);
           setPendingExcelRemoval(false);
-          if (st.excelData && st.excelData.length > 0) {
-            setComparisonModalOpen(true);
-          } else {
-            setComparisonModalOpen(false);
-          }
+          setComparisonModalOpen(false);
         } else {
           setActuals({});
           setDbActuals({});
@@ -2413,9 +2632,9 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 <Button
                   size="small"
                   variant="outlined"
-                  component="label"
                   startIcon={importingExcel ? <CircularProgress size={14} color="inherit" /> : <UploadIcon />}
                   disabled={importingExcel}
+                  onClick={() => setUploadDialogOpen(true)}
                   sx={{
                     fontWeight: 700,
                     borderRadius: 2,
@@ -2429,7 +2648,6 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                   }}
                 >
                   {importingExcel ? 'Importing Excel…' : 'Upload Incentive Excel'}
-                  <input type="file" accept=".xls,.xlsx" hidden onChange={(e) => handleExcelUpload(e.target.files[0])} />
                 </Button>
 
                 {/* Staged unsaved removal indicator chip */}
@@ -2456,9 +2674,9 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
               <Button
                 size="small"
                 variant="outlined"
-                component="label"
                 startIcon={importingExcel ? <CircularProgress size={14} color="inherit" /> : <UploadIcon />}
                 disabled={importingExcel}
+                onClick={() => setUploadDialogOpen(true)}
                 sx={{
                   fontWeight: 700,
                   borderRadius: 2,
@@ -2473,7 +2691,6 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 }}
               >
                 {importingExcel ? 'Importing Excel…' : 'Upload Incentive Excel'}
-                <input type="file" accept=".xls,.xlsx" hidden onChange={(e) => handleExcelUpload(e.target.files[0])} />
               </Button>
             )}
           </Box>
@@ -2602,6 +2819,27 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           </Box>
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Button
+              fullWidth
+              size="small"
+              variant="outlined"
+              startIcon={<UploadIcon sx={{ fontSize: 16 }} />}
+              onClick={() => {
+                setExcelFileAnchorEl(null);
+                setUploadDialogOpen(true);
+              }}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 700,
+                fontSize: '11.5px',
+                borderRadius: 1.5,
+                borderColor: '#cbd5e1',
+                color: '#334155',
+                '&:hover': { bgcolor: '#f1f5f9' }
+              }}
+            >
+              Replace / Re-upload Excel
+            </Button>
             <Typography variant="caption" sx={{ color: '#64748b', fontSize: '10.5px' }}>
               Clicking Remove will detach this Excel in the current unsaved state. Click <b>SAVE</b> afterwards to commit.
             </Typography>
@@ -2785,12 +3023,24 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                       placeholder="0"
                     />
                   </td>
-                  <td style={{ ...tdBase, fontWeight: 800, color: (getTotalActual(t.truckNo) - t.totalFinal) < 0 ? '#b91c1c' : '#047857', background: 'rgba(251,207,232,0.3)' }}>
-                    {fmt(getTotalActual(t.truckNo) - t.totalFinal)}
-                  </td>
-                  <td style={{ ...tdBase, fontWeight: 800, color: '#4338ca', background: 'rgba(224,231,255,0.4)' }}>
-                    {fmt(getTotalActual(t.truckNo) > t.totalFinal ? t.totalFinal : getTotalActual(t.truckNo))}
-                  </td>
+                  {(() => {
+                    const rawAct = actuals[t.truckNo];
+                    const hasImportedDiff = rawAct && typeof rawAct === 'object' && rawAct.difference !== undefined && rawAct.difference !== null && rawAct.difference !== '';
+                    const totalAct = getTotalActual(t.truckNo);
+                    const diffVal = hasImportedDiff ? Number(rawAct.difference) : (totalAct - t.totalFinal);
+                    const effectiveActual = hasImportedDiff ? (t.totalFinal + Number(rawAct.difference)) : totalAct;
+                    const settledVal = (effectiveActual > 0 && effectiveActual > t.totalFinal) ? t.totalFinal : (effectiveActual > 0 ? effectiveActual : 0);
+                    return (
+                      <>
+                        <td style={{ ...tdBase, fontWeight: 800, color: diffVal < 0 ? '#b91c1c' : '#047857', background: 'rgba(251,207,232,0.3)' }}>
+                          {fmt(diffVal)}
+                        </td>
+                        <td style={{ ...tdBase, fontWeight: 800, color: '#4338ca', background: 'rgba(224,231,255,0.4)' }}>
+                          {fmt(settledVal)}
+                        </td>
+                      </>
+                    );
+                  })()}
                 </tr>
               ))}
 
@@ -2812,8 +3062,15 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                   totalActualNVCL += actNVCL;
                   totalActual10WH += act10WH;
                   totalActual6WH += act6WH;
-                  totalDiff += (totalAct - t.totalFinal);
-                  totalSettled += (totalAct > t.totalFinal ? t.totalFinal : totalAct);
+
+                  const rawAct = actuals[t.truckNo];
+                  const hasImportedDiff = rawAct && typeof rawAct === 'object' && rawAct.difference !== undefined && rawAct.difference !== null && rawAct.difference !== '';
+                  const diffVal = hasImportedDiff ? Number(rawAct.difference) : (totalAct - t.totalFinal);
+                  const effectiveActual = hasImportedDiff ? (t.totalFinal + Number(rawAct.difference)) : totalAct;
+                  const settledVal = (effectiveActual > 0 && effectiveActual > t.totalFinal) ? t.totalFinal : (effectiveActual > 0 ? effectiveActual : 0);
+
+                  totalDiff += diffVal;
+                  totalSettled += settledVal;
                 });
                 return (
                   <tr style={{ background: '#e2e8f0', borderTop: '2px solid #475569', position: 'sticky', bottom: 0, zIndex: 15 }}>
@@ -3470,6 +3727,17 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           </Alert>
         )}
       </Snackbar>
+
+      {/* ── Redesigned Upload Incentive Excel Dialog ── */}
+      <UploadIncentiveExcelDialog
+        open={uploadDialogOpen}
+        onClose={() => setUploadDialogOpen(false)}
+        initialMonth={month}
+        initialYear={year}
+        years={years || [2024, 2025, 2026, 2027, 2028]}
+        systemVehicles={data}
+        onConfirmImport={handleConfirmExcelImport}
+      />
     </Box>
   );
 }

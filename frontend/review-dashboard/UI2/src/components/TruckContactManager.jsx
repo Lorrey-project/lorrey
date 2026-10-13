@@ -28,7 +28,18 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import axios from 'axios';
 import { API_URL } from '../config';
-import { normalizeDate, formatDateToDDMMYYYY, getEffectivePartyMaster } from '../utils/partyMasterHelper';
+import {
+  normalizeDate,
+  formatDateToDDMMYYYY,
+  getEffectivePartyMaster,
+  parseBasicFreightCommission,
+  parseIncentiveCommission,
+  isAtoaRelationship,
+  normalizeWheelType,
+  is6Wheel,
+  is10or12or14Wheel,
+  isMktRelationship
+} from '../utils/partyMasterHelper';
 
 function TabPanel({ value, index, children }) {
   return value === index ? <Box>{children}</Box> : null;
@@ -138,7 +149,15 @@ export default function TruckContactManager({ open, onClose }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyContact, setHistoryContact] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const userRole = localStorage.getItem('role') || 'Site';
+  const storedUserStr = localStorage.getItem('user');
+  let currentRole = localStorage.getItem('role') || '';
+  try {
+    if (!currentRole && storedUserStr) {
+      const parsed = JSON.parse(storedUserStr);
+      currentRole = parsed.role || '';
+    }
+  } catch (e) {}
+  const isHeadOffice = !currentRole || /^(HEAD_OFFICE|Head-office|Head Office|ADMIN|Admin|OFFICE|Office)$/i.test(currentRole);
   const [docs, setDocs] = useState([
     { id: 'pan', label: 'PAN Card Copy', status: 'Pending' },
     { id: 'aadhar', label: 'Aadhar Card Copy', status: 'Pending' },
@@ -152,8 +171,20 @@ export default function TruckContactManager({ open, onClose }) {
     { id: 'np', label: 'NP (National Permit) Copy', status: 'Pending' },
     { id: 'driverPan', label: 'Driver PAN Card Copy', status: 'Pending' },
     { id: 'driverAadhar', label: 'Driver Aadhar Copy', status: 'Pending' },
-    { id: 'driverBank', label: 'Driver Bank Passbook / Cheque', status: 'Pending' },
   ]);
+
+  const fetchMktTripCount = async (truckNo) => {
+    if (!truckNo || !String(truckNo).trim()) return 0;
+    try {
+      const res = await axios.get(`${API_URL}/truck-contacts/mkt-trips/${encodeURIComponent(String(truckNo).trim())}`);
+      if (res.data && res.data.success) {
+        return res.data.tripCount || 0;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch MKT trip count:', e.message);
+    }
+    return 0;
+  };
 
   useEffect(() => {
     if (open) {
@@ -164,7 +195,7 @@ export default function TruckContactManager({ open, onClose }) {
       setEditId(null);
       setDocs(prev => prev.map(d => ({ ...d, status: 'Pending', url: undefined, fileName: undefined })));
       fetchContacts();
-      if (userRole === 'Head-office') fetchApprovals();
+      if (isHeadOffice) fetchApprovals();
     }
   }, [open]);
 
@@ -319,28 +350,134 @@ export default function TruckContactManager({ open, onClose }) {
         }
       });
 
-      if (userRole !== 'Head-office') {
-        // Site / SAS User: Submit Request
-        await axios.post(`${API_URL}/truck-contacts/request`, payload);
-        setSnack({ type: 'success', message: 'Registration request sent for Head Office approval!' });
-      } else {
-        // Head Office User: Save Directly
-        if (editId) {
+      const isAtoa = isAtoaRelationship({ custType: form.custType }) || isAtoaRelationship(payload);
+      const isMkt = isMktRelationship({ custType: form.custType }) || isMktRelationship(payload);
+      const normWheel = normalizeWheelType(form.wheelType || payload.wheel_type || payload.wheelType);
+
+      const rawComm = (form.basicFreightComm !== undefined && form.basicFreightComm !== null && String(form.basicFreightComm).trim() !== '')
+        ? form.basicFreightComm
+        : (isAtoa && !editId ? 0.05 : (isMkt && !editId ? 0.05 : form.basicFreight));
+
+      if (rawComm !== undefined && rawComm !== null && String(rawComm).trim() !== '') {
+        const commParsed = parseBasicFreightCommission(rawComm);
+        const commVal = (commParsed !== null && commParsed !== undefined) ? commParsed : (parseFloat(rawComm) || 0);
+        payload['basic_freight_commission'] = commVal;
+        payload['basicFreightCommission'] = commVal;
+        payload['BASIC FREIGHT COMMISSION'] = commVal;
+        payload['Basic Freight Commission'] = commVal;
+        payload['Basic Freight Commission '] = commVal;
+        payload['Basic Freight Comission Applicability '] = commVal;
+        payload['Basic Freight Comission Applicability'] = commVal;
+        payload['Basic Freight Comission Appliciability'] = commVal;
+        payload['Basic Freight Comission Appliciability '] = commVal;
+        payload['basic_freight_commission_applicability'] = commVal;
+      } else if (isAtoa || (isMkt && is10or12or14Wheel(normWheel))) {
+        const commVal = 0.05;
+        payload['basic_freight_commission'] = commVal;
+        payload['basicFreightCommission'] = commVal;
+        payload['BASIC FREIGHT COMMISSION'] = commVal;
+        payload['Basic Freight Commission'] = commVal;
+        payload['Basic Freight Commission '] = commVal;
+        payload['Basic Freight Comission Applicability '] = commVal;
+        payload['Basic Freight Comission Applicability'] = commVal;
+        payload['Basic Freight Comission Appliciability'] = commVal;
+        payload['Basic Freight Comission Appliciability '] = commVal;
+        payload['basic_freight_commission_applicability'] = commVal;
+      } else if (isMkt && is6Wheel(normWheel)) {
+        const commVal = 0.05;
+        payload['basic_freight_commission'] = commVal;
+        payload['basicFreightCommission'] = commVal;
+        payload['BASIC FREIGHT COMMISSION'] = commVal;
+        payload['Basic Freight Commission'] = commVal;
+        payload['Basic Freight Commission '] = commVal;
+        payload['Basic Freight Comission Applicability '] = commVal;
+        payload['Basic Freight Comission Applicability'] = commVal;
+        payload['Basic Freight Comission Appliciability'] = commVal;
+        payload['Basic Freight Comission Appliciability '] = commVal;
+        payload['basic_freight_commission_applicability'] = commVal;
+      }
+
+      const rawIncentiveComm = (form.incentiveCommVal !== undefined && form.incentiveCommVal !== null && String(form.incentiveCommVal).trim() !== '')
+        ? form.incentiveCommVal
+        : (isAtoa && !editId ? 0.00 : (isMkt && !editId ? (is6Wheel(normWheel) ? 0.07 : 0.05) : form.incentiveComm));
+
+      if (rawIncentiveComm !== undefined && rawIncentiveComm !== null && String(rawIncentiveComm).trim() !== '') {
+        const incParsed = parseIncentiveCommission(rawIncentiveComm);
+        const incVal = (incParsed !== null && incParsed !== undefined) ? incParsed : (parseFloat(rawIncentiveComm) || 0);
+        payload['incentive_commission'] = incVal;
+        payload['incentiveCommission'] = incVal;
+        payload['INCENTIVE COMMISSION'] = incVal;
+        payload['Incentive Commission'] = incVal;
+        payload['Incentive Commission '] = incVal;
+        payload['Incentive Comission Applicability '] = incVal;
+        payload['Incentive Comission Applicability'] = incVal;
+        payload['Incentive Commission Applicability '] = incVal;
+        payload['Incentive Commission Applicability'] = incVal;
+        payload['Incentive Comission Appliciability'] = incVal;
+        payload['Incentive Comission Appliciability '] = incVal;
+        payload['incentive_commission_applicability'] = incVal;
+      } else if (isAtoa) {
+        const incVal = 0.00;
+        payload['incentive_commission'] = incVal;
+        payload['incentiveCommission'] = incVal;
+        payload['INCENTIVE COMMISSION'] = incVal;
+        payload['Incentive Commission'] = incVal;
+        payload['Incentive Commission '] = incVal;
+        payload['Incentive Comission Applicability '] = incVal;
+        payload['Incentive Comission Applicability'] = incVal;
+        payload['Incentive Commission Applicability '] = incVal;
+        payload['Incentive Commission Applicability'] = incVal;
+        payload['Incentive Comission Appliciability'] = incVal;
+        payload['Incentive Comission Appliciability '] = incVal;
+        payload['incentive_commission_applicability'] = incVal;
+      } else if (isMkt) {
+        const incVal = is6Wheel(normWheel) ? 0.07 : 0.05;
+        payload['incentive_commission'] = incVal;
+        payload['incentiveCommission'] = incVal;
+        payload['INCENTIVE COMMISSION'] = incVal;
+        payload['Incentive Commission'] = incVal;
+        payload['Incentive Commission '] = incVal;
+        payload['Incentive Comission Applicability '] = incVal;
+        payload['Incentive Comission Applicability'] = incVal;
+        payload['Incentive Commission Applicability '] = incVal;
+        payload['Incentive Commission Applicability'] = incVal;
+        payload['Incentive Comission Appliciability'] = incVal;
+        payload['Incentive Comission Appliciability '] = incVal;
+        payload['incentive_commission_applicability'] = incVal;
+      }
+
+      if (editId) {
+        if (isHeadOffice) {
           const res = await axios.put(`${API_URL}/truck-contacts/${editId}`, payload);
-          if (res.data.success) setSnack({ type: 'success', message: 'Effective version saved successfully!' });
+          if (res.data.success) setSnack({ type: 'success', message: 'Contact updated and saved successfully!' });
         } else {
+          await axios.post(`${API_URL}/truck-contacts/request`, {
+            ...payload,
+            existingContactId: editId,
+            requestType: 'Edit Profile'
+          });
+          setSnack({ type: 'success', message: 'Edit request sent for Head Office approval!' });
+        }
+      } else {
+        // New Profile
+        if (isHeadOffice) {
           const res = await axios.post(`${API_URL}/truck-contacts`, payload);
           if (res.data.success) setSnack({ type: 'success', message: 'New Profile registered successfully!' });
+        } else {
+          await axios.post(`${API_URL}/truck-contacts/request`, payload);
+          setSnack({ type: 'success', message: 'Registration request sent for Head Office approval!' });
         }
       }
 
       setForm({});
       setEditId(null);
-      fetchContacts();
-      if (userRole === 'Head-office') fetchApprovals();
-      setTab(userRole === 'Head-office' ? 2 : 0); // Open existing contacts for HO, or stay for Site
-    } catch {
-      setSnack({ type: 'error', message: 'Failed to save.' });
+      await fetchContacts();
+      if (isHeadOffice) fetchApprovals();
+      setTab(2); // Always return to Existing Contacts so user immediately sees the saved record
+    } catch (error) {
+      console.error("Save failed:", error);
+      const msg = error.response?.data?.error || error.message || 'Failed to save.';
+      setSnack({ type: 'error', message: msg });
     } finally {
       setSaving(false);
     }
@@ -383,7 +520,11 @@ export default function TruckContactManager({ open, onClose }) {
       panAadharLink: getStr(c["PAN Addahar Link "], c.pan_aadhar_link),
       nilTds: getStr(c["NIL TDS Declaration "], c.nil_tds_declaration),
       tdsApp: getStr(c["TDS Applicability "], c.tds_applicability),
-      basicFreight: getStr(c["Basic Freight Comission Applicability "], c.basic_freight_commission_applicability),
+      basicFreight: (() => {
+        const p = parseBasicFreightCommission(c);
+        if (p !== null && p !== undefined) return String(p);
+        return getStr(c["Basic Freight Comission Applicability "], c["Basic Freight Comission Appliciability"], c["Basic Freight Commission"], c.basic_freight_commission, c.basic_freight_commission_applicability);
+      })(),
       incentiveComm: getStr(c["Incentive Comission Appliciability "], c.incentive_commission_applicability),
       gstType: getStr(c["GST TYPE "], c.gst_type),
       gstNo: getStr(c["GST NO "], c.gst_no),
@@ -407,13 +548,42 @@ export default function TruckContactManager({ open, onClose }) {
       driverBankAcc: getStr(c["Driver Bank Account No "], c.driver_bank_acc),
       driverIfsc: getStr(c["Driver IFSC Code "], c.driver_ifsc),
       driverPanAadharLink: getStr(c["Driver PAN Aadhar Link "], c.driver_pan_aadhar_link),
-      basicFreightComm: getStr(c.basic_freight_commission, c["basic_freight_commission "]),
-      incentiveCommVal: getStr(c.incentive_commission, c["incentive_commission "]),
+      basicFreightComm: (() => {
+        const p = parseBasicFreightCommission(c);
+        if (p !== null && p !== undefined) return String(p);
+        return getStr(c.basic_freight_commission, c["basic_freight_commission "], c["BASIC FREIGHT COMMISSION"], c["Basic Freight Commission"], c["Basic Freight Commission "], c["Basic Freight Comission Applicability "], c["Basic Freight Comission Appliciability"], c.basic_freight_commission_applicability);
+      })(),
+      incentiveCommVal: (() => {
+        const p = parseIncentiveCommission(c);
+        if (p !== null && p !== undefined) return String(p);
+        return getStr(c.incentive_commission, c["incentive_commission "], c["INCENTIVE COMMISSION"], c["Incentive Commission"], c["Incentive Commission "], c["Incentive Comission Applicability "], c["Incentive Comission Applicability"], c["Incentive Commission Applicability "], c["Incentive Commission Applicability"], c["Incentive Comission Appliciability"], c["Incentive Comission Appliciability "], c.incentive_commission_applicability, c.incentiveCommVal);
+      })(),
       gstDocs: Array.isArray(c.gst_documents) ? c.gst_documents : [],
     });
     setEditId(c._id);
     setTab(0);
     setFormTab(0);
+
+    const contactCustType = getStr(c["TYPE OF CUSTOMER "], c["TYPE OF CUSTOMER"], c.type_of_customer, c.relationshipType, c.custType, c.type) || 'MKT';
+    const contactWheelType = getStr(c.wheel_type, c.wheelType, c["Wheel Type "], c["Type of vehicle "], c["Type of vehicle"]) || '10WH';
+    const contactTruckNo = getStr(c["Truck No "], c["Truck No"], c.truck_no);
+
+    if (isMktRelationship({ custType: contactCustType }) && is6Wheel(contactWheelType) && contactTruckNo) {
+      fetchMktTripCount(contactTruckNo).then(cnt => {
+        if (cnt >= 6) {
+          setForm(curr => {
+            if (isMktRelationship({ custType: curr.custType }) && is6Wheel(curr.wheelType)) {
+              return {
+                ...curr,
+                basicFreightComm: '0.07',
+                incentiveCommVal: '0.07'
+              };
+            }
+            return curr;
+          });
+        }
+      });
+    }
     
     setDocs(prevDocs => prevDocs.map(d => {
       const url = c[`doc_url_${d.id}`];
@@ -493,6 +663,48 @@ export default function TruckContactManager({ open, onClose }) {
       if (field === 'gstType' && val === 'URD (Unregistered)') {
         updated.gstNo = '';
         updated.gstPercent = '';
+      }
+      if (field === 'custType') {
+        const isAtoa = String(val || '').trim().toUpperCase() === 'ATOA' || String(val || '').trim().toUpperCase() === 'ATO';
+        if (isAtoa) {
+          updated.basicFreightComm = '0.05';
+          updated.incentiveCommVal = '0.00';
+        }
+      }
+
+      const effCustType = field === 'custType' ? val : updated.custType;
+      const effWheelType = field === 'wheelType' ? val : updated.wheelType;
+      const effTruckNo = field === 'truckNo' ? val : updated.truckNo;
+
+      if (isMktRelationship({ custType: effCustType })) {
+        const normWheel = normalizeWheelType(effWheelType);
+        if (is10or12or14Wheel(normWheel)) {
+          if (field === 'custType' || field === 'wheelType') {
+            updated.basicFreightComm = '0.05';
+            updated.incentiveCommVal = '0.05';
+          }
+        } else if (is6Wheel(normWheel)) {
+          if (field === 'custType' || field === 'wheelType') {
+            updated.incentiveCommVal = '0.07';
+            if (!updated.basicFreightComm || (field === 'custType' && prev.custType !== val) || (field === 'wheelType' && prev.wheelType !== val)) {
+              updated.basicFreightComm = '0.05';
+            }
+          }
+          if (effTruckNo && (field === 'custType' || field === 'wheelType' || field === 'truckNo')) {
+            fetchMktTripCount(effTruckNo).then(cnt => {
+              setForm(current => {
+                if (isMktRelationship({ custType: current.custType }) && is6Wheel(current.wheelType)) {
+                  return {
+                    ...current,
+                    basicFreightComm: cnt >= 6 ? '0.07' : (current.basicFreightComm || '0.05'),
+                    incentiveCommVal: '0.07'
+                  };
+                }
+                return current;
+              });
+            });
+          }
+        }
       }
       return updated;
     });
@@ -841,7 +1053,7 @@ export default function TruckContactManager({ open, onClose }) {
             <Tab icon={<AddCircleOutlineIcon sx={{ fontSize: 18 }} />} iconPosition="start" label={editId ? 'Edit Contact' : 'Add New Contact'} />
             <Tab icon={<BadgeIcon sx={{ fontSize: 18 }} />} iconPosition="start" label="Temp Driver Assign" />
             <Tab icon={<ListAltIcon sx={{ fontSize: 18 }} />} iconPosition="start" label={`Existing Contacts (${contacts.length})`} />
-            {userRole === 'Head-office' && (
+            {isHeadOffice && (
               <Tab
                 icon={<ReceiptIcon sx={{ fontSize: 18 }} />} iconPosition="start"
                 label={`Approvals (${approvals.length})`}
@@ -1406,8 +1618,14 @@ export default function TruckContactManager({ open, onClose }) {
                             const contactNo = getStr(c["Contact No."], c["Contact No. "], c["Contact No"], c.contact_no);
                             const driverContactNo = getStr(c["DRIVER CONTACT"], c["Driver Contact No "], c["Driver Contact No"], c.driver_contact, c.driver_contact_no, c.driver_contact_number);
                             const tds = getStr(c["TDS Applicability"], c["TDS Applicability "], c["NIL TDS Declaration"], c["NIL TDS Declaration "], c.tds_applicability, c.nil_tds_declaration, c.tdsApp, c.nilTds);
-                            const basicFreightComm = getStr(c["Basic Freight Comission Appliciability"], c["Basic Freight Comission Applicability "], c.basic_freight_commission, c.basicFreightComm);
-                            const incentiveComm = getStr(c["Incentive Comission Appliciability"], c["Incentive Comission Applicability "], c.incentive_commission, c.incentiveCommVal);
+                            const parsedComm = parseBasicFreightCommission(c);
+                            const basicFreightComm = (parsedComm !== null && parsedComm !== undefined)
+                              ? String(parsedComm)
+                              : (getStr(c.basic_freight_commission, c["basic_freight_commission "], c["BASIC FREIGHT COMMISSION"], c["Basic Freight Commission"], c["Basic Freight Comission Applicability "], c["Basic Freight Comission Appliciability"], c.basicFreightComm) || '-');
+                            const parsedIncComm = parseIncentiveCommission(c);
+                            const incentiveComm = (parsedIncComm !== null && parsedIncComm !== undefined)
+                              ? String(parsedIncComm)
+                              : (getStr(c["Incentive Comission Appliciability"], c["Incentive Comission Applicability "], c["Incentive Commission"], c["Incentive Commission "], c.incentive_commission, c.incentiveCommVal) || '-');
                             const gstNo = getStr(c["GST NO"], c["GST NO "], c["GST No"], c["GST No "], c.gst_no, c.gstNo);
                             const rcValidity = getStr(c["RC Validity"], c["RC Validity "], c.rc_validity, c.rcValidity);
                             const insValidity = getStr(c["Insurance Validity"], c["Insurance Validity "], c.insurance_validity, c.insuranceValidity);
@@ -1437,7 +1655,7 @@ export default function TruckContactManager({ open, onClose }) {
                                 <TableCell>{driverContactNo}</TableCell>
                                 <TableCell>{tds}</TableCell>
                                 <TableCell sx={{ fontWeight: 700, color: '#166534' }}>{basicFreightComm}</TableCell>
-                                <TableCell>{incentiveComm}</TableCell>
+                                <TableCell sx={{ fontWeight: 700, color: '#166534' }}>{incentiveComm}</TableCell>
                                 <TableCell>{gstNo}</TableCell>
                                 <TableCell>{rcValidity}</TableCell>
                                 <TableCell>{insValidity}</TableCell>
@@ -1471,7 +1689,7 @@ export default function TruckContactManager({ open, onClose }) {
             </TabPanel>
 
             {/* ── TAB 3: APPROVALS QUEUE (Head Office Only) ── */}
-            {userRole === 'Head-office' && (
+            {isHeadOffice && (
               <TabPanel value={tab} index={3}>
                 <Box sx={{ p: 3 }}>
                   <Box mb={3} display="flex" justifyContent="space-between" alignItems="center">

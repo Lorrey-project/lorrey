@@ -17,6 +17,9 @@ const partyPaymentSchema = new mongoose.Schema({
   },
   // Manual Entries
   gstFcm: { type: Number, default: 0 },
+  gstFcm_manual: { type: Boolean, default: false },
+  gstFcmInvoices: { type: Array, default: [] },
+  gstFcm_source: { type: String, default: '' },
   withholdAmount: { type: Number, default: 0 },
   withholdReason: { type: String, default: '' },
   otherReason: { type: String, default: '' },

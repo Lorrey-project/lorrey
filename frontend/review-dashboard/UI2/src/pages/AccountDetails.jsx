@@ -82,31 +82,148 @@ const COLUMNS = [
   { key: 'Remittance Copy', label: 'REMITTANCE\nCOPY', width: 150 },
 ];
 
+export const getUniqueUpperOptions = (...arrays) => {
+  const seen = new Set();
+  const res = [];
+  arrays.forEach(arr => {
+    (arr || []).forEach(item => {
+      if (!item) return;
+      let clean = String(item).trim().toUpperCase();
+      if (clean === 'MONOJ BANDHAN') clean = 'MANOJ BANDHAN';
+      if (clean === 'OTHERS_CREDITOR') clean = 'OTHERS CREDITOR';
+      if (clean === 'OFFICE EXP' || clean === 'OFFICE EXP.' || clean === 'OFFICE EXPENSE') clean = 'OFFICE EXPENSES';
+      if (clean === 'PRINTING&STATIONARY' || clean === 'PRINTING & STATIONARY') clean = 'PRINTING & STATIONERY';
+      if (clean === 'ITR RETUND') clean = 'ITR RETURN';
+      if (clean === 'TRAVLLING & CONVANCE' || clean === 'TRAVELLING & CONVEYANCE' || clean === 'TRAVELLING AND CONVEYANCE') clean = 'TRAVELLING & CONVANCE';
+      if (clean === 'COURIER CHARGES') clean = 'COURIER CHARGERS';
+      if (clean === 'ENTERTAINMENT EXP') clean = 'ENTERTENMENT EXP';
+      if (clean === 'SERVICE CHARGES') clean = 'SERVICES CHARGES';
+      if (clean === 'SOFTWARE DEVELOPMENT EXPENSE') clean = 'SOFTWARE DEVELOPMENT EXPENSES';
+      if (clean === 'INTEREST ON PARTNER CAPITAL' || clean === 'PARTNER INTEREST') clean = 'INTEREST ON PARTNERS CAPITAL';
+      if (clean && !seen.has(clean)) {
+        seen.add(clean);
+        res.push(clean);
+      }
+    });
+  });
+  return res.sort((a, b) => a.localeCompare(b));
+};
+
 export const LEDGER_OPTIONS = [
-  "Bill & Unbilled", "BRINDA SHYAM", "CA charges", "Capital investment", "Capital investment refund", "Challan Sign",
-  "Employee P Tax", "Endhan Cash Back", "Fasttag payment", "Freight Advance",
-  "Freight payment", "Freight Payment Refund", "GST Paid", "interest Paid",
-  "ITR return", "JEET PANJA", "Main cash", "MANOJ BANDHAN", "MONOJ BANDHAN", "Office Exp", "Partner Interest", "Partner Salary",
-  "Payment Received", "Printing&stationary", "Pump payment", "Room rent",
-  "Salary Advance", "Staff Salary", "subscription", "TDS on Cash Withdrawl",
-  "Tds Payment", "Toll Payment"
+  "BANK CHARGES",
+  "BANK GUARANTEE CHARGES",
+  "BILL & UNBILLED",
+  "BONUS",
+  "BRINDA SHYAM",
+  "CA CHARGES",
+  "CAPITAL INVESTMENT",
+  "CAPITAL INVESTMENT REFUND",
+  "CHALLAN SIGN",
+  "COURIER CHARGERS",
+  "DEPRECIATION",
+  "EMPLOYEE P TAX",
+  "ENDHAN CASH BACK",
+  "ENTERTENMENT EXP",
+  "FASTTAG PAYMENT",
+  "FREIGHT ADVANCE",
+  "FREIGHT PAYMENT",
+  "FREIGHT PAYMENT REFUND",
+  "GST PAID",
+  "INTEREST ON PARTNERS CAPITAL",
+  "INTEREST ON PUNJAB & SIND BANK (CC)",
+  "INTEREST PAID",
+  "ITR RETURN",
+  "JEET PANJA",
+  "LATE FEES ON TDS",
+  "MAIN CASH",
+  "MANOJ BANDHAN",
+  "MISC EXPENSES",
+  "OFFICE EXPENSES",
+  "OTHERS CREDITOR",
+  "PARTNER SALARY",
+  "PAYMENT RECEIVED",
+  "PRINTING & STATIONERY",
+  "PROFESSIONAL CHARGES",
+  "P TAX",
+  "PUMP ADVANCE",
+  "PUMP PAYMENT",
+  "RENT EXP",
+  "ROOM RENT",
+  "SALARY",
+  "SALARY ADVANCE",
+  "SERVICES CHARGES",
+  "SOFTWARE DEVELOPMENT EXPENSES",
+  "STAFF SALARY",
+  "SUBSCRIPTION",
+  "TDS ON CASH WITHDRAWL",
+  "TDS PAYMENT",
+  "TOLL PAYMENT",
+  "TRAVELLING & CONVANCE"
 ];
 
 export const NAMES_OPTIONS = [
-  "Abhijit Ghosh", "Animesh Banerjee", "Animesh mukherjee", "Arobindo Roy",
-  "Arup Mondol", "Avijit Gorai", "Bablu Bar", "Bhola Yadav", "Biplab Goswami",
-  "Bithi Nayak", "Challan Sign", "DAC GST paid", "Dilip Panja", "Dipali Nayak",
-  "Dipali Association", "Endhaan Cash Book", "Fasttag Payment", "Gorachand Dutta",
-  "Goutam Kumar roy", "Haradhan Mondal", "Indranil Ray", "Interest paid",
-  "ITR retund", "Jayanta maji", "Kanika nayak", "Kush Singh", "Main Cash",
-  "Manas Sarkar", "Manoj Modak", "MANOJ BANDHAN", "MONOJ BANDHAN", "Md Faiyaz Alam", "Mir Ahasan Ali", "NON_GST PURCHASE", "NVCL",
-  "NVL", "Office Exp.", "OTHERS CREDITOR", "OTHERS_CREDITOR", "Pbd Associations", "Prasanta Maji",
-  "Printing & Stationary", "Ragunath guin", "Room Rent", "Ruhul Sk",
-  "Sajal Banerjee", "satyanarayan Ghosh", "Sekh mustafa", "Suvadip Konar",
-  "Sonthalia Pump", "Sourav Ghosh", "Subscription", "Suman Ghosh",
-  "Supriyo Das CA charges", "Suraj Singh", "Swarup Bhowal", "Tapas Maji",
-  "TDS on CashWithdrawl", "TDS Payment", "Tushar Kanti Mondal", "Uday Malik",
-  "Uttam Roy"
+  "ABHIJIT GHOSH",
+  "ANIMESH BANERJEE",
+  "ANIMESH MUKHERJEE",
+  "AROBINDO ROY",
+  "ARUP MONDOL",
+  "AVIJIT GORAI",
+  "BABLU BAR",
+  "BHOLA YADAV",
+  "BIPLAB GOSWAMI",
+  "BITHI NAYAK",
+  "CHALLAN SIGN",
+  "DAC GST PAID",
+  "DILIP PANJA",
+  "DIPALI ASSOCIATION",
+  "DIPALI NAYAK",
+  "ENDHAAN CASH BOOK",
+  "FASTTAG PAYMENT",
+  "GORACHAND DUTTA",
+  "GOUTAM KUMAR ROY",
+  "HARADHAN MONDAL",
+  "INDIRECT EXPENSE",
+  "INDIRECT EXPENSES",
+  "INDRANIL RAY",
+  "INTEREST PAID",
+  "ITR RETURN",
+  "JAYANTA MAJI",
+  "KANIKA NAYAK",
+  "KUSH SINGH",
+  "MAIN CASH",
+  "MANAS SARKAR",
+  "MANOJ BANDHAN",
+  "MANOJ MODAK",
+  "MD FAIYAZ ALAM",
+  "MIR AHASAN ALI",
+  "NON_GST PURCHASE",
+  "NVCL",
+  "NVL",
+  "OFFICE EXP",
+  "OTHERS CREDITOR",
+  "PBD ASSOCIATIONS",
+  "PRASANTA MAJI",
+  "PRINTING & STATIONARY",
+  "RAGUNATH GUIN",
+  "ROOM RENT",
+  "RUHUL SK",
+  "SAJAL BANERJEE",
+  "SATYANARAYAN GHOSH",
+  "SEKH MUSTAFA",
+  "SONTHALIA PUMP",
+  "SOURAV GHOSH",
+  "SUBSCRIPTION",
+  "SUMAN GHOSH",
+  "SUPRIYO DAS CA CHARGES",
+  "SURAJ SINGH",
+  "SUVADIP KONAR",
+  "SWARUP BHOWAL",
+  "TAPAS MAJI",
+  "TDS ON CASH WITHDRAWL",
+  "TDS PAYMENT",
+  "TUSHAR KANTI MONDAL",
+  "UDAY MALIK",
+  "UTTAM ROY"
 ];
 
 const AUTO_COLS = new Set(['Transaction Date', 'Remarks', 'Reference No', 'Cheque No', 'Withdraw', 'Deposit', 'Closing Balance']);
@@ -1061,7 +1178,11 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
   const isFiltered = !!(filterFrom || filterTo);
 
   const handleCellEdit = useCallback((rowId, field, value) => {
-    setLocalData(prev => ({ ...prev, [rowId]: { ...(prev[rowId] || {}), [field]: value } }));
+    let cleanVal = value;
+    if (field === 'Ledger Name' || field === 'Names' || field === 'Vehicle') {
+      cleanVal = typeof value === 'string' ? value.toUpperCase() : value;
+    }
+    setLocalData(prev => ({ ...prev, [rowId]: { ...(prev[rowId] || {}), [field]: cleanVal } }));
   }, []);
 
   const handleAddRow = () => {
@@ -1927,17 +2048,24 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                                   : isParticularsCreditor
                                     ? getValiditiesForVehicle(rowVehicle)
                                     : col.key === 'Ledger Name'
-                                      ? LEDGER_OPTIONS
+                                      ? getUniqueUpperOptions(LEDGER_OPTIONS)
                                       : ((rowLedger?.toLowerCase().includes('payment') && rowLedger?.toLowerCase().includes('receiv'))
                                         ? ['NVL', 'NVCL']
                                         : (rowLedger?.toLowerCase() === 'main cash'
-                                          ? ['Main Cash', ...NAMES_OPTIONS.filter(n => n.toLowerCase() !== 'main cash')]
-                                          : NAMES_OPTIONS))
+                                          ? ['MAIN CASH', ...getUniqueUpperOptions(NAMES_OPTIONS, Object.keys(ownerVehicleMap)).filter(n => n !== 'MAIN CASH')]
+                                          : getUniqueUpperOptions(NAMES_OPTIONS, Object.keys(ownerVehicleMap))))
                             }
-                            value={val || ''}
+                            value={
+                              (col.key === 'Ledger Name' || col.key === 'Names' || col.key === 'Vehicle')
+                                ? (val ? String(val).toUpperCase() : '')
+                                : (val || '')
+                            }
                             freeSolo={!isParticularsCreditor}
                             onChange={(e, newValue) => {
-                              handleCellEdit(row._id, col.key, newValue);
+                              const formatted = (col.key === 'Ledger Name' || col.key === 'Names' || col.key === 'Vehicle')
+                                ? (typeof newValue === 'string' ? newValue.toUpperCase() : newValue)
+                                : newValue;
+                              handleCellEdit(row._id, col.key, formatted);
                               if (col.key === 'Names') {
                                 if (newValue === 'NVL' || newValue === 'NVCL') {
                                   const ledgerLower = rowLedger.toLowerCase();

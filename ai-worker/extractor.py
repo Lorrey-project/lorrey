@@ -91,20 +91,19 @@ Return ONLY valid JSON matching the schema exactly.
     import random
     import openai
 
-    models_to_try = ["gpt-4o", "gpt-4o-mini"]
-    max_retries = 4
+    models_to_try = ["gpt-4o-mini", "gpt-4o"]
+    max_retries = 3
     content = None
 
     for attempt in range(max_retries):
-        # Pick model: try gpt-4o on first attempt, fallback to gpt-4o-mini on rate limit or subsequent retries
-        model_name = models_to_try[0] if attempt == 0 else models_to_try[attempt % len(models_to_try)]
+        model_name = models_to_try[attempt % len(models_to_try)]
         
         try:
             print(f"[AI EXTRACTOR] Attempt {attempt + 1}/{max_retries} requesting model '{model_name}'...")
             response = client.chat.completions.create(
                 model=model_name,
                 temperature=0,
-                timeout=60,
+                timeout=35,
                 messages=[
                     {
                         "role": "user",
