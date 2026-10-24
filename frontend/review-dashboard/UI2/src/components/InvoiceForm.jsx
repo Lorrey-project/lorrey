@@ -222,16 +222,52 @@ export default function InvoiceForm({ onBack }) {
     }
   };
 
-  const ADDON_OPTIONS = [
+  const [addonOptions, setAddonOptions] = useState([
     { label: "GPS Device", amount: 1500 },
     { label: "RFID Tag", amount: 100 },
     { label: "RFID Tag Reassurance", amount: 100 },
     { label: "Fastag", amount: 200 },
-  ];
+  ]);
+
+  const applyDeductionRates = (rates) => {
+    if (!rates) return;
+    setAddonOptions([
+      { label: "GPS Device", amount: Number(rates["GPS Device"] ?? rates.gpsDeviceInstallation) || 1500 },
+      { label: "RFID Tag", amount: Number(rates["RFID Tag"] ?? rates.rfid) || 100 },
+      { label: "RFID Tag Reassurance", amount: Number(rates["RFID Tag Reassurance"] ?? rates.rfid) || 100 },
+      { label: "Fastag", amount: Number(rates["Fastag"]) || 200 },
+    ]);
+  };
+
+  // Fetch active deduction settings on mount
+  useEffect(() => {
+    const fetchDeductionRates = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await axios.get(`${API_URL}/invoice/deduction-rates`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (res.data?.success && res.data?.rates) {
+          applyDeductionRates(res.data.rates);
+        }
+      } catch (err) {
+        console.warn("Could not load dynamic deduction rates:", err.message);
+      }
+    };
+    fetchDeductionRates();
+  }, []);
 
   const getEmptySchema = () => ({
     invoice_details: {},
-    seller_details: {},
+    seller_details: {
+      seller_name: "NVCL",
+      seller_address: "PANAGARH INDUSTRIAL PARK, KOTAGRAM, BURDWAN",
+      seller_state: "WEST BENGAL",
+      seller_state_code: "19",
+      seller_pincode: "713148",
+      seller_gstin: "19AAACL4159L1Z5",
+      seller_pan: "AAACL4159L",
+    },
     buyer_details: {},
     consignee_details: {},
     supply_details: {},
@@ -240,7 +276,54 @@ export default function InvoiceForm({ onBack }) {
     amount_summary: {},
     ewb_details: {},
     addon_charges: [],
+    validation_meta: { needs_manual_verification: false, warnings: [] },
   });
+
+  const normalizeExtractedData = (aiData, invoiceId) => {
+    const invData = aiData?.invoice_data || {};
+    if (aiData?.applicable_deductions) {
+      applyDeductionRates(aiData.applicable_deductions);
+    }
+
+    const consigneeName = invData.consignee_details?.consignee_name || invData.buyer_details?.buyer_name || aiData?.consignee_name || '';
+    const consigneeAddr = invData.consignee_details?.consignee_address || invData.buyer_details?.buyer_address || '';
+    const consigneeGstin = invData.consignee_details?.consignee_gstin || invData.buyer_details?.buyer_gstin || '';
+    const consigneePan = invData.consignee_details?.consignee_pan || invData.buyer_details?.buyer_pan || '';
+
+    const rawSellerName = String(invData.seller_details?.seller_name || '').toUpperCase();
+    const cleanSellerName = (rawSellerName.includes('NVL') || rawSellerName.includes('NU VISTA') || rawSellerName.includes('NUVISTA')) ? 'NVL' : 'NVCL';
+
+    return {
+      _id: invoiceId,
+      ...getEmptySchema(),
+      ...invData,
+      seller_details: {
+        ...invData.seller_details,
+        seller_name: cleanSellerName,
+        seller_address: "PANAGARH INDUSTRIAL PARK, KOTAGRAM, BURDWAN",
+        seller_state: "WEST BENGAL",
+        seller_state_code: "19",
+        seller_pincode: "713148",
+        seller_gstin: "19AAACL4159L1Z5",
+        seller_pan: "AAACL4159L",
+      },
+      buyer_details: {
+        ...invData.buyer_details,
+        buyer_name: invData.buyer_details?.buyer_name || consigneeName,
+        buyer_address: invData.buyer_details?.buyer_address || consigneeAddr,
+        buyer_gstin: invData.buyer_details?.buyer_gstin || consigneeGstin,
+        buyer_pan: invData.buyer_details?.buyer_pan || consigneePan,
+      },
+      consignee_details: {
+        ...invData.consignee_details,
+        consignee_name: invData.consignee_details?.consignee_name || consigneeName,
+        consignee_address: invData.consignee_details?.consignee_address || consigneeAddr,
+        consignee_gstin: invData.consignee_details?.consignee_gstin || consigneeGstin,
+        consignee_pan: invData.consignee_details?.consignee_pan || consigneePan,
+      },
+      validation_meta: invData.validation_meta || aiData?.validation_meta,
+    };
+  };
 
   const toggleAddon = (opt) => {
     setFormData(prev => {
@@ -283,11 +366,7 @@ export default function InvoiceForm({ onBack }) {
     };
 
     const onProcessed = (data) => {
-      setFormData({
-        _id: data.invoice_id,
-        ...getEmptySchema(),
-        ...data.ai_data.invoice_data,
-      });
+      setFormData(normalizeExtractedData(data.ai_data, data.invoice_id));
       setErrors({});
       setStatus({
         type: "success",
@@ -307,11 +386,7 @@ export default function InvoiceForm({ onBack }) {
         setStatus({ type: "error", message: data.message });
         setPendingInvoiceId(null);
       } else if (data.status === "success") {
-        setFormData({
-          _id: data.invoiceId,
-          ...getEmptySchema(),
-          ...data.ai_data.invoice_data,
-        });
+        setFormData(normalizeExtractedData(data.ai_data, data.invoiceId));
         setErrors({});
         setStatus({
           type: "success",
@@ -365,11 +440,7 @@ export default function InvoiceForm({ onBack }) {
 
         const inv = res.data;
         if (inv && (inv.status === "pending" || inv.status === "approved" || inv.status === "success") && inv.ai_data?.invoice_data) {
-          setFormData({
-            _id: inv.invoiceId,
-            ...getEmptySchema(),
-            ...inv.ai_data.invoice_data,
-          });
+          setFormData(normalizeExtractedData(inv.ai_data, inv.invoiceId));
           setErrors({});
           setStatus({
             type: "success",
@@ -566,22 +637,53 @@ export default function InvoiceForm({ onBack }) {
   const validate = () => {
     const newErrors = {};
     let isValid = true;
-    const checkRegex = (val, regex) => val && regex.test(val);
-    const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-    const pinRegex = /^[1-9][0-9]{5}$/;
+
+    // Harmonize fixed seller details before validation
+    if (formData.seller_details) {
+      if (!formData.seller_details.seller_address) formData.seller_details.seller_address = "PANAGARH INDUSTRIAL PARK, KOTAGRAM, BURDWAN";
+      if (!formData.seller_details.seller_state) formData.seller_state = "WEST BENGAL";
+      if (!formData.seller_details.seller_state_code) formData.seller_state_code = "19";
+      if (!formData.seller_details.seller_pincode) formData.seller_details.seller_pincode = "713148";
+      if (!formData.seller_details.seller_gstin || formData.seller_details.seller_gstin.length !== 15) {
+        formData.seller_details.seller_gstin = "19AAACL4159L1Z5";
+      }
+      if (!formData.seller_details.seller_pan || formData.seller_details.seller_pan.length !== 10) {
+        formData.seller_details.seller_pan = "AAACL4159L";
+      }
+    }
+
+    const checkGstin = (val) => {
+      if (!val) return true;
+      const clean = String(val).trim().toUpperCase();
+      if (!clean || ['NA', 'N/A', 'URP', 'UNREGISTERED', 'CONSUMER', 'NONE'].includes(clean)) return true;
+      return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(clean);
+    };
+
+    const checkPan = (val) => {
+      if (!val) return true;
+      const clean = String(val).trim().toUpperCase();
+      if (!clean || ['NA', 'N/A', 'URP', 'UNREGISTERED', 'NONE'].includes(clean)) return true;
+      return /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(clean);
+    };
+
+    const checkPin = (val) => {
+      if (!val) return true;
+      const clean = String(val).trim().replace(/\s+/g, '');
+      if (!clean || ['NA', 'N/A'].includes(clean)) return true;
+      return /^[1-9][0-9]{5}$/.test(clean);
+    };
 
     if (formData.seller_details) {
       newErrors.seller_details = {};
-      if (formData.seller_details.seller_gstin && !checkRegex(formData.seller_details.seller_gstin, gstinRegex)) {
+      if (formData.seller_details.seller_gstin && !checkGstin(formData.seller_details.seller_gstin)) {
         newErrors.seller_details.seller_gstin = "Invalid GSTIN";
         isValid = false;
       }
-      if (formData.seller_details.seller_pan && !checkRegex(formData.seller_details.seller_pan, panRegex)) {
+      if (formData.seller_details.seller_pan && !checkPan(formData.seller_details.seller_pan)) {
         newErrors.seller_details.seller_pan = "Invalid PAN";
         isValid = false;
       }
-      if (formData.seller_details.seller_pincode && !checkRegex(formData.seller_details.seller_pincode, pinRegex)) {
+      if (formData.seller_details.seller_pincode && !checkPin(formData.seller_details.seller_pincode)) {
         newErrors.seller_details.seller_pincode = "Invalid Pincode";
         isValid = false;
       }
@@ -589,26 +691,27 @@ export default function InvoiceForm({ onBack }) {
 
     if (formData.buyer_details) {
       newErrors.buyer_details = {};
-      if (formData.buyer_details.buyer_gstin && !checkRegex(formData.buyer_details.buyer_gstin, gstinRegex)) {
+      if (formData.buyer_details.buyer_gstin && !checkGstin(formData.buyer_details.buyer_gstin)) {
         newErrors.buyer_details.buyer_gstin = "Invalid GSTIN";
         isValid = false;
       }
-      if (formData.buyer_details.buyer_pan && !checkRegex(formData.buyer_details.buyer_pan, panRegex)) {
+      if (formData.buyer_details.buyer_pan && !checkPan(formData.buyer_details.buyer_pan)) {
         newErrors.buyer_details.buyer_pan = "Invalid PAN";
         isValid = false;
       }
-      if (formData.buyer_details.buyer_pincode && !checkRegex(formData.buyer_details.buyer_pincode, pinRegex)) {
+      if (formData.buyer_details.buyer_pincode && !checkPin(formData.buyer_details.buyer_pincode)) {
         newErrors.buyer_details.buyer_pincode = "Invalid Pincode";
         isValid = false;
       }
     }
 
     setErrors(newErrors);
-    return isValid;
+    return { isValid, errors: newErrors };
   };
 
   const handleSave = async () => {
-    if (validate()) {
+    const { isValid, errors: valErrors } = validate();
+    if (isValid) {
       setProcessingMode("save");
       setIsProcessing(true);
       try {
@@ -643,12 +746,25 @@ export default function InvoiceForm({ onBack }) {
         setIsProcessing(false);
       }
     } else {
+      const errorList = [];
+      if (valErrors.seller_details) {
+        Object.entries(valErrors.seller_details).forEach(([f, msg]) => {
+          if (msg) errorList.push(`Seller ${f.replace('seller_', '').toUpperCase()}: ${msg}`);
+        });
+      }
+      if (valErrors.buyer_details) {
+        Object.entries(valErrors.buyer_details).forEach(([f, msg]) => {
+          if (msg) errorList.push(`Consignee ${f.replace('buyer_', '').toUpperCase()}: ${msg}`);
+        });
+      }
       setStatus({
         type: "error",
-        message: "Please fix the validation errors before saving.",
+        message: errorList.length > 0
+          ? `Please fix validation errors: ${errorList.join(', ')}`
+          : "Please fix the validation errors before saving.",
       });
     }
-    setTimeout(() => setStatus(null), 4000);
+    setTimeout(() => setStatus(null), 5000);
   };
 
   if (!formData) return null;
@@ -832,6 +948,23 @@ export default function InvoiceForm({ onBack }) {
         />
 
         <Paper elevation={0} sx={{ p: { xs: 2.5, md: 6 }, borderRadius: 2, border: "1px solid #e0e0e0", backgroundColor: "#ffffff", mb: 4 }}>
+          {formData.validation_meta?.warnings?.length > 0 && (
+            <Alert severity="warning" sx={{ mb: 3, borderRadius: 2, border: '1px solid #f59e0b' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#b45309' }}>
+                ⚠️ Document Data Validation Notice
+              </Typography>
+              <Box component="ul" sx={{ m: 0, pl: 2.5, mt: 0.5 }}>
+                {formData.validation_meta.warnings.map((warn, i) => (
+                  <li key={i}>
+                    <Typography variant="body2" sx={{ fontWeight: 600, color: '#92400e' }}>
+                      {warn}
+                    </Typography>
+                  </li>
+                ))}
+              </Box>
+            </Alert>
+          )}
+
           <Divider sx={{ mb: 4, display: 'none' }} />
 
           <InvoiceDetails data={formData.invoice_details} errors={errors.invoice_details} onChange={handleChange} />
@@ -887,7 +1020,7 @@ export default function InvoiceForm({ onBack }) {
             />
             <CardContent sx={{ pt: 1.5 }}>
               <Box display="flex" flexDirection="column" gap={0}>
-                {ADDON_OPTIONS.map((opt) => {
+                {addonOptions.map((opt) => {
                   const addedIdx = (formData.addon_charges || []).findIndex(c => c.type === opt.label);
                   const isAdded = addedIdx !== -1;
                   return (

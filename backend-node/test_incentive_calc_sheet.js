@@ -258,7 +258,99 @@ async function runTests() {
     console.log('✅ PASSED Test 6: Standard incentive is 808 (8.5% of Party Rate 9,500)\n');
 
     // -------------------------------------------------------------------------
-    // TEST 7: ATOA Non-Dedicated 10W vehicle with qualifying SO + NT first trip: 10W extra is 8.5% of Bill Freight.
+    // TEST 6B: MKT Dedicated 10W with 6 qualifying trips: standard incentive is 8.5% of Party Freight
+    // -------------------------------------------------------------------------
+    console.log('Test 6B: MKT Dedicated 10W with 6 qualifying trips -> standard incentive is 8.5% of Party Freight');
+    const veh6B = 'TEST10WMKT6B';
+    await ownerCol.deleteMany({ "Truck No": veh6B });
+    await entriesCol.deleteMany({ "VEHICLE NUMBER": veh6B, month: TEST_MONTH, year: TEST_YEAR });
+
+    await ownerCol.insertOne({
+      "Truck No": veh6B,
+      "Owner Name": "Owner Test 6B",
+      "Type of vehicle": "10WH",
+      "TYPE OF CUSTOMER ": "MKT",
+      "Dedicated Type": "Dedicated"
+    });
+    createdOwners.push(veh6B);
+
+    for (let i = 1; i <= 6; i++) {
+      const e = {
+        "VEHICLE NUMBER": veh6B,
+        "INVOICE NO": `INV-T6B-${i}`,
+        "LOADING DT": `${String(i).padStart(2, '0')}-06-2026`,
+        month: TEST_MONTH,
+        year: TEST_YEAR,
+        "MT": 19,
+        "BILLING": 100,
+        "BILLING ER 95%": 1900,
+        "SITE": "NVCL",
+        "Bill Type": "STO"
+      };
+      await entriesCol.insertOne(e);
+      createdEntries.push(e);
+    }
+
+    const res6B = await evaluateVehicleIncentiveEligibility(veh6B, TEST_MONTH, TEST_YEAR);
+    assert.strictEqual(res6B.standardIncentive.eligible, true, 'Should be eligible with 6 trips for 10W');
+    assert.strictEqual(res6B.standardIncentive.rate, 0.085, 'Rate must be 8.5% for MKT 10W');
+    // Total Party Freight = 6 * 1900 = 11,400. 8.5% of 11,400 = 969
+    assert.strictEqual(res6B.standardIncentive.amount, 969, 'Standard incentive must be 8.5% of Party Freight (969)');
+    console.log('✅ PASSED Test 6B: Standard incentive is 969 (8.5% of Party Freight 11,400)\n');
+
+    // -------------------------------------------------------------------------
+    // TEST 6C: Split invoices on same day for 10W vehicle (12 MT + 7 MT = 19 MT) -> evaluated as 1 trip, NOT 2 trips
+    // -------------------------------------------------------------------------
+    console.log('Test 6C: Split invoices on same day (12 MT + 7 MT = 19 MT) -> evaluated as 1 trip, NOT 2');
+    const veh6C = 'TEST10WSPLIT';
+    await ownerCol.deleteMany({ "Truck No": veh6C });
+    await entriesCol.deleteMany({ "VEHICLE NUMBER": veh6C, month: TEST_MONTH, year: TEST_YEAR });
+
+    await ownerCol.insertOne({
+      "Truck No": veh6C,
+      "Owner Name": "Owner Test 6C",
+      "Type of vehicle": "10WH",
+      "TYPE OF CUSTOMER ": "MKT",
+      "Dedicated Type": "Dedicated"
+    });
+    createdOwners.push(veh6C);
+
+    // 2 split invoices on the same date: 16-06-2026
+    const split1 = {
+      "VEHICLE NUMBER": veh6C,
+      "INVOICE NO": "INV-SPLIT-1",
+      "LOADING DT": "16-06-2026",
+      month: TEST_MONTH,
+      year: TEST_YEAR,
+      "MT": 12,
+      "BILLING": 778,
+      "Billing Amount": 9336,
+      "BILLING ER 95%": 8869.2,
+      "SITE": "NVCL",
+      "Bill Type": "SO"
+    };
+    const split2 = {
+      "VEHICLE NUMBER": veh6C,
+      "INVOICE NO": "INV-SPLIT-2",
+      "LOADING DT": "16-06-2026",
+      month: TEST_MONTH,
+      year: TEST_YEAR,
+      "MT": 7,
+      "BILLING": 778,
+      "Billing Amount": 5446,
+      "BILLING ER 95%": 5173.7,
+      "SITE": "NVCL",
+      "Bill Type": "SO"
+    };
+    await entriesCol.insertOne(split1);
+    await entriesCol.insertOne(split2);
+    createdEntries.push(split1, split2);
+
+    const res6C = await evaluateVehicleIncentiveEligibility(veh6C, TEST_MONTH, TEST_YEAR);
+    assert.strictEqual(res6C.qualifyingTripsCount, 1, 'Split invoices on same date must evaluate to 1 completed trip');
+    assert.strictEqual(res6C.standardIncentive.eligible, false, '1 trip is less than 6 trips required for 10W, must be ineligible');
+    assert.strictEqual(res6C.standardIncentive.amount, 0, 'Standard incentive must be 0 for ineligible vehicle');
+    console.log('✅ PASSED Test 6C: Split invoices on same day evaluated as exactly 1 trip and standard incentive is 0\n');
     // -------------------------------------------------------------------------
     console.log('Test 7: ATOA Non-Dedicated 10W with qualifying SO+NT first trip -> 10W extra is 8.5% of Bill Freight');
     const veh7 = 'TEST10WATOA';

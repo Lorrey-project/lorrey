@@ -26,9 +26,11 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CloseIcon from '@mui/icons-material/Close';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
+import CheckBookModal from '../components/CheckBookModal';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -378,6 +380,7 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
   }, [rawContacts]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [openCheckBook, setOpenCheckBook] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [snack, setSnack] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1791,7 +1794,34 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
             </Typography>
           </Box>
 
-          <Box sx={{ ml: 'auto', display: 'flex', gap: 1.5 }}>
+          <Box sx={{ ml: 'auto', display: 'flex', gap: 2, alignItems: 'center' }}>
+            {/* ── Check Book Action Button (Immediately beside Total Entries) ── */}
+            <Button
+              variant="contained"
+              onClick={() => setOpenCheckBook(true)}
+              startIcon={<MenuBookIcon />}
+              sx={{
+                bgcolor: '#0f766e',
+                color: '#ffffff',
+                fontWeight: 800,
+                fontSize: '0.8125rem',
+                letterSpacing: '0.2px',
+                textTransform: 'none',
+                borderRadius: 2,
+                px: 2,
+                py: 0.85,
+                boxShadow: '0 2px 6px rgba(15, 118, 110, 0.25)',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  bgcolor: '#115e59',
+                  boxShadow: '0 4px 12px rgba(15, 118, 110, 0.35)',
+                  transform: 'translateY(-1px)',
+                },
+              }}
+            >
+              CHECK BOOK
+            </Button>
+            <Divider orientation="vertical" flexItem sx={{ mx: 0.5, height: 32, my: 'auto' }} />
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Entries</Typography>
               <Typography variant="body1" fontWeight={800} color="#0f172a">{filteredRows.length}</Typography>
@@ -3565,6 +3595,12 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── Check Book Management Modal ── */}
+      <CheckBookModal
+        open={openCheckBook}
+        onClose={() => setOpenCheckBook(false)}
+      />
 
     </Box>
   );

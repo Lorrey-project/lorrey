@@ -144,6 +144,7 @@ export default function TruckContactManager({ open, onClose }) {
   const [editId, setEditId] = useState(null);
   const [formTab, setFormTab] = useState(0); // Sub-tab within form (Owner, Driver, Vehicle)
   const [searchQuery, setSearchQuery] = useState('');
+  const [dedicatedFilter, setDedicatedFilter] = useState('ALL'); // 'ALL' | 'Dedicated' | 'Non-Dedicated'
   const [approvals, setApprovals] = useState([]);
   const [approvalLoading, setApprovalLoading] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -505,10 +506,13 @@ export default function TruckContactManager({ open, onClose }) {
     const todayStr = normalizeDate(new Date());
 
     setForm({
-      truckNo: getStr(c["Truck No "], c["Truck No"], c.truck_no),
+      truckNo: getStr(c["Truck No "], c["Truck No"], c["Truck No."], c["Truck No. "], c.truck_no, c.truckNo),
       wheelType: getStr(c.wheel_type, c.wheelType, c["Wheel Type "], c["Type of vehicle "], c["Type of vehicle"]) || '10WH',
       custType: getStr(c["TYPE OF CUSTOMER "], c["TYPE OF CUSTOMER"], c.type_of_customer, c.relationshipType, c.custType, c.type) || 'MKT',
-      dedicatedType: getStr(c.dedicated_type, c.dedicatedType, c["Dedicated Type"], c["Dedicated Type "]) || 'Non-Dedicated',
+      dedicatedType: (() => {
+        const raw = getStr(c.dedicated_type, c.dedicatedType, c["Dedicated Type"], c["Dedicated Type "], c.TYPE, c.type, c.Dedicated);
+        return String(raw).trim().toUpperCase() === 'DEDICATED' ? 'Dedicated' : 'Non-Dedicated';
+      })(),
       registrationDate: regDate,
       effectiveDate: todayStr,
       ownerName: getStr(c["Owner Name "], c["Owner Name"], c.owner_name),
@@ -1518,36 +1522,102 @@ export default function TruckContactManager({ open, onClose }) {
             {/* ── TAB 2: EXISTING CONTACTS ── */}
             <TabPanel value={tab} index={2}>
               <Box sx={{ p: 3 }}>
-                <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', flex: 1 }}>
-                    <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <PersonIcon sx={{ color: '#475569' }} />
-                      </Box>
-                      <Box>
-                        <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Owners</Typography>
-                        <Typography variant="h6" fontWeight={800} color="#0f172a">{uniqueOwners.length}</Typography>
-                      </Box>
-                    </Box>
-                    <Box sx={{ flex: 1, minWidth: 160, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <LocalShippingIcon sx={{ color: '#10b981' }} />
-                      </Box>
-                      <Box>
-                        <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Vehicles</Typography>
-                        <Typography variant="h6" fontWeight={800} color="#047857">{contacts.length}</Typography>
-                      </Box>
-                    </Box>
-                  </Box>
+                {(() => {
+                  const dedCount = contacts.filter(c => {
+                    const raw = getStr(c.dedicated_type, c.dedicatedType, c["Dedicated Type"], c["Dedicated Type "], c.TYPE, c.type, c.Dedicated);
+                    return String(raw).trim().toUpperCase() === 'DEDICATED';
+                  }).length;
+                  const nonDedCount = contacts.length - dedCount;
 
-                  <TextField
-                    size="small"
-                    placeholder="Search by Truck No, Owner, Driver, or PAN..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    sx={{ minWidth: 300, bgcolor: 'background.paper', borderRadius: '10px', '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
-                  />
-                </Box>
+                  return (
+                    <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', flex: 1 }}>
+                        <Box sx={{ flex: 1, minWidth: 140, p: 2, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <PersonIcon sx={{ color: '#475569' }} />
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" fontWeight={700} color="#64748b" textTransform="uppercase">Total Owners</Typography>
+                            <Typography variant="h6" fontWeight={800} color="#0f172a">{uniqueOwners.length}</Typography>
+                          </Box>
+                        </Box>
+                        <Box
+                          onClick={() => setDedicatedFilter('ALL')}
+                          sx={{
+                            flex: 1, minWidth: 140, p: 2, borderRadius: 2,
+                            border: dedicatedFilter === 'ALL' ? '2px solid #10b981' : '1px solid #e2e8f0',
+                            bgcolor: '#ecfdf5', display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
+                            transition: 'all 0.2s', '&:hover': { transform: 'translateY(-1px)' }
+                          }}
+                        >
+                          <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #a7f3d0' }}>
+                            <LocalShippingIcon sx={{ color: '#10b981' }} />
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" fontWeight={700} color="#065f46" textTransform="uppercase">Total Vehicles</Typography>
+                            <Typography variant="h6" fontWeight={800} color="#047857">{contacts.length}</Typography>
+                          </Box>
+                        </Box>
+                        <Box
+                          onClick={() => setDedicatedFilter(dedicatedFilter === 'Dedicated' ? 'ALL' : 'Dedicated')}
+                          sx={{
+                            flex: 1, minWidth: 150, p: 2, borderRadius: 2,
+                            border: dedicatedFilter === 'Dedicated' ? '2px solid #d97706' : '1px solid #fde68a',
+                            bgcolor: '#fffbeb', display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
+                            transition: 'all 0.2s', '&:hover': { transform: 'translateY(-1px)' }
+                          }}
+                        >
+                          <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #fde68a' }}>
+                            <CheckCircleIcon sx={{ color: '#d97706' }} />
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" fontWeight={700} color="#92400e" textTransform="uppercase">Dedicated</Typography>
+                            <Typography variant="h6" fontWeight={800} color="#b45309">{dedCount}</Typography>
+                          </Box>
+                        </Box>
+                        <Box
+                          onClick={() => setDedicatedFilter(dedicatedFilter === 'Non-Dedicated' ? 'ALL' : 'Non-Dedicated')}
+                          sx={{
+                            flex: 1, minWidth: 150, p: 2, borderRadius: 2,
+                            border: dedicatedFilter === 'Non-Dedicated' ? '2px solid #64748b' : '1px solid #cbd5e1',
+                            bgcolor: '#f8fafc', display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
+                            transition: 'all 0.2s', '&:hover': { transform: 'translateY(-1px)' }
+                          }}
+                        >
+                          <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #cbd5e1' }}>
+                            <DirectionsCarIcon sx={{ color: '#64748b' }} />
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" fontWeight={700} color="#475569" textTransform="uppercase">Non-Dedicated</Typography>
+                            <Typography variant="h6" fontWeight={800} color="#334155">{nonDedCount}</Typography>
+                          </Box>
+                        </Box>
+                      </Box>
+
+                      <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <TextField
+                          select
+                          size="small"
+                          value={dedicatedFilter}
+                          onChange={(e) => setDedicatedFilter(e.target.value)}
+                          sx={{ minWidth: 160, bgcolor: 'background.paper', borderRadius: '10px', '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+                        >
+                          <MenuItem value="ALL">All Dedicated Types</MenuItem>
+                          <MenuItem value="Dedicated">Dedicated Only</MenuItem>
+                          <MenuItem value="Non-Dedicated">Non-Dedicated Only</MenuItem>
+                        </TextField>
+
+                        <TextField
+                          size="small"
+                          placeholder="Search by Truck No, Owner, Driver, or PAN..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          sx={{ minWidth: 280, bgcolor: 'background.paper', borderRadius: '10px', '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+                        />
+                      </Box>
+                    </Box>
+                  );
+                })()}
 
                 {loading ? (
                   <Box display="flex" justifyContent="center" py={6}>
@@ -1596,21 +1666,32 @@ export default function TruckContactManager({ open, onClose }) {
                       <TableBody>
                         {contacts
                           .filter(c => {
+                            const rawDed = getStr(c.dedicated_type, c.dedicatedType, c["Dedicated Type"], c["Dedicated Type "], c.TYPE, c.type, c.Dedicated);
+                            const dedicatedType = (String(rawDed).trim().toUpperCase() === 'DEDICATED') ? 'Dedicated' : 'Non-Dedicated';
+
+                            if (dedicatedFilter === 'Dedicated' && dedicatedType !== 'Dedicated') return false;
+                            if (dedicatedFilter === 'Non-Dedicated' && dedicatedType !== 'Non-Dedicated') return false;
+
                             if (!searchQuery) return true;
                             const q = searchQuery.toLowerCase().trim();
-                            const tNo = getStr(c["Truck No "], c["Truck No"], c.truck_no).toLowerCase();
+                            const tNo = getStr(c["Truck No "], c["Truck No"], c["Truck No."], c["Truck No. "], c.truck_no, c.truckNo).toLowerCase();
                             const oName = getStr(c["Owner Name "], c["Owner Name"], c.owner_name).toLowerCase();
                             const dName = getStr(c["Driver Name "], c["Driver Name"], c.driver_name).toLowerCase();
                             const pan = getStr(c["PAN No. "], c["PAN No."], c.pan_no).toLowerCase();
                             return tNo.includes(q) || oName.includes(q) || dName.includes(q) || pan.includes(q);
                           })
                           .map((c, idx) => {
-                            const tNo = getStr(c["Truck No"], c["Truck No "], c.truck_no);
+                            const tNo = getStr(c["Truck No"], c["Truck No "], c["Truck No."], c["Truck No. "], c.truck_no, c.truckNo);
                             const vehType = getStr(c.wheel_type, c.wheelType, c["Wheel Type "], c["Type of vehicle"], c["Type of vehicle "], c.type_of_vehicle, c.type, c.vehType);
                             const oName = getStr(c["Owner Name"], c["Owner Name "], c.owner_name);
                             const dName = getStr(c["Driver Name"], c["Driver Name "], c.driver_name);
                             const custType = getStr(c["TYPE OF CUSTOMER"], c["TYPE OF CUSTOMER "], c.type_of_customer, c.relationshipType, c.customer_type, c.custType, c.type);
-                            const dedicatedType = getStr(c.dedicated_type, c.dedicatedType, c["Dedicated Type"], c["Dedicated Type "]) || 'Non-Dedicated';
+                            const rawDed = getStr(c.dedicated_type, c.dedicatedType, c["Dedicated Type"], c["Dedicated Type "], c.TYPE, c.type, c.Dedicated);
+                            const dedicatedType = (String(rawDed).trim().toUpperCase() === 'DEDICATED')
+                              ? 'Dedicated'
+                              : (String(rawDed).trim().toUpperCase() === 'NON DEDICATED' || String(rawDed).trim().toLowerCase() === 'non-dedicated')
+                                ? 'Non-Dedicated'
+                                : (rawDed || 'Non-Dedicated');
                             const regDate = formatDateToDDMMYYYY(c.registration_date || c.registrationDate || c.effective_date || c.effectiveDate) || '-';
                             const pan = getStr(c["PAN No."], c["PAN No. "], c["PAN No"], c.pan_no);
                             const aadhar = getStr(c["Aadhar No."], c["Aadhar No. "], c["Aadhaar No."], c["Aadhaar No"], c.aadhar_no);
@@ -1646,7 +1727,19 @@ export default function TruckContactManager({ open, onClose }) {
                                 <TableCell sx={{ fontWeight: 600 }}>{oName}</TableCell>
                                 <TableCell>{dName}</TableCell>
                                 <TableCell><Chip label={custType || 'MKT'} size="small" sx={{ fontWeight: 700, fontSize: '11px', bgcolor: custType === 'ATOA' ? '#e0e7ff' : custType === 'Site' ? '#ecfdf5' : '#f1f5f9', color: custType === 'ATOA' ? '#3730a3' : custType === 'Site' ? '#065f46' : '#334155' }} /></TableCell>
-                                <TableCell><Chip label={dedicatedType} size="small" sx={{ fontWeight: 700, fontSize: '11px', bgcolor: dedicatedType === 'Dedicated' ? '#fef3c7' : '#f1f5f9', color: dedicatedType === 'Dedicated' ? '#92400e' : '#475569' }} /></TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={dedicatedType}
+                                    size="small"
+                                    sx={{
+                                      fontWeight: 800,
+                                      fontSize: '11px',
+                                      bgcolor: dedicatedType === 'Dedicated' ? '#fef3c7' : '#f1f5f9',
+                                      color: dedicatedType === 'Dedicated' ? '#92400e' : '#475569',
+                                      border: dedicatedType === 'Dedicated' ? '1px solid #fde68a' : '1px solid #cbd5e1'
+                                    }}
+                                  />
+                                </TableCell>
                                 <TableCell sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{regDate}</TableCell>
                                 <TableCell>{pan}</TableCell>
                                 <TableCell>{aadhar}</TableCell>

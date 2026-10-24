@@ -72,7 +72,10 @@ async function getTruckDetails(vehicleNumber, ownerName = "", recordDate = null)
           $or: [
             { "Truck No": { $regex: truckRegex } },
             { "Truck No ": { $regex: truckRegex } },
+            { "Truck No.": { $regex: truckRegex } },
+            { "Truck No. ": { $regex: truckRegex } },
             { truck_no: { $regex: truckRegex } },
+            { truckNo: { $regex: truckRegex } },
             { "Contact No.(Truck No.)": { $regex: truckRegex } },
             { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
           ]
@@ -94,7 +97,10 @@ async function getTruckDetails(vehicleNumber, ownerName = "", recordDate = null)
       $or: [
         { "Truck No": { $regex: truckRegex } },
         { "Truck No ": { $regex: truckRegex } },
+        { "Truck No.": { $regex: truckRegex } },
+        { "Truck No. ": { $regex: truckRegex } },
         { truck_no: { $regex: truckRegex } },
+        { truckNo: { $regex: truckRegex } },
         { "Contact No.(Truck No.)": { $regex: truckRegex } },
         { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
       ]
@@ -109,7 +115,10 @@ async function getTruckDetails(vehicleNumber, ownerName = "", recordDate = null)
           $or: [
             { "Truck No": { $regex: truckRegex } },
             { "Truck No ": { $regex: truckRegex } },
+            { "Truck No.": { $regex: truckRegex } },
+            { "Truck No. ": { $regex: truckRegex } },
             { truck_no: { $regex: truckRegex } },
+            { truckNo: { $regex: truckRegex } },
             { "Contact No.(Truck No.)": { $regex: truckRegex } },
             { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
           ]
@@ -131,7 +140,10 @@ async function getTruckDetails(vehicleNumber, ownerName = "", recordDate = null)
       $or: [
         { "Truck No": { $regex: truckRegex } },
         { "Truck No ": { $regex: truckRegex } },
+        { "Truck No.": { $regex: truckRegex } },
+        { "Truck No. ": { $regex: truckRegex } },
         { truck_no: { $regex: truckRegex } },
+        { truckNo: { $regex: truckRegex } },
         { "Contact No.(Truck No.)": { $regex: truckRegex } },
         { "Contact No\\.(Truck No\\.)": { $regex: truckRegex } }
       ]
@@ -537,7 +549,11 @@ async function pushToRegister(invoiceId, overrides) {
     if (vehicleNumber) {
       const invoiceOwnerName = safe(supplyDetails.transporter_name || supplyDetails.owner_name || hvd.owner_name || "").trim();
       const truckDetails = await getTruckDetails(vehicleNumber, invoiceOwnerName, loadingDate);
-      wheel = truckDetails.wheel;
+      wheel = truckDetails.wheel || "";
+      if (!wheel && supplyDetails.wheel_type) {
+        const wm = String(supplyDetails.wheel_type).match(/(\d+)/);
+        wheel = wm ? `${wm[1]}W` : String(supplyDetails.wheel_type);
+      }
       ownerName = truckDetails.ownerName || invoiceOwnerName;
       tdsPercent = truckDetails.tdsPercent;
       isATO = truckDetails.isATO;
@@ -550,6 +566,10 @@ async function pushToRegister(invoiceId, overrides) {
         console.warn(`[syncManager] ${commissionError}`);
       }
     } else {
+      if (supplyDetails.wheel_type) {
+        const wm = String(supplyDetails.wheel_type).match(/(\d+)/);
+        wheel = wm ? `${wm[1]}W` : String(supplyDetails.wheel_type);
+      }
       commissionError = "Missing vehicle number on invoice for Party Master commission lookup";
     }
 
@@ -702,7 +722,8 @@ async function pushToRegister(invoiceId, overrides) {
     const balance = fmt2(hsdLtr - fuelRequired);
     const pctAdv = amount > 0 ? fmt2(((advance + hsdAmount) / amount) * 100) : 0;
     const dedicated = isATO ? fmt2(billingAmt * 0.095) : (effectiveComm !== null ? fmt2(billing * (1 - effectiveComm) * num(mt) * 0.085) : 0);
-    const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(billingAmt * 0.085) : 0;
+    const extra10Base = isATO ? billingAmt : amount;
+    const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(extra10Base * 0.085) : 0;
 
     // ── Deductions & Net Amount Calculation ──────────────────────────────
     const existingGpsDev = num(existing?.["GPS Deviation Charges"] || existing?.["GPS DEVIATION CHARGES"] || 0);

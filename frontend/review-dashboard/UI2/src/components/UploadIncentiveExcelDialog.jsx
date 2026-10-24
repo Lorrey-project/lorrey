@@ -54,62 +54,73 @@ function parseExcelNum(val) {
 export function parseHeadlineInfo(headlineText) {
   if (!headlineText || typeof headlineText !== 'string') return null;
   const raw = String(headlineText).trim();
-  const text = raw.toLowerCase().replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
+  const text = raw.replace(/\u00a0/g, ' ').toLowerCase().replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ');
+  const compactText = text.replace(/[\s\-_]/g, '');
 
-  // Look for signature keywords in headline
-  const isDedicatedKeyword = text.includes('dedicated') || text.includes('dedi') || text.includes('qualified') || text.includes('extra freight');
-  const isExtraKeyword = text.includes('extra') || text.includes('8.5%') || text.includes('15%') || text.includes('10wh') || text.includes('10w') || text.includes('6wh') || text.includes('6w');
-  const isSiteKeyword = text.includes('nvl') || text.includes('nvcl') || text.includes('dispatch') || text.includes('wb so') || text.includes('so of') || text.includes('plant') || text.includes('9214');
+  // 1. Identify NVCL vs NVL
+  const isNVCL = text.includes('nvcl') || text.includes('market') || /\bmkt\b/i.test(text);
+  const isNVL = (text.includes('nvl') || /\batoa?\b/i.test(text) || text.includes('plant') || text.includes('9214')) && !isNVCL;
 
-  if (!((isDedicatedKeyword || isExtraKeyword) && isSiteKeyword)) {
+  const isSiteKeyword = isNVCL || isNVL || text.includes('dispatch') || text.includes('wb so') || text.includes('so of') || text.includes('plant') || text.includes('9214');
+
+  // 2. Identify Wheel / Incentive Type
+  const is10W = compactText.includes('10wh') ||
+                compactText.includes('10w') ||
+                compactText.includes('10wheel') ||
+                text.includes('8.5%') ||
+                text.includes('8.5 %') ||
+                text.includes('8.5');
+
+  const is6W = compactText.includes('6wh') ||
+               compactText.includes('6w') ||
+               compactText.includes('6wheel') ||
+               text.includes('15%') ||
+               text.includes('15 %') ||
+               text.includes('15');
+
+  const isDedicatedKeyword = text.includes('dedicated') ||
+                             text.includes('dedi') ||
+                             text.includes('qualified') ||
+                             text.includes('extra freight') ||
+                             text.includes('freight') ||
+                             text.includes('9.5%') ||
+                             text.includes('9.5 %') ||
+                             text.includes('9.5');
+
+  if (!((isDedicatedKeyword || is10W || is6W) && (isSiteKeyword || text.includes('incentive') || text.includes('freight')))) {
     return null;
   }
-
-  const isNVCL = text.includes('nvcl') || text.includes('mkt') || text.includes('market');
-  const isNVL = (text.includes('nvl') || text.includes('ato') || text.includes('atoa') || text.includes('plant') || text.includes('9214')) && !isNVCL;
-
-  const is10W = text.includes('10wh') || text.includes('10w') || text.includes('8.5%') || text.includes('10 wheel') || text.includes('10-wheel');
-  const is6W = text.includes('6wh') || text.includes('6w') || text.includes('15%') || text.includes('6 wheel') || text.includes('6-wheel');
-  const isDedicatedFreight = isDedicatedKeyword && !is10W && !is6W;
 
   let category = '';
   let targetField = '';
   let subField = '';
 
-  if (isDedicatedFreight) {
+  if (is10W) {
+    targetField = 'w10';
     if (isNVCL) {
-      category = 'Dedicated Freight 9.5% of NVCL';
-      targetField = 'nvcl';
-    } else {
-      category = 'Dedicated Freight 9.5% of NVL';
-      targetField = 'nvl';
-    }
-  } else if (is10W) {
-    if (isNVCL) {
-      category = 'Extra Freight 8.5% 10WH of NVCL';
-      targetField = 'w10';
+      category = '10 WH 8.5% NVCL';
       subField = 'w10_nvcl';
     } else {
-      category = 'Extra Freight 8.5% 10WH of NVL';
-      targetField = 'w10';
+      category = '10 WH 8.5% NVL';
       subField = 'w10_nvl';
     }
   } else if (is6W) {
+    targetField = 'w6';
     if (isNVCL) {
-      category = 'Extra Freight 15% 6WH of NVCL';
-      targetField = 'w6';
+      category = 'Extra Freight 15% 6 WH NVCL';
       subField = 'w6_nvcl';
     } else {
-      category = 'Extra Freight 15% 6WH of NVL';
-      targetField = 'w6';
+      category = 'Extra Freight 15% 6 WH NVL';
       subField = 'w6_nvl';
     }
   } else if (isNVCL) {
     category = 'Dedicated Freight 9.5% of NVCL';
     targetField = 'nvcl';
-  } else if (isNVL) {
+    subField = 'nvcl';
+  } else if (isNVL || isDedicatedKeyword) {
     category = 'Dedicated Freight 9.5% of NVL';
     targetField = 'nvl';
+    subField = 'nvl';
   } else {
     return null;
   }
@@ -182,11 +193,18 @@ export function detectWorkbookPeriod(wb, fileName = '') {
 export function parseIncentiveSheetData(aoa, systemTrucks = []) {
   if (!aoa || aoa.length === 0) return null;
 
-  const systemTruckSet = new Set((systemTrucks || []).map(t => normVeh(t.truckNo || t['Truck No'])).filter(Boolean));
+  // Build canonical system vehicle map
+  const systemTruckMap = new Map();
+  (systemTrucks || []).forEach(t => {
+    const rawNo = t.truckNo || t['Truck No'];
+    const norm = normVeh(rawNo);
+    if (norm) systemTruckMap.set(norm, rawNo);
+  });
+  const systemTruckSet = new Set(systemTruckMap.keys());
 
   const tables = [];
   const normalizedRecords = [];
-  const duplicateErrors = [];
+  const multipleEntries = [];
 
   let r = 0;
   let hasHeadlines = false;
@@ -197,7 +215,7 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
 
     let headlineInfo = null;
     for (let c = 0; c < row.length; c++) {
-      if (typeof row[c] === 'string' && row[c].trim().length > 8) {
+      if (typeof row[c] === 'string' && row[c].trim().length > 4) {
         headlineInfo = parseHeadlineInfo(row[c]);
         if (headlineInfo) break;
       }
@@ -214,8 +232,11 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
         if (hRow) {
           hRow.forEach((cell, idx) => {
             const s = String(cell || '').toLowerCase().trim();
-            if (s.includes('truck') || s.includes('vehicle')) truckCol = idx;
-            if (s.includes('diff') || s.includes('difference')) diffCol = idx;
+            if (s.includes('truck') || s.includes('vehicle') || s.includes('lorry')) truckCol = idx;
+            if (s.includes('diff') || s.includes('difference') || s.includes('dedi') || s.includes('amount') || s.includes('amt') || s.includes('freight')) {
+              if (s.includes('diff') || s.includes('difference')) diffCol = idx;
+              else if (diffCol === -1) diffCol = idx;
+            }
           });
           if (truckCol !== -1 && diffCol !== -1) break;
         }
@@ -226,7 +247,6 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
       if (diffCol === -1) diffCol = 1;
 
       let cr = hr + 1;
-      const seenInTable = new Set();
       const tableRecords = [];
 
       while (cr < aoa.length) {
@@ -235,23 +255,43 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
         const isNextHead = cRow.some(cell => typeof cell === 'string' && parseHeadlineInfo(cell));
         if (isNextHead) break;
         const s0 = String(cRow[0] || '').toLowerCase().trim();
-        if (s0.startsWith('total') || s0.includes('total')) { cr++; break; }
+        if (s0.startsWith('total') || s0.includes('total') || s0.startsWith('grand total')) { cr++; break; }
 
         const rawTruck = cRow[truckCol];
         const cleanTruck = normVeh(rawTruck);
         if (cleanTruck && cleanTruck.length >= 4) {
-          if (seenInTable.has(cleanTruck)) {
-            duplicateErrors.push({
-              truckNo: cleanTruck,
-              section: headlineInfo.category,
+          const amt = parseExcelNum(cRow[diffCol]);
+          const canonicalTruckNo = systemTruckMap.get(cleanTruck) || cleanTruck;
+          const isMatched = systemTruckSet.size === 0 || systemTruckSet.has(cleanTruck);
+
+          // Check if this vehicle already exists in this table (aggregate rule)
+          const existingInTable = tableRecords.find(tr => tr.truckNo === canonicalTruckNo);
+          if (existingInTable) {
+            existingInTable.amount += amt;
+            existingInTable.differenceAmount += amt;
+            multipleEntries.push({
+              truckNo: canonicalTruckNo,
+              category: headlineInfo.category,
+              addedAmount: amt,
+              newTotal: existingInTable.amount,
               rowIdx: cr + 1
             });
+          } else {
+            tableRecords.push({
+              truckNo: canonicalTruckNo,
+              rawTruckNo: String(rawTruck).trim(),
+              category: headlineInfo.category,
+              targetField: headlineInfo.targetField,
+              subField: headlineInfo.subField,
+              differenceAmount: amt,
+              amount: amt,
+              rowIdx: cr + 1,
+              isMatched
+            });
           }
-          seenInTable.add(cleanTruck);
 
-          const amt = parseExcelNum(cRow[diffCol]);
-          const rec = {
-            truckNo: cleanTruck,
+          normalizedRecords.push({
+            truckNo: canonicalTruckNo,
             rawTruckNo: String(rawTruck).trim(),
             category: headlineInfo.category,
             targetField: headlineInfo.targetField,
@@ -259,10 +299,8 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
             differenceAmount: amt,
             amount: amt,
             rowIdx: cr + 1,
-            isMatched: systemTruckSet.size === 0 || systemTruckSet.has(cleanTruck)
-          };
-          tableRecords.push(rec);
-          normalizedRecords.push(rec);
+            isMatched
+          });
         }
         cr++;
       }
@@ -270,6 +308,7 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
       tables.push({
         headline: headlineInfo.category,
         targetField: headlineInfo.targetField,
+        subField: headlineInfo.subField,
         rowCount: tableRecords.length,
         totalAmount: tableRecords.reduce((s, rec) => s + rec.amount, 0),
         records: tableRecords
@@ -290,8 +329,11 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
       if (!row) continue;
       row.forEach((cell, cIdx) => {
         const s = String(cell || '').toLowerCase().trim();
-        if (s.includes('truck') || s.includes('vehicle')) truckCol = cIdx;
-        if (s.includes('diff') || s.includes('difference') || s.includes('dedi')) diffCol = cIdx;
+        if (s.includes('truck') || s.includes('vehicle') || s.includes('lorry')) truckCol = cIdx;
+        if (s.includes('diff') || s.includes('difference') || s.includes('dedi') || s.includes('amount') || s.includes('amt')) {
+          if (s.includes('diff') || s.includes('difference')) diffCol = cIdx;
+          else if (diffCol === -1) diffCol = cIdx;
+        }
       });
       if (truckCol !== -1 && diffCol !== -1) {
         headerRowIdx = idx;
@@ -303,7 +345,6 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
     if (diffCol === -1) diffCol = 1;
     if (headerRowIdx === -1) headerRowIdx = 0;
 
-    const seenInTable = new Set();
     const tableRecords = [];
 
     for (let cr = headerRowIdx + 1; cr < aoa.length; cr++) {
@@ -315,28 +356,46 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
       const rawTruck = cRow[truckCol];
       const cleanTruck = normVeh(rawTruck);
       if (cleanTruck && cleanTruck.length >= 4) {
-        if (seenInTable.has(cleanTruck)) {
-          duplicateErrors.push({
-            truckNo: cleanTruck,
-            section: 'General Incentive',
+        const amt = parseExcelNum(cRow[diffCol]);
+        const canonicalTruckNo = systemTruckMap.get(cleanTruck) || cleanTruck;
+        const isMatched = systemTruckSet.size === 0 || systemTruckSet.has(cleanTruck);
+
+        const existingInTable = tableRecords.find(tr => tr.truckNo === canonicalTruckNo);
+        if (existingInTable) {
+          existingInTable.amount += amt;
+          existingInTable.differenceAmount += amt;
+          multipleEntries.push({
+            truckNo: canonicalTruckNo,
+            category: 'General Incentive Difference',
+            addedAmount: amt,
+            newTotal: existingInTable.amount,
             rowIdx: cr + 1
           });
+        } else {
+          tableRecords.push({
+            truckNo: canonicalTruckNo,
+            rawTruckNo: String(rawTruck).trim(),
+            category: 'General Incentive Difference',
+            targetField: 'diff',
+            subField: '',
+            differenceAmount: amt,
+            amount: amt,
+            rowIdx: cr + 1,
+            isMatched
+          });
         }
-        seenInTable.add(cleanTruck);
 
-        const amt = parseExcelNum(cRow[diffCol]);
-        const rec = {
-          truckNo: cleanTruck,
+        normalizedRecords.push({
+          truckNo: canonicalTruckNo,
           rawTruckNo: String(rawTruck).trim(),
           category: 'General Incentive Difference',
           targetField: 'diff',
+          subField: '',
           differenceAmount: amt,
           amount: amt,
           rowIdx: cr + 1,
-          isMatched: systemTruckSet.size === 0 || systemTruckSet.has(cleanTruck)
-        };
-        tableRecords.push(rec);
-        normalizedRecords.push(rec);
+          isMatched
+        });
       }
     }
 
@@ -344,6 +403,7 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
       tables.push({
         headline: 'General Incentive Difference',
         targetField: 'diff',
+        subField: '',
         rowCount: tableRecords.length,
         totalAmount: tableRecords.reduce((s, rec) => s + rec.amount, 0),
         records: tableRecords
@@ -351,7 +411,7 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
     }
   }
 
-  // Construct actuals map with difference field
+  // Construct actuals map with difference field & 6 distinct sub-columns
   const actuals = {};
   const truckDiffs = {};
   const truckBreakdowns = {};
@@ -363,28 +423,87 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
     truckBreakdowns[t].push({
       category: rec.category,
       targetField: rec.targetField,
+      subField: rec.subField,
       amount: rec.differenceAmount
     });
   });
 
   for (const [t, totalDiff] of Object.entries(truckDiffs)) {
+    const bds = truckBreakdowns[t] || [];
+    let actNvl = 0;
+    let actNvcl = 0;
+    let actW10Nvl = 0;
+    let actW10Nvcl = 0;
+    let actW6Nvl = 0;
+    let actW6Nvcl = 0;
+    let hasNvl = false;
+    let hasNvcl = false;
+    let hasW10Nvl = false;
+    let hasW10Nvcl = false;
+    let hasW6Nvl = false;
+    let hasW6Nvcl = false;
+
+    bds.forEach(b => {
+      const amt = Number(b.amount) || 0;
+      if (b.subField === 'w10_nvl') { actW10Nvl += amt; hasW10Nvl = true; }
+      else if (b.subField === 'w10_nvcl') { actW10Nvcl += amt; hasW10Nvcl = true; }
+      else if (b.subField === 'w6_nvl') { actW6Nvl += amt; hasW6Nvl = true; }
+      else if (b.subField === 'w6_nvcl') { actW6Nvcl += amt; hasW6Nvcl = true; }
+      else if (b.subField === 'nvl' || b.targetField === 'nvl') { actNvl += amt; hasNvl = true; }
+      else if (b.subField === 'nvcl' || b.targetField === 'nvcl') { actNvcl += amt; hasNvcl = true; }
+    });
+
+    const sumW10 = (hasW10Nvl ? actW10Nvl : 0) + (hasW10Nvcl ? actW10Nvcl : 0);
+    const sumW6 = (hasW6Nvl ? actW6Nvl : 0) + (hasW6Nvcl ? actW6Nvcl : 0);
+
     actuals[t] = {
-      nvl: '',
-      nvcl: '',
-      w10: '',
-      w6: '',
+      nvl: hasNvl ? String(actNvl) : '0',
+      nvcl: hasNvcl ? String(actNvcl) : '0',
+      w10_nvl: hasW10Nvl ? String(actW10Nvl) : '0',
+      w10_nvcl: hasW10Nvcl ? String(actW10Nvcl) : '0',
+      w6_nvl: hasW6Nvl ? String(actW6Nvl) : '0',
+      w6_nvcl: hasW6Nvcl ? String(actW6Nvcl) : '0',
+      w10: sumW10 ? String(sumW10) : '0',
+      w6: sumW6 ? String(sumW6) : '0',
       difference: totalDiff,
-      diffBreakdown: truckBreakdowns[t] || []
+      diffBreakdown: bds
     };
   }
 
+  // Zero Value Rule: Pre-populate system vehicles that had no entries in Excel with '0'
+  (systemTrucks || []).forEach(st => {
+    const rawNo = st.truckNo || st['Truck No'];
+    const norm = normVeh(rawNo);
+    const canonical = systemTruckMap.get(norm) || rawNo;
+    if (canonical && !actuals[canonical]) {
+      actuals[canonical] = {
+        nvl: '0',
+        nvcl: '0',
+        w10_nvl: '0',
+        w10_nvcl: '0',
+        w6_nvl: '0',
+        w6_nvcl: '0',
+        w10: '0',
+        w6: '0',
+        difference: 0,
+        diffBreakdown: []
+      };
+    }
+  });
+
   const uniqueTruckList = Object.keys(truckDiffs);
   const matchedTrucks = systemTruckSet.size > 0
-    ? uniqueTruckList.filter(t => systemTruckSet.has(t))
+    ? uniqueTruckList.filter(t => systemTruckSet.has(normVeh(t)))
     : uniqueTruckList;
   const unmatchedTrucks = systemTruckSet.size > 0
-    ? uniqueTruckList.filter(t => !systemTruckSet.has(t))
+    ? uniqueTruckList.filter(t => !systemTruckSet.has(normVeh(t)))
     : [];
+
+  const unmatchedTruckDetails = unmatchedTrucks.map(t => ({
+    truckNo: t,
+    totalAmount: truckDiffs[t] || 0,
+    records: truckBreakdowns[t] || []
+  }));
 
   const totalDifference = Object.values(truckDiffs).reduce((a, b) => a + b, 0);
 
@@ -392,15 +511,23 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
     tables,
     normalizedRecords,
     actuals,
-    duplicateErrors,
+    multipleEntries,
+    duplicateErrors: [], // No longer blocks import; multiple entries are aggregated
     totalRecords: normalizedRecords.length,
     uniqueTruckCount: uniqueTruckList.length,
     matchedCount: matchedTrucks.length,
     unmatchedCount: unmatchedTrucks.length,
     matchedTrucks,
     unmatchedTrucks,
+    unmatchedTruckDetails,
     totalDifference
   };
+}
+
+function getFYFromYearAndMonth(y, m) {
+  return m >= 3
+    ? `FY ${y}-${String(y + 1).slice(-2)}`
+    : `FY ${y - 1}-${String(y).slice(-2)}`;
 }
 
 export default function UploadIncentiveExcelDialog({
@@ -414,6 +541,7 @@ export default function UploadIncentiveExcelDialog({
 }) {
   const [selectedMonth, setSelectedMonth] = useState(initialMonth);
   const [selectedYear, setSelectedYear] = useState(initialYear);
+  const [selectedFY, setSelectedFY] = useState(() => getFYFromYearAndMonth(initialYear, initialMonth));
   const [file, setFile] = useState(null);
   const [workbook, setWorkbook] = useState(null);
   const [sheetNames, setSheetNames] = useState([]);
@@ -423,11 +551,22 @@ export default function UploadIncentiveExcelDialog({
   const [detectedPeriod, setDetectedPeriod] = useState(null);
   const [periodMismatchChoice, setPeriodMismatchChoice] = useState('keep_selected'); // 'keep_selected' | 'switch_to_detected'
 
+  const fyOptions = useMemo(() => {
+    const list = [];
+    const minYear = Math.min(...years) - 1;
+    const maxYear = Math.max(...years) + 1;
+    for (let y = minYear; y <= maxYear; y++) {
+      list.push(`FY ${y}-${String(y + 1).slice(-2)}`);
+    }
+    return list;
+  }, [years]);
+
   // Reset state when opening
   useEffect(() => {
     if (open) {
       setSelectedMonth(initialMonth);
       setSelectedYear(initialYear);
+      setSelectedFY(getFYFromYearAndMonth(initialYear, initialMonth));
       setFile(null);
       setWorkbook(null);
       setSheetNames([]);
@@ -438,6 +577,33 @@ export default function UploadIncentiveExcelDialog({
       setPeriodMismatchChoice('keep_selected');
     }
   }, [open, initialMonth, initialYear]);
+
+  const handleFYChange = (newFY) => {
+    setSelectedFY(newFY);
+    const m = newFY.match(/\d{4}/);
+    if (m) {
+      const startY = parseInt(m[0], 10);
+      const computedY = selectedMonth >= 3 ? startY : startY + 1;
+      setSelectedYear(computedY);
+    }
+  };
+
+  const handleMonthChange = (newMonth) => {
+    setSelectedMonth(newMonth);
+    const m = selectedFY.match(/\d{4}/);
+    if (m) {
+      const startY = parseInt(m[0], 10);
+      const computedY = newMonth >= 3 ? startY : startY + 1;
+      setSelectedYear(computedY);
+    } else {
+      setSelectedFY(getFYFromYearAndMonth(selectedYear, newMonth));
+    }
+  };
+
+  const handleYearChange = (newYear) => {
+    setSelectedYear(newYear);
+    setSelectedFY(getFYFromYearAndMonth(newYear, selectedMonth));
+  };
 
   // Handle file selection
   const handleFileChange = async (selectedFile) => {
@@ -502,50 +668,44 @@ export default function UploadIncentiveExcelDialog({
     );
   }, [detectedPeriod, selectedMonth, selectedYear]);
 
-  // Compute financial year string
-  const financialYearStr = useMemo(() => {
-    const effectiveYear = periodMismatchChoice === 'switch_to_detected' && detectedPeriod?.detectedCalendarYear
-      ? detectedPeriod.detectedCalendarYear
-      : selectedYear;
-    const effectiveMonth = periodMismatchChoice === 'switch_to_detected' && detectedPeriod?.detectedMonthIndex !== null
-      ? detectedPeriod.detectedMonthIndex
-      : selectedMonth;
-    return effectiveMonth >= 3
-      ? `FY ${effectiveYear}–${String(effectiveYear + 1).slice(-2)}`
-      : `FY ${effectiveYear - 1}–${String(effectiveYear).slice(-2)}`;
-  }, [selectedYear, selectedMonth, periodMismatchChoice, detectedPeriod]);
-
   // Handle Confirm Import
   const handleConfirm = () => {
     if (!parseResult || !file) return;
 
     let targetYear = selectedYear;
     let targetMonth = selectedMonth;
+    let targetFY = selectedFY;
 
     if (hasPeriodMismatch && periodMismatchChoice === 'switch_to_detected') {
       if (detectedPeriod.detectedCalendarYear !== null) targetYear = detectedPeriod.detectedCalendarYear;
       if (detectedPeriod.detectedMonthIndex !== null) targetMonth = detectedPeriod.detectedMonthIndex;
+      targetFY = getFYFromYearAndMonth(targetYear, targetMonth);
     }
 
     onConfirmImport({
       targetYear,
       targetMonth,
-      financialYear: financialYearStr,
+      financialYear: targetFY,
       newActuals: parseResult.actuals,
       normalizedRecords: parseResult.normalizedRecords,
       uploadSummary: {
         tables: parseResult.tables,
         normalizedRecords: parseResult.normalizedRecords,
+        multipleEntries: parseResult.multipleEntries,
         totalRows: parseResult.totalRecords,
         uniqueTruckCount: parseResult.uniqueTruckCount,
         matchedCount: parseResult.matchedCount,
         unmatchedCount: parseResult.unmatchedCount,
-        unmatchedTrucks: parseResult.unmatchedTrucks.map(t => ({ truckNo: t, records: [] })),
+        unmatchedTrucks: parseResult.unmatchedTrucks.map(t => ({
+          truckNo: t,
+          records: (parseResult.unmatchedTruckDetails?.find(d => d.truckNo === t)?.records) || []
+        })),
+        unmatchedTruckDetails: parseResult.unmatchedTruckDetails || [],
         totalAmount: parseResult.totalDifference,
         totalDifference: parseResult.totalDifference,
         detectedMonthIndex: detectedPeriod?.detectedMonthIndex,
         detectedCalendarYear: detectedPeriod?.detectedCalendarYear,
-        detectedFY: financialYearStr
+        detectedFY: targetFY
       },
       excelName: file.name,
       excelData: parseResult.aoa
@@ -615,12 +775,30 @@ export default function UploadIncentiveExcelDialog({
               <Select
                 size="small"
                 value={selectedMonth}
-                onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                sx={{ minWidth: 150, height: 36, fontSize: '12px', fontWeight: 700 }}
+                onChange={(e) => handleMonthChange(Number(e.target.value))}
+                sx={{ minWidth: 140, height: 36, fontSize: '12px', fontWeight: 700 }}
               >
                 {MONTH_NAMES.map((m, idx) => (
                   <MenuItem key={idx} value={idx} sx={{ fontSize: '12px', fontWeight: 600 }}>
                     {m}
+                  </MenuItem>
+                ))}
+              </Select>
+            </Box>
+
+            <Box>
+              <Typography variant="caption" fontWeight={700} color="#64748b" display="block" mb={0.5}>
+                Financial Year
+              </Typography>
+              <Select
+                size="small"
+                value={selectedFY}
+                onChange={(e) => handleFYChange(e.target.value)}
+                sx={{ minWidth: 140, height: 36, fontSize: '12px', fontWeight: 700 }}
+              >
+                {fyOptions.map(fy => (
+                  <MenuItem key={fy} value={fy} sx={{ fontSize: '12px', fontWeight: 600 }}>
+                    {fy}
                   </MenuItem>
                 ))}
               </Select>
@@ -633,7 +811,7 @@ export default function UploadIncentiveExcelDialog({
               <Select
                 size="small"
                 value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                onChange={(e) => handleYearChange(Number(e.target.value))}
                 sx={{ minWidth: 110, height: 36, fontSize: '12px', fontWeight: 700 }}
               >
                 {years.map(y => (
@@ -646,10 +824,10 @@ export default function UploadIncentiveExcelDialog({
 
             <Box sx={{ ml: 'auto', textAlign: 'right' }}>
               <Typography variant="caption" fontWeight={700} color="#64748b" display="block" mb={0.5}>
-                Financial Year
+                Target Period
               </Typography>
               <Chip
-                label={financialYearStr}
+                label={`${MONTH_NAMES[selectedMonth]} ${selectedYear} (${selectedFY})`}
                 size="small"
                 sx={{ fontWeight: 800, bgcolor: '#ede9fe', color: '#6d28d9', fontSize: '11px' }}
               />
@@ -737,7 +915,7 @@ export default function UploadIncentiveExcelDialog({
                   Period Mismatch Warning
                 </Typography>
                 <Typography variant="body2" color="#78350f" mt={0.5} fontSize="12px">
-                  The file content mentions <strong>{detectedPeriod?.detectedMonthIndex !== null ? MONTH_NAMES[detectedPeriod.detectedMonthIndex] : ''} {detectedPeriod?.detectedCalendarYear || ''}</strong>, but your target selection above is <strong>{MONTH_NAMES[selectedMonth]} {selectedYear}</strong>.
+                  The file content mentions <strong>{detectedPeriod?.detectedMonthIndex !== null ? MONTH_NAMES[detectedPeriod.detectedMonthIndex] : ''} {detectedPeriod?.detectedCalendarYear || ''}</strong>, but your target selection above is <strong>{MONTH_NAMES[selectedMonth]} {selectedYear} ({selectedFY})</strong>.
                 </Typography>
                 <RadioGroup
                   value={periodMismatchChoice}
@@ -749,7 +927,7 @@ export default function UploadIncentiveExcelDialog({
                     control={<Radio size="small" sx={{ color: '#b45309', '&.Mui-checked': { color: '#b45309' } }} />}
                     label={
                       <Typography fontSize="12px" fontWeight={700} color="#92400e">
-                        Import into selected target period: {MONTH_NAMES[selectedMonth]} {selectedYear} (Authoritative)
+                        Import into selected target period: {MONTH_NAMES[selectedMonth]} {selectedYear} ({selectedFY}) (Authoritative)
                       </Typography>
                     }
                   />
@@ -771,7 +949,7 @@ export default function UploadIncentiveExcelDialog({
                 sx={{ borderRadius: 2.5, bgcolor: '#f0fdf4', border: '1px solid #bbf7d0', py: 0.5 }}
               >
                 <Typography variant="body2" color="#166534" fontWeight={700} fontSize="12px">
-                  Target Period Matches: File corresponds to {MONTH_NAMES[selectedMonth]} {selectedYear}.
+                  Target Period Matches: File corresponds to {MONTH_NAMES[selectedMonth]} {selectedYear} ({selectedFY}).
                 </Typography>
               </Alert>
             ) : null}
@@ -804,23 +982,27 @@ export default function UploadIncentiveExcelDialog({
                   </Box>
                 </Box>
 
-                {/* Duplicate Rows Warning */}
-                {parseResult.duplicateErrors.length > 0 && (
-                  <Alert severity="error" icon={<ErrorOutlineIcon />} sx={{ borderRadius: 2.5 }}>
-                    <Typography variant="subtitle2" fontWeight={800}>
-                      Duplicate vehicle rows detected in section!
+                {/* Multiple Entries Aggregation Notice */}
+                {parseResult.multipleEntries && parseResult.multipleEntries.length > 0 && (
+                  <Alert severity="info" icon={<CheckCircleOutlineIcon />} sx={{ borderRadius: 2.5, bgcolor: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                    <Typography variant="subtitle2" fontWeight={800} color="#1e40af">
+                      Aggregated Multiple Entries for Same Vehicle
                     </Typography>
-                    <Typography variant="body2" fontSize="11px" mt={0.5}>
-                      The following vehicles appear multiple times within the same table: {parseResult.duplicateErrors.map(d => `${d.truckNo} (Row ${d.rowIdx})`).join(', ')}.
+                    <Typography variant="body2" color="#1e3a8a" fontSize="11px" mt={0.5}>
+                      {parseResult.multipleEntries.length} multiple rows for the same vehicle under the same category were automatically aggregated and summed together.
                     </Typography>
                   </Alert>
                 )}
 
                 {/* Unmatched Vehicles Warning */}
                 {parseResult.unmatchedCount > 0 && (
-                  <Alert severity="info" sx={{ borderRadius: 2.5, bgcolor: '#eff6ff', border: '1px solid #bfdbfe' }}>
-                    <Typography variant="body2" fontWeight={700} color="#1e40af" fontSize="12px">
-                      {parseResult.unmatchedCount} vehicles in the Excel do not have trip records in this period ({parseResult.unmatchedTrucks.join(', ')}). They will not create new Party Master vehicles.
+                  <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ borderRadius: 2.5, bgcolor: '#fffbeb', border: '1px solid #fde68a' }}>
+                    <Typography variant="subtitle2" fontWeight={800} color="#92400e">
+                      {parseResult.unmatchedCount} Unmatched Vehicles Detected in Excel
+                    </Typography>
+                    <Typography variant="body2" color="#78350f" fontSize="11px" mt={0.5}>
+                      The following vehicles from Excel do not match any vehicles in the system for this month: <strong>{parseResult.unmatchedTrucks.join(', ')}</strong>.
+                      Their amounts will <strong>not</strong> be assigned to other vehicles and will not create new vehicles.
                     </Typography>
                   </Alert>
                 )}
@@ -887,7 +1069,7 @@ export default function UploadIncentiveExcelDialog({
         <Button
           variant="contained"
           onClick={handleConfirm}
-          disabled={!parseResult || parseResult.duplicateErrors.length > 0 || parsing}
+          disabled={!parseResult || parsing || !file}
           sx={{
             fontWeight: 800,
             textTransform: 'none',

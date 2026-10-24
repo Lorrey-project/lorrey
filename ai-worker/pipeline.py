@@ -64,14 +64,11 @@ def download_file_from_s3(s3_url: str) -> str:
     Returns the local file path.
     Works for private buckets where plain HTTP gives 403.
     """
+    if os.path.exists(s3_url):
+        return s3_url
+
     parsed = urlparse(s3_url)
 
-    # Extract bucket name and key from the S3 URL
-    # Formats supported:
-    #   https://<bucket>.s3.<region>.amazonaws.com/<key>
-    #   https://<bucket>.s3.amazonaws.com/<key>
-    #   https://<bucket>.s3-<region>.amazonaws.com/<key>
-    #   https://s3.<region>.amazonaws.com/<bucket>/<key>
     hostname = parsed.netloc.lower()
     path = unquote(parsed.path.lstrip("/"))
 
@@ -143,7 +140,6 @@ def health():
 def process_invoice(data: InvoiceRequest):
 
     file_url = data.file
-
     print("Received file:", file_url)
 
     import time
@@ -162,15 +158,12 @@ def process_invoice(data: InvoiceRequest):
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"Failed to download file from S3: {str(e)}")
 
-    # Convert PDF to Image or optimize image and encode to base64 in memory
     import base64
     from io import BytesIO
     from PIL import Image
 
-    base64_image = None
-
-    def optimize_and_encode_image(img_raw_bytes, max_dim=1600):
-        """Helper to resize large images to max 1600px dimension to save tokens & prevent 429 rate limits"""
+    def optimize_and_encode_image(img_raw_bytes, max_dim=2000):
+        """Helper to resize large images to max 2000px dimension while preserving high quality for OCR"""
         try:
             with Image.open(BytesIO(img_raw_bytes)) as img:
                 if img.mode != 'RGB':
@@ -179,42 +172,51 @@ def process_invoice(data: InvoiceRequest):
                 if w > max_dim or h > max_dim:
                     img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
                 buf = BytesIO()
-                img.save(buf, format="JPEG", quality=85, optimize=True)
+                img.save(buf, format="JPEG", quality=90, optimize=True)
                 return base64.b64encode(buf.getvalue()).decode("utf-8")
         except Exception as err:
             print(f"PIL Optimization fallback: {err}")
             return base64.b64encode(img_raw_bytes).decode("utf-8")
+
+    page_images = []
 
     try:
         t0 = time.time()
         import fitz  # PyMuPDF
         doc = fitz.open(file_path)
         if doc.is_pdf:
-            print("PDF detected. Converting first page to image in memory...")
-            page = doc.load_page(0)
-            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            img_bytes = pix.tobytes("jpeg")
-            base64_image = optimize_and_encode_image(img_bytes, max_dim=1600)
+            total_pages = len(doc)
+            print(f"PDF detected with {total_pages} page(s). Processing all pages...")
+            # Limit to max 6 pages to preserve tokens while capturing full invoices
+            max_pages_to_process = min(total_pages, 6)
+            for page_idx in range(max_pages_to_process):
+                page = doc.load_page(page_idx)
+                # Render at 2.0x zoom (144-150 DPI) for razor-sharp visual text
+                pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+                img_bytes = pix.tobytes("jpeg")
+                b64 = optimize_and_encode_image(img_bytes, max_dim=2000)
+                page_images.append(b64)
             doc.close()
         else:
             doc.close()
             with open(file_path, "rb") as img_file:
                 raw_bytes = img_file.read()
-                base64_image = optimize_and_encode_image(raw_bytes, max_dim=1600)
-        print(f"[Profiling] Image processing completed in {time.time() - t0:.2f}s")
+                b64 = optimize_and_encode_image(raw_bytes, max_dim=2000)
+                page_images.append(b64)
+        print(f"[Profiling] Image processing for {len(page_images)} page(s) completed in {time.time() - t0:.2f}s")
     except Exception as e:
         print(f"PyMuPDF check fallback: {e}. Reading raw image file.")
         with open(file_path, "rb") as img_file:
-            base64_image = optimize_and_encode_image(img_file.read(), max_dim=1600)
+            b64 = optimize_and_encode_image(img_file.read(), max_dim=2000)
+            page_images.append(b64)
 
     # -------------------------------
-    # Direct AI Vision Extraction
-    # (No OCR — GPT-4o reads image directly)
+    # Direct AI Vision Extraction on All Pages
     # -------------------------------
     try:
         t0 = time.time()
-        print("Running GPT-4o Vision extraction...")
-        invoice_json = extract_invoice_data(base64_image, target_schema)
+        print(f"Running high-accuracy GPT-4o Vision extraction across {len(page_images)} page(s)...")
+        invoice_json = extract_invoice_data(page_images, target_schema)
         print(f"[Profiling] Vision Extraction completed in {time.time() - t0:.2f}s")
         
         t0 = time.time()
@@ -225,7 +227,7 @@ def process_invoice(data: InvoiceRequest):
         # Hard guard: clear fields the AI should never hallucinate
         invoice_json = clear_hallucinated_fields(invoice_json, "")
 
-        # Rule-based validations
+        # Rule-based validations and anti-confusion sanitization
         invoice_json = validate_invoice(invoice_json)
 
         # Address validation
@@ -234,7 +236,7 @@ def process_invoice(data: InvoiceRequest):
         # GST / PAN validation
         invoice_json = validate_gst_pan(invoice_json)
 
-        # Amount validation
+        # Amount validation (preserving printed values)
         invoice_json = validate_amounts(invoice_json)
 
         # Time normalization

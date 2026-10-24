@@ -25,6 +25,124 @@ function num(val, fb = 0) {
   return isNaN(n) ? fb : n;
 }
 
+/**
+ * ACTUAL / DEDICATED -> ACTUAL PAYOUT:
+ * ACTUAL PAYOUT = Normal Actual Payout + 10 WH Extra Payout + 6 WH Extra Payout
+ *
+ * Component A: Normal Actual Payout
+ * Calculated from SUM OF AC NVL & NVCL (sumAc) based on Vehicle Type and Wheel:
+ * 1. ATOA (Any wheel) -> 0% commission deducted: sumAc
+ * 2. MKT (12 WH & 14 WH) -> 5% commission deducted: sumAc * 0.95
+ * 3. MKT (10 WH) -> ((sumAc / 9.5%) * (100% - 5%)) * 8.5%
+ * 4. MKT (6 WH)  -> ((sumAc / 9.5%) * (100% - 7%)) * 8.5%
+ */
+export function calculateNormalActualPayout(sumAc, type, wheel) {
+  const numSum = num(sumAc);
+  if (!numSum) return 0;
+
+  const upperType = String(type || '').toUpperCase().trim();
+  const upperWheel = String(wheel || '').toUpperCase().trim();
+
+  // 1. ATOA — All Wheel Types (0% commission)
+  if (upperType === 'ATOA' || upperType === 'ATO' || upperType.startsWith('ATO')) {
+    return numSum;
+  }
+
+  // 2, 3, 4. MKT Rules
+  if (upperType === 'MKT' || upperType === 'MKTA' || upperType.startsWith('MKT')) {
+    // 2. MKT — 12 WH and 14 WH (5% commission)
+    if (upperWheel.includes('12') || upperWheel.includes('14')) {
+      return numSum * 0.95;
+    }
+
+    // 3. MKT — 10 WH (((sumAc / 9.5%) * (100% - 5%)) * 8.5%)
+    if (upperWheel.includes('10')) {
+      return (numSum / 0.095) * 0.95 * 0.085;
+    }
+
+    // 4. MKT — 6 WH (((sumAc / 9.5%) * (100% - 7%)) * 8.5%)
+    if (upperWheel.includes('6')) {
+      return (numSum / 0.095) * 0.93 * 0.085;
+    }
+
+    // Default MKT fallback
+    return numSum * 0.95;
+  }
+
+  // Default fallback if type is neither ATOA nor MKT
+  return numSum;
+}
+
+/**
+ * Component B: 10 WH Extra Payout
+ * Calculated strictly from SUM OF 10WH EXT (sum10W):
+ * - ATOA: 0% commission -> sum10W
+ * - MKTA / MKT: 5% commission -> sum10W * 0.95
+ */
+export function calculate10WHExtraPayout(sum10W, type) {
+  const num10W = num(sum10W);
+  if (!num10W) return 0;
+
+  const upperType = String(type || '').toUpperCase().trim();
+
+  // ATOA: 0% commission
+  if (upperType === 'ATOA' || upperType === 'ATO' || upperType.startsWith('ATO')) {
+    return num10W;
+  }
+
+  // MKTA / MKT: 5% commission
+  if (upperType === 'MKTA' || upperType === 'MKT' || upperType.startsWith('MKT')) {
+    return num10W * 0.95;
+  }
+
+  return num10W;
+}
+
+/**
+ * Component C: 6 WH Extra Payout
+ * Calculated strictly from SUM OF 6WH EXT (sum6W):
+ * - ATOA: 0% commission -> sum6W
+ * - MKTA / MKT: 7% commission -> sum6W * 0.93
+ */
+export function calculate6WHExtraPayout(sum6W, type) {
+  const num6W = num(sum6W);
+  if (!num6W) return 0;
+
+  const upperType = String(type || '').toUpperCase().trim();
+
+  // ATOA: 0% commission
+  if (upperType === 'ATOA' || upperType === 'ATO' || upperType.startsWith('ATO')) {
+    return num6W;
+  }
+
+  // MKTA / MKT: 7% commission
+  if (upperType === 'MKTA' || upperType === 'MKT' || upperType.startsWith('MKT')) {
+    return num6W * 0.93;
+  }
+
+  return num6W;
+}
+
+/**
+ * Combined Actual Payout:
+ * ACTUAL PAYOUT = Normal Actual Payout + 10 WH Extra Payout + 6 WH Extra Payout
+ */
+export function calculateCombinedActualPayout(sumAc, sum10W, sum6W, type, wheel) {
+  const normalPayout = calculateNormalActualPayout(sumAc, type, wheel);
+  const extra10Payout = calculate10WHExtraPayout(sum10W, type);
+  const extra6Payout = calculate6WHExtraPayout(sum6W, type);
+  return normalPayout + extra10Payout + extra6Payout;
+}
+
+/**
+ * Polymorphic calculateActualPayout:
+ * If sum10W & sum6W are passed, calculates combined payout.
+ * If only 3 args are passed, acts as combined calculation where 10W & 6W default to 0.
+ */
+export function calculateActualPayout(sumAc, type, wheel, sum10W = 0, sum6W = 0) {
+  return calculateCombinedActualPayout(sumAc, sum10W, sum6W, type, wheel);
+}
+
 // Robust truck number extractor - normalizes Indian truck registrations from messy text
 function extractTruckNo(val) {
   if (val === undefined || val === null) return '';
@@ -53,13 +171,13 @@ function parseLoadingDate(str) {
     const a = parseInt(parts[0], 10);
     const b = parseInt(parts[1], 10);
     const c = parseInt(parts[2], 10);
-    
+
     // Check if it's YYYY-MM-DD
     if (a > 1000 && b >= 1 && b <= 12 && c >= 1 && c <= 31) {
       const date = new Date(a, b - 1, c);
       if (!isNaN(date.getTime())) return date;
     }
-    
+
     // Check if it's DD-MM-YYYY or DD-MM-YY
     const day = a;
     const month = b - 1;
@@ -136,9 +254,9 @@ function truckDisplayType(row) {
 //   Total           = NVL Sum of Amt + NVCL Sum of Amt
 //   Final TOTAL     = Total + 10W Extra 8.5%
 export function buildIncentiveData(rows, year, month, truckContacts = []) {
-  // 1. Filter to selected month (by LOADING DT)
+  // 1. Filter to selected month (by LOADING DT / LOADING DATE / BILL DATE)
   const filtered = rows.filter(row => {
-    const ld = row['LOADING DT'];
+    const ld = row['LOADING DT'] || row['LOADING DATE'] || row['BILL DATE'] || row.date || row.Date;
     const d = parseLoadingDate(ld);
     if (!d) return false;
     return d.getFullYear() === year && d.getMonth() === month;
@@ -159,34 +277,65 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
         return dbNo === normT;
       });
 
+      // 1. WHEEL must come from Party Master (do NOT manually calculate or infer)
       const dbWheel = contact ? (
+        contact['Wheel Type '] ||
+        contact['Wheel Type'] ||
+        contact.wheelType ||
+        contact.wheel_type ||
         contact['Type of vehicle '] ||
         contact['Type of vehicle'] ||
         contact['type_of_vehicle'] ||
         contact.veh_type ||
-        contact.wheelType ||
-        contact.wheel_type ||
         ''
       ) : '';
+      let displayWheel = dbWheel || row['WHEEL'] || '';
+      if (displayWheel) {
+        const upW = String(displayWheel).toUpperCase();
+        if (upW.includes('14')) displayWheel = '14W';
+        else if (upW.includes('12')) displayWheel = '12W';
+        else if (upW.includes('10')) displayWheel = '10W';
+        else if (upW.includes('6')) displayWheel = '6W';
+      }
 
-      const owner = contact ? (contact['Owner Name '] || contact['Owner Name'] || contact.owner_name || '') : '';
+      // 2. OWNER NAME from Party Master / Owner Details primary, fallback to row
+      const dbOwner = contact ? (
+        contact['Owner Name '] ||
+        contact['Owner Name'] ||
+        contact.owner_name ||
+        contact.owner ||
+        ''
+      ) : '';
+      const displayOwner = (dbOwner || row['OWNER NAME'] || row['PARTY NAME'] || '').trim();
 
-      // Determine Customer Type (ATOA vs MKT) from Database primary
-      const dbCustType = contact ? (
+      // 3. TYPE: Read existing Relationship Type from Party Master / Party Payment, preserve exact value
+      const dbRelationshipType = contact ? (
+        contact['Relationship Type '] ||
+        contact['Relationship Type'] ||
+        contact.relationshipType ||
+        contact.RelationshipType ||
         contact['TYPE OF CUSTOMER '] ||
+        contact['TYPE OF CUSTOMER'] ||
         contact['type_of_customer'] ||
         contact['type_of_customers'] ||
         contact.cust_type ||
+        contact.custType ||
         contact.type ||
-        contact.relationshipType ||
         ''
       ) : '';
-      let displayType = truckDisplayType(row); // fallback to trip logic
-      if (dbCustType) {
-        const upper = String(dbCustType).toUpperCase().trim();
-        if (upper === 'ATOA' || upper === 'ATO' || upper.startsWith('ATO')) displayType = 'ATOA';
-        else if (upper === 'MKT' || upper === 'MKTA' || upper.startsWith('MKT')) displayType = 'MKT';
+      let displayType = '';
+      if (dbRelationshipType) {
+        displayType = String(dbRelationshipType).trim();
+      } else if (row['TYPE']) {
+        displayType = String(row['TYPE']).trim();
+      } else {
+        displayType = truckDisplayType(row);
       }
+
+      const upperType = displayType.toUpperCase();
+      const isAtoa = upperType === 'ATOA' || upperType === 'ATO' || upperType.startsWith('ATO');
+      const isMktOrOwn = upperType === 'MKT' || upperType === 'MKTA' || upperType.startsWith('MKT') || upperType === 'OWN' || upperType.startsWith('OWN');
+      const isAtoaOrMktRel = isAtoa || isMktOrOwn;
 
       const commApp = contact ? (contact['Incentive Comission Appliciability '] || contact.incentive_commission_applicability || '') : '';
       let rawComm = contact ? (contact.incentive_commission || contact['incentive_commission ']) : undefined;
@@ -196,38 +345,50 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
       }
       commValue = commValue / 100;
 
+      // 4. DEDICATED TYPE: Party Master MUST be DEDICATED
       const rawDedicated = contact ? (
         contact.dedicated_type ||
         contact.dedicatedType ||
         contact['Dedicated Type'] ||
         contact['Dedicated Type '] ||
         contact.dedicated ||
+        contact.TYPE ||
         ''
       ) : '';
       const isDedicated = String(rawDedicated).trim().toLowerCase() === 'dedicated';
 
       let normWheel = 'OTHER';
-      const wheelRaw = String(dbWheel || row['WHEEL'] || '').toUpperCase();
+      const wheelRaw = String(displayWheel).toUpperCase();
       if (wheelRaw.includes('6')) normWheel = '6WH';
       else if (wheelRaw.includes('10')) normWheel = '10WH';
       else if (wheelRaw.includes('12')) normWheel = '12WH';
       else if (wheelRaw.includes('14')) normWheel = '14WH';
 
-      const isAtoaOrMktRel = (displayType === 'ATOA' || displayType === 'MKT');
+      // Capacity according to vehicle-wise trip summary: 14W -> 30 MT, 12W -> 25 MT, 10W -> 19 MT, 6W -> 13 MT
+      let standardCap = 0;
+      if (normWheel === '14WH') standardCap = 30;
+      else if (normWheel === '12WH') standardCap = 25;
+      else if (normWheel === '10WH') standardCap = 19;
+      else if (normWheel === '6WH') standardCap = 13;
 
       byTruck[truck] = {
         type: displayType,
-        ownerName: row['OWNER NAME'] || owner || '',
+        ownerName: displayOwner,
         truckNo: truck,
-        wheel: row['WHEEL'] || dbWheel || normWheel,
+        wheel: displayWheel,
         normWheel,
+        standardCap,
         isDedicated,
+        isAtoa,
+        isMktOrOwn,
         isAtoaOrMkt: isAtoaOrMktRel,
         contact,
         tripsCount: 0,
+        dailyMT: {},
+        totalMT: 0,
         seenInvoices: new Set(),
-        nvl: { invQty: 0, orgFreight: 0, amt: 0, sourceAmt: 0 },
-        nvcl: { invQty: 0, orgFreight: 0, amt: 0, sourceAmt: 0 },
+        nvl: { invQty: 0, orgBillingAmt: 0, orgFreight: 0, amt: 0, sourceAmt: 0, extra10W: 0, extra6WPotential: 0, extra6W: 0 },
+        nvcl: { invQty: 0, orgBillingAmt: 0, orgFreight: 0, amt: 0, sourceAmt: 0, extra10W: 0, extra6WPotential: 0, extra6W: 0 },
         extra10W: 0,
         extra6WPotential: 0,
         extra6W: 0,
@@ -270,15 +431,20 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
       }
       entry.seenInvoices.add(invNo);
     }
-    entry.tripsCount += 1;
 
-    const isAtoa = (entry.type === 'ATOA' || entry.type === 'ATO');
+    // Track daily MT to calculate trip count per vehicle-wise trip summary logic
+    const ldRaw = row['LOADING DT'] || row['LOADING DATE'] || row['BILL DATE'] || row.date;
+    const ldKey = formatLoadingDate(ldRaw) || 'single_date';
+    entry.dailyMT[ldKey] = (entry.dailyMT[ldKey] || 0) + mt;
+    entry.totalMT = (entry.totalMT || 0) + mt;
 
-    // Bill Freight for ATOA (from Cement Register)
+    // Bill Freight / Billing Amount Total from Cement Register
     let billFreight = billingRate > 0 && mt > 0 ? billingRate * mt : bAmt;
     if (billFreight === 0 && billingRate > 0) billFreight = billingRate;
+    if (billFreight === 0 && bAmt > 0) billFreight = bAmt;
+    const orgBillingAmt = billFreight > 0 ? billFreight : (bAmt > 0 ? bAmt : (billingRate > 0 && mt > 0 ? billingRate * mt : 0));
 
-    // Party Freight for MKT (from Cement Register)
+    // Party Freight from Party Payment / Cement Register (BILLING ER 95% / PARTY PAYABLE)
     let partyFreight = 0;
     const storedPartyFreight = num(row['BILLING ER 95%'] || row['BILLING @ 95% (PARTY PAYABLE)']);
     const storedPartyRateAmt = num(row['PARTY RATE AMOUNT'] || row['PARTY FREIGHT']);
@@ -305,113 +471,145 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
       partyFreight = billFreight * (1 - comm);
     }
 
-    // Source Freight:
-    // ATOA: Bill Freight | MKT: Party Freight
-    const sourceFreight = isAtoa ? billFreight : partyFreight;
-
     const cat = classifyRow(row);
     const rawDed = row['DEDICATED'] ?? row['Dedicated'] ?? row['dedicated'] ?? '';
     const dedAmt = parseExcelNum(rawDed);
 
     if (cat === 'NVL') {
       entry.nvl.invQty = Math.round(entry.nvl.invQty + mt);
-      entry.nvl.orgFreight += sourceFreight;
+      entry.nvl.orgBillingAmt += orgBillingAmt;
+      entry.nvl.orgFreight += partyFreight; // Strictly Party Freight / Party Payable
       if (dedAmt > 0) {
         entry.nvl.sourceAmt += dedAmt;
       }
     } else {
       entry.nvcl.invQty = Math.round(entry.nvcl.invQty + mt);
-      entry.nvcl.orgFreight += sourceFreight;
+      entry.nvcl.orgBillingAmt += orgBillingAmt;
+      entry.nvcl.orgFreight += partyFreight; // Strictly Party Freight / Party Payable
       if (dedAmt > 0) {
         entry.nvcl.sourceAmt += dedAmt;
       }
     }
 
-    // Rule 2: 10-Wheel Extra Incentive from first qualifying trip (SO + NT)
-    // Both conditions required: Bill Type = SO (NOT STO) AND NT classification
-    const bType = String(row['Bill Type'] || row['BILL TYPE'] || '').trim().toUpperCase();
-    const isSo = bType === 'SO';
+    // Rule 2: 10-Wheel Extra Incentive from first qualifying trip (SO + NT, STO disallowed)
+    const bType = String(row['Bill Type'] || row['BILL TYPE'] || row.billType || row.invoice_type || '').trim().toUpperCase();
+    const isSto = bType === 'STO' || bType.includes('STOCK');
+    const isSo = !isSto && (bType === 'SO' || bType.includes('SALES'));
     const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
+    const hasUnloadingCharges = Boolean(
+      (row.nt_details && (row.nt_details.unloading_charges || row.nt_details.unloadingCharges)) ||
+      (row['EXTRA UNLOADING'] && parseExcelNum(row['EXTRA UNLOADING']) > 0)
+    );
+    const stored10WExtraVal = num(
+      row['10W EXTRA 8.5%'] ??
+      (row['10W EXTRA 8'] ? (row['10W EXTRA 8']['5%'] ?? row['10W EXTRA 8']['5']) : 0)
+    );
     const isNt = row._is_nt_invoice === true || row._is_nt_invoice === 'true' ||
-                 row._source_nt_unloading === true || row._source_nt_unloading === 'true' ||
-                 ntWordRegex.test(String(row.classification || row.category || row.invoice_type_classification || '')) ||
-                 (row['EXTRA UNLOADING'] && parseExcelNum(row['EXTRA UNLOADING']) > 0) ||
-                 ntWordRegex.test(String(row['UNLOADING STATUS NOTE'] || row['UNLOADING STATUS'] || row.notes || ''));
+      row._source_nt_unloading === true || row._source_nt_unloading === 'true' ||
+      hasUnloadingCharges ||
+      stored10WExtraVal > 0 ||
+      ntWordRegex.test(String(row.classification || row.category || row.invoice_type_classification || '')) ||
+      ntWordRegex.test(String(row['UNLOADING STATUS NOTE'] || row['UNLOADING STATUS'] || row.notes || ''));
     const isSoAndNt = isSo && isNt;
 
-    const manualW10 = num(row['10W EXTRA 8.5%']);
-    if (manualW10 > 0) {
-      entry.extra10W += manualW10;
-    } else if (entry.normWheel === '10WH' && entry.isAtoaOrMkt && isSoAndNt) {
-      const extra10Base = isAtoa ? billFreight : partyFreight;
-      entry.extra10W += extra10Base * 0.085;
+    // Rule 2: 10-Wheel Extra Incentive (qualifying SO + NT, STO disallowed)
+    // ATOA: 8.5% on Sum of Original Billing Amount | MKT: 8.5% on Sum of Original Freight
+    const isQualifying10W = entry.normWheel === '10WH' && !isSto && (isSoAndNt || stored10WExtraVal > 0);
+    if (isQualifying10W) {
+      const extra10Base = entry.isAtoa ? orgBillingAmt : partyFreight;
+      const trip10W = extra10Base * 0.085;
+      entry.extra10W += trip10W;
+      if (cat === 'NVL') {
+        entry.nvl.extra10W = (entry.nvl.extra10W || 0) + trip10W;
+      } else {
+        entry.nvcl.extra10W = (entry.nvcl.extra10W || 0) + trip10W;
+      }
     }
 
-    // Rule 3: 6-Wheel Extra Incentive (15% if 6WH + ATOA/MKT, requires >= 6 completed trips)
-    if (entry.normWheel === '6WH' && entry.isAtoaOrMkt) {
-      const extra6Base = isAtoa ? billFreight : partyFreight;
-      entry.extra6WPotential += extra6Base * 0.15;
+    // Rule 3: 6-Wheel Extra Incentive (15% if 6WH, requires >= 6 completed trips)
+    // ATOA: 15% on Sum of Original Billing Amount | MKT: 15% on Sum of Original Freight
+    if (entry.normWheel === '6WH') {
+      const extra6Base = entry.isAtoa ? orgBillingAmt : partyFreight;
+      const trip6W = extra6Base * 0.15;
+      entry.extra6WPotential += trip6W;
+      if (cat === 'NVL') {
+        entry.nvl.extra6WPotential = (entry.nvl.extra6WPotential || 0) + trip6W;
+      } else {
+        entry.nvcl.extra6WPotential = (entry.nvcl.extra6WPotential || 0) + trip6W;
+      }
     }
   }
 
   // 3. Final Aggregation with Achievement Criteria
   return Object.values(byTruck).map(t => {
-    // Rule 1: Standard Incentive (Base NVL/NVCL)
-    // Eligible ONLY when ALL conditions are satisfied:
-    // 1. Vehicle is DEDICATED in Party Master
-    // 2. Relationship is ATOA or MKT
-    // 3. Completed required qualifying trips:
-    //    6WH: 10 trips | 10WH: 6 trips | 12WH: 6 trips | 14WH: 6 trips
-    let reqStandardTrips = null;
-    if (t.normWheel === '6WH') reqStandardTrips = 10;
-    else if (t.normWheel === '10WH' || t.normWheel === '12WH' || t.normWheel === '14WH') reqStandardTrips = 6;
-
-    const standardEligible = t.isAtoaOrMkt && t.isDedicated && reqStandardTrips !== null && t.tripsCount >= reqStandardTrips;
-
-    // Standard Dedicated Incentive Rate:
-    // ATOA (all wheels 6W, 10W, 12W, 14W): 9.5%
-    // MKT (12W & 14W): 9.5%
-    // MKT (6W & 10W): 8.5%
-    const isAtoa = (t.type === 'ATOA' || t.type === 'ATO');
-    let standardRate = 0.095;
-    if (!isAtoa && (t.normWheel === '6WH' || t.normWheel === '10WH')) {
-      standardRate = 0.085;
+    // Calculate Trips using vehicle-wise trip summary logic:
+    // Capacity: 14W -> 30 MT, 12W -> 25 MT, 10W -> 19 MT, 6W -> 13 MT
+    let tripsCount = 0;
+    const dates = Object.keys(t.dailyMT || {});
+    if (dates.length > 0) {
+      for (const dKey of dates) {
+        const dayMT = t.dailyMT[dKey] || 0;
+        if (dayMT > 0) {
+          const dayTrips = t.standardCap > 0 ? Math.max(1, Math.round(dayMT / t.standardCap)) : 1;
+          tripsCount += dayTrips;
+        }
+      }
     }
+    if (tripsCount === 0 && t.totalMT > 0 && t.standardCap > 0) {
+      tripsCount = Math.max(1, Math.round(t.totalMT / t.standardCap));
+    }
+    t.tripsCount = tripsCount;
 
-    // Map source amounts / calculate standard incentive for display in NVL and NVCL columns:
-    // - For standard-eligible vehicles, preserve the authoritative calculation logic (orgFreight * standardRate).
-    // - For non-eligible vehicles, map authoritative non-zero source amounts from Cement Register ('DEDICATED').
-    // - Vehicles with no matching source amount retain 0 (rendered blank).
-    if (standardEligible) {
-      t.nvl.amt = t.nvl.orgFreight > 0 ? Math.round(t.nvl.orgFreight * standardRate) : (t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0);
-      t.nvcl.amt = t.nvcl.orgFreight > 0 ? Math.round(t.nvcl.orgFreight * standardRate) : (t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0);
+    // Rule 1: Dedicated Incentive Calculation (PROJECTED / DEDICATED)
+    // Dedicated Type in Party Master MUST be DEDICATED (Non-Dedicated vehicles are NOT eligible for Dedicated Incentive)
+    if (t.isDedicated) {
+      if (t.isAtoa) {
+        // ATOA: 9.5% on SUM OF ORIGINAL BILLING AMOUNT
+        t.nvl.amt = t.nvl.orgBillingAmt > 0 ? Math.round(t.nvl.orgBillingAmt * 0.095) : (t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0);
+        t.nvcl.amt = t.nvcl.orgBillingAmt > 0 ? Math.round(t.nvcl.orgBillingAmt * 0.095) : (t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0);
+      } else {
+        // MKT / OWN:
+        // 14W & 12W: 9.5% on SUM OF ORIGINAL FREIGHT (Party Freight)
+        // 10W & 6W: 8.5% on SUM OF ORIGINAL FREIGHT (Party Freight)
+        let mktRate = 0.095;
+        if (t.normWheel === '6WH' || t.normWheel === '10WH') {
+          mktRate = 0.085;
+        }
+        t.nvl.amt = t.nvl.orgFreight > 0 ? Math.round(t.nvl.orgFreight * mktRate) : (t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0);
+        t.nvcl.amt = t.nvcl.orgFreight > 0 ? Math.round(t.nvcl.orgFreight * mktRate) : (t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0);
+      }
     } else {
-      t.nvl.amt = t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0;
-      t.nvcl.amt = t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0;
+      // Ineligible Non-Dedicated vehicles MUST have incentive amounts = 0!
+      t.nvl.amt = 0;
+      t.nvcl.amt = 0;
     }
 
-    // Rule 3: 6-Wheel Extra Incentive
-    // Eligible when vehicle completes at least 6 qualifying trips (Dedicated NOT required)
-    const extra6WEligible = t.normWheel === '6WH' && t.isAtoaOrMkt && t.tripsCount >= 6;
+    // Total = NVL Sum of Amt + NVCL Sum of Amt
+    const nvlNvclTotal = t.nvl.amt + t.nvcl.amt;
+
+    // Rule 2: 10-Wheel Extra Incentive (starts from 1st trip on qualifying SO+NT invoices, regardless of Dedicated status)
+    const extra10WEligible = t.normWheel === '10WH' && t.extra10W > 0;
+    if (!extra10WEligible) {
+      t.extra10W = 0;
+      t.nvl.extra10W = 0;
+      t.nvcl.extra10W = 0;
+    } else {
+      t.extra10W = Math.round(t.extra10W);
+      t.nvl.extra10W = Math.round(t.nvl.extra10W || 0);
+      t.nvcl.extra10W = Math.round(t.nvcl.extra10W || 0);
+    }
+
+    // Rule 3: 6-Wheel Extra Incentive (requires >= 6 trips, regardless of Dedicated status)
+    const extra6WEligible = t.normWheel === '6WH' && t.tripsCount >= 6;
     if (extra6WEligible) {
-      t.extra6W = t.extra6WPotential;
+      t.extra6W = Math.round(t.extra6WPotential);
+      t.nvl.extra6W = Math.round(t.nvl.extra6WPotential || 0);
+      t.nvcl.extra6W = Math.round(t.nvcl.extra6WPotential || 0);
     } else {
       t.extra6W = 0;
+      t.nvl.extra6W = 0;
+      t.nvcl.extra6W = 0;
     }
-
-    // Rule 2: 10-Wheel Extra Incentive
-    // Eligible from 1st qualifying SO+NT trip! No minimum trip threshold required. Dedicated not required.
-    // (Already accumulated only for qualifying SO+NT trips above).
-    const extra10WEligible = t.extra10W > 0;
-
-    // Round the sub-amounts for visual consistency
-    t.nvl.amt = Math.round(t.nvl.amt);
-    t.nvcl.amt = Math.round(t.nvcl.amt);
-    t.extra10W = Math.round(t.extra10W);
-    t.extra6W = Math.round(t.extra6W);
-
-    // Total = NVL Sum of Amt + NVCL Sum Amt
-    const nvlNvclTotal = t.nvl.amt + t.nvcl.amt;
 
     // Total (Projected) = standard incentive + 10W extra + 6W extra
     const totalFinal = nvlNvclTotal + t.extra10W + t.extra6W;
@@ -419,7 +617,11 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
     // Incentive Commission Amount = Incentive Amount × (Incentive Commission % ÷ 100)
     if (t.hasComm) {
       t.commission = Math.round(totalFinal * num(t.commRate, 0.05));
+    } else {
+      t.commission = 0;
     }
+
+    const standardEligible = t.isDedicated;
 
     return {
       ...t,
@@ -440,11 +642,11 @@ function parseExcelNum(val) {
     .replace(/,/g, '')
     .replace(/[₹$%\s]/g, '')
     .trim();
-  
+
   if (cleaned.startsWith('(') && cleaned.endsWith(')')) {
     cleaned = '-' + cleaned.slice(1, -1);
   }
-  
+
   const n = parseFloat(cleaned);
   return isNaN(n) ? 0 : n;
 }
@@ -452,7 +654,7 @@ function parseExcelNum(val) {
 // Custom worksheet-to-AOA parser that handles merges, empty rows, and dimensions
 function parseWorksheetToAOA(ws) {
   if (!ws) return [];
-  
+
   // 1. Resolve merges: copy value of top-left cell to all cells within the merge range
   if (ws['!merges']) {
     ws['!merges'].forEach(merge => {
@@ -498,7 +700,7 @@ function parseWorksheetToAOA(ws) {
   }
 
   // Fallback
-  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }).map(row => 
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }).map(row =>
     (row || []).map(cell => (cell !== undefined && cell !== null ? String(cell).trim() : ''))
   );
 }
@@ -506,7 +708,7 @@ function parseWorksheetToAOA(ws) {
 // Locate the column containing "Sum of Dedi SMT Diff" or variation
 function findDediSmtDiffColIdx(excelData) {
   if (!excelData || excelData.length === 0) return -1;
-  
+
   // Find header row index
   let firstDataRowIdx = -1;
   for (let i = 0; i < Math.min(15, excelData.length); i++) {
@@ -892,13 +1094,37 @@ export function parseIncentiveWorkbook(wb, systemTrucks = []) {
   });
 
   for (const [t, diffSum] of Object.entries(truckDiffs)) {
+    const bds = truckBreakdowns[t] || [];
+    let actNvl = '';
+    let actNvcl = '';
+    let actW10Nvl = '';
+    let actW10Nvcl = '';
+    let actW6Nvl = '';
+    let actW6Nvcl = '';
+    bds.forEach(b => {
+      const amt = Number(b.amount) || 0;
+      if (b.subField === 'w10_nvl') actW10Nvl = String((Number(actW10Nvl) || 0) + amt);
+      else if (b.subField === 'w10_nvcl') actW10Nvcl = String((Number(actW10Nvcl) || 0) + amt);
+      else if (b.subField === 'w6_nvl') actW6Nvl = String((Number(actW6Nvl) || 0) + amt);
+      else if (b.subField === 'w6_nvcl') actW6Nvcl = String((Number(actW6Nvcl) || 0) + amt);
+      else if (b.targetField === 'nvl') actNvl = String((Number(actNvl) || 0) + amt);
+      else if (b.targetField === 'nvcl') actNvcl = String((Number(actNvcl) || 0) + amt);
+    });
+
+    const sumW10 = (Number(actW10Nvl) || 0) + (Number(actW10Nvcl) || 0);
+    const sumW6 = (Number(actW6Nvl) || 0) + (Number(actW6Nvcl) || 0);
+
     actuals[t] = {
-      nvl: '',
-      nvcl: '',
-      w10: '',
-      w6: '',
+      nvl: actNvl,
+      nvcl: actNvcl,
+      w10: sumW10 ? String(sumW10) : '',
+      w6: sumW6 ? String(sumW6) : '',
+      w10_nvl: actW10Nvl,
+      w10_nvcl: actW10Nvcl,
+      w6_nvl: actW6Nvl,
+      w6_nvcl: actW6Nvcl,
       difference: diffSum,
-      diffBreakdown: truckBreakdowns[t] || []
+      diffBreakdown: bds
     };
   }
 
@@ -1260,12 +1486,12 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
 
   aoa[0][OUR_START_COL] = `Qualified Vehicle Extra Freight 9.5% NVL & NVCL FOR DEDICATED FROM OUR CALCULATION NVL Month of ${MONTH_NAMES[month]} '${String(year).slice(2)}`;
   aoa[1][OUR_START_COL + 3] = 'NVL';
-  aoa[1][OUR_START_COL + 6] = 'NVCL';
+  aoa[1][OUR_START_COL + 7] = 'NVCL';
 
   const ourHeaders = [
     'TYPE', 'Owner Name', 'Truck No',
-    'Sum of Inv Qty', 'Sum of ORG FREIGHT', 'Sum of Amt',
-    'Sum of Inv Qty', 'Sum of ORG FREIGHT', 'Sum Amt',
+    'Sum of Inv Qty', 'SUM OF ORG Billing Amt', 'Sum of ORG FREIGHT', 'Sum of Amt',
+    'Sum of Inv Qty', 'SUM OF ORG Billing Amt', 'Sum of ORG FREIGHT', 'Sum Amt',
     'Total', '10WH extra 8.5% incentive', '6WH extra 15% incentive', 'Total (Projected)'
   ];
   for (let i = 0; i < ourHeaders.length; i++) aoa[2][OUR_START_COL + i] = ourHeaders[i];
@@ -1310,15 +1536,17 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
       row[OUR_START_COL + 1] = m.ownerName || '';
       row[OUR_START_COL + 2] = m.truckNo || '';
       row[OUR_START_COL + 3] = m.nvl.invQty || 0;
-      row[OUR_START_COL + 4] = Math.round(m.nvl.orgFreight) || 0;
-      row[OUR_START_COL + 5] = Math.round(m.nvl.amt) || 0;
-      row[OUR_START_COL + 6] = m.nvcl.invQty || 0;
-      row[OUR_START_COL + 7] = Math.round(m.nvcl.orgFreight) || 0;
-      row[OUR_START_COL + 8] = Math.round(m.nvcl.amt) || 0;
-      row[OUR_START_COL + 9] = Math.round(m.total) || 0;
-      row[OUR_START_COL + 10] = Math.round(m.extra10W) || 0;
-      row[OUR_START_COL + 11] = Math.round(m.extra6W) || 0;
-      row[OUR_START_COL + 12] = Math.round(m.totalFinal) || 0;
+      row[OUR_START_COL + 4] = Math.round(m.nvl.orgBillingAmt) || 0;
+      row[OUR_START_COL + 5] = Math.round(m.nvl.orgFreight) || 0;
+      row[OUR_START_COL + 6] = Math.round(m.nvl.amt) || 0;
+      row[OUR_START_COL + 7] = m.nvcl.invQty || 0;
+      row[OUR_START_COL + 8] = Math.round(m.nvcl.orgBillingAmt) || 0;
+      row[OUR_START_COL + 9] = Math.round(m.nvcl.orgFreight) || 0;
+      row[OUR_START_COL + 10] = Math.round(m.nvcl.amt) || 0;
+      row[OUR_START_COL + 11] = Math.round(m.total) || 0;
+      row[OUR_START_COL + 12] = Math.round(m.extra10W) || 0;
+      row[OUR_START_COL + 13] = Math.round(m.extra6W) || 0;
+      row[OUR_START_COL + 14] = Math.round(m.totalFinal) || 0;
     }
   }
 
@@ -1332,30 +1560,32 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
       newRow[OUR_START_COL + 1] = m.ownerName || '';
       newRow[OUR_START_COL + 2] = m.truckNo || '';
       newRow[OUR_START_COL + 3] = m.nvl.invQty || 0;
-      newRow[OUR_START_COL + 4] = Math.round(m.nvl.orgFreight) || 0;
-      newRow[OUR_START_COL + 5] = Math.round(m.nvl.amt) || 0;
-      newRow[OUR_START_COL + 6] = m.nvcl.invQty || 0;
-      newRow[OUR_START_COL + 7] = Math.round(m.nvcl.orgFreight) || 0;
-      newRow[OUR_START_COL + 8] = Math.round(m.nvcl.amt) || 0;
-      newRow[OUR_START_COL + 9] = Math.round(m.total) || 0;
-      newRow[OUR_START_COL + 10] = Math.round(m.extra10W) || 0;
-      newRow[OUR_START_COL + 11] = Math.round(m.extra6W) || 0;
-      newRow[OUR_START_COL + 12] = Math.round(m.totalFinal) || 0;
+      newRow[OUR_START_COL + 4] = Math.round(m.nvl.orgBillingAmt) || 0;
+      newRow[OUR_START_COL + 5] = Math.round(m.nvl.orgFreight) || 0;
+      newRow[OUR_START_COL + 6] = Math.round(m.nvl.amt) || 0;
+      newRow[OUR_START_COL + 7] = m.nvcl.invQty || 0;
+      newRow[OUR_START_COL + 8] = Math.round(m.nvcl.orgBillingAmt) || 0;
+      newRow[OUR_START_COL + 9] = Math.round(m.nvcl.orgFreight) || 0;
+      newRow[OUR_START_COL + 10] = Math.round(m.nvcl.amt) || 0;
+      newRow[OUR_START_COL + 11] = Math.round(m.total) || 0;
+      newRow[OUR_START_COL + 12] = Math.round(m.extra10W) || 0;
+      newRow[OUR_START_COL + 13] = Math.round(m.extra6W) || 0;
+      newRow[OUR_START_COL + 14] = Math.round(m.totalFinal) || 0;
       aoa.push(newRow);
     }
   }
 
   const merges = [
-    { s: { r: 0, c: OUR_START_COL }, e: { r: 0, c: OUR_START_COL + 12 } },
-    { s: { r: 1, c: OUR_START_COL + 3 }, e: { r: 1, c: OUR_START_COL + 5 } },
-    { s: { r: 1, c: OUR_START_COL + 6 }, e: { r: 1, c: OUR_START_COL + 8 } },
+    { s: { r: 0, c: OUR_START_COL }, e: { r: 0, c: OUR_START_COL + 14 } },
+    { s: { r: 1, c: OUR_START_COL + 3 }, e: { r: 1, c: OUR_START_COL + 6 } },
+    { s: { r: 1, c: OUR_START_COL + 7 }, e: { r: 1, c: OUR_START_COL + 10 } },
     { s: { r: 1, c: OUR_START_COL + 0 }, e: { r: 2, c: OUR_START_COL + 0 } },
     { s: { r: 1, c: OUR_START_COL + 1 }, e: { r: 2, c: OUR_START_COL + 1 } },
     { s: { r: 1, c: OUR_START_COL + 2 }, e: { r: 2, c: OUR_START_COL + 2 } },
-    { s: { r: 1, c: OUR_START_COL + 9 }, e: { r: 2, c: OUR_START_COL + 9 } },
-    { s: { r: 1, c: OUR_START_COL + 10 }, e: { r: 2, c: OUR_START_COL + 10 } },
     { s: { r: 1, c: OUR_START_COL + 11 }, e: { r: 2, c: OUR_START_COL + 11 } },
-    { s: { r: 1, c: OUR_START_COL + 12 }, e: { r: 2, c: OUR_START_COL + 12 } }
+    { s: { r: 1, c: OUR_START_COL + 12 }, e: { r: 2, c: OUR_START_COL + 12 } },
+    { s: { r: 1, c: OUR_START_COL + 13 }, e: { r: 2, c: OUR_START_COL + 13 } },
+    { s: { r: 1, c: OUR_START_COL + 14 }, e: { r: 2, c: OUR_START_COL + 14 } }
   ];
 
   // 4. Map of normalizedTruckNo -> Array<{ rowIndex, row }>
@@ -1406,7 +1636,7 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
     if (!row) {
       return { rowIndex: rIdx, rowData: new Array(mailMaxCol).fill(''), matchedTruck: null, isSystemMissing: false };
     }
-    
+
     const paddedRow = [...row];
     while (paddedRow.length < mailMaxCol) {
       paddedRow.push('');
@@ -1474,7 +1704,7 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
     if (!t) {
       // Excel-only truck
       missingInSystemCount++;
-      
+
       let excelType = 'MKT';
       const excelRowForType = rightRow || leftRow;
       if (colMap.type !== -1 && excelRowForType && colMap.type < excelRowForType.length) {
@@ -1631,67 +1861,108 @@ function exportComparisonExcel(data, year, month, actuals = {}, uploadedExcelDat
   ws['!merges'] = comp.merges;
 
   XLSX.utils.book_append_sheet(wb, ws, 'Comparison');
-  XLSX.writeFile(wb, `Incentive_Comparison_Full_${MONTH_NAMES[month]}_${year}.xlsx`);
+  XLSX.writeFile(wb, `Incentive_Comparison_${MONTH_NAMES[month]}_${year}.xlsx`);
 }
 
 function exportIncentiveExcel(data, year, month, actuals = {}) {
-  const monthLabel = `${MONTH_NAMES[month].slice(0, 3)}'${String(year).slice(2)}`;
   const wb = XLSX.utils.book_new();
-
-  // ── Sheet rows (manual construction for precise header merges) ──────────────
-  const aoa = []; // array of arrays
+  const aoa = [];
 
   // Row 1: Big title
-  aoa.push([
-    `Qualified Vehicle Extra Freight 9.5% NVL & NVCL FOR Dedicated FROM OUR CALCULATION NVL  Month of ${MONTH_NAMES[month]} '${String(year).slice(2)}`
-  ]);
+  const monthLabel = `${MONTH_NAMES[month]} ${year}`.toUpperCase();
+  aoa.push([`QUALIFIED VEHICLE EXTRA FREIGHT 9.5% NVL & NVCL FOR DEDICATED FROM OUR CALCULATION NVL   MONTH OF ${monthLabel}`]);
 
   // Row 2: Column group headers
   aoa.push([
-    'TYPE', 'Owner Name', 'Truck No', 'Wheel',
-    'Sum of\nInv Qty', 'Sum of\nORG FREIGHT', 'Sum of\nAmt',   // NVL
-    'Sum of\nInv Qty', 'Sum of\nORG FREIGHT', 'Sum Amt',        // NVCL
+    'TYPE', 'Owner Name', 'Truck No', 'Wheel', 'Trips',
+    'Sum of\nInv Qty', 'SUM OF\nORG Billing Amt', 'Sum of\nORG FREIGHT', 'Sum of\nAmt',   // NVL
+    'Sum of\nInv Qty', 'SUM OF\nORG Billing Amt', 'Sum of\nORG FREIGHT', 'Sum Amt',        // NVCL
     'Total',
     '10W EXTRA\n8.5%',
-    'TOTAL(PROJECTED)',
-    'ACTUAL',
+    '6W EXTRA\n15%',
+    'TOTAL (PROJECTED)',
+    'ACTUAL NVL',
+    'ACTUAL NVCL',
+    'SUM OF AC NVL & NVCL',
+    '10 WH EXTRA NVL',
+    '10 WH EXTRA NVCL',
+    'SUM OF 10WH EXT',
+    '6 WH EXTRA NVL',
+    '6 WH EXTRA NVCL',
+    'SUM OF 6WH EXT',
+    'TOTAL ACTUAL',
+    'ACTUAL PAYOUT',
     'DIFFERENCE\n(ACTUAL-PROJECTED)',
     'SETTLED AMOUNT'
   ]);
 
   // Row 3: NVL / NVCL sub-group labels
   aoa.push([
+    '', '', '', '', '',
+    '', 'NVL', '', '',
+    '', 'NVCL', '', '',
     '', '', '', '',
-    '', 'NVL', '',
-    '', 'NVCL', '',
-    '', '', '', '', '', ''
+    '', '', '',
+    '', '', '',
+    '', '', '',
+    '', '', '', ''
   ]);
 
   // Data rows
   for (const t of data) {
     const rawAct = actuals[t.truckNo];
-    const act = (typeof rawAct === 'object' && rawAct !== null)
-      ? (num(rawAct.nvl) + num(rawAct.nvcl) + num(rawAct.w10) + num(rawAct.w6))
-      : (parseFloat(rawAct) || 0);
-    const hasImportedDiff = rawAct && typeof rawAct === 'object' && rawAct.difference !== undefined && rawAct.difference !== null && rawAct.difference !== '';
-    const diff = hasImportedDiff ? Number(rawAct.difference) : (act - t.totalFinal);
-    const effectiveActual = hasImportedDiff ? (t.totalFinal + Number(rawAct.difference)) : act;
-    const settled = (effectiveActual > 0 && effectiveActual > t.totalFinal) ? t.totalFinal : (effectiveActual > 0 ? effectiveActual : 0);
+    const actNVL = (typeof rawAct === 'object' && rawAct !== null) ? num(rawAct.nvl) : 0;
+    const actNVCL = (typeof rawAct === 'object' && rawAct !== null) ? num(rawAct.nvcl) : (parseFloat(rawAct) || 0);
+    const sumAc = actNVL + actNVCL;
+    const act10WH_NVL = (typeof rawAct === 'object' && rawAct !== null)
+      ? num(rawAct.w10_nvl !== undefined && rawAct.w10_nvl !== '' ? rawAct.w10_nvl : (rawAct.w10 && (t.type === 'ATOA' || t.type === 'ATO' || (t.nvl?.amt > 0 && !t.nvcl?.amt)) ? rawAct.w10 : 0))
+      : 0;
+    const act10WH_NVCL = (typeof rawAct === 'object' && rawAct !== null)
+      ? num(rawAct.w10_nvcl !== undefined && rawAct.w10_nvcl !== '' ? rawAct.w10_nvcl : (rawAct.w10 && (t.type === 'MKT' || (t.nvcl?.amt > 0 && !t.nvl?.amt)) ? rawAct.w10 : 0))
+      : 0;
+    const sum10W = act10WH_NVL + act10WH_NVCL;
+    const act6WH_NVL = (typeof rawAct === 'object' && rawAct !== null)
+      ? num(rawAct.w6_nvl !== undefined && rawAct.w6_nvl !== '' ? rawAct.w6_nvl : (rawAct.w6 && (t.type === 'ATOA' || t.type === 'ATO' || (t.nvl?.amt > 0 && !t.nvcl?.amt)) ? rawAct.w6 : 0))
+      : 0;
+    const act6WH_NVCL = (typeof rawAct === 'object' && rawAct !== null)
+      ? num(rawAct.w6_nvcl !== undefined && rawAct.w6_nvcl !== '' ? rawAct.w6_nvcl : (rawAct.w6 && (t.type === 'MKT' || (t.nvcl?.amt > 0 && !t.nvl?.amt)) ? rawAct.w6 : 0))
+      : 0;
+    const sum6W = act6WH_NVL + act6WH_NVCL;
+    const totalAct = actNVL + actNVCL + act10WH_NVL + act10WH_NVCL + act6WH_NVL + act6WH_NVCL;
+    const actualPayout = calculateCombinedActualPayout(sumAc, sum10W, sum6W, t.type, t.wheel);
+    const totalProj = num(t.totalFinal);
+    const diff = totalProj - totalAct;
+    const settled = (totalAct > 0 && totalAct > t.totalFinal) ? t.totalFinal : (totalAct > 0 ? totalAct : 0);
+
     aoa.push([
       t.type,
       t.ownerName,
       t.truckNo,
       t.wheel,
+      t.tripsCount,
       t.nvl.invQty || '',
+      t.nvl.orgBillingAmt ? Math.round(t.nvl.orgBillingAmt) : '',
       t.nvl.orgFreight ? Math.round(t.nvl.orgFreight) : '',
       t.nvl.amt ? Math.round(t.nvl.amt) : '',
       t.nvcl.invQty || '',
+      t.nvcl.orgBillingAmt ? Math.round(t.nvcl.orgBillingAmt) : '',
       t.nvcl.orgFreight ? Math.round(t.nvcl.orgFreight) : '',
       t.nvcl.amt ? Math.round(t.nvcl.amt) : '',
       t.total || 0,
       t.extra10W ? Math.round(t.extra10W) : 0,
+      t.extra6W ? Math.round(t.extra6W) : 0,
       t.totalFinal || 0,
-      effectiveActual || 0,
+      actNVL || 0,
+      actNVCL || 0,
+      sumAc || 0,
+      act10WH_NVL || 0,
+      act10WH_NVCL || 0,
+      sum10W || 0,
+      act6WH_NVL || 0,
+      act6WH_NVCL || 0,
+      sum6W || 0,
+      totalAct || 0,
+      actualPayout ? Math.round(actualPayout * 100) / 100 : 0,
       diff || 0,
       settled || 0
     ]);
@@ -1700,42 +1971,91 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
   // Footer totals row
   const totals = data.reduce((acc, t) => {
     acc.nvlQty = Math.round(acc.nvlQty + t.nvl.invQty);
+    acc.nvlBillingAmt += (t.nvl.orgBillingAmt || 0);
     acc.nvlFreight += t.nvl.orgFreight;
     acc.nvlAmt += t.nvl.amt;
     acc.nvclQty = Math.round(acc.nvclQty + t.nvcl.invQty);
+    acc.nvclBillingAmt += (t.nvcl.orgBillingAmt || 0);
     acc.nvclFreight += t.nvcl.orgFreight;
     acc.nvclAmt += t.nvcl.amt;
     acc.total += t.total;
     acc.w10 += t.extra10W;
+    acc.w6 += t.extra6W;
     acc.grand += t.totalFinal;
+
     const rawAct = actuals[t.truckNo];
-    const act = (typeof rawAct === 'object' && rawAct !== null)
-      ? (num(rawAct.nvl) + num(rawAct.nvcl) + num(rawAct.w10) + num(rawAct.w6))
-      : (parseFloat(rawAct) || 0);
-    const hasImportedDiff = rawAct && typeof rawAct === 'object' && rawAct.difference !== undefined && rawAct.difference !== null && rawAct.difference !== '';
-    const diff = hasImportedDiff ? Number(rawAct.difference) : (act - t.totalFinal);
-    const effectiveActual = hasImportedDiff ? (t.totalFinal + Number(rawAct.difference)) : act;
-    const settled = (effectiveActual > 0 && effectiveActual > t.totalFinal) ? t.totalFinal : (effectiveActual > 0 ? effectiveActual : 0);
-    acc.actual += effectiveActual;
+    const actNVL = (typeof rawAct === 'object' && rawAct !== null) ? num(rawAct.nvl) : 0;
+    const actNVCL = (typeof rawAct === 'object' && rawAct !== null) ? num(rawAct.nvcl) : (parseFloat(rawAct) || 0);
+    const sumAc = actNVL + actNVCL;
+    const act10WH_NVL = (typeof rawAct === 'object' && rawAct !== null)
+      ? num(rawAct.w10_nvl !== undefined && rawAct.w10_nvl !== '' ? rawAct.w10_nvl : (rawAct.w10 && (t.type === 'ATOA' || t.type === 'ATO' || (t.nvl?.amt > 0 && !t.nvcl?.amt)) ? rawAct.w10 : 0))
+      : 0;
+    const act10WH_NVCL = (typeof rawAct === 'object' && rawAct !== null)
+      ? num(rawAct.w10_nvcl !== undefined && rawAct.w10_nvcl !== '' ? rawAct.w10_nvcl : (rawAct.w10 && (t.type === 'MKT' || (t.nvcl?.amt > 0 && !t.nvl?.amt)) ? rawAct.w10 : 0))
+      : 0;
+    const sum10W = act10WH_NVL + act10WH_NVCL;
+    const act6WH_NVL = (typeof rawAct === 'object' && rawAct !== null)
+      ? num(rawAct.w6_nvl !== undefined && rawAct.w6_nvl !== '' ? rawAct.w6_nvl : (rawAct.w6 && (t.type === 'ATOA' || t.type === 'ATO' || (t.nvl?.amt > 0 && !t.nvcl?.amt)) ? rawAct.w6 : 0))
+      : 0;
+    const act6WH_NVCL = (typeof rawAct === 'object' && rawAct !== null)
+      ? num(rawAct.w6_nvcl !== undefined && rawAct.w6_nvcl !== '' ? rawAct.w6_nvcl : (rawAct.w6 && (t.type === 'MKT' || (t.nvcl?.amt > 0 && !t.nvl?.amt)) ? rawAct.w6 : 0))
+      : 0;
+    const sum6W = act6WH_NVL + act6WH_NVCL;
+    const totalAct = actNVL + actNVCL + act10WH_NVL + act10WH_NVCL + act6WH_NVL + act6WH_NVCL;
+    const actualPayout = calculateCombinedActualPayout(sumAc, sum10W, sum6W, t.type, t.wheel);
+    const totalProj = num(t.totalFinal);
+    const diff = totalProj - totalAct;
+    const settled = (totalAct > 0 && totalAct > t.totalFinal) ? t.totalFinal : (totalAct > 0 ? totalAct : 0);
+
+    acc.actNVL += actNVL;
+    acc.actNVCL += actNVCL;
+    acc.actSumAc += sumAc;
+    acc.act10WH_NVL += act10WH_NVL;
+    acc.act10WH_NVCL += act10WH_NVCL;
+    acc.actSum10W += sum10W;
+    acc.act6WH_NVL += act6WH_NVL;
+    acc.act6WH_NVCL += act6WH_NVCL;
+    acc.actSum6W += sum6W;
+    acc.actual += totalAct;
+    acc.actualPayout += actualPayout;
     acc.diff += diff;
     acc.settled += settled;
     return acc;
-  }, { nvlQty: 0, nvlFreight: 0, nvlAmt: 0, nvclQty: 0, nvclFreight: 0, nvclAmt: 0, total: 0, w10: 0, grand: 0, actual: 0, diff: 0, settled: 0 });
+  }, {
+    nvlQty: 0, nvlBillingAmt: 0, nvlFreight: 0, nvlAmt: 0,
+    nvclQty: 0, nvclBillingAmt: 0, nvclFreight: 0, nvclAmt: 0,
+    total: 0, w10: 0, w6: 0, grand: 0,
+    actNVL: 0, actNVCL: 0, actSumAc: 0, act10WH_NVL: 0, act10WH_NVCL: 0, actSum10W: 0, act6WH_NVL: 0, act6WH_NVCL: 0, actSum6W: 0,
+    actual: 0, actualPayout: 0, diff: 0, settled: 0
+  });
 
   aoa.push([
-    '', '', '', '',
+    'TOTALS', '', '', '', '',
     Math.round(totals.nvlQty),
+    Math.round(totals.nvlBillingAmt),
     Math.round(totals.nvlFreight),
     Math.round(totals.nvlAmt),
     Math.round(totals.nvclQty),
+    Math.round(totals.nvclBillingAmt),
     Math.round(totals.nvclFreight),
     Math.round(totals.nvclAmt),
     Math.round(totals.total),
     Math.round(totals.w10),
+    Math.round(totals.w6),
     Math.round(totals.grand),
+    Math.round(totals.actNVL),
+    Math.round(totals.actNVCL),
+    Math.round(totals.actSumAc),
+    Math.round(totals.act10WH_NVL),
+    Math.round(totals.act10WH_NVCL),
+    Math.round(totals.actSum10W),
+    Math.round(totals.act6WH_NVL),
+    Math.round(totals.act6WH_NVCL),
+    Math.round(totals.actSum6W),
     Math.round(totals.actual),
+    Math.round(totals.actualPayout * 100) / 100,
     Math.round(totals.diff),
-    Math.round(totals.settled),
+    Math.round(totals.settled)
   ]);
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -1746,28 +2066,42 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
     { wch: 22 },  // Owner Name
     { wch: 14 },  // Truck No
     { wch: 8 },   // Wheel
+    { wch: 8 },   // Trips
     { wch: 12 },  // NVL inv qty
+    { wch: 16 },  // NVL org billing amt
     { wch: 14 },  // NVL org freight
     { wch: 12 },  // NVL amt
     { wch: 12 },  // NVCL inv qty
+    { wch: 16 },  // NVCL org billing amt
     { wch: 14 },  // NVCL org freight
     { wch: 12 },  // NVCL amt
     { wch: 10 },  // Total
     { wch: 12 },  // 10W Extra
+    { wch: 12 },  // 6W Extra
     { wch: 16 },  // TOTAL(PROJECTED)
-    { wch: 10 },  // ACTUAL
+    { wch: 12 },  // ACTUAL NVL
+    { wch: 12 },  // ACTUAL NVCL
+    { wch: 14 },  // SUM OF AC NVL & NVCL
+    { wch: 12 },  // 10WH NVL
+    { wch: 12 },  // 10WH NVCL
+    { wch: 14 },  // SUM OF 10WH EXT
+    { wch: 12 },  // 6WH NVL
+    { wch: 12 },  // 6WH NVCL
+    { wch: 14 },  // SUM OF 6WH EXT
+    { wch: 14 },  // TOTAL ACTUAL
+    { wch: 14 },  // ACTUAL PAYOUT
     { wch: 16 },  // DIFFERENCE
     { wch: 16 },  // SETTLED AMOUNT
   ];
 
-  // ── Merges (16 cols total now: A–P) ────────────────────────────────────────
+  // ── Merges (30 cols total now: A–AD) ────────────────────────────────────────
   ws['!merges'] = [
-    // Title row spans all 16 cols (A1:P1)
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 15 } },
-    // NVL sub-header (E3:G3)
-    { s: { r: 2, c: 4 }, e: { r: 2, c: 6 } },
-    // NVCL sub-header (H3:J3)
-    { s: { r: 2, c: 7 }, e: { r: 2, c: 9 } },
+    // Title row spans all 30 cols (A1:AD1)
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 29 } },
+    // NVL sub-header (F3:I3)
+    { s: { r: 2, c: 5 }, e: { r: 2, c: 8 } },
+    // NVCL sub-header (J3:M3)
+    { s: { r: 2, c: 9 }, e: { r: 2, c: 12 } },
     // TYPE spans rows 2-3
     { s: { r: 1, c: 0 }, e: { r: 2, c: 0 } },
     // Owner Name spans rows 2-3
@@ -1776,18 +2110,30 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
     { s: { r: 1, c: 2 }, e: { r: 2, c: 2 } },
     // Wheel spans rows 2-3
     { s: { r: 1, c: 3 }, e: { r: 2, c: 3 } },
+    // Trips spans rows 2-3
+    { s: { r: 1, c: 4 }, e: { r: 2, c: 4 } },
     // Total spans rows 2-3
-    { s: { r: 1, c: 10 }, e: { r: 2, c: 10 } },
-    // 10W spans rows 2-3
-    { s: { r: 1, c: 11 }, e: { r: 2, c: 11 } },
-    // TOTAL(PROJECTED) spans rows 2-3
-    { s: { r: 1, c: 12 }, e: { r: 2, c: 12 } },
-    // ACTUAL spans rows 2-3
     { s: { r: 1, c: 13 }, e: { r: 2, c: 13 } },
-    // DIFFERENCE spans rows 2-3
+    // 10W spans rows 2-3
     { s: { r: 1, c: 14 }, e: { r: 2, c: 14 } },
-    // SETTLED spans rows 2-3
+    // 6W spans rows 2-3
     { s: { r: 1, c: 15 }, e: { r: 2, c: 15 } },
+    // TOTAL(PROJECTED) spans rows 2-3
+    { s: { r: 1, c: 16 }, e: { r: 2, c: 16 } },
+    // ACTUAL NVL spans rows 2-3
+    { s: { r: 1, c: 17 }, e: { r: 2, c: 17 } },
+    // ACTUAL NVCL spans rows 2-3
+    { s: { r: 1, c: 18 }, e: { r: 2, c: 18 } },
+    // SUM OF AC NVL & NVCL spans rows 2-3
+    { s: { r: 1, c: 19 }, e: { r: 2, c: 19 } },
+    // TOTAL ACTUAL spans rows 2-3
+    { s: { r: 1, c: 26 }, e: { r: 2, c: 26 } },
+    // ACTUAL PAYOUT spans rows 2-3
+    { s: { r: 1, c: 27 }, e: { r: 2, c: 27 } },
+    // DIFFERENCE spans rows 2-3
+    { s: { r: 1, c: 28 }, e: { r: 2, c: 28 } },
+    // SETTLED spans rows 2-3
+    { s: { r: 1, c: 29 }, e: { r: 2, c: 29 } },
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Incentive Analysis');
@@ -1913,7 +2259,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     const keys1 = Object.keys(actuals || {});
     const keys2 = Object.keys(dbActuals || {});
     const allKeys = Array.from(new Set([...keys1, ...keys2]));
-    
+
     for (const key of allKeys) {
       const v1 = actuals?.[key];
       const v2 = dbActuals?.[key];
@@ -1924,7 +2270,11 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           String(o1.nvl ?? '').trim() !== String(o2.nvl ?? '').trim() ||
           String(o1.nvcl ?? '').trim() !== String(o2.nvcl ?? '').trim() ||
           String(o1.w10 ?? '').trim() !== String(o2.w10 ?? '').trim() ||
-          String(o1.w6 ?? '').trim() !== String(o2.w6 ?? '').trim()
+          String(o1.w6 ?? '').trim() !== String(o2.w6 ?? '').trim() ||
+          String(o1.w10_nvl ?? '').trim() !== String(o2.w10_nvl ?? '').trim() ||
+          String(o1.w10_nvcl ?? '').trim() !== String(o2.w10_nvcl ?? '').trim() ||
+          String(o1.w6_nvl ?? '').trim() !== String(o2.w6_nvl ?? '').trim() ||
+          String(o1.w6_nvcl ?? '').trim() !== String(o2.w6_nvcl ?? '').trim()
         ) {
           return true;
         }
@@ -2005,39 +2355,68 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   // ── Authoritative Callback for Redesigned Upload Dialog ─────────────────────
-  const handleConfirmExcelImport = ({
+  const handleConfirmExcelImport = async ({
     targetYear,
     targetMonth,
+    financialYear: importedFY,
     newActuals,
     normalizedRecords,
     uploadSummary,
     excelName,
     excelData
   }) => {
+    const fy = importedFY || (targetMonth >= 3 ? `FY ${targetYear}-${String(targetYear + 1).slice(-2)}` : `FY ${targetYear - 1}-${String(targetYear).slice(-2)}`);
+
+    // Merge/replace imported vehicle actuals state immediately for instantaneous UI update
+    setActuals(newActuals);
+    setDbActuals(newActuals);
+    setUploadedExcelName(excelName);
+    setUploadedExcelData(excelData);
+    setUploadSummaryData(uploadSummary);
+    setHasNewUpload(false);
+    setPendingExcelRemoval(false);
+    setSaveCompleted(true);
+    setUploadDialogOpen(false);
+
+    // Save immediately to MongoDB so the imported Actual Incentive values persist across refresh/reopen
+    try {
+      const token = localStorage.getItem('token');
+      const API_URL = import.meta.env.VITE_API_URL;
+      await axios.post(`${API_URL}/cement-register/incentive-state`, {
+        year: targetYear,
+        month: targetMonth,
+        actuals: newActuals,
+        pdfUrl: uploadedPdfUrl,
+        excelName,
+        excelData,
+        uploadSummary,
+        financialYear: fy,
+        normalizedRecords: normalizedRecords || []
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      setSnack({
+        severity: 'success',
+        msg: `Actual Incentive Excel imported & saved! (${uploadSummary.matchedCount} matched, ${uploadSummary.unmatchedCount} unmatched, ₹${Math.round(uploadSummary.totalDifference || 0).toLocaleString('en-IN')})`
+      });
+
+      // Automatically open the detailed import summary report
+      setUploadSummaryModalOpen(true);
+    } catch (err) {
+      console.error("Failed to persist imported incentive state:", err);
+      setSnack({
+        severity: 'error',
+        msg: 'Imported into view, but saving to database failed: ' + (err.response?.data?.error || err.message)
+      });
+    }
+
     // If target period is different from currently active view, align UI view
     if (targetYear !== year || targetMonth !== month) {
       setYear(targetYear);
       setMonth(targetMonth);
       if (onPeriodChange) onPeriodChange(targetYear, targetMonth + 1);
     }
-
-    // Merge imported vehicle difference records into actuals state
-    setActuals(prev => ({
-      ...prev,
-      ...newActuals
-    }));
-    setUploadedExcelName(excelName);
-    setUploadedExcelData(excelData);
-    setUploadSummaryData(uploadSummary);
-    setHasNewUpload(true);
-    setPendingExcelRemoval(false);
-    setSaveCompleted(false);
-    setUploadDialogOpen(false);
-
-    setSnack({
-      severity: 'success',
-      msg: `Excel imported: ${uploadSummary.matchedCount} vehicles updated (Total Difference: ₹${Math.round(uploadSummary.totalDifference || 0).toLocaleString('en-IN')}). Click SAVE to persist.`
-    });
   };
 
   // Auto-initialize month/year based on latest record date if not provided
@@ -2249,9 +2628,11 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   // Column totals for footer
   const totals = useMemo(() => data.reduce((acc, t) => {
     acc.nvlQty = Math.round(acc.nvlQty + t.nvl.invQty);
+    acc.nvlBillingAmt += (t.nvl.orgBillingAmt || 0);
     acc.nvlFreight += t.nvl.orgFreight;
     acc.nvlAmt += t.nvl.amt; // already rounded in buildIncentiveData
     acc.nvclQty = Math.round(acc.nvclQty + t.nvcl.invQty);
+    acc.nvclBillingAmt += (t.nvcl.orgBillingAmt || 0);
     acc.nvclFreight += t.nvcl.orgFreight;
     acc.nvclAmt += t.nvcl.amt; // already rounded in buildIncentiveData
     acc.total += t.total;
@@ -2259,7 +2640,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     acc.extra6W += t.extra6W;
     acc.grand += t.totalFinal;
     return acc;
-  }, { nvlQty: 0, nvlFreight: 0, nvlAmt: 0, nvclQty: 0, nvclFreight: 0, nvclAmt: 0, total: 0, extra10W: 0, extra6W: 0, grand: 0 }), [data]);
+  }, { nvlQty: 0, nvlBillingAmt: 0, nvlFreight: 0, nvlAmt: 0, nvclQty: 0, nvclBillingAmt: 0, nvclFreight: 0, nvclAmt: 0, total: 0, extra10W: 0, extra6W: 0, grand: 0 }), [data]);
 
   // Available years (5 year window)
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i);
@@ -2285,7 +2666,17 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     textAlign: 'right',
     whiteSpace: 'nowrap',
   };
-  const fmt = (n) => n ? Math.round(n).toLocaleString('en-IN') : '0';
+  const fmt = (n, maxDec = 0) => {
+    const numVal = Number(n) || 0;
+    if (numVal === 0 || Object.is(numVal, -0)) return '0';
+    if (maxDec > 0) {
+      const rounded = Math.round(numVal * Math.pow(10, maxDec)) / Math.pow(10, maxDec);
+      if (rounded === 0 || Object.is(rounded, -0)) return '0';
+      return rounded.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: maxDec });
+    }
+    const r = Math.round(numVal);
+    return (r === 0 || Object.is(r, -0)) ? '0' : r.toLocaleString('en-IN');
+  };
 
   const renderComparedCell = (sysVal, excelVal, isAmount = false, highlightDiff = false) => {
     return (
@@ -2313,7 +2704,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     return comparisonViewDef.systemTrucksDetail.reduce((acc, detail) => {
       const t = detail.truck;
       const ev = detail.excelValues;
-      
+
       acc.sysTrips += t.tripsCount;
       acc.sysNvlQty += t.nvl.invQty;
       acc.sysNvlAmt += t.nvl.amt;
@@ -2339,44 +2730,169 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
 
   const getActualNVL = (truckNo) => {
     const act = actuals[truckNo];
-    if (typeof act === 'object' && act !== null) return act.nvl || '';
+    if (typeof act === 'object' && act !== null) {
+      if (act.nvl !== undefined && act.nvl !== null && act.nvl !== '') return act.nvl;
+      if (uploadedExcelName) return '0';
+      return '';
+    }
+    if (uploadedExcelName) return '0';
     return '';
   };
 
   const getActualNVCL = (truckNo) => {
     const act = actuals[truckNo];
-    if (typeof act === 'object' && act !== null) return act.nvcl || '';
-    return typeof act !== 'undefined' ? act : '';
+    if (typeof act === 'object' && act !== null) {
+      if (act.nvcl !== undefined && act.nvcl !== null && act.nvcl !== '') return act.nvcl;
+      if (uploadedExcelName) return '0';
+      return '';
+    }
+    if (typeof act !== 'undefined') return act;
+    if (uploadedExcelName) return '0';
+    return '';
   };
 
   const getActual10WH = (truckNo) => {
     const act = actuals[truckNo];
-    if (typeof act === 'object' && act !== null) return act.w10 || '';
-    return '';
+    if (typeof act === 'object' && act !== null) {
+      if (act.w10_nvl || act.w10_nvcl) {
+        return (num(act.w10_nvl) + num(act.w10_nvcl)) || '';
+      }
+      return act.w10 || (uploadedExcelName ? '0' : '');
+    }
+    return uploadedExcelName ? '0' : '';
   };
 
   const getActual6WH = (truckNo) => {
     const act = actuals[truckNo];
-    if (typeof act === 'object' && act !== null) return act.w6 || '';
+    if (typeof act === 'object' && act !== null) {
+      if (act.w6_nvl || act.w6_nvcl) {
+        return (num(act.w6_nvl) + num(act.w6_nvcl)) || '';
+      }
+      return act.w6 || (uploadedExcelName ? '0' : '');
+    }
+    return uploadedExcelName ? '0' : '';
+  };
+
+  const getActual10WH_NVL = (truckNo, truckData) => {
+    const act = actuals[truckNo];
+    if (typeof act === 'object' && act !== null) {
+      if (act.w10_nvl !== undefined && act.w10_nvl !== null && act.w10_nvl !== '') return act.w10_nvl;
+      if (Array.isArray(act.diffBreakdown)) {
+        const bd = act.diffBreakdown.find(b => b.subField === 'w10_nvl' || (b.targetField === 'w10' && b.category?.includes('NVL')));
+        if (bd && bd.amount !== undefined) return bd.amount;
+      }
+      if (act.w10 !== undefined && act.w10 !== null && act.w10 !== '' && !act.w10_nvcl) {
+        if (!truckData || truckData.type === 'ATOA' || truckData.type === 'ATO' || (truckData.nvl?.amt > 0 && !truckData.nvcl?.amt)) {
+          return act.w10;
+        }
+      }
+      if (uploadedExcelName) return '0';
+    }
+    if (uploadedExcelName) return '0';
     return '';
   };
 
-  const getTotalActual = (truckNo) => {
+  const getActual10WH_NVCL = (truckNo, truckData) => {
     const act = actuals[truckNo];
-    if (typeof act === 'object' && act !== null) return num(act.nvl) + num(act.nvcl) + num(act.w10) + num(act.w6);
-    return num(act);
+    if (typeof act === 'object' && act !== null) {
+      if (act.w10_nvcl !== undefined && act.w10_nvcl !== null && act.w10_nvcl !== '') return act.w10_nvcl;
+      if (Array.isArray(act.diffBreakdown)) {
+        const bd = act.diffBreakdown.find(b => b.subField === 'w10_nvcl' || (b.targetField === 'w10' && b.category?.includes('NVCL')));
+        if (bd && bd.amount !== undefined) return bd.amount;
+      }
+      if (act.w10 !== undefined && act.w10 !== null && act.w10 !== '' && !act.w10_nvl) {
+        if (truckData && (truckData.type === 'MKT' || (truckData.nvcl?.amt > 0 && !truckData.nvl?.amt))) {
+          return act.w10;
+        }
+      }
+      if (uploadedExcelName) return '0';
+    }
+    if (uploadedExcelName) return '0';
+    return '';
+  };
+
+  const getActual6WH_NVL = (truckNo, truckData) => {
+    const act = actuals[truckNo];
+    if (typeof act === 'object' && act !== null) {
+      if (act.w6_nvl !== undefined && act.w6_nvl !== null && act.w6_nvl !== '') return act.w6_nvl;
+      if (Array.isArray(act.diffBreakdown)) {
+        const bd = act.diffBreakdown.find(b => b.subField === 'w6_nvl' || (b.targetField === 'w6' && b.category?.includes('NVL')));
+        if (bd && bd.amount !== undefined) return bd.amount;
+      }
+      if (act.w6 !== undefined && act.w6 !== null && act.w6 !== '' && !act.w6_nvcl) {
+        if (!truckData || truckData.type === 'ATOA' || truckData.type === 'ATO' || (truckData.nvl?.amt > 0 && !truckData.nvcl?.amt)) {
+          return act.w6;
+        }
+      }
+      if (uploadedExcelName) return '0';
+    }
+    if (uploadedExcelName) return '0';
+    return '';
+  };
+
+  const getActual6WH_NVCL = (truckNo, truckData) => {
+    const act = actuals[truckNo];
+    if (typeof act === 'object' && act !== null) {
+      if (act.w6_nvcl !== undefined && act.w6_nvcl !== null && act.w6_nvcl !== '') return act.w6_nvcl;
+      if (Array.isArray(act.diffBreakdown)) {
+        const bd = act.diffBreakdown.find(b => b.subField === 'w6_nvcl' || (b.targetField === 'w6' && b.category?.includes('NVCL')));
+        if (bd && bd.amount !== undefined) return bd.amount;
+      }
+      if (act.w6 !== undefined && act.w6 !== null && act.w6 !== '' && !act.w6_nvl) {
+        if (truckData && (truckData.type === 'MKT' || (truckData.nvcl?.amt > 0 && !truckData.nvl?.amt))) {
+          return act.w6;
+        }
+      }
+      if (uploadedExcelName) return '0';
+    }
+    if (uploadedExcelName) return '0';
+    return '';
+  };
+
+  const getTotalActual = (truckNo, truckData) => {
+    const actNVL = num(getActualNVL(truckNo));
+    const actNVCL = num(getActualNVCL(truckNo));
+    const act10WH_NVL = num(getActual10WH_NVL(truckNo, truckData));
+    const act10WH_NVCL = num(getActual10WH_NVCL(truckNo, truckData));
+    const act6WH_NVL = num(getActual6WH_NVL(truckNo, truckData));
+    const act6WH_NVCL = num(getActual6WH_NVCL(truckNo, truckData));
+    return actNVL + actNVCL + act10WH_NVL + act10WH_NVCL + act6WH_NVL + act6WH_NVCL;
+  };
+
+  const getActualPayout = (truckNo, truckData) => {
+    const tData = truckData || data.find(d => d.truckNo === truckNo);
+    const actNVL = num(getActualNVL(truckNo));
+    const actNVCL = num(getActualNVCL(truckNo));
+    const sumAc = actNVL + actNVCL;
+    const act10WH_NVL = num(getActual10WH_NVL(truckNo, tData));
+    const act10WH_NVCL = num(getActual10WH_NVCL(truckNo, tData));
+    const sum10W = act10WH_NVL + act10WH_NVCL;
+    const act6WH_NVL = num(getActual6WH_NVL(truckNo, tData));
+    const act6WH_NVCL = num(getActual6WH_NVCL(truckNo, tData));
+    const sum6W = act6WH_NVL + act6WH_NVCL;
+    return calculateCombinedActualPayout(sumAc, sum10W, sum6W, tData?.type, tData?.wheel);
   };
 
   const updateActual = (truckNo, field, value) => {
     setActuals(prev => {
       const current = prev[truckNo];
-      let newObj = { nvl: '', nvcl: '', w10: '', w6: '' };
+      let newObj = { nvl: '', nvcl: '', w10: '', w6: '', w10_nvl: '', w10_nvcl: '', w6_nvl: '', w6_nvcl: '' };
       if (typeof current === 'object' && current !== null) {
         newObj = { ...current };
       } else if (typeof current !== 'undefined') {
         newObj.nvcl = current;
       }
       newObj[field] = value;
+      if (field === 'w10_nvl' || field === 'w10_nvcl') {
+        const v1 = field === 'w10_nvl' ? value : (newObj.w10_nvl || '');
+        const v2 = field === 'w10_nvcl' ? value : (newObj.w10_nvcl || '');
+        newObj.w10 = (v1 !== '' || v2 !== '') ? String((num(v1) || 0) + (num(v2) || 0)) : '';
+      }
+      if (field === 'w6_nvl' || field === 'w6_nvcl') {
+        const v1 = field === 'w6_nvl' ? value : (newObj.w6_nvl || '');
+        const v2 = field === 'w6_nvcl' ? value : (newObj.w6_nvcl || '');
+        newObj.w6 = (v1 !== '' || v2 !== '') ? String((num(v1) || 0) + (num(v2) || 0)) : '';
+      }
       return { ...prev, [truckNo]: newObj };
     });
   };
@@ -2914,7 +3430,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
           '&::-webkit-scrollbar-thumb': { bgcolor: '#cbd5e1', borderRadius: 4 },
           '&::-webkit-scrollbar-thumb:hover': { bgcolor: '#94a3b8' }
         }}>
-          <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 1200, width: '100%', fontFamily: 'inherit', fontSize: 12 }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 2200, width: '100%', fontFamily: 'inherit', fontSize: 12 }}>
             <thead>
               {/* Row 1: Top Level group headers (Height ~28px, Top: 0) */}
               <tr style={{ height: 28 }}>
@@ -2923,8 +3439,8 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                 <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#bfdbfe', minWidth: 120 }}>Truck No</th>
                 <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#bfdbfe', minWidth: 70 }}>Wheel</th>
                 <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#bfdbfe', minWidth: 60 }}>Trips</th>
-                <th colSpan={10} style={{ ...thBase, top: 0, zIndex: 20, height: 28, background: '#e2e8f0', color: '#1e293b', letterSpacing: '1px' }}>PROJECTED / DEDICATED</th>
-                <th colSpan={4} style={{ ...thBase, top: 0, zIndex: 20, height: 28, background: '#fed7aa', color: '#9a3412', letterSpacing: '1px' }}>ACTUAL / DEDICATED</th>
+                <th colSpan={12} style={{ ...thBase, top: 0, zIndex: 20, height: 28, background: '#e2e8f0', color: '#1e293b', letterSpacing: '1px' }}>PROJECTED / DEDICATED</th>
+                <th colSpan={11} style={{ ...thBase, top: 0, zIndex: 20, height: 28, background: '#fed7aa', color: '#9a3412', letterSpacing: '1px' }}>ACTUAL / DEDICATED</th>
                 <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#fbcfe8', minWidth: 90 }}>DIFFERENCE<br />(ACTUAL-PROJECTED)</th>
                 <th rowSpan={3} style={{ ...thBase, top: 0, zIndex: 30, background: '#e0e7ff', minWidth: 90 }}>SETTLED AMOUNT</th>
               </tr>
@@ -2932,35 +3448,50 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
               {/* Row 2: Sub-Level group headers (Height ~26px, Top: 28px) */}
               <tr style={{ height: 26 }}>
                 {/* Under PROJECTED / DEDICATED */}
-                <th colSpan={3} style={{ ...thBase, top: 28, zIndex: 20, height: 26, background: '#ddd6fe', color: '#4c1d95' }}>NVL</th>
-                <th colSpan={3} style={{ ...thBase, top: 28, zIndex: 20, height: 26, background: '#bbf7d0', color: '#14532d' }}>NVCL</th>
+                <th colSpan={4} style={{ ...thBase, top: 28, zIndex: 20, height: 26, background: '#ddd6fe', color: '#4c1d95' }}>NVL</th>
+                <th colSpan={4} style={{ ...thBase, top: 28, zIndex: 20, height: 26, background: '#bbf7d0', color: '#14532d' }}>NVCL</th>
                 <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fef9c3', minWidth: 80 }}>Total</th>
                 <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fef9c3', minWidth: 90 }}>10WH extra 8.5% incentive</th>
                 <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fef9c3', minWidth: 90 }}>6WH extra 15% incentive</th>
                 <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fef9c3', minWidth: 80 }}>Total (Projected)</th>
 
                 {/* Under ACTUAL / DEDICATED */}
-                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#4c1d95', minWidth: 70 }}>NVL</th>
-                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#14532d', minWidth: 70 }}>NVCL</th>
-                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#b91c1c', minWidth: 70 }}>10WH</th>
-                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#b91c1c', minWidth: 70 }}>6WH</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#4c1d95', minWidth: 80, whiteSpace: 'nowrap' }}>ACTUAL NVL</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#ffedd5', color: '#14532d', minWidth: 80, whiteSpace: 'nowrap' }}>ACTUAL NVCL</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fed7aa', color: '#713f12', fontWeight: 800, minWidth: 90, whiteSpace: 'nowrap' }}>SUM OF AC NVL &amp; NVCL</th>
+                <th colSpan={3} style={{ ...thBase, top: 28, zIndex: 20, height: 26, background: '#fed7aa', color: '#b91c1c', fontWeight: 800, whiteSpace: 'nowrap' }}>10 WH Extra</th>
+                <th colSpan={3} style={{ ...thBase, top: 28, zIndex: 20, height: 26, background: '#fed7aa', color: '#b91c1c', fontWeight: 800, whiteSpace: 'nowrap' }}>6 WH Extra</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fed7aa', color: '#9a3412', fontWeight: 900, minWidth: 85, whiteSpace: 'nowrap' }}>TOTAL ACTUAL</th>
+                <th rowSpan={2} style={{ ...thBase, top: 28, zIndex: 20, background: '#fed7aa', color: '#9a3412', fontWeight: 900, minWidth: 90, whiteSpace: 'nowrap' }}>ACTUAL PAYOUT</th>
               </tr>
 
               {/* Row 3: Third-Level headers (Height ~38px, Top: 54px) */}
               <tr style={{ height: 38 }}>
+                {/* Under PROJECTED NVL */}
                 <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ede9fe', fontSize: 10, minWidth: 65 }}>Sum of{'\n'}Inv Qty</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ede9fe', fontSize: 10, minWidth: 80 }}>SUM OF{'\n'}ORG Billing Amt</th>
                 <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ede9fe', fontSize: 10, minWidth: 75 }}>Sum of{'\n'}ORG{'\n'}FREIGHT</th>
                 <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ede9fe', fontSize: 10, minWidth: 70 }}>Sum of{'\n'}Amt</th>
+                {/* Under PROJECTED NVCL */}
                 <th style={{ ...thBase, top: 54, zIndex: 20, background: '#dcfce7', fontSize: 10, minWidth: 65 }}>Sum of{'\n'}Inv Qty</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#dcfce7', fontSize: 10, minWidth: 80 }}>SUM OF{'\n'}ORG Billing Amt</th>
                 <th style={{ ...thBase, top: 54, zIndex: 20, background: '#dcfce7', fontSize: 10, minWidth: 75 }}>Sum of{'\n'}ORG{'\n'}FREIGHT</th>
                 <th style={{ ...thBase, top: 54, zIndex: 20, background: '#dcfce7', fontSize: 10, minWidth: 70 }}>Sum Amt</th>
+                {/* Under ACTUAL 10 WH Extra */}
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ffedd5', color: '#4c1d95', fontSize: 11, minWidth: 65 }}>NVL</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ffedd5', color: '#14532d', fontSize: 11, minWidth: 65 }}>NVCL</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ffedd5', color: '#b91c1c', fontSize: 10, fontWeight: 800, minWidth: 80, whiteSpace: 'nowrap' }}>SUM OF 10WH EXT</th>
+                {/* Under ACTUAL 6 WH Extra */}
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ffedd5', color: '#4c1d95', fontSize: 11, minWidth: 65 }}>NVL</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ffedd5', color: '#14532d', fontSize: 11, minWidth: 65 }}>NVCL</th>
+                <th style={{ ...thBase, top: 54, zIndex: 20, background: '#ffedd5', color: '#b91c1c', fontSize: 10, fontWeight: 800, minWidth: 80, whiteSpace: 'nowrap' }}>SUM OF 6WH EXT</th>
               </tr>
             </thead>
 
             <tbody>
               {data.length === 0 && (
                 <tr>
-                  <td colSpan={12} style={{ ...tdBase, textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                  <td colSpan={30} style={{ ...tdBase, textAlign: 'center', padding: '40px', color: '#64748b' }}>
                     No data for {MONTH_NAMES[month]} {year}. Check that cement register entries have Loading Dates in this month.
                   </td>
                 </tr>
@@ -2974,15 +3505,17 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                   <td style={{ ...tdBase, textAlign: 'left', fontWeight: 600 }}>{t.ownerName}</td>
                   <td style={{ ...tdBase, textAlign: 'center', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{t.truckNo}</td>
                   <td style={{ ...tdBase, textAlign: 'center', fontWeight: 600, color: '#374151' }}>{t.wheel}</td>
-                  <td style={{ ...tdBase, textAlign: 'center', fontWeight: 800, color: t.tripsCount > 6 ? '#16a34a' : '#dc2626' }}>{t.tripsCount}</td>
+                  <td style={{ ...tdBase, textAlign: 'center', fontWeight: 800, color: t.tripsCount >= 6 ? '#16a34a' : '#dc2626' }}>{t.tripsCount}</td>
 
                   {/* NVL */}
                   <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.invQty ? Math.round(t.nvl.invQty) : ''}</td>
+                  <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.orgBillingAmt ? fmt(t.nvl.orgBillingAmt) : ''}</td>
                   <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.orgFreight ? fmt(t.nvl.orgFreight) : ''}</td>
                   <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.amt ? fmt(t.nvl.amt) : ''}</td>
 
                   {/* NVCL */}
                   <td style={{ ...tdBase, background: 'rgba(220,252,231,0.3)' }}>{t.nvcl.invQty ? Math.round(t.nvcl.invQty) : ''}</td>
+                  <td style={{ ...tdBase, background: 'rgba(220,252,231,0.3)' }}>{t.nvcl.orgBillingAmt ? fmt(t.nvcl.orgBillingAmt) : ''}</td>
                   <td style={{ ...tdBase, background: 'rgba(220,252,231,0.3)' }}>{t.nvcl.orgFreight ? fmt(t.nvcl.orgFreight) : ''}</td>
                   <td style={{ ...tdBase, background: 'rgba(220,252,231,0.3)' }}>{t.nvcl.amt ? fmt(t.nvcl.amt) : ''}</td>
 
@@ -2991,6 +3524,9 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                   <td style={{ ...tdBase, color: t.extra10W > 0 ? '#b91c1c' : '#94a3b8' }}>{t.extra10W ? fmt(t.extra10W) : '0'}</td>
                   <td style={{ ...tdBase, color: t.extra6W > 0 ? '#b91c1c' : '#94a3b8' }}>{t.extra6W ? fmt(t.extra6W) : '0'}</td>
                   <td style={{ ...tdBase, fontWeight: 800, color: '#0f172a', background: 'rgba(254,249,195,0.4)' }}>{fmt(t.totalFinal)}</td>
+
+                  {/* ACTUAL / DEDICATED (6 Sub-Columns + TOTAL ACTUAL + 4 NEW COLUMNS) */}
+                  {/* 1. ACTUAL NVL */}
                   <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
                     <input type="number"
                       value={getActualNVL(t.truckNo)}
@@ -2999,6 +3535,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                       placeholder="0"
                     />
                   </td>
+                  {/* 2. ACTUAL NVCL */}
                   <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
                     <input type="number"
                       value={getActualNVCL(t.truckNo)}
@@ -3007,35 +3544,95 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                       placeholder="0"
                     />
                   </td>
-                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
-                    <input type="number"
-                      value={getActual10WH(t.truckNo)}
-                      onChange={e => updateActual(t.truckNo, 'w10', e.target.value)}
-                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#b91c1c', padding: '4px' }}
-                      placeholder="0"
-                    />
-                  </td>
-                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
-                    <input type="number"
-                      value={getActual6WH(t.truckNo)}
-                      onChange={e => updateActual(t.truckNo, 'w6', e.target.value)}
-                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#b91c1c', padding: '4px' }}
-                      placeholder="0"
-                    />
-                  </td>
+                  {/* 3. SUM OF AC NVL & NVCL (NEW) */}
                   {(() => {
-                    const rawAct = actuals[t.truckNo];
-                    const hasImportedDiff = rawAct && typeof rawAct === 'object' && rawAct.difference !== undefined && rawAct.difference !== null && rawAct.difference !== '';
-                    const totalAct = getTotalActual(t.truckNo);
-                    const diffVal = hasImportedDiff ? Number(rawAct.difference) : (totalAct - t.totalFinal);
-                    const effectiveActual = hasImportedDiff ? (t.totalFinal + Number(rawAct.difference)) : totalAct;
-                    const settledVal = (effectiveActual > 0 && effectiveActual > t.totalFinal) ? t.totalFinal : (effectiveActual > 0 ? effectiveActual : 0);
+                    const actNVL = num(getActualNVL(t.truckNo));
+                    const actNVCL = num(getActualNVCL(t.truckNo));
+                    return (
+                      <td style={{ ...tdBase, fontWeight: 700, color: '#713f12', background: 'rgba(254, 215, 170, 0.3)', textAlign: 'right' }}>
+                        {fmt(actNVL + actNVCL)}
+                      </td>
+                    );
+                  })()}
+                  {/* 4. 10 WH Extra -> NVL */}
+                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
+                    <input type="number"
+                      value={getActual10WH_NVL(t.truckNo, t)}
+                      onChange={e => updateActual(t.truckNo, 'w10_nvl', e.target.value)}
+                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#b91c1c', padding: '4px' }}
+                      placeholder="0"
+                    />
+                  </td>
+                  {/* 5. 10 WH Extra -> NVCL */}
+                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
+                    <input type="number"
+                      value={getActual10WH_NVCL(t.truckNo, t)}
+                      onChange={e => updateActual(t.truckNo, 'w10_nvcl', e.target.value)}
+                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#b91c1c', padding: '4px' }}
+                      placeholder="0"
+                    />
+                  </td>
+                  {/* 6. SUM OF 10WH EXT (NEW) */}
+                  {(() => {
+                    const act10_nvl = num(getActual10WH_NVL(t.truckNo, t));
+                    const act10_nvcl = num(getActual10WH_NVCL(t.truckNo, t));
+                    return (
+                      <td style={{ ...tdBase, fontWeight: 700, color: '#b91c1c', background: 'rgba(254, 215, 170, 0.3)', textAlign: 'right' }}>
+                        {fmt(act10_nvl + act10_nvcl)}
+                      </td>
+                    );
+                  })()}
+                  {/* 7. 6 WH Extra -> NVL */}
+                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
+                    <input type="number"
+                      value={getActual6WH_NVL(t.truckNo, t)}
+                      onChange={e => updateActual(t.truckNo, 'w6_nvl', e.target.value)}
+                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#b91c1c', padding: '4px' }}
+                      placeholder="0"
+                    />
+                  </td>
+                  {/* 8. 6 WH Extra -> NVCL */}
+                  <td style={{ ...tdBase, background: '#fff', padding: '2px' }}>
+                    <input type="number"
+                      value={getActual6WH_NVCL(t.truckNo, t)}
+                      onChange={e => updateActual(t.truckNo, 'w6_nvcl', e.target.value)}
+                      style={{ width: '100%', border: 'none', background: 'transparent', textAlign: 'right', outline: 'none', fontWeight: 700, fontSize: '11px', color: '#b91c1c', padding: '4px' }}
+                      placeholder="0"
+                    />
+                  </td>
+                  {/* 9. SUM OF 6WH EXT (NEW) */}
+                  {(() => {
+                    const act6_nvl = num(getActual6WH_NVL(t.truckNo, t));
+                    const act6_nvcl = num(getActual6WH_NVCL(t.truckNo, t));
+                    return (
+                      <td style={{ ...tdBase, fontWeight: 700, color: '#b91c1c', background: 'rgba(254, 215, 170, 0.3)', textAlign: 'right' }}>
+                        {fmt(act6_nvl + act6_nvcl)}
+                      </td>
+                    );
+                  })()}
+
+                  {(() => {
+                    const totalAct = getTotalActual(t.truckNo, t);
+                    const actPayout = getActualPayout(t.truckNo, t);
+                    const totalProj = num(t.totalFinal);
+                    const diffVal = totalProj - totalAct;
+                    const settledVal = (totalAct > 0 && totalAct > t.totalFinal) ? t.totalFinal : (totalAct > 0 ? totalAct : 0);
                     return (
                       <>
-                        <td style={{ ...tdBase, fontWeight: 800, color: diffVal < 0 ? '#b91c1c' : '#047857', background: 'rgba(251,207,232,0.3)' }}>
+                        {/* 10. TOTAL ACTUAL */}
+                        <td style={{ ...tdBase, fontWeight: 800, color: '#9a3412', background: 'rgba(254, 215, 170, 0.45)', textAlign: 'right' }}>
+                          {fmt(totalAct)}
+                        </td>
+                        {/* 11. ACTUAL PAYOUT (NEW) */}
+                        <td style={{ ...tdBase, fontWeight: 900, color: '#9a3412', background: 'rgba(254, 215, 170, 0.55)', textAlign: 'right' }}>
+                          {fmt(actPayout, 2)}
+                        </td>
+                        {/* DIFFERENCE (ACTUAL - PROJECTED) */}
+                        <td style={{ ...tdBase, fontWeight: 800, color: diffVal < 0 ? '#b91c1c' : (diffVal > 0 ? '#047857' : '#64748b'), background: 'rgba(251,207,232,0.3)', textAlign: 'right' }}>
                           {fmt(diffVal)}
                         </td>
-                        <td style={{ ...tdBase, fontWeight: 800, color: '#4338ca', background: 'rgba(224,231,255,0.4)' }}>
+                        {/* SETTLED AMOUNT */}
+                        <td style={{ ...tdBase, fontWeight: 800, color: '#4338ca', background: 'rgba(224,231,255,0.4)', textAlign: 'right' }}>
                           {fmt(settledVal)}
                         </td>
                       </>
@@ -3048,26 +3645,45 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
               {data.length > 0 && (() => {
                 let totalActualNVL = 0;
                 let totalActualNVCL = 0;
-                let totalActual10WH = 0;
-                let totalActual6WH = 0;
+                let totalActualSumAc = 0;
+                let totalActual10WH_NVL = 0;
+                let totalActual10WH_NVCL = 0;
+                let totalActualSum10W = 0;
+                let totalActual6WH_NVL = 0;
+                let totalActual6WH_NVCL = 0;
+                let totalActualSum6W = 0;
+                let grandTotalActual = 0;
+                let grandActualPayout = 0;
                 let totalDiff = 0;
                 let totalSettled = 0;
                 data.forEach(t => {
                   const actNVL = num(getActualNVL(t.truckNo));
                   const actNVCL = num(getActualNVCL(t.truckNo));
-                  const act10WH = num(getActual10WH(t.truckNo));
-                  const act6WH = num(getActual6WH(t.truckNo));
-                  const totalAct = actNVL + actNVCL + act10WH + act6WH;
+                  const sumAc = actNVL + actNVCL;
+                  const act10WH_NVL = num(getActual10WH_NVL(t.truckNo, t));
+                  const act10WH_NVCL = num(getActual10WH_NVCL(t.truckNo, t));
+                  const sum10W = act10WH_NVL + act10WH_NVCL;
+                  const act6WH_NVL = num(getActual6WH_NVL(t.truckNo, t));
+                  const act6WH_NVCL = num(getActual6WH_NVCL(t.truckNo, t));
+                  const sum6W = act6WH_NVL + act6WH_NVCL;
+                  const totalAct = actNVL + actNVCL + act10WH_NVL + act10WH_NVCL + act6WH_NVL + act6WH_NVCL;
+                  const actPayout = getActualPayout(t.truckNo, t);
+
                   totalActualNVL += actNVL;
                   totalActualNVCL += actNVCL;
-                  totalActual10WH += act10WH;
-                  totalActual6WH += act6WH;
+                  totalActualSumAc += sumAc;
+                  totalActual10WH_NVL += act10WH_NVL;
+                  totalActual10WH_NVCL += act10WH_NVCL;
+                  totalActualSum10W += sum10W;
+                  totalActual6WH_NVL += act6WH_NVL;
+                  totalActual6WH_NVCL += act6WH_NVCL;
+                  totalActualSum6W += sum6W;
+                  grandTotalActual += totalAct;
+                  grandActualPayout += actPayout;
 
-                  const rawAct = actuals[t.truckNo];
-                  const hasImportedDiff = rawAct && typeof rawAct === 'object' && rawAct.difference !== undefined && rawAct.difference !== null && rawAct.difference !== '';
-                  const diffVal = hasImportedDiff ? Number(rawAct.difference) : (totalAct - t.totalFinal);
-                  const effectiveActual = hasImportedDiff ? (t.totalFinal + Number(rawAct.difference)) : totalAct;
-                  const settledVal = (effectiveActual > 0 && effectiveActual > t.totalFinal) ? t.totalFinal : (effectiveActual > 0 ? effectiveActual : 0);
+                  const totalProj = num(t.totalFinal);
+                  const diffVal = totalProj - totalAct;
+                  const settledVal = (totalAct > 0 && totalAct > t.totalFinal) ? t.totalFinal : (totalAct > 0 ? totalAct : 0);
 
                   totalDiff += diffVal;
                   totalSettled += settledVal;
@@ -3077,10 +3693,12 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                     <td colSpan={5} style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, textAlign: 'center', fontWeight: 900, color: '#0f172a', background: '#e2e8f0' }}>TOTALS</td>
                     {/* NVL totals */}
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#ede9fe' }}>{Math.round(totals.nvlQty).toLocaleString('en-IN')}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#ede9fe' }}>{fmt(totals.nvlBillingAmt)}</td>
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#ede9fe' }}>{fmt(totals.nvlFreight)}</td>
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#ede9fe' }}>{fmt(totals.nvlAmt)}</td>
                     {/* NVCL totals */}
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#dcfce7' }}>{Math.round(totals.nvclQty).toLocaleString('en-IN')}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#dcfce7' }}>{fmt(totals.nvclBillingAmt)}</td>
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#dcfce7' }}>{fmt(totals.nvclFreight)}</td>
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#dcfce7' }}>{fmt(totals.nvclAmt)}</td>
                     {/* Grand totals */}
@@ -3088,11 +3706,19 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#f1f5f9' }}>{fmt(totals.extra10W)}</td>
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#f1f5f9' }}>{fmt(totals.extra6W)}</td>
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, fontSize: 13, color: '#0f172a', background: '#fef9c3' }}>{fmt(totals.grand)}</td>
+                    {/* ACTUAL / DEDICATED totals (11 columns) */}
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActualNVL)}</td>
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActualNVCL)}</td>
-                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActual10WH)}</td>
-                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActual6WH)}</td>
-                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, fontSize: 13, color: totalDiff < 0 ? '#b91c1c' : '#047857', background: '#fbcfe8' }}>{fmt(totalDiff)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#713f12' }}>{fmt(totalActualSumAc)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActual10WH_NVL)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActual10WH_NVCL)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#b91c1c' }}>{fmt(totalActualSum10W)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActual6WH_NVL)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#9a3412' }}>{fmt(totalActual6WH_NVCL)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 800, background: '#fed7aa', color: '#b91c1c' }}>{fmt(totalActualSum6W)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, background: '#fed7aa', color: '#9a3412' }}>{fmt(grandTotalActual)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, background: '#fed7aa', color: '#9a3412' }}>{fmt(grandActualPayout, 2)}</td>
+                    <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, fontSize: 13, color: totalDiff < 0 ? '#b91c1c' : (totalDiff > 0 ? '#047857' : '#64748b'), background: '#fbcfe8' }}>{fmt(totalDiff)}</td>
                     <td style={{ ...tdBase, position: 'sticky', bottom: 0, zIndex: 15, fontWeight: 900, fontSize: 13, color: '#312e81', background: '#e0e7ff' }}>{fmt(totalSettled)}</td>
                   </tr>
                 );
@@ -3240,7 +3866,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                         <td style={{ padding: '8px 12px', fontWeight: 700, color: '#0f172a' }}>{tbl.headline || tbl.category}</td>
                         <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                           <Chip
-                            label={`ACTUAL / DEDICATED → ${tbl.targetField.toUpperCase()}${tbl.subField ? ` (${tbl.subField.includes('nvl') ? 'NVL' : 'NVCL'})` : ''}`}
+                            label={`ACTUAL / DEDICATED → ${tbl.targetField === 'w10' ? '10 WH Extra' : tbl.targetField === 'w6' ? '6 WH Extra' : tbl.targetField === 'nvl' ? 'ACTUAL NVL' : 'ACTUAL NVCL'}${tbl.subField ? ` (${tbl.subField.includes('nvl') ? 'NVL' : 'NVCL'})` : ''}`}
                             size="small"
                             sx={{ fontWeight: 700, fontSize: '10px', bgcolor: tbl.targetField === 'nvl' ? '#ede9fe' : tbl.targetField === 'nvcl' ? '#dcfce7' : '#ffedd5', color: '#0f172a' }}
                           />
@@ -3350,7 +3976,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
 
               {/* ── Stacked Tables Scroll Container ── */}
               <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, p: 2, overflow: 'hidden' }}>
-                
+
                 {/* 1. Top Section - System Generated Data */}
                 <Box sx={{ flex: '1 1 48%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
                   <Box sx={{ p: 1.5, bgcolor: 'background.default', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
@@ -3384,7 +4010,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                         {comparisonViewDef?.systemTrucksDetail.map((detail, idx) => {
                           const t = detail.truck;
                           const ev = detail.excelValues;
-                          
+
                           // Row background color based on status
                           let rowBg = '#fff';
                           if (detail.status === 'MISSING_IN_EXCEL') rowBg = '#fef2f2'; // light red for missing
@@ -3400,7 +4026,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                               <td style={{ ...tdBase, textAlign: 'left', fontWeight: 600 }}>{t.ownerName}</td>
                               <td style={{ ...tdBase, textAlign: 'center', fontFamily: 'monospace', fontWeight: 700 }}>{t.truckNo}</td>
                               <td style={{ ...tdBase, textAlign: 'center' }}>{t.wheel}</td>
-                              
+
                               {/* Trips */}
                               <td style={tdBase}>
                                 {renderComparedCell(t.tripsCount, ev.trips, false, detail.mismatches.includes('trips'))}
@@ -3429,7 +4055,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                               <td style={{ ...tdBase, fontWeight: 800, background: 'rgba(254,249,195,0.3)' }}>
                                 {renderComparedCell(t.totalFinal, ev.grandTotal, true, detail.mismatches.includes('grandTotal'))}
                               </td>
-                              
+
                               {/* Status badge */}
                               <td style={{ ...tdBase, textAlign: 'center' }}>
                                 {detail.status === 'MISSING_IN_EXCEL' && (

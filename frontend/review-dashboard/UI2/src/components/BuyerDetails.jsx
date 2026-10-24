@@ -4,7 +4,15 @@ import { Box, TextField, Card, CardHeader, CardContent } from '@mui/material';
 // Renamed from "Buyer Details" → "Consignee Details"
 export default function BuyerDetails({ data, errors, onChange }) {
     const handleChange = (e) => {
-        onChange('buyer_details', e.target.name, e.target.value);
+        const { name, value } = e.target;
+        onChange('buyer_details', name, value);
+        if (name === 'buyer_name') onChange('consignee_details', 'consignee_name', value);
+        if (name === 'buyer_address') onChange('consignee_details', 'consignee_address', value);
+        if (name === 'buyer_gstin') onChange('consignee_details', 'consignee_gstin', value);
+        if (name === 'buyer_pan') onChange('consignee_details', 'consignee_pan', value);
+        if (name === 'buyer_state') onChange('consignee_details', 'consignee_state', value);
+        if (name === 'buyer_state_code') onChange('consignee_details', 'consignee_state_code', value);
+        if (name === 'buyer_pincode') onChange('consignee_details', 'consignee_pincode', value);
     };
 
     return (

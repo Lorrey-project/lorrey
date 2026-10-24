@@ -28,20 +28,20 @@ const frozenSx = {
 export default function SupplyDetails({ data, errors, onChange }) {
   const [fetchingContact, setFetchingContact] = useState(false);
 
-  // Auto-fetch driver info when vehicle number is present but driver fields are empty
+  // Auto-fetch driver info & wheel type from DB when vehicle number is present
   useEffect(() => {
     const vehicleNo = data?.vehicle_number;
 
-    // We consider driver info missing if at least one crucial field is empty
-    const missingDriverInfo = !data?.driver_number || !data?.driver_license;
+    // Check if any crucial information is missing
+    const missingInfo = !data?.wheel_type || !data?.driver_number || !data?.driver_license || !data?.driver_name;
 
-    if (vehicleNo && vehicleNo.length >= 4 && missingDriverInfo) {
+    if (vehicleNo && vehicleNo.length >= 4 && missingInfo) {
       const fetchContact = async () => {
         setFetchingContact(true);
         try {
           const token = localStorage.getItem('token');
           const res = await axios.get(`${API_URL}/invoice/truck-contact/${encodeURIComponent(vehicleNo)}`, {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
           });
           if (res.data && res.data.found) {
             const contact = res.data;
@@ -54,7 +54,7 @@ export default function SupplyDetails({ data, errors, onChange }) {
             if (contact.driver_name && !data?.driver_name) {
               onChange('supply_details', 'driver_name', contact.driver_name);
             }
-            if (contact.wheel_type && !data?.wheel_type) {
+            if (contact.wheel_type) {
               onChange('supply_details', 'wheel_type', contact.wheel_type);
             }
           }
@@ -68,7 +68,7 @@ export default function SupplyDetails({ data, errors, onChange }) {
       // Debounce the fetch
       const timer = setTimeout(() => {
         fetchContact();
-      }, 600);
+      }, 500);
 
       return () => clearTimeout(timer);
     }
@@ -146,15 +146,24 @@ export default function SupplyDetails({ data, errors, onChange }) {
               fullWidth 
               label="Wheel" 
               name="wheel_type" 
-              value={data?.wheel_type || ''} 
+              value={(() => {
+                const wt = data?.wheel_type || '';
+                if (!wt) return '';
+                const match = String(wt).match(/(\d+)/);
+                return match ? `${match[1]}WH` : wt;
+              })()} 
               onChange={handleChange} 
               variant="outlined"
             >
               <MenuItem value=""><em>None</em></MenuItem>
-              <MenuItem value="6WH">6WH</MenuItem>
-              <MenuItem value="10WH">10WH</MenuItem>
-              <MenuItem value="12WH">12WH</MenuItem>
-              <MenuItem value="14WH">14WH</MenuItem>
+              {["6WH", "10WH", "12WH", "14WH", "16WH", "18WH", "22WH"].map((wh) => (
+                <MenuItem key={wh} value={wh}>{wh}</MenuItem>
+              ))}
+              {data?.wheel_type && !["6WH", "10WH", "12WH", "14WH", "16WH", "18WH", "22WH"].includes(
+                String(data.wheel_type).match(/(\d+)/) ? `${String(data.wheel_type).match(/(\d+)/)[1]}WH` : data.wheel_type
+              ) && (
+                <MenuItem value={data.wheel_type}>{data.wheel_type}</MenuItem>
+              )}
             </TextField>
           </Box>
 

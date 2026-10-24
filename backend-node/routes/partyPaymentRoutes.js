@@ -414,6 +414,13 @@ router.post('/bulk', async (req, res) => {
         paymentDate: record.paymentDate || '',
         remarks: record.remarks || ''
       };
+      if (record.extra10WIncentive !== undefined) {
+        setFields.extra10WIncentive = Number(record.extra10WIncentive);
+        setFields.nvclIncentive = Number(record.extra10WIncentive);
+      } else if (record.nvclIncentive !== undefined) {
+        setFields.nvclIncentive = Number(record.nvclIncentive);
+        setFields.extra10WIncentive = Number(record.nvclIncentive);
+      }
       if (record.dedicatedIncentive !== undefined) {
         if (record.dedicatedIncentive === '' || record.dedicatedIncentive === null) {
           setFields.dedicatedIncentive = null;
@@ -588,6 +595,7 @@ router.get('/full-year', async (req, res) => {
     const FreightCreditorGstBreakdown = require('../models/FreightCreditorGstBreakdown');
     const Voucher = require('../models/Voucher');
     const { getCreditorKeyForVehicleOrParty } = require('./freightCreditorGstRoutes');
+    const { evaluateVehicleIncentiveEligibility } = require('../utils/incentiveEligibilityManager');
 
     // 1. Fetch contacts, settings, saved manual entries, breakdown, credit vouchers, and bank book freight payments in parallel
     const [allOwnerDocs, allTruckDocs, savedPartyPayments, settingsDoc, savedGstBreakdowns, creditVoucherDocs, allFreightDocs] = await Promise.all([
@@ -854,6 +862,9 @@ router.get('/full-year', async (req, res) => {
           'GPS TRIP CHARGE': 0,
           'GPS DEVICE': 0,
           'NET AMOUNT': 0,
+          '10WH Extra 8.5% Incentive': 0,
+          '10WH EXTRA 8.5% INCENTIVE': 0,
+          'NVCL INCENTIVE': 0,
           '8.5% NVCL': 0,
           'DEDICATED INCENTIVE': 0,
           'RAFTER': 0,
@@ -903,6 +914,9 @@ router.get('/full-year', async (req, res) => {
           'GPS TRIP CHARGE': 0,
           'GPS DEVICE': 0,
           'NET AMOUNT': 0,
+          '10WH Extra 8.5% Incentive': 0,
+          '10WH EXTRA 8.5% INCENTIVE': 0,
+          'NVCL INCENTIVE': 0,
           '8.5% NVCL': 0,
           'DEDICATED INCENTIVE': 0,
           'RAFTER': 0,
@@ -938,7 +952,6 @@ router.get('/full-year', async (req, res) => {
       let cashBankOthers = 0;
       let cementOtherDeduction = 0;
       let gpsDevice = 0;
-      let nvcl85 = 0;
       let rafter = 0;
       let extraUl = 0;
       let tollUp = 0;
@@ -948,16 +961,6 @@ router.get('/full-year', async (req, res) => {
         const isDummy = isDummyRow(row);
         if (!isDummy) {
           grossFreight += getF(row, 'BILLING ER 95%', 'BILLING ER VAR', 'BILLING @ 95% (PARTY PAYABLE)', 'BILLING@95%', 'AMOUNT', 'Billing Amount');
-
-          const extra85 = row['10W EXTRA 8.5%'] !== undefined
-            ? num(row['10W EXTRA 8.5%'])
-            : row['10W EXTRA 8'] !== undefined
-              ? (typeof row['10W EXTRA 8'] === 'object'
-                ? Object.values(row['10W EXTRA 8']).reduce((s, x) => s + num(x), 0)
-                : num(row['10W EXTRA 8']))
-              : 0;
-          nvcl85 += extra85;
-
           rafter += getF(row, 'RAFTER', 'RAFTER CHARGES');
           extraUl += getF(row, 'EXTRA UNLOADING', 'EXTRA  UNLOADING', 'EXTRA UL', 'EXTRA U/L');
           tollUp += getF(row, 'UP TOLL', 'TOLL UP', 'TOLL_UP', 'TOLL UP ');
@@ -1017,8 +1020,29 @@ router.get('/full-year', async (req, res) => {
       // TDS on Incentive
       const tdsOnIncentive = round2((dedicatedIncentive + extraUl) * (effectiveTdsRate || 0.01));
 
+      // Authoritative 10WH Extra 8.5% Incentive from Incentive Entry
+      let nvclIncentive = 0;
+      if (saved.extra10WIncentive !== undefined && saved.extra10WIncentive !== null) {
+        nvclIncentive = Number(saved.extra10WIncentive);
+      } else if (saved.nvclIncentive !== undefined && saved.nvclIncentive !== null) {
+        nvclIncentive = Number(saved.nvclIncentive);
+      } else if (hasActivity && monthTrips.length > 0) {
+        try {
+          const eligRes = await evaluateVehicleIncentiveEligibility(normTargetVeh, m, y);
+          if (eligRes?.extra10WheelIncentive?.amount !== undefined) {
+            nvclIncentive = eligRes.extra10WheelIncentive.amount || 0;
+          } else if (eligRes?.extra10W !== undefined) {
+            nvclIncentive = eligRes.extra10W || 0;
+          } else if (eligRes?.standardIncentive?.nvclAmount) {
+            nvclIncentive = eligRes.standardIncentive.nvclAmount;
+          }
+        } catch (err) {
+          console.warn(`[partyPayment] Error evaluating incentive for ${normTargetVeh} ${m}/${y}:`, err.message);
+        }
+      }
+
       // Total Freight
-      const incentiveSum = nvcl85 + dedicatedIncentive + extraUl + tollUp + tollDown;
+      const incentiveSum = nvclIncentive + dedicatedIncentive + extraUl + tollUp + tollDown;
       const totalFreight = round2(netAmount + incentiveSum - tdsOnIncentive);
 
       // ── Authoritative GST FCM resolution from Party Payment Details / Freight Creditor GST ──
@@ -1098,7 +1122,10 @@ router.get('/full-year', async (req, res) => {
         'GPS TRIP CHARGE': gpsTripCharge,
         'GPS DEVICE': gpsDevice,
         'NET AMOUNT': netAmount,
-        '8.5% NVCL': nvcl85,
+        '10WH Extra 8.5% Incentive': nvclIncentive,
+        '10WH EXTRA 8.5% INCENTIVE': nvclIncentive,
+        'NVCL INCENTIVE': nvclIncentive,
+        '8.5% NVCL': nvclIncentive,
         'DEDICATED INCENTIVE': dedicatedIncentive,
         'RAFTER': rafter,
         'EXTRA U/L': extraUl,
@@ -1127,7 +1154,7 @@ router.get('/full-year', async (req, res) => {
     const flowKeys = [
       'GROSS FREIGHT', 'LOADING ADVANCE', 'FUEL', 'TDS', 'TRAVELLING EXP',
       'DAMAGE RECOVERY', 'CASH_BANK_OTHERS', 'OTHER DEDUCTION', 'GPS TRIP CHARGE',
-      'GPS DEVICE', 'NET AMOUNT', '8.5% NVCL', 'DEDICATED INCENTIVE', 'RAFTER',
+      'GPS DEVICE', 'NET AMOUNT', '10WH Extra 8.5% Incentive', '10WH EXTRA 8.5% INCENTIVE', 'NVCL INCENTIVE', '8.5% NVCL', 'DEDICATED INCENTIVE', 'RAFTER',
       'EXTRA U/L', 'TOLL UP', 'TOLL DOWN', 'TDS ON INCENTIVE', 'TOTAL FREIGHT',
       'WITHHOLD AMOUNT', 'RECOVERED TO DAC', 'CREDIT REFUND', 'PAID TO PARTY'
     ];

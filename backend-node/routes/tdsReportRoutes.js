@@ -229,11 +229,10 @@ async function computeCandidateIncentives(candidateMonths, cementCol, incStateCo
         entry.nvcl.amt += tripStandardIncentive;
       }
 
-      // Rule 2: 10W Extra Incentive (from 1st qualifying trip if 10WH + ATOA/MKT + SO + NT)
+      // Rule 2: 10W Extra Incentive (from 1st qualifying trip if 10WH + ATOA/MKT + SO + NT, STO disallowed)
       const manualW10 = num(row['10W EXTRA 8.5%']);
-      if (manualW10 > 0) {
-        entry.extra10W += manualW10;
-      } else if (entry.wheelNorm === '10WH' && entry.isEligibleRel && isInvoiceSoAndNt(row)) {
+      const isSto = String(row['Bill Type'] || row.billType || '').trim().toUpperCase() === 'STO';
+      if (entry.wheelNorm === '10WH' && entry.isEligibleRel && !isSto && (isInvoiceSoAndNt(row) || manualW10 > 0)) {
         const extra10Base = entry.isAtoa ? billFreight : partyFreight;
         entry.extra10W += extra10Base * 0.085;
       }
@@ -623,17 +622,18 @@ router.get('/party-tds', async (req, res) => {
         entry.nvcl.amt += baseIncentive;
       }
 
-      // Rule 2: 10W Extra Incentive (from 1st qualifying trip if 10WH + ATOA/MKT + SO + NT)
+      // Rule 2: 10W Extra Incentive (from 1st qualifying trip if 10WH + ATOA/MKT + SO + NT, STO disallowed)
       const manualW10 = num(row['10W EXTRA 8.5%']);
-      if (manualW10 > 0) {
-        entry.extra10W += manualW10;
-      } else if (entry.wheelNorm === '10WH' && entry.isEligibleRel && isInvoiceSoAndNt(row)) {
-        entry.extra10W += orgFreight * 0.085;
+      const isSto = String(row['Bill Type'] || row.billType || '').trim().toUpperCase() === 'STO';
+      if (entry.wheelNorm === '10WH' && entry.isEligibleRel && !isSto && (isInvoiceSoAndNt(row) || manualW10 > 0)) {
+        const extra10Base = entry.isAtoa ? orgFreight : (entry.partyFreight || (orgFreight * 0.95));
+        entry.extra10W += extra10Base * 0.085;
       }
 
       // Rule 3: 6W Extra Incentive (15% if 6WH + ATOA/MKT, checked against >= 6 trips threshold)
       if (entry.wheelNorm === '6WH' && entry.isEligibleRel) {
-        entry.extra6W += orgFreight * 0.15;
+        const extra6Base = entry.isAtoa ? orgFreight : (entry.partyFreight || (orgFreight * 0.95));
+        entry.extra6W += extra6Base * 0.15;
       }
     }
 

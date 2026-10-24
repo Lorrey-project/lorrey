@@ -31,7 +31,10 @@ target_schema = {
     "consignee_name": "",
     "consignee_address": "",
     "consignee_state": "",
-    "consignee_pincode": ""
+    "consignee_state_code": "",
+    "consignee_pincode": "",
+    "consignee_gstin": "",
+    "consignee_pan": ""
   },
 
   "supply_details": {
@@ -40,14 +43,19 @@ target_schema = {
     "destination": "",
     "destination_state": "",
     "destination_code": "",
-    "mode_of_transport": "",
+    "mode_of_transport": "Road",
     "vehicle_number": "",
+    "wheel_type": "",
     "challan_number": "",
     "transporter_name": "DIPALI ASSOCIATES & CO",
     "transporter_address": "PANAGARH PANAGARH INDUSTRIAL PARK KOTAGRAM, BURDWAN 19-WEST BENGAL-713148",
     "transporter_pincode": "713148",
+    "transporter_gstin": "19AATFD1733C1ZH",
     "shipment_number": "",
-    "lorrey_receipt_number": ""
+    "lorrey_receipt_number": "",
+    "driver_name": "",
+    "driver_number": "",
+    "driver_license": ""
   },
 
   "items": [
@@ -58,7 +66,8 @@ target_schema = {
       "quantity": "",
       "uom": "",
       "rate": "",
-      "taxable_value": ""
+      "taxable_value": "",
+      "net_payable": ""
     }
   ],
 
@@ -66,7 +75,9 @@ target_schema = {
     "cgst_rate": "",
     "cgst_amount": "",
     "sgst_rate": "",
-    "sgst_amount": ""
+    "sgst_amount": "",
+    "igst_rate": "",
+    "igst_amount": ""
   },
 
   "amount_summary": {
@@ -84,5 +95,10 @@ target_schema = {
     "ewb_create_time": "",
     "ewb_valid_date": "",
     "ewb_valid_time": ""
+  },
+
+  "validation_meta": {
+    "needs_manual_verification": False,
+    "warnings": []
   }
 }

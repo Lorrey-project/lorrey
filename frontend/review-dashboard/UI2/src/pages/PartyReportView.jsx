@@ -741,24 +741,21 @@ export default function PartyReportView({
     const partyFreightRow = parseNum(originalRow['BILLING ER 95%'] || originalRow['BILLING @ 95% (PARTY PAYABLE)'] || originalRow['PARTY RATE AMOUNT']) || (parseNum(originalRow['PARTY RATE'] || originalRow['PARTY RATE (95-97%)']) * mt) || amount;
     const incentiveBase = isAtoaParty ? (billFreightRow > 0 ? billFreightRow : amount) : (partyFreightRow > 0 ? partyFreightRow : amount);
 
-    // Rule 2: 10-Wheel Extra Incentive (from 1st qualifying trip if 10W + ATOA/MKT + SO + NT)
+    // Rule 2: 10-Wheel Extra Incentive (from 1st qualifying trip if 10W + ATOA/MKT + SO + NT, STO disallowed)
     let incentive10WH = 0;
     if (rowIs10Wheel && isAtoaOrMkt) {
       const stored10W = parseNum(originalRow['10W EXTRA 8.5%'] || originalRow['10WH EXTRA 8.5%'] || originalRow['10W EXTRA 8']);
-      if (stored10W > 0) {
-        incentive10WH = stored10W;
-      } else {
-        const bType = String(originalRow['Bill Type'] || originalRow['BILL TYPE'] || '').trim().toUpperCase();
-        const isSo = bType === 'SO';
-        const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
-        const isNt = originalRow._is_nt_invoice === true || originalRow._is_nt_invoice === 'true' ||
-                     originalRow._source_nt_unloading === true ||
-                     ntWordRegex.test(String(originalRow.classification || '')) ||
-                     (originalRow['EXTRA UNLOADING'] && parseNum(originalRow['EXTRA UNLOADING']) > 0) ||
-                     ntWordRegex.test(String(originalRow['UNLOADING STATUS NOTE'] || originalRow['UNLOADING STATUS'] || ''));
-        if (isSo && isNt) {
-          incentive10WH = incentiveBase > 0 ? round2(incentiveBase * 0.085) : 0;
-        }
+      const bType = String(originalRow['Bill Type'] || originalRow['BILL TYPE'] || '').trim().toUpperCase();
+      const isSto = bType === 'STO' || bType.includes('STOCK');
+      const isSo = !isSto && (bType === 'SO' || bType.includes('SALES'));
+      const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
+      const isNt = originalRow._is_nt_invoice === true || originalRow._is_nt_invoice === 'true' ||
+                   originalRow._source_nt_unloading === true ||
+                   ntWordRegex.test(String(originalRow.classification || '')) ||
+                   (originalRow['EXTRA UNLOADING'] && parseNum(originalRow['EXTRA UNLOADING']) > 0) ||
+                   ntWordRegex.test(String(originalRow['UNLOADING STATUS NOTE'] || originalRow['UNLOADING STATUS'] || ''));
+      if (!isSto && ((isSo && isNt) || stored10W > 0)) {
+        incentive10WH = incentiveBase > 0 ? round2(incentiveBase * 0.085) : 0;
       }
     }
 

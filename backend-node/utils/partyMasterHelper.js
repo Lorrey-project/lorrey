@@ -553,7 +553,7 @@ function findContactForRecord(ownerName, vehicleNo, contactsList = [], recordDat
   if (!matched && cleanOwner && cleanVeh) {
     matched = contactsList.find(c => {
       if (!c) return false;
-      const cVeh = String(c["Truck No "] || c["Truck No"] || c.truck_no || c.vehicleNo || c["Vehicle No"] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const cVeh = String(c["Truck No "] || c["Truck No"] || c["Truck No."] || c["Truck No. "] || c.truck_no || c.truckNo || c.vehicleNo || c["Vehicle No"] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
       const cOwner = String(c["Owner Name "] || c["Owner Name"] || c.owner_name || c.ownerName || '').trim().toLowerCase();
       return cVeh === cleanVeh && cOwner === cleanOwner;
     });
@@ -563,7 +563,7 @@ function findContactForRecord(ownerName, vehicleNo, contactsList = [], recordDat
   if (!matched && cleanVeh) {
     matched = contactsList.find(c => {
       if (!c) return false;
-      const cVeh = String(c["Truck No "] || c["Truck No"] || c.truck_no || c.vehicleNo || c["Vehicle No"] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const cVeh = String(c["Truck No "] || c["Truck No"] || c["Truck No."] || c["Truck No. "] || c.truck_no || c.truckNo || c.vehicleNo || c["Vehicle No"] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
       return cVeh === cleanVeh;
     });
   }

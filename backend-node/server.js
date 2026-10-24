@@ -9,6 +9,7 @@ const cors = require("cors");
 const axios = require("axios");
 const mongoose = require("mongoose");
 const http = require("http");
+const path = require("path");
 const { init: initSocket } = require("./socket");
 const { startWatcher } = require("./utils/scannerWatcher");
 
@@ -46,6 +47,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Async request logger — writes OUTSIDE backend-node/ so nodemon never watches it
 // Async request logger -> Replaced with console.log for Render compatibility
@@ -99,6 +101,7 @@ app.use("/fingerprint", require("./routes/fingerprintRoutes"));
 app.use("/freight-adjustments", require("./routes/freightAdjustmentRoutes"));
 app.use("/freight-creditor-gst", require("./routes/freightCreditorGstRoutes"));
 app.use("/indirect-expense", require("./routes/indirectExpenseRoutes"));
+app.use("/check-book", require("./routes/checkBookRoutes"));
 
 
 

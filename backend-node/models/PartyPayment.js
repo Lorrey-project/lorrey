@@ -34,6 +34,7 @@ const partyPaymentSchema = new mongoose.Schema({
   balanceDue: { type: Number, default: 0 },
   dedicatedIncentive: { type: Number },
   dedicatedIncentive_manual: { type: Boolean, default: false },
+  nvclIncentive: { type: Number, default: 0 },
   tds: { type: Number },
   tds_manual: { type: Boolean, default: false },
   paymentDate: { type: String, default: '' },

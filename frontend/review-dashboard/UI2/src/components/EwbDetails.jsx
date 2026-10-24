@@ -6,14 +6,32 @@ export default function EwbDetails({ data, errors, onChange }) {
     onChange("ewb_details", e.target.name, e.target.value);
   };
 
+  const handleDateChange = (name, val) => {
+    if (!val) {
+      onChange("ewb_details", name, "");
+      return;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      const [year, month, day] = val.split("-");
+      onChange("ewb_details", name, `${day}/${month}/${year}`);
+    } else {
+      onChange("ewb_details", name, val);
+    }
+  };
+
   const convertDate = (date) => {
     if (!date) return "";
-
-    const parts = date.split("/");
-    if (parts.length !== 3) return date;
-
-    const [day, month, year] = parts;
-    return `${year}-${month}-${day}`;
+    if (typeof date !== "string") return "";
+    const clean = date.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+    const parts = clean.split(/[\/\-]/);
+    if (parts.length === 3) {
+      if (parts[2].length === 4) {
+        const [day, month, year] = parts;
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+    }
+    return clean;
   };
 
   return (
@@ -36,7 +54,7 @@ export default function EwbDetails({ data, errors, onChange }) {
             type="date"
             InputLabelProps={{ shrink: true }}
             value={convertDate(data?.ewb_create_date)}
-            onChange={handleChange}
+            onChange={(e) => handleDateChange("ewb_create_date", e.target.value)}
             error={!!errors?.ewb_create_date}
             helperText={errors?.ewb_create_date}
             variant="outlined"
@@ -58,7 +76,7 @@ export default function EwbDetails({ data, errors, onChange }) {
             type="date"
             InputLabelProps={{ shrink: true }}
             value={convertDate(data?.ewb_valid_date)}
-            onChange={handleChange}
+            onChange={(e) => handleDateChange("ewb_valid_date", e.target.value)}
             error={!!errors?.ewb_valid_date}
             helperText={errors?.ewb_valid_date}
             variant="outlined"

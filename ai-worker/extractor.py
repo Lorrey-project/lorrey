@@ -1,6 +1,9 @@
 import base64
 import json
 import os
+import time
+import random
+import re
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -9,170 +12,141 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def extract_invoice_data(base64_image, target_schema):
+def extract_invoice_data(images, target_schema):
     """
-    Directly extract structured invoice data from the image using GPT-4o vision.
-    No OCR step required — the model reads the image natively.
+    Directly extract structured invoice data from one or more page images using GPT-4o vision.
+    Supports multi-page documents seamlessly.
     """
+
+    if isinstance(images, str):
+        images = [images]
 
     prompt = f"""
 TASK:
-You are an expert invoice data extraction engine.
-Look at the invoice image carefully and extract all data into the exact JSON schema provided.
+You are an authoritative, 100% accurate Indian invoice and logistics document extraction engine.
+Analyze all provided document pages with extreme visual precision and extract every relevant field into the exact JSON schema provided below.
 
-IMPORTANT INVOICE STRUCTURE RULES:
+CRITICAL DOCUMENT RULES — AVOID COMMON ERRORS:
 
-1. Seller is the company issuing the invoice (usually at the top of the document).
-2. Buyer details must come from the section labeled:
-   - "BILLED TO" / "BILL TO"
-3. Consignee details must come from the section labeled:
-   - "SHIP TO" / "ADDRESS OF DELIVERY" / "DELIVERY ADDRESS"
+1. INVOICE NUMBER vs REFERENCE NUMBER vs SHIPMENT NUMBER:
+   - "invoice_number": The exact Tax Invoice Number (e.g. "2625111151791", "262511020877", "352311231346", "1196083354"). Strip any leading dot.
+   - "reference_number": The Sales Order No / PO Ref / Order Reference (e.g. "2625204226", "2625027756", "0100449320").
+   - NEVER swap invoice_number with reference_number, delivery_number, or shipment_number.
 
-4. Never confuse these sections:
-   - Seller, Billed To, Delivery Address, Transporter
+2. CONSIGNEE vs BUYER vs TABLE LABELS:
+   - "consignee_name": The actual corporate or individual recipient name from "SHIP TO" / "ADDRESS OF DELIVERY" / "DELIVERY TO" / "CONSIGNEE".
+     CRITICAL: NEVER extract generic table titles or code labels such as "ADDRESS OF DELIVERY", "SHIP TO CODE", "CUSTOMER CODE", or "SAME AS BILLED TO" as a consignee name!
+     Example: If the header says "ADDRESS OF DELIVERY" followed by "MAJI HARDWARE", the consignee_name is "MAJI HARDWARE".
+   - "buyer_name": The billed-to entity name from "BILLED TO" / "BILL TO" / "CUSTOMER". Strip prefixes like "CUSTOMER CODE 12345:".
+   - Extract complete street address, state, state code, pincode, and GSTIN/PAN for both.
 
-5. Transporter details must NOT be used as buyer or consignee details.
-6. Buyer name is usually the first company/person name under BILLED TO.
-7. Consignee name is usually the first name under DELIVERY ADDRESS.
+3. VEHICLE NUMBER — STRICT ACCURACY:
+   - "vehicle_number": Indian commercial vehicle registration plate (e.g. "WB33C6016", "WB39A5858", "WB41B6273", "WB38B9916").
+   - Normalize formatting: remove spaces and hyphens (e.g. "WB 33C 6016" -> "WB33C6016").
+   - NEVER put a 15-character GSTIN (like 19AATFD1733C1ZH) or a phone number or shipment number here!
+   - Leave "wheel_type" as "" (empty string). Our database is the authoritative source for wheel type.
 
-DATA EXTRACTION RULES:
+4. DISPATCH & LOGISTICS IDENTIFIERS:
+   - "delivery_number": Delivery Note / Delivery No / DO No (e.g. "101602700", "50900115", "100418376").
+   - "shipment_number": Shipment No / Dispatch No (e.g. "2111091703", "2110876145", "DAC/23-24/01852").
+   - "challan_number": ONLY extract if explicitly titled "Challan" or "Delivery Challan". If not labeled Challan, return "". Never derive it from the invoice number.
+   - "destination": Town/site and pincode (e.g. "Purulia - 723148", "Birahimpur - 713123").
+   - "destination_state": Valid Indian state (e.g. "West Bengal", "Jharkhand", "Bihar", "Odisha").
 
-8. Return ONLY valid JSON — no markdown, no explanation.
-9. Follow the schema exactly.
-10. If any field is missing or not visible, return "" for that field.
-11. Do not hallucinate or invent values not visible in the image.
-12. Preserve numeric values exactly as visible in the image.
+5. DRIVER INFORMATION:
+   - Extract "driver_name", "driver_number" (phone), "driver_license" if printed anywhere on the invoice or delivery slip.
+   - If not printed on the document, return "". Do not invent or fabricate driver information.
 
-ADDRESS RULES:
+6. ITEM / MATERIAL DETAILS:
+   - Extract all items with complete accuracy.
+   - "description_of_product": Product name (e.g. "PSC: CONCRETO ADSTAR", "NUVOCO VISTAS PREMIUM SLAG CEMENT").
+   - "hsn_code": HSN/SAC code (e.g. "25232940").
+   - "quantity": Number of MT or units (e.g. "19.000", "25.00").
+   - "bags": Number of bags if printed (otherwise "").
+   - "uom": "MT", "BAGS", etc.
+   - "rate": Price/rate per unit as printed. Preserve exact decimals.
+   - "taxable_value": Taxable amount as printed. Preserve exact decimals.
+   - Do NOT round values unless printed as rounded.
 
-13. Extract only valid 6-digit pincodes.
-14. Do not mix addresses between buyer, consignee and transporter.
-15. BILLED TO address = buyer address.
-16. SHIP TO / ADDRESS OF DELIVERY / DELIVERY TO = consignee details and address.
-17. Fix obvious visual OCR mistakes like "ITH FLOOR" → "11TH FLOOR".
+7. E-WAY BILL (EWB) DETAILS — VERY IMPORTANT:
+   - Look carefully across all pages for the E-Way Bill section (often in a dedicated box, header, or footer).
+   - "ewb_number": 11-15 digit numeric code (e.g. "89175663812", "881678650961").
+   - "ewb_create_date": Generation date as DD/MM/YYYY.
+   - "ewb_create_time": Generation time as HH:MM:SS.
+   - "ewb_valid_date": Validity date as DD/MM/YYYY.
+   - "ewb_valid_time": Validity time as HH:MM:SS.
+   - If not present anywhere in the document, return "".
 
-TIME RULES:
+8. MULTI-PAGE INVOICES:
+   - You have been provided with all pages of the document.
+   - Inspect every page. Consolidate details into a single cohesive invoice record.
+   - Do NOT duplicate items if headers/footers repeat across pages.
 
-18. Normalize time to HH:MM:SS format.
-19. Replace "." with ":" in time values.
-
-TAX RULES:
-
-20. total_tax_amount = cgst_amount + sgst_amount.
-
-TRANSPORT RULES:
-
-21. If mode_of_transport is missing, use "Road".
-22. If lorrey_receipt_number is missing, return "".
-23. For challan_number: ONLY extract it if the word "Challan" or "Challan No" is explicitly visible in the image. Never derive it from the invoice number.
-24. Pattern like "WB39B1080" is a Truck/Vehicle number. Put it in `vehicle_number`, NOT in `lorrey_receipt_number`. 
-25. If `destination_state` is missing or implicit, derive it from the `destination` or `consignee_state` (e.g., if destination has 814154 or Mohanpur, output "Jharkhand"). Must output a valid Indian State name.
-
-E-WAY BILL RULES:
-
-26. Look carefully for any E-Way Bill / EWB section anywhere on the invoice (often at the bottom or in a small box).
-27. ewb_number is a long numeric code (12-15 digits), labeled "E-Way Bill No.", "EWB No.", or "E-WayBill No."
-28. ewb_create_date and ewb_create_time come from fields labeled "Generated On", "EWB Date", "Created On", or similar. Format date as DD/MM/YYYY and time as HH:MM:SS.
-29. ewb_valid_date and ewb_valid_time come from fields labeled "Valid Till", "Valid Upto", "Validity". Format date as DD/MM/YYYY and time as HH:MM:SS.
-30. If any EWB field is not present, return "" — do not guess.
-
-NUMBER CLEANING RULES:
-
-31. Remove any leading "." from numeric IDs. e.g. ".262511003283" → "262511003283", ".2014086270" → "2014086270".
-32. Invoice numbers, reference numbers, shipment numbers must NEVER start with ".".
-
-SCHEMA:
+SCHEMA TO MATCH EXACTLY:
 {json.dumps(target_schema, indent=2)}
 
-Return ONLY valid JSON matching the schema exactly.
+Return ONLY a valid JSON object matching the schema.
 """
 
-    import time
-    import random
-    import openai
+    user_content = [{"type": "text", "text": prompt}]
+    for idx, b64_img in enumerate(images):
+        user_content.append({
+            "type": "text",
+            "text": f"=== DOCUMENT PAGE {idx + 1} OF {len(images)} ==="
+        })
+        user_content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{b64_img}",
+                "detail": "high"
+            }
+        })
 
-    models_to_try = ["gpt-4o-mini", "gpt-4o"]
+    models_to_try = ["gpt-4o", "gpt-4o-mini"]
     max_retries = 3
     content = None
 
     for attempt in range(max_retries):
-        model_name = models_to_try[attempt % len(models_to_try)]
-        
+        model_name = models_to_try[0] if attempt < 2 else models_to_try[1]
+
         try:
-            print(f"[AI EXTRACTOR] Attempt {attempt + 1}/{max_retries} requesting model '{model_name}'...")
+            print(f"[AI EXTRACTOR] Attempt {attempt + 1}/{max_retries} requesting model '{model_name}' on {len(images)} page(s)...")
             response = client.chat.completions.create(
                 model=model_name,
                 temperature=0,
-                timeout=35,
+                timeout=60,
+                response_format={"type": "json_object"},
                 messages=[
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}",
-                                    "detail": "auto"
-                                }
-                            }
-                        ]
+                        "content": user_content
                     }
                 ]
             )
             content = response.choices[0].message.content
-            print(f"GPT ({model_name}) VISION EXTRACTION RESPONSE:", content[:300], "...")
+            print(f"GPT ({model_name}) VISION EXTRACTION SUCCESS:", content[:300], "...")
             break
-        except openai.AuthenticationError as auth_err:
-            print(f"[AI EXTRACTOR AUTH ERROR] Invalid API key: {auth_err}")
-            raise ValueError(f"OpenAI Authentication Failed: {auth_err}")
-        except openai.PermissionDeniedError as perm_err:
-            print(f"[AI EXTRACTOR PERMISSION ERROR]: {perm_err}")
-            raise ValueError(f"OpenAI Permission Denied: {perm_err}")
-        except openai.BadRequestError as bad_err:
-            print(f"[AI EXTRACTOR BAD REQUEST]: {bad_err}")
-            raise ValueError(f"OpenAI Bad Request: {bad_err}")
         except Exception as e:
             err_str = str(e)
-            is_rate_limit = isinstance(e, openai.RateLimitError) or "429" in err_str or "rate_limit" in err_str.lower() or "quota" in err_str.lower()
-            
+            is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower() or "quota" in err_str.lower()
             print(f"[AI EXTRACTOR ERROR] Model '{model_name}' Attempt {attempt + 1}/{max_retries} failed: {e}")
             if attempt == max_retries - 1:
                 if is_rate_limit:
                     raise ValueError("AI service is currently busy due to high traffic. Please try again in a moment.")
                 raise ValueError(f"Failed AI vision extraction after {max_retries} attempts: {e}")
 
-            # If rate limit on gpt-4o, immediately switch to gpt-4o-mini with minimal pause
             if is_rate_limit and attempt == 0:
-                print(f"[AI EXTRACTOR FALLBACK] Rate limit hit on {model_name}. Immediately falling back to gpt-4o-mini...")
-                time.sleep(0.5)
+                print(f"[AI EXTRACTOR FALLBACK] Rate limit on {model_name}. Trying gpt-4o-mini...")
+                time.sleep(1.0)
                 continue
 
-            # Calculate retry wait time using Retry-After header if present, or exponential backoff + jitter
-            retry_after_sec = None
-            if hasattr(e, 'response') and e.response and hasattr(e.response, 'headers'):
-                raw_retry_after = e.response.headers.get("retry-after") or e.response.headers.get("Retry-After")
-                if raw_retry_after:
-                    try: retry_after_sec = float(raw_retry_after)
-                    except ValueError: pass
-
-            if retry_after_sec is not None and retry_after_sec > 0:
-                wait_sec = retry_after_sec + random.uniform(0.5, 1.2)
-                print(f"[AI EXTRACTOR RATE LIMIT] Respecting Retry-After header. Waiting {wait_sec:.2f}s...")
-            else:
-                base_wait = 2 ** attempt
-                jitter = random.uniform(0.3, 1.0)
-                wait_sec = base_wait + jitter
-                print(f"[AI EXTRACTOR BACKOFF] Waiting {wait_sec:.2f}s before retry...")
-
+            wait_sec = (2 ** attempt) + random.uniform(0.5, 1.5)
             time.sleep(wait_sec)
 
     if not content:
         raise ValueError("Empty response from GPT vision extraction")
 
     content = content.strip()
-
-    # Strip markdown code blocks if present
     if content.startswith("```json"):
         content = content[7:]
     if content.startswith("```"):
@@ -181,11 +155,11 @@ Return ONLY valid JSON matching the schema exactly.
         content = content[:-3]
     content = content.strip()
 
-    # Extract first valid JSON object
     if not (content.startswith("{") and content.endswith("}")):
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end != -1 and end > start:
             content = content[start:end + 1]
 
-    return json.loads(content)
+    extracted = json.loads(content)
+    return extracted

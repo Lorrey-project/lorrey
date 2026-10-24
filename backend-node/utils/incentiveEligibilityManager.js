@@ -89,10 +89,13 @@ function isDedicatedVehicle(contact) {
     contact.dedicatedType ??
     contact["Dedicated Type"] ??
     contact["Dedicated Type "] ??
-    contact.dedicated
+    contact.dedicated ??
+    contact.TYPE ??
+    contact.type
   );
   if (val === undefined || val === null) return false;
-  return String(val).trim().toLowerCase() === 'dedicated';
+  const s = String(val).trim().toUpperCase();
+  return s === 'DEDICATED';
 }
 
 /**
@@ -144,7 +147,10 @@ function isInvoiceSoAndNt(entry) {
   ).trim().toUpperCase();
 
   // STO is explicitly disallowed
-  if (rawBillType === "STO" || rawBillType !== "SO") {
+  if (rawBillType === "STO" || rawBillType.includes("STOCK")) {
+    return false;
+  }
+  if (rawBillType !== "SO" && !rawBillType.includes("SALES")) {
     return false;
   }
 
@@ -165,6 +171,12 @@ function isInvoiceSoAndNt(entry) {
     if (!isNaN(parsed) && parsed > 0) hasExtraUl = true;
   }
 
+  const hasNtDetails = Boolean(
+    (entry.nt_details && (entry.nt_details.unloading_charges || entry.nt_details.unloadingCharges)) ||
+    (entry['10W EXTRA 8.5%'] && parseFloat(String(entry['10W EXTRA 8.5%'])) > 0) ||
+    (entry['10W EXTRA 8'] && (entry['10W EXTRA 8']['5%'] || entry['10W EXTRA 8']['5']))
+  );
+
   // Word boundary regex for NT / Non-Trade to avoid false positives on words like "CEMENT", "ENTERPRISE", "PAYMENT", etc.
   const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
   const classStr = String(entry.classification || entry.category || entry.invoice_type_classification || "").trim();
@@ -173,7 +185,7 @@ function isInvoiceSoAndNt(entry) {
   const unloadingNote = String(entry["UNLOADING STATUS NOTE"] || entry["UNLOADING STATUS"] || entry.notes || "").trim();
   const isNoteNt = ntWordRegex.test(unloadingNote);
 
-  return isNtFlag || sourceNtFlag || isClassNt || hasExtraUl || isNoteNt;
+  return isNtFlag || sourceNtFlag || hasNtDetails || isClassNt || hasExtraUl || isNoteNt;
 }
 
 /**
@@ -207,17 +219,44 @@ async function findPartyMasterContact(vehicleNumber, recordDate = null) {
     $or: [
       { "Truck No": vRegex },
       { "Truck No ": vRegex },
+      { "Truck No.": vRegex },
+      { "Truck No. ": vRegex },
       { truck_no: vRegex },
+      { truckNo: vRegex },
       { vehicleNo: vRegex },
       { "Vehicle No": vRegex },
       { "VEHICLE NUMBER": vRegex },
-      { "VEHICLE NO": vRegex }
+      { "VEHICLE NO": vRegex },
+      { "VEHICLE NO.": vRegex }
     ]
   };
 
-  let contact = await ownerCol.findOne(vQuery);
-  if (!contact) {
-    contact = await truckCol.findOne(vQuery);
+  let contact = await truckCol.findOne(vQuery);
+  const ownerDoc = await ownerCol.findOne(vQuery);
+
+  if (contact && ownerDoc) {
+    const custType = contact["TYPE OF CUSTOMER "] ||
+      contact["TYPE OF CUSTOMER"] ||
+      contact.custType ||
+      contact.relationshipType ||
+      contact.RelationshipType ||
+      contact["Relationship Type"] ||
+      ownerDoc["TYPE OF CUSTOMER "] ||
+      ownerDoc["TYPE OF CUSTOMER"] ||
+      ownerDoc.custType ||
+      ownerDoc.relationshipType ||
+      "MKT";
+    const history = (Array.isArray(contact.history) && contact.history.length > 0)
+      ? contact.history
+      : (Array.isArray(ownerDoc.history) ? ownerDoc.history : []);
+
+    contact = { ...contact, ...ownerDoc };
+    contact["TYPE OF CUSTOMER "] = custType;
+    contact.custType = custType;
+    contact.relationshipType = custType;
+    contact.history = history;
+  } else if (!contact && ownerDoc) {
+    contact = ownerDoc;
   }
 
   if (contact && recordDate) {
@@ -443,6 +482,9 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
     contact["TYPE OF CUSTOMER "] ||
     contact["TYPE OF CUSTOMER"] ||
     contact.custType ||
+    contact.relationshipType ||
+    contact.RelationshipType ||
+    contact["Relationship Type"] ||
     contact.type_of_customer ||
     "OTHER"
   ) : "UNREGISTERED";
@@ -472,6 +514,30 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
   let standardEligible = false;
   let standardReason = '';
 
+  let standardCap = 0;
+  if (normWheel === '14WH') standardCap = 30;
+  else if (normWheel === '12WH') standardCap = 25;
+  else if (normWheel === '10WH') standardCap = 19;
+  else if (normWheel === '6WH') standardCap = 13;
+
+  // Calculate actual trip count using date-wise loading summary logic (prevents split invoices from inflating trip count)
+  const dailyMT = {};
+  for (const t of qualifyingTrips) {
+    const mt = parseFloat(String(t["MT"] || t.mt || 0).replace(/,/g, '')) || 0;
+    const dVal = t["LOADING DT"] || t["LOADING DATE"] || t["BILL DATE"] || t.date || 'single_date';
+    dailyMT[dVal] = (dailyMT[dVal] || 0) + mt;
+  }
+  let calculatedTripCount = 0;
+  for (const dVal of Object.keys(dailyMT)) {
+    const dayMT = dailyMT[dVal] || 0;
+    if (dayMT > 0) {
+      calculatedTripCount += standardCap > 0 ? Math.max(1, Math.round(dayMT / standardCap)) : 1;
+    }
+  }
+  if (calculatedTripCount === 0 && qualifyingCount > 0) {
+    calculatedTripCount = qualifyingCount;
+  }
+
   if (!isAtoaOrMktRel) {
     standardEligible = false;
     standardReason = `Ineligible: Relationship type (${rawRel}) is not ATOA or MKT`;
@@ -481,12 +547,12 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
   } else if (reqTrips === null) {
     standardEligible = false;
     standardReason = `Ineligible: Unknown wheel type (${rawWheel || 'None'})`;
-  } else if (qualifyingCount < reqTrips) {
+  } else if (calculatedTripCount < reqTrips) {
     standardEligible = false;
-    standardReason = `Ineligible: Completed ${qualifyingCount}/${reqTrips} qualifying trips`;
+    standardReason = `Ineligible: Completed ${calculatedTripCount}/${reqTrips} qualifying trips`;
   } else {
     standardEligible = true;
-    standardReason = `Eligible: Dedicated ${normWheel} completed ${qualifyingCount}/${reqTrips} qualifying trips`;
+    standardReason = `Eligible: Dedicated ${normWheel} completed ${calculatedTripCount}/${reqTrips} qualifying trips`;
   }
 
   // ── RULE 2: 10-WHEEL EXTRA INCENTIVE ───────────────────────────────────────
@@ -527,12 +593,12 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
   } else if (!isAtoaOrMktRel) {
     extra6WEligible = false;
     extra6WReason = `Ineligible: Relationship type (${rawRel}) is not ATOA or MKT`;
-  } else if (qualifyingCount >= 6) {
+  } else if (calculatedTripCount >= 6) {
     extra6WEligible = true;
-    extra6WReason = `Eligible: 6-wheel vehicle completed ${qualifyingCount}/6 qualifying trips`;
+    extra6WReason = `Eligible: 6-wheel vehicle completed ${calculatedTripCount}/6 qualifying trips`;
   } else {
     extra6WEligible = false;
-    extra6WReason = `Ineligible: Completed ${qualifyingCount}/6 qualifying trips`;
+    extra6WReason = `Ineligible: Completed ${calculatedTripCount}/6 qualifying trips`;
   }
 
   // ── RULE 4: PROJECTED INCENTIVE PAYOUT AMOUNTS ─────────────────────────────
@@ -542,7 +608,11 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
   let standardNvlAmount = 0;
   let standardNvclAmount = 0;
   let extra10WAmount = 0;
+  let extra10WNvlAmount = 0;
+  let extra10WNvclAmount = 0;
   let extra6WAmount = 0;
+  let extra6WNvlAmount = 0;
+  let extra6WNvclAmount = 0;
 
   // Standard rate:
   // ATOA: 9.5% on Bill Freight
@@ -556,13 +626,13 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
     const tripBillFreight = getBillFreight(trip);
     const tripPartyFreight = getPartyFreight(trip, contact);
     const sourceFreight = isAtoa ? tripBillFreight : tripPartyFreight;
+    const site = String(trip["SITE"] || trip.site || "").toUpperCase();
+    const billType = String(trip["Bill Type"] || trip.billType || "").toUpperCase();
+    const isAtoTrip = trip._is_ato === true || trip._is_ato === 'true' || site === 'NVL' || billType === 'NT';
 
     // Standard incentive calculation (only if eligible)
     if (standardEligible) {
       const tripAmt = sourceFreight * standardRate;
-      const site = String(trip["SITE"] || trip.site || "").toUpperCase();
-      const billType = String(trip["Bill Type"] || trip.billType || "").toUpperCase();
-      const isAtoTrip = trip._is_ato === true || trip._is_ato === 'true' || site === 'NVL' || billType === 'NT';
       if (isAtoTrip) {
         standardNvlAmount += tripAmt;
       } else {
@@ -575,14 +645,26 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
     // Only qualifying SO+NT trips contribute
     if (extra10WEligible && isInvoiceSoAndNt(trip)) {
       const extra10Base = isAtoa ? tripBillFreight : tripPartyFreight;
-      extra10WAmount += extra10Base * 0.085;
+      const trip10WAmt = extra10Base * 0.085;
+      extra10WAmount += trip10WAmt;
+      if (isAtoTrip) {
+        extra10WNvlAmount += trip10WAmt;
+      } else {
+        extra10WNvclAmount += trip10WAmt;
+      }
     }
 
     // 6W Extra incentive: 15% of Bill Freight (ATOA) or Party Rate (MKT)
     // Requires >= 6 qualifying trips
     if (extra6WEligible) {
       const extra6Base = isAtoa ? tripBillFreight : tripPartyFreight;
-      extra6WAmount += extra6Base * 0.15;
+      const trip6WAmt = extra6Base * 0.15;
+      extra6WAmount += trip6WAmt;
+      if (isAtoTrip) {
+        extra6WNvlAmount += trip6WAmt;
+      } else {
+        extra6WNvclAmount += trip6WAmt;
+      }
     }
   }
 
@@ -590,7 +672,11 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
   standardNvlAmount = Math.round(standardNvlAmount);
   standardNvclAmount = Math.round(standardNvclAmount);
   extra10WAmount = Math.round(extra10WAmount);
+  extra10WNvlAmount = Math.round(extra10WNvlAmount);
+  extra10WNvclAmount = Math.round(extra10WNvclAmount);
   extra6WAmount = Math.round(extra6WAmount);
+  extra6WNvlAmount = Math.round(extra6WNvlAmount);
+  extra6WNvclAmount = Math.round(extra6WNvclAmount);
 
   const totalProjected = standardIncentiveAmount + extra10WAmount + extra6WAmount;
 
@@ -604,12 +690,12 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
     relationshipType: String(rawRel).trim(),
     isDedicated,
     isAtoaOrMkt: isAtoaOrMktRel,
-    qualifyingTripsCount: qualifyingCount,
+    qualifyingTripsCount: calculatedTripCount,
     soNtTripsCount,
     standardIncentive: {
       eligible: standardEligible,
       requiredTrips: reqTrips || 0,
-      completedTrips: qualifyingCount,
+      completedTrips: calculatedTripCount,
       isDedicated,
       rate: standardRate,
       amount: standardIncentiveAmount,
@@ -622,6 +708,8 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
       qualifyingSoNtTrips: soNtTripsCount,
       rate: 0.085,
       amount: extra10WAmount,
+      nvlAmount: extra10WNvlAmount,
+      nvclAmount: extra10WNvclAmount,
       reason: extra10WReason
     },
     extra6WheelIncentive: {
@@ -630,6 +718,8 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
       completedTrips: qualifyingCount,
       rate: 0.15,
       amount: extra6WAmount,
+      nvlAmount: extra6WNvlAmount,
+      nvclAmount: extra6WNvclAmount,
       reason: extra6WReason
     },
     totalProjectedIncentive: totalProjected,

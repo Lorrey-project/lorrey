@@ -36,6 +36,11 @@ function normVeh(v) {
   return String(v).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 }
 
+function extractTruckNo(doc) {
+  if (!doc) return "";
+  return doc["Truck No"] || doc["Truck No "] || doc["Truck No."] || doc["Truck No. "] || doc.truck_no || doc.truckNo || doc.vehicleNo || doc["Vehicle No"] || "";
+}
+
 // Helper to fetch contacts with owner details collection as primary source of truth
 async function fetchAllContacts() {
   const ownerCol = getOwnerDetailsCollection();
@@ -46,16 +51,60 @@ async function fetchAllContacts() {
 
   const combinedMap = new Map();
 
-  // 1. Add owner details FIRST so owner details is the primary source of truth
-  for (const doc of ownerDocs) {
-    const rawTruck = doc["Truck No"] || doc["Truck No "] || doc.truck_no || doc.vehicleNo || doc["Vehicle No"];
+  // Index Truck Contact Number by normalized truck number
+  const truckMap = new Map();
+  for (const doc of truckDocs) {
+    const rawTruck = extractTruckNo(doc);
     const key = rawTruck ? normVeh(rawTruck) : doc._id.toString();
-    combinedMap.set(key, doc);
+    truckMap.set(key, doc);
   }
 
-  // 2. Add Truck Contact Number ONLY if truck is not in owner details
+  // 1. Process owner details FIRST as primary source of truth for Owner & Vehicle data
+  for (const oDoc of ownerDocs) {
+    const rawTruck = extractTruckNo(oDoc);
+    const key = rawTruck ? normVeh(rawTruck) : oDoc._id.toString();
+    const tDoc = truckMap.get(key);
+
+    const dedicatedVal = (oDoc.TYPE && String(oDoc.TYPE).trim().toUpperCase() === 'DEDICATED')
+      ? 'Dedicated'
+      : (oDoc.TYPE && String(oDoc.TYPE).trim().toUpperCase() === 'NON DEDICATED')
+        ? 'Non-Dedicated'
+        : (oDoc.dedicated_type || oDoc.dedicatedType || (tDoc && (tDoc.dedicated_type || tDoc.dedicatedType)) || 'Non-Dedicated');
+
+    // Merge: tDoc base (preserving relationshipType, history, uploaded docs) overlaid with oDoc
+    const merged = {
+      ...(tDoc || {}),
+      ...oDoc,
+      _id: (tDoc && tDoc._id) ? tDoc._id : oDoc._id,
+      // Dedicated status
+      dedicated_type: dedicatedVal,
+      dedicatedType: dedicatedVal,
+      "Dedicated Type": dedicatedVal,
+      "Dedicated Type ": dedicatedVal,
+      TYPE: dedicatedVal === 'Dedicated' ? 'DEDICATED' : 'NON DEDICATED',
+      // Harmonized truck number
+      "Truck No": rawTruck,
+      "Truck No ": rawTruck,
+      "Truck No.": rawTruck,
+      truck_no: rawTruck,
+      truckNo: rawTruck,
+      // Relationship type preserved from tDoc if oDoc doesn't have it
+      custType: (tDoc && (tDoc.custType || tDoc['TYPE OF CUSTOMER '] || tDoc['TYPE OF CUSTOMER'])) || oDoc.custType || 'MKT',
+      type_of_customer: (tDoc && (tDoc.type_of_customer || tDoc['TYPE OF CUSTOMER '] || tDoc['TYPE OF CUSTOMER'])) || oDoc.type_of_customer || 'MKT',
+      relationshipType: (tDoc && (tDoc.relationshipType || tDoc['TYPE OF CUSTOMER '] || tDoc['TYPE OF CUSTOMER'])) || oDoc.relationshipType || 'MKT',
+      "TYPE OF CUSTOMER": (tDoc && (tDoc['TYPE OF CUSTOMER'] || tDoc['TYPE OF CUSTOMER '])) || oDoc['TYPE OF CUSTOMER'] || 'MKT',
+      "TYPE OF CUSTOMER ": (tDoc && (tDoc['TYPE OF CUSTOMER '] || tDoc['TYPE OF CUSTOMER'])) || oDoc['TYPE OF CUSTOMER '] || 'MKT',
+      // History and documents preserved
+      history: (tDoc && Array.isArray(tDoc.history) && tDoc.history.length > 0) ? tDoc.history : (oDoc.history || []),
+      gst_documents: (tDoc && Array.isArray(tDoc.gst_documents)) ? tDoc.gst_documents : (oDoc.gst_documents || [])
+    };
+
+    combinedMap.set(key, merged);
+  }
+
+  // 2. Add Truck Contact Number records ONLY if truck is not in owner details (e.g. test trucks)
   for (const doc of truckDocs) {
-    const rawTruck = doc.truck_no || doc["Truck No "] || doc["Truck No"] || doc.vehicleNo || doc["Vehicle No"];
+    const rawTruck = extractTruckNo(doc);
     const key = rawTruck ? normVeh(rawTruck) : doc._id.toString();
     if (!combinedMap.has(key)) {
       combinedMap.set(key, doc);

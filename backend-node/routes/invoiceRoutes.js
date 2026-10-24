@@ -16,6 +16,123 @@ function makeSpaceAgnosticRegex(str) {
     return new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
 }
 
+async function enrichAndValidateInvoiceData(aiData) {
+    if (!aiData || !aiData.invoice_data) return aiData;
+    const invData = aiData.invoice_data;
+    const supplyDetails = invData.supply_details || (invData.supply_details = {});
+    const consigneeDetails = invData.consignee_details || (invData.consignee_details = {});
+    const buyerDetails = invData.buyer_details || (invData.buyer_details = {});
+    const invoiceDetails = invData.invoice_details || (invData.invoice_details = {});
+
+    // 1. Vehicle Number Normalization
+    let rawVehicle = supplyDetails.vehicle_number || '';
+    let vehicleNo = rawVehicle.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    supplyDetails.vehicle_number = vehicleNo;
+
+    // 2. Query vehicle database (TruckContact and owner details in invoice_system)
+    let contact = null;
+    if (vehicleNo) {
+        const truckRegex = makeSpaceAgnosticRegex(vehicleNo);
+        contact = await TruckContact.findOne({
+            $or: [
+                { truck_no: { $regex: truckRegex } },
+                { "Truck No": { $regex: truckRegex } },
+                { "Contact No.(Truck No.)": { $regex: truckRegex } }
+            ]
+        }).lean();
+
+        if (!contact) {
+            try {
+                const mongoose = require("mongoose");
+                const invoiceSystemDb = mongoose.connection.useDb("invoice_system");
+                const ownerCol = invoiceSystemDb.db.collection("owner details");
+                contact = await ownerCol.findOne({
+                    $or: [
+                        { "Truck No": { $regex: truckRegex } },
+                        { "Truck No ": { $regex: truckRegex } },
+                        { truck_no: { $regex: truckRegex } }
+                    ]
+                });
+            } catch (err) {
+                console.warn("[enrichAndValidateInvoiceData] Error querying owner details:", err.message);
+            }
+        }
+    }
+
+    if (contact) {
+        // Extract stored wheel type directly from database — NEVER guess when exists
+        let rawWheel = contact.wheel_type || contact["Wheel Type "] || contact["Wheel Type"] || contact["Type of vehicle"] || contact["Type of vehicle "] || contact.type || contact["Vehicle Type"] || contact.type_of_vehicle || contact.vehicle_type || "";
+        if (!rawWheel) {
+            for (let key in contact) {
+                const lk = key.toLowerCase();
+                if (lk.includes("type") || lk.includes("wheel") || lk.includes("vehicle")) {
+                    const val = contact[key];
+                    if (val && typeof val === "string") { rawWheel = val; break; }
+                    if (val && typeof val === "number") { rawWheel = val.toString(); break; }
+                }
+            }
+        }
+        const wheelMatch = rawWheel ? String(rawWheel).match(/(\d+)/) : null;
+        const normalizedWheel = wheelMatch ? `${wheelMatch[1]}WH` : (rawWheel ? String(rawWheel).toUpperCase() : "");
+        supplyDetails.wheel_type = normalizedWheel;
+
+        // Auto-populate driver information if missing from document
+        if (!supplyDetails.driver_name) {
+            supplyDetails.driver_name = contact.driver_name || contact["Driver Name"] || contact["DRIVER NAME"] || "";
+        }
+        if (!supplyDetails.driver_number) {
+            supplyDetails.driver_number = contact.contact_no || contact["Contact No."] || contact["Contact No. "] || contact["DRIVER CONTACT"] || contact.driver_contact_no || "";
+        }
+        if (!supplyDetails.driver_license) {
+            supplyDetails.driver_license = contact.license_no || contact["License No."] || contact["Driver License No."] || contact["DRIVER LICENSE"] || "";
+        }
+    } else {
+        // Vehicle not in database -> NEVER guess wheel type!
+        supplyDetails.wheel_type = "";
+        const meta = invData.validation_meta || (invData.validation_meta = { needs_manual_verification: false, warnings: [] });
+        if (vehicleNo) {
+            meta.warnings = meta.warnings || [];
+            if (!meta.warnings.some(w => w.includes("not found in database"))) {
+                meta.warnings.push(`Vehicle ${vehicleNo} not found in database. Wheel Type requires manual selection.`);
+                meta.needs_manual_verification = true;
+            }
+        }
+    }
+
+    // 3. Dynamic Add-on Charges from Deduction Settings
+    try {
+        const { getAllApplicableProjectedDeductions } = require("../utils/projectedDeductionResolver");
+        const invDate = invoiceDetails.invoice_date || new Date();
+        const deductionRates = await getAllApplicableProjectedDeductions(invDate);
+        aiData.applicable_deductions = {
+            "GPS Device": Number(deductionRates.gpsDeviceInstallation) || 1500,
+            "RFID Tag": Number(deductionRates.rfid) || 100,
+            "RFID Tag Reassurance": Number(deductionRates.rfid) || 100,
+            "Fastag": 200,
+        };
+    } catch (e) {
+        console.warn("[enrichAndValidateInvoiceData] Error fetching deduction settings:", e.message);
+        aiData.applicable_deductions = {
+            "GPS Device": 1500,
+            "RFID Tag": 100,
+            "RFID Tag Reassurance": 100,
+            "Fastag": 200,
+        };
+    }
+
+    // 4. Consignee / Buyer consistency
+    const consignee_name = consigneeDetails.consignee_name || buyerDetails.buyer_name || aiData.consignee_name || '';
+    if (!consigneeDetails.consignee_name && consignee_name) consigneeDetails.consignee_name = consignee_name;
+    if (!buyerDetails.buyer_name && consignee_name) buyerDetails.buyer_name = consignee_name;
+
+    invData.supply_details = supplyDetails;
+    invData.consignee_details = consigneeDetails;
+    invData.buyer_details = buyerDetails;
+    aiData.consignee_name = consignee_name;
+
+    return aiData;
+}
+
 const populateDriverAndVehicle = async (inv) => {
     if (!inv) return inv;
     
@@ -222,31 +339,85 @@ router.get("/fuel-requirement/:truck_no/:destination", async (req, res) => {
     }
 });
 
+// Active Add-on Charge Rates dynamically resolved from Deduction Settings
+router.get("/deduction-rates", async (req, res) => {
+    try {
+        const { getAllApplicableProjectedDeductions } = require("../utils/projectedDeductionResolver");
+        const date = req.query.date ? new Date(req.query.date) : new Date();
+        const rates = await getAllApplicableProjectedDeductions(date);
+        res.json({
+            success: true,
+            rates: {
+                "GPS Device": Number(rates.gpsDeviceInstallation) || 1500,
+                "RFID Tag": Number(rates.rfid) || 100,
+                "RFID Tag Reassurance": Number(rates.rfid) || 100,
+                "Fastag": 200,
+            },
+            raw: rates
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Lookup truck contact by truck number
 router.get("/truck-contact/:truck_no", async (req, res) => {
     try {
         const { truck_no } = req.params;
         // Case-insensitive search, strip spaces and tolerate any internal spacing
         const truckRegex = makeSpaceAgnosticRegex(truck_no);
-        const record = await TruckContact.findOne({
+        let record = await TruckContact.findOne({
             $or: [
                 { truck_no: { $regex: truckRegex } },
                 { "Truck No": { $regex: truckRegex } },
                 { "Contact No.(Truck No.)": { $regex: truckRegex } }
             ]
         }).lean();
-        if (!record) return res.json({ found: false });
+
+        if (!record) {
+            try {
+                const mongoose = require("mongoose");
+                const invoiceSystemDb = mongoose.connection.useDb("invoice_system");
+                const ownerCol = invoiceSystemDb.db.collection("owner details");
+                record = await ownerCol.findOne({
+                    $or: [
+                        { "Truck No": { $regex: truckRegex } },
+                        { "Truck No ": { $regex: truckRegex } },
+                        { truck_no: { $regex: truckRegex } }
+                    ]
+                });
+            } catch (err) {
+                console.warn("[truck-contact] Error querying owner details:", err.message);
+            }
+        }
+
+        if (!record) return res.json({ found: false, wheel_type: "" });
+
+        // Stored wheel type lookup
+        let rawWheel = record.wheel_type || record["Wheel Type "] || record["Wheel Type"] || record["Type of vehicle"] || record["Type of vehicle "] || record.type || record["Vehicle Type"] || record.type_of_vehicle || record.vehicle_type || "";
+        if (!rawWheel) {
+            for (let key in record) {
+                const lk = key.toLowerCase();
+                if (lk.includes("type") || lk.includes("wheel") || lk.includes("vehicle")) {
+                    const val = record[key];
+                    if (val && typeof val === "string") { rawWheel = val; break; }
+                    if (val && typeof val === "number") { rawWheel = val.toString(); break; }
+                }
+            }
+        }
+        const wheelMatch = rawWheel ? String(rawWheel).match(/(\d+)/) : null;
+        const normalizedWheel = wheelMatch ? `${wheelMatch[1]}WH` : (rawWheel ? String(rawWheel).toUpperCase() : "");
+
         res.json({
             found: true,
-            contact: record.contact_no || record["Contact No."] || record["DRIVER CONTACT"] || record["Driver Contact"] || "",
+            contact: record.contact_no || record["Contact No."] || record["Contact No. "] || record["DRIVER CONTACT"] || record["Driver Contact"] || "",
             owner: record.owner_name || record["Owner Name"] || "",
             pan_no: record.pan_no || record["PAN No."] || "",
             aadhar_no: record.aadhar_no || record["Aadhar No."] || "",
             driver_name: record.driver_name || record["Driver Name"] || record["DRIVER NAME"] || "",
             license_no: record.license_no || record["License No."] || record["Driver License No."] || record["DRIVER LICENSE"] || record["License No"] || "",
-            wheel_type: record.wheel_type || record["Wheel Type "] || record["Wheel Type"] || "",
+            wheel_type: normalizedWheel,
             address: record.address || record["Address"] || "",
-            // Include other fields just in case they are needed later
             type: record.type || "",
             gst_no: record.gst_no || "",
             rc_validity: record.rc_validity || "",
@@ -425,10 +596,12 @@ async function processInvoiceBackground(invoiceId, fileUrl) {
                     : "Retrying extraction...";
 
                 emitStatus("retrying", { message: retryMsg });
-                await Invoice.findByIdAndUpdate(invoiceId, { processing_message: retryMsg }).catch(() => {});
                 await new Promise(resolve => setTimeout(resolve, waitMs));
             }
         }
+
+        // Enrich and validate against authoritative DB sources (TruckContact, owner details, Deduction Settings)
+        aiData = await enrichAndValidateInvoiceData(aiData);
 
         emitStatus("validating", { message: "Mapping & saving to Cement Register..." });
         await Invoice.findByIdAndUpdate(invoiceId, { processing_message: "Mapping & saving to Cement Register..." }).catch(() => {});
@@ -621,6 +794,7 @@ Bucket: bucketName,
                 { timeout: 90000 }
             );
             aiData = aiResponse.data;
+            aiData = await enrichAndValidateInvoiceData(aiData);
         } catch (aiErr) {
             let details = aiErr.response?.data?.detail || aiErr.response?.data?.error || aiErr.message;
             if (aiErr.response?.status === 404) {

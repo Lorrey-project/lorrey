@@ -43,7 +43,7 @@ const COLUMNS = [
   { key: 'GPS TRIP CHARGE', label: 'GPS Monitoring /\nTrip Charge', width: 115, calc: true },
   { key: 'GPS DEVICE', label: 'GPS\nDevice', width: 85, calc: true },
   { key: 'NET AMOUNT', label: 'Net Amount', width: 110, calc: true, highlight: '#ecfdf5' },
-  { key: '8.5% NVCL', label: '8.5% NVCL\nIncentive', width: 95, calc: true, bg: '#f0f9ff' },
+  { key: '10WH Extra 8.5% Incentive', label: '10WH Extra\n8.5% Incentive', width: 110, calc: true, bg: '#f0f9ff' },
   { key: 'DEDICATED INCENTIVE', label: 'Dedicated\nIncentive', width: 115, calc: true, bg: '#f0f9ff' },
   { key: 'RAFTER', label: 'Others', width: 85, calc: true, bg: '#f0f9ff' },
   { key: 'EXTRA U/L', label: 'Extra U/L', width: 85, calc: true, bg: '#f0f9ff' },
@@ -484,7 +484,7 @@ export default function PartyFullYear({ onBack, initialFy, initialParty }) {
                     </td>
 
                     {COLUMNS.map(col => {
-                      const val = row[col.key];
+                      const val = row[col.key] !== undefined ? row[col.key] : (col.key === '10WH Extra 8.5% Incentive' || col.key === 'NVCL INCENTIVE' ? (row['10WH Extra 8.5% Incentive'] !== undefined ? row['10WH Extra 8.5% Incentive'] : (row['NVCL INCENTIVE'] !== undefined ? row['NVCL INCENTIVE'] : row['8.5% NVCL'])) : undefined);
                       const isSticky = col.key === 'MONTH';
                       const leftPx = isSticky ? stickyLeft[col.key] : undefined;
                       const isText = ['MONTH', 'REMARKS', 'OTHER REASON', 'WITHHOLD REASON'].includes(col.key);

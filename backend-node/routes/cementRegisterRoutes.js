@@ -751,37 +751,45 @@ router.post("/incentive-state", auth, async (req, res) => {
     const y = parseInt(year, 10);
     const fy = financialYear || (m >= 3 ? `FY ${y}-${String(y + 1).slice(-2)}` : `FY ${y - 1}-${String(y).slice(-2)}`);
 
-    // Bulk upsert normalized records to incentive_project_actuals collection if provided
-    if (Array.isArray(normalizedRecords) && normalizedRecords.length > 0) {
+    // Upsert normalized records to incentive_project_actuals collection if provided
+    if (Array.isArray(normalizedRecords)) {
       const colActuals = db.collection("incentive_project_actuals");
-      const bulkOps = normalizedRecords.map(rec => ({
-        updateOne: {
-          filter: {
-            year: y,
-            month: m,
-            category: rec.category,
-            truckNo: String(rec.truckNo).toUpperCase().trim()
-          },
-          update: {
-            $set: {
+      await colActuals.deleteMany({ year: y, month: m });
+      if (normalizedRecords.length > 0) {
+        // Aggregate records by truckNo + category + subField to guarantee idempotence and proper sum
+        const aggMap = new Map();
+        normalizedRecords.forEach(rec => {
+          const tNo = String(rec.truckNo || '').toUpperCase().trim();
+          if (!tNo) return;
+          const cat = rec.category || '';
+          const sub = rec.subField || '';
+          const key = `${tNo}___${cat}___${sub}`;
+          const amt = Number(rec.amount !== undefined ? rec.amount : (rec.differenceAmount || 0));
+          if (aggMap.has(key)) {
+            const existing = aggMap.get(key);
+            existing.amount += amt;
+          } else {
+            aggMap.set(key, {
               financialYear: fy,
               year: y,
               month: m,
-              sourceHeadline: rec.headline || rec.sourceHeadline || '',
-              category: rec.category,
+              sourceHeadline: rec.headline || rec.sourceHeadline || rec.category || '',
+              category: cat,
               targetField: rec.targetField,
-              subField: rec.subField || '',
-              truckNo: String(rec.truckNo).toUpperCase().trim(),
+              subField: sub,
+              truckNo: tNo,
               rawTruckNo: rec.rawTruckNo || rec.truckNo,
-              amount: Number(rec.amount) || 0,
+              amount: amt,
               uploadSourceId: rec.uploadSourceId || excelName || '',
               uploadedAt: new Date()
-            }
-          },
-          upsert: true
+            });
+          }
+        });
+        const docs = Array.from(aggMap.values());
+        if (docs.length > 0) {
+          await colActuals.insertMany(docs);
         }
-      }));
-      await colActuals.bulkWrite(bulkOps);
+      }
     }
 
     const query = { year: y, month: m };
