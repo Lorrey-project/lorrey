@@ -18,6 +18,8 @@ const accountDetailSchema = new mongoose.Schema({
   selectedYear: { type: String, default: '' },
   vehicle: { type: String, default: '' },
   _source: { type: String, default: 'manual' },
+  checkBookId: { type: mongoose.Schema.Types.ObjectId, ref: 'CheckBook', default: null },
+  _checkBookRecord: { type: mongoose.Schema.Types.Mixed, default: null },
   _allocations: { type: mongoose.Schema.Types.Mixed, default: [] },
   _creditorSync: { type: mongoose.Schema.Types.Mixed, default: null },
   _monojSync: { type: mongoose.Schema.Types.Mixed, default: null }

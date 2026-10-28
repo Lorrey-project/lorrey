@@ -15,6 +15,8 @@ router.get('/', async (req, res) => {
       const q = String(search).trim();
       filter.$or = [
         { checkNumber: { $regex: q, $options: 'i' } },
+        { checkDate: { $regex: q, $options: 'i' } },
+        { receivingDate: { $regex: q, $options: 'i' } },
         { remarks: { $regex: q, $options: 'i' } },
         { documentName: { $regex: q, $options: 'i' } }
       ];
@@ -35,6 +37,23 @@ router.get('/', async (req, res) => {
   }
 });
 
+const { getCheckBookBalance } = require('../utils/checkBookHelper');
+
+// ── GET /check-book/balance ──────────────────────────────────────────────────
+// Returns dynamic balance of available vs used checks and alert thresholds
+router.get('/balance', async (req, res) => {
+  try {
+    const balance = await getCheckBookBalance();
+    res.json({
+      success: true,
+      ...balance
+    });
+  } catch (error) {
+    console.error('[CheckBook] GET /balance error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ── GET /check-book/check-exists/:checkNumber ─────────────────────────────────
 // Verify whether a check number is already taken
 router.get('/check-exists/:checkNumber', async (req, res) => {
@@ -47,9 +66,38 @@ router.get('/check-exists/:checkNumber', async (req, res) => {
     res.json({
       success: true,
       exists: Boolean(found),
-      check: found ? { _id: found._id, checkNumber: found.checkNumber, checkAmount: found.checkAmount } : null
+      check: found ? { _id: found._id, checkNumber: found.checkNumber, checkAmount: found.checkAmount, checkDate: found.checkDate, receivingDate: found.receivingDate } : null
     });
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── GET /check-book/by-number/:checkNumber ────────────────────────────────────
+// Search and return saved checks matching a check number
+router.get('/by-number/:checkNumber', async (req, res) => {
+  try {
+    const rawNo = String(req.params.checkNumber || '').trim();
+    if (!rawNo) {
+      return res.json({ success: true, count: 0, checks: [] });
+    }
+    const escaped = rawNo.replace(/[^a-zA-Z0-9]/g, '\\$&');
+    const searchRegex = new RegExp(`^0*${escaped}$`, 'i');
+
+    const checks = await CheckBook.find({
+      $or: [
+        { checkNumber: rawNo },
+        { checkNumber: { $regex: searchRegex } }
+      ]
+    }).sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      count: checks.length,
+      checks
+    });
+  } catch (error) {
+    console.error('[CheckBook] by-number error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -99,6 +147,12 @@ router.post('/bulk', (req, res, next) => {
       const item = checks[i];
       const rowNum = i + 1;
 
+      // Check Date validation (required)
+      const checkDate = String(item.checkDate !== undefined && item.checkDate !== null ? item.checkDate : '').trim();
+      if (!checkDate) {
+        return res.status(400).json({ success: false, error: `Row ${rowNum}: Check Date is required.` });
+      }
+
       // Check Number validation (must be string, preserve leading zeros)
       const checkNo = String(item.checkNumber !== undefined && item.checkNumber !== null ? item.checkNumber : '').trim();
       if (!checkNo) {
@@ -114,6 +168,9 @@ router.post('/bulk', (req, res, next) => {
           error: `Row ${rowNum} (Check #${checkNo}): Valid positive Check Amount is required.`
         });
       }
+
+      // Receiving Date (optional on initial creation)
+      const receivingDate = String(item.receivingDate !== undefined && item.receivingDate !== null ? item.receivingDate : '').trim();
 
       // File attachment validation
       const file = uploadedFiles.find(
@@ -169,8 +226,10 @@ router.post('/bulk', (req, res, next) => {
       const docName = file.originalname || `check_${checkNo}`;
 
       return {
+        checkDate: String(item.checkDate || '').trim(),
         checkNumber: checkNo,
         checkAmount: Math.round(parsedAmt * 100) / 100,
+        receivingDate: String(item.receivingDate || '').trim(),
         documentUrl: docUrl,
         documentType: docType,
         documentName: docName,
@@ -203,6 +262,20 @@ router.post('/bulk', (req, res, next) => {
   }
 });
 
+// ── GET /check-book/:id ──────────────────────────────────────────────────────
+// Fetch a single check book record by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const check = await CheckBook.findById(req.params.id);
+    if (!check) {
+      return res.status(404).json({ success: false, error: 'Check record not found.' });
+    }
+    res.json({ success: true, check });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ── PUT /check-book/:id ──────────────────────────────────────────────────────
 // Update an existing check (with optional document replacement)
 router.put('/:id', (req, res, next) => {
@@ -215,7 +288,7 @@ router.put('/:id', (req, res, next) => {
 }, async (req, res) => {
   try {
     const { id } = req.params;
-    const { checkNumber, checkAmount, remarks } = req.body;
+    const { checkNumber, checkAmount, checkDate, receivingDate, remarks } = req.body;
 
     const existingDoc = await CheckBook.findById(id);
     if (!existingDoc) {
@@ -250,6 +323,22 @@ router.put('/:id', (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Check Amount must be a positive number.' });
       }
       updateFields.checkAmount = Math.round(parsedAmt * 100) / 100;
+    }
+
+    if (checkDate !== undefined) {
+      const cleanDate = String(checkDate).trim();
+      if (!cleanDate) {
+        return res.status(400).json({ success: false, error: 'Check Date cannot be empty.' });
+      }
+      updateFields.checkDate = cleanDate;
+    }
+
+    if (receivingDate !== undefined) {
+      const cleanRecDate = String(receivingDate).trim();
+      if (!cleanRecDate) {
+        return res.status(400).json({ success: false, error: 'Receiving Date cannot be empty.' });
+      }
+      updateFields.receivingDate = cleanRecDate;
     }
 
     if (remarks !== undefined) {
@@ -287,6 +376,53 @@ router.put('/:id', (req, res, next) => {
     if (error.code === 11000) {
       return res.status(400).json({ success: false, error: 'Check number already exists.' });
     }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── PATCH /check-book/:id/confirm-receive ────────────────────────────────────
+// Confirm and permanently save receivingDate from Bank Book check selection
+router.patch('/:id/confirm-receive', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { receivingDate, bankBookRowId } = req.body;
+
+    const cleanDate = String(receivingDate || '').trim();
+    if (!cleanDate) {
+      return res.status(400).json({ success: false, error: 'Receiving Date is required to confirm check.' });
+    }
+
+    const updateFields = {
+      receivingDate: cleanDate,
+    };
+    if (bankBookRowId) {
+      updateFields.bankBookRowId = String(bankBookRowId).trim();
+    }
+
+    const updated = await CheckBook.findByIdAndUpdate(
+      id,
+      { $set: updateFields },
+      { returnDocument: 'after' }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Check record not found.' });
+    }
+
+    try {
+      const io = getIO();
+      if (io) {
+        io.emit('checkBookUpdated', { action: 'confirmReceive', checkId: id });
+      }
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      message: `Check #${updated.checkNumber} receiving date confirmed successfully.`,
+      check: updated
+    });
+  } catch (error) {
+    console.error('[CheckBook] PATCH confirm-receive error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

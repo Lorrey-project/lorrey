@@ -129,10 +129,9 @@ router.get("/", auth, async (req, res) => {
       // 2. Cement Register all entries for advance aggregation
       cementCol.find({}).toArray().catch(() => []),
 
-      // 3. Bank Book Main Cash withdrawals (Cash Receive Bank Book)
+      // 3. Bank Book Main Cash transactions (Deposit & Withdrawal / Check Book)
       AccountDetail.find({
-        ledgerName: { $regex: /^main cash$/i },
-        names: { $regex: /^main cash$/i }
+        ledgerName: { $regex: /^main\s*cash(\s*book)?$/i }
       }).lean().catch(() => []),
 
       // 4. Indirect Expenses
@@ -158,26 +157,70 @@ router.get("/", auth, async (req, res) => {
     });
 
     // ── TASK 1 & TASK 2: Authoritative SITE CASH EXP & OFFICE EXP date-wise aggregation ──
-    // SITE CASH EXP (date) =
-    //   SUM(Cement Register Loading Advance for date)
-    // + SUM(Cement Register Site Cash Advance for date)
-    // + SUM(Indirect Expenses Site Cash for date)
-    //
-    // OFFICE EXP (date) =
-    //   SUM(Cement Register Office Cash Advance for date)
-    // + SUM(Indirect Expenses Office Cash for date)
     const {
       getSiteCashExp,
       getOfficeExp
     } = aggregateCashbookExpenses(cementDocs, indirectDocs);
 
-    // Bank Book Main Cash withdrawals: Aggregate by Date
+    // Bank Book Main Cash transactions: Aggregate by Date, supporting Deposit & Withdrawal, respecting Month
+    const MONTH_NAMES = [
+      'january', 'february', 'march', 'april', 'may', 'june',
+      'july', 'august', 'september', 'october', 'november', 'december'
+    ];
+    const targetMonth = filter.month; // e.g. 10 or 9
+    const targetYear = filter.year;   // e.g. 2026
+
     bankBookMainCash.forEach(doc => {
+      // Support both DEPOSIT (Case 1) and WITHDRAWAL (Case 2)
+      const dep = parseFloat(String(doc.deposit || '').replace(/,/g, '')) || 0;
+      const w = parseFloat(String(doc.withdraw || '').replace(/,/g, '')) || 0;
+      const amt = (dep > 0) ? dep : ((w > 0) ? w : 0);
+      if (amt <= 0) return;
+
       const rawDate = doc.transactionDate || doc['Transaction Date'];
       const normDate = normalizeDateToKey(rawDate);
-      const w = parseFloat(String(doc.withdraw || '').replace(/,/g, ''));
-      if (normDate && !isNaN(w) && w > 0) {
-        bankBookCashRecvMap[normDate] = (bankBookCashRecvMap[normDate] || 0) + w;
+      if (!normDate) return;
+
+      const parts = normDate.split('-');
+      const dayNum = parts[0];
+      let docMonthNum = parseInt(parts[1], 10);
+      let docYearNum = parseInt(parts[2], 10);
+
+      // Check if doc has explicit month (e.g. 'September' / 'October' from Bank Book Month dropdown)
+      const docMonthStr = String(doc.month || doc.selectedMonth || '').trim();
+      if (docMonthStr) {
+        const mIdx = MONTH_NAMES.findIndex(m => m === docMonthStr.toLowerCase());
+        if (mIdx !== -1) {
+          docMonthNum = mIdx + 1;
+        } else {
+          const parsed = parseInt(docMonthStr, 10);
+          if (!isNaN(parsed) && parsed >= 1 && parsed <= 12) docMonthNum = parsed;
+        }
+      }
+
+      if (doc.selectedYear) {
+        const yMatch = String(doc.selectedYear).match(/(\d{4})/);
+        if (yMatch) docYearNum = parseInt(yMatch[1], 10);
+      } else if (doc.year) {
+        const parsedY = parseInt(doc.year, 10);
+        if (!isNaN(parsedY)) docYearNum = parsedY;
+      }
+
+      const mappedKey = `${dayNum}-${String(docMonthNum).padStart(2, '0')}-${docYearNum}`;
+
+      // Respect Current Month vs Previous Month filtering
+      if (targetMonth && targetYear) {
+        if (docMonthNum === targetMonth && docYearNum === targetYear) {
+          bankBookCashRecvMap[mappedKey] = (bankBookCashRecvMap[mappedKey] || 0) + amt;
+          if (normDate !== mappedKey) {
+            bankBookCashRecvMap[normDate] = (bankBookCashRecvMap[normDate] || 0) + amt;
+          }
+        }
+      } else {
+        bankBookCashRecvMap[normDate] = (bankBookCashRecvMap[normDate] || 0) + amt;
+        if (mappedKey !== normDate) {
+          bankBookCashRecvMap[mappedKey] = (bankBookCashRecvMap[mappedKey] || 0) + amt;
+        }
       }
     });
 

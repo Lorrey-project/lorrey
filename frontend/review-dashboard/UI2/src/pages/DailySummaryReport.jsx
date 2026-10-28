@@ -35,6 +35,8 @@ import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import AssignmentLateIcon from '@mui/icons-material/AssignmentLate';
 import CloseIcon from '@mui/icons-material/Close';
 import ClearIcon from '@mui/icons-material/Clear';
+import AddIcon from '@mui/icons-material/Add';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -43,6 +45,7 @@ import PartyReportView from './PartyReportView';
 import VehicleWiseTripSummaryTab from '../components/VehicleWiseTripSummaryTab';
 import DailyRevenueNvlNvclTab from '../components/DailyRevenueNvlNvclTab';
 import RevenewTab from '../components/RevenewTab';
+import CheckBookModal from '../components/CheckBookModal';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -358,6 +361,7 @@ function DailySummaryTab({
   onOpenPumpPaymentRegister,
   onOpenPieChart,
   onOpenVehicleMktAssoc,
+  onOpenBankBook,
   mainTab,
   setMainTab,
   initialOpenVehicleSummary = false,
@@ -392,6 +396,29 @@ function DailySummaryTab({
   const [billTabValue, setBillTabValue] = useState(0);
   const [tabValue, setTabValue] = useState(0);
   const [snack, setSnack] = useState(null);
+
+  // ── Check Book Balance State & Management Modal ──────────────────────────────
+  const [checkBookBalance, setCheckBookBalance] = useState({
+    totalSavedChecks: 0,
+    alreadyUsedChecks: 0,
+    availableChecks: 0,
+    isLow: false,
+    isCritical: false,
+    alertLevel: 'none',
+    alertTitle: '',
+    alertMessage: '',
+    actionText: 'ADD CHECKS',
+    availableChecksList: [],
+    usedChecksList: []
+  });
+  const [checkBookLoading, setCheckBookLoading] = useState(false);
+  const [openCheckBookModal, setOpenCheckBookModal] = useState(false);
+  const [checkBookModalTab, setCheckBookModalTab] = useState(1); // 1 = Add Checks, 0 = Saved Checks
+
+  const handleOpenCheckBook = (tab = 1) => {
+    setCheckBookModalTab(tab);
+    setOpenCheckBookModal(true);
+  };
 
   // ── Vehicle Wise Trip Summary States ────────────────────────────────────────
   const [vehSearchTerm, setVehSearchTerm] = useState('');
@@ -468,6 +495,21 @@ function DailySummaryTab({
           count: res.data.pending?.count || 0,
           totalBillingAmount: (res.data.pending?.records || []).reduce((s, r) => s + parseNum(r["Billing Amount"] ?? r["BILLING AMOUNT"] ?? r["AMOUNT"]), 0)
         });
+        if (res.data?.checkBook) {
+          setCheckBookBalance({
+            totalSavedChecks: res.data.checkBook.totalSavedChecks || 0,
+            alreadyUsedChecks: res.data.checkBook.alreadyUsedChecks || 0,
+            availableChecks: res.data.checkBook.availableChecks ?? 0,
+            isLow: Boolean(res.data.checkBook.isLow),
+            isCritical: Boolean(res.data.checkBook.isCritical),
+            alertLevel: res.data.checkBook.alertLevel || 'none',
+            alertTitle: res.data.checkBook.alertTitle || '',
+            alertMessage: res.data.checkBook.alertMessage || '',
+            actionText: res.data.checkBook.actionText || 'ADD CHECKS',
+            availableChecksList: res.data.checkBook.availableChecksList || [],
+            usedChecksList: res.data.checkBook.usedChecksList || []
+          });
+        }
       }
     } catch (err) {
       console.error('[DailySummaryReport] Fetch YTD alerts error:', err);
@@ -475,6 +517,35 @@ function DailySummaryTab({
       setLoadingYtdAlerts(false);
     }
   }, [financialYear]);
+
+  // ── Live Check Book Balance Fetcher ─────────────────────────────────────────
+  const fetchCheckBookBalance = useCallback(async () => {
+    setCheckBookLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.get(`${API_URL}/check-book/balance`, { headers });
+      if (res.data?.success) {
+        setCheckBookBalance({
+          totalSavedChecks: res.data.totalSavedChecks || 0,
+          alreadyUsedChecks: res.data.alreadyUsedChecks || 0,
+          availableChecks: res.data.availableChecks ?? 0,
+          isLow: Boolean(res.data.isLow),
+          isCritical: Boolean(res.data.isCritical),
+          alertLevel: res.data.alertLevel || 'none',
+          alertTitle: res.data.alertTitle || '',
+          alertMessage: res.data.alertMessage || '',
+          actionText: res.data.actionText || 'ADD CHECKS',
+          availableChecksList: res.data.availableChecksList || [],
+          usedChecksList: res.data.usedChecksList || []
+        });
+      }
+    } catch (err) {
+      console.error('[DailySummaryReport] Fetch check-book balance error:', err);
+    } finally {
+      setCheckBookLoading(false);
+    }
+  }, []);
 
   // ── Live Pending Challans from Shipment Register ────────────────────────────
   const [pendingChallansData, setPendingChallansData] = useState({
@@ -790,6 +861,7 @@ function DailySummaryTab({
     fetchAlertsYtd();
     fetchSixTripAlerts();
     fetchVehicleNotLoadedAlerts();
+    fetchCheckBookBalance();
     try {
       const token = localStorage.getItem('token');
 
@@ -808,7 +880,7 @@ function DailySummaryTab({
     } finally {
       setLoading(false);
     }
-  }, [dateOptions, fetchValidityAlerts, fetchPendingChallans, fetchAlertsYtd, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts, financialYear, month]);
+  }, [dateOptions, fetchValidityAlerts, fetchPendingChallans, fetchAlertsYtd, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts, fetchCheckBookBalance, financialYear, month]);
 
   useEffect(() => {
     fetchData(date);
@@ -819,9 +891,10 @@ function DailySummaryTab({
     fetchPendingChallans();
     fetchSixTripAlerts();
     fetchVehicleNotLoadedAlerts();
-  }, [fetchAlertsYtd, fetchPendingChallans, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts]);
+    fetchCheckBookBalance();
+  }, [fetchAlertsYtd, fetchPendingChallans, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts, fetchCheckBookBalance]);
 
-  // Live auto-refresh when Main Cashbook or Cement Register data changes
+  // Live auto-refresh when Main Cashbook, Cement Register, or Check Book data changes
   useEffect(() => {
     const handler = () => {
       fetchData(date);
@@ -830,14 +903,19 @@ function DailySummaryTab({
       fetchAlertsYtd();
       fetchSixTripAlerts();
       fetchVehicleNotLoadedAlerts();
+      fetchCheckBookBalance();
     };
     socket.on('mainCashbookUpdates', handler);
     socket.on('cementUpdates', handler);
+    socket.on('checkBookUpdated', handler);
+    socket.on('accountDetailsUpdate', handler);
     return () => {
       socket.off('mainCashbookUpdates', handler);
       socket.off('cementUpdates', handler);
+      socket.off('checkBookUpdated', handler);
+      socket.off('accountDetailsUpdate', handler);
     };
-  }, [date, fetchData, fetchValidityAlerts, fetchPendingChallans, fetchAlertsYtd, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts]);
+  }, [date, fetchData, fetchValidityAlerts, fetchPendingChallans, fetchAlertsYtd, fetchSixTripAlerts, fetchVehicleNotLoadedAlerts, fetchCheckBookBalance]);
 
   const handleExportExcel = () => {
     if (!data) return;
@@ -1787,6 +1865,166 @@ function DailySummaryTab({
             </Card>
           </Box>
 
+          {/* ==========================================
+              CHECK BOOK BALANCE ALERT / ACTION BANNER
+              (Shown dynamically when availableChecks <= 2)
+             ========================================== */}
+          {checkBookBalance.isLow && (
+            <Card
+              sx={{
+                mb: 3,
+                borderRadius: '16px',
+                border: '1.5px solid',
+                borderColor: checkBookBalance.isCritical ? '#f87171' : '#f59e0b',
+                bgcolor: checkBookBalance.isCritical ? '#fef2f2' : '#fffbeb',
+                boxShadow: checkBookBalance.isCritical
+                  ? '0 6px 20px rgba(239, 68, 68, 0.15)'
+                  : '0 6px 20px rgba(245, 158, 11, 0.12)',
+                overflow: 'hidden',
+                animation: checkBookBalance.isCritical
+                  ? 'pulseCheckBookBannerRed 2s infinite ease-in-out'
+                  : 'none',
+                '@keyframes pulseCheckBookBannerRed': {
+                  '0%, 100%': { boxShadow: '0 4px 14px rgba(239, 68, 68, 0.15)' },
+                  '50%': { boxShadow: '0 4px 24px rgba(239, 68, 68, 0.3)' }
+                }
+              }}
+            >
+              <CardContent
+                sx={{
+                  p: { xs: 2, sm: 2.5 },
+                  '&:last-child': { pb: { xs: 2, sm: 2.5 } },
+                  display: 'flex',
+                  flexDirection: { xs: 'column', md: 'row' },
+                  alignItems: { xs: 'flex-start', md: 'center' },
+                  justifyContent: 'space-between',
+                  gap: 2
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                  <Box
+                    sx={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: '12px',
+                      bgcolor: checkBookBalance.isCritical ? '#fee2e2' : '#fef3c7',
+                      border: '1px solid',
+                      borderColor: checkBookBalance.isCritical ? '#fca5a5' : '#fde68a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}
+                  >
+                    {checkBookBalance.isCritical ? (
+                      <ErrorOutlineIcon sx={{ color: '#dc2626', fontSize: 30 }} />
+                    ) : (
+                      <WarningAmberIcon sx={{ color: '#d97706', fontSize: 30 }} />
+                    )}
+                  </Box>
+
+                  <Box sx={{ minWidth: 0 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', mb: 0.5 }}>
+                      <Typography
+                        variant="h6"
+                        fontWeight={900}
+                        sx={{
+                          color: checkBookBalance.isCritical ? '#991b1b' : '#92400e',
+                          letterSpacing: '-0.3px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1
+                        }}
+                      >
+                        {checkBookBalance.isCritical ? '🔴 NO CHECKS AVAILABLE' : '⚠️ LOW CHECK BALANCE'}
+                      </Typography>
+
+                      <Chip
+                        label={
+                          checkBookBalance.isCritical
+                            ? 'CRITICAL: 0 CHECKS'
+                            : `ONLY ${checkBookBalance.availableChecks} CHECK${checkBookBalance.availableChecks === 1 ? '' : 'S'} LEFT`
+                        }
+                        size="small"
+                        sx={{
+                          bgcolor: checkBookBalance.isCritical ? '#dc2626' : '#d97706',
+                          color: '#ffffff',
+                          fontWeight: 800,
+                          fontSize: '11px',
+                          height: 22,
+                          borderRadius: '6px'
+                        }}
+                      />
+                    </Box>
+
+                    <Typography
+                      variant="body2"
+                      fontWeight={700}
+                      sx={{
+                        color: checkBookBalance.isCritical ? '#7f1d1d' : '#78350f',
+                        lineHeight: 1.5,
+                        mb: 0.5
+                      }}
+                    >
+                      {checkBookBalance.isCritical
+                        ? 'No checks are currently available. Please add checks to the Check Book before processing the next cheque transaction.'
+                        : `Only ${checkBookBalance.availableChecks} check${checkBookBalance.availableChecks === 1 ? '' : 's'} ${checkBookBalance.availableChecks === 1 ? 'is' : 'are'} currently available. More checks are required. Please add/save additional checks in the Check Book.`}
+                    </Typography>
+
+                    <Typography
+                      variant="caption"
+                      fontWeight={600}
+                      sx={{
+                        color: checkBookBalance.isCritical ? '#991b1b' : '#92400e',
+                        opacity: 0.9
+                      }}
+                    >
+                      Total Saved in Check Book: <strong>{checkBookBalance.totalSavedChecks}</strong> •
+                      Already Used in Bank Book: <strong>{checkBookBalance.alreadyUsedChecks}</strong> •
+                      Available Balance: <strong style={{ textDecoration: 'underline' }}>{checkBookBalance.availableChecks}</strong> (Alert threshold: ≤ 2)
+                    </Typography>
+                  </Box>
+                </Box>
+
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.5,
+                    flexShrink: 0,
+                    width: { xs: '100%', md: 'auto' },
+                    justifyContent: { xs: 'flex-start', md: 'flex-end' }
+                  }}
+                >
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => handleOpenCheckBook(1)}
+                    sx={{
+                      py: 1,
+                      px: 3,
+                      borderRadius: '10px',
+                      bgcolor: checkBookBalance.isCritical ? '#dc2626' : '#d97706',
+                      color: '#ffffff',
+                      fontWeight: 800,
+                      fontSize: '0.875rem',
+                      textTransform: 'none',
+                      letterSpacing: '0.3px',
+                      boxShadow: checkBookBalance.isCritical
+                        ? '0 4px 12px rgba(220, 38, 38, 0.35)'
+                        : '0 4px 12px rgba(217, 119, 6, 0.3)',
+                      '&:hover': {
+                        bgcolor: checkBookBalance.isCritical ? '#b91c1c' : '#b45309'
+                      }
+                    }}
+                  >
+                    ADD CHECKS
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+
           <Grid container spacing={2.5} mb={4}>
             {/* ==========================================
                 SECTION 3: FINANCIAL SUMMARY
@@ -1845,6 +2083,61 @@ function DailySummaryTab({
               </Typography>
               <Card sx={{ borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', height: 'calc(100% - 34px)' }}>
                 <CardContent sx={{ p: 2.5 }}>
+
+                  {/* ── CHECK BOOK LOW/ZERO BALANCE ALERT ───────────────────────── */}
+                  {checkBookBalance.isLow && (
+                    <Box
+                      onClick={() => handleOpenCheckBook(1)}
+                      display="flex" alignItems="center" gap={1.5} p={1.5} mb={1.5} borderRadius="12px"
+                      sx={{
+                        cursor: 'pointer',
+                        bgcolor: checkBookBalance.isCritical ? '#fff1f2' : '#fffbeb',
+                        border: `1.5px solid ${checkBookBalance.isCritical ? '#fecdd3' : '#fde68a'}`,
+                        transition: 'all 0.2s',
+                        '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.06)' },
+                        animation: checkBookBalance.isCritical ? 'pulseCheckBookCardRed 1.5s infinite ease-in-out' : 'none',
+                        '@keyframes pulseCheckBookCardRed': {
+                          '0%, 100%': { boxShadow: '0 0 0 0 rgba(225, 29, 72, 0.4)' },
+                          '50%': { boxShadow: '0 0 0 8px rgba(225, 29, 72, 0)' }
+                        }
+                      }}
+                    >
+                      <WarningAmberIcon sx={{ color: checkBookBalance.isCritical ? '#e11d48' : '#d97706', fontSize: 26 }} />
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body2" fontWeight={800} color={checkBookBalance.isCritical ? '#be123c' : '#b45309'} noWrap>
+                          {checkBookBalance.isCritical ? '🔴 NO CHECKS AVAILABLE' : '⚠️ LOW CHECK BALANCE'}
+                        </Typography>
+                        <Typography variant="caption" fontWeight={600} color={checkBookBalance.isCritical ? '#e11d48' : '#d97706'} noWrap display="block">
+                          {checkBookBalance.isCritical
+                            ? '0 checks left • Add checks to Check Book'
+                            : `Only ${checkBookBalance.availableChecks} check${checkBookBalance.availableChecks === 1 ? '' : 's'} available • Add Checks`}
+                        </Typography>
+                      </Box>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenCheckBook(1);
+                        }}
+                        sx={{
+                          py: 0.3,
+                          px: 1.2,
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                          textTransform: 'none',
+                          borderRadius: '6px',
+                          bgcolor: checkBookBalance.isCritical ? '#dc2626' : '#d97706',
+                          color: '#fff',
+                          boxShadow: 'none',
+                          flexShrink: 0,
+                          '&:hover': { bgcolor: checkBookBalance.isCritical ? '#b91c1c' : '#b45309' }
+                        }}
+                      >
+                        ADD CHECKS
+                      </Button>
+                    </Box>
+                  )}
 
                   <Box
                     onClick={() => handleAlertClick('Pending', pendingChallansData.records)}
@@ -2092,6 +2385,15 @@ function DailySummaryTab({
                     sx={{ py: 0.8, borderRadius: '10px', color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)', fontWeight: 700, textTransform: 'none', '&:hover': { borderColor: '#38bdf8', bgcolor: 'rgba(56,189,248,0.1)' } }}
                   >
                     Vehicle Trip Summary
+                  </Button>
+
+                  <Button
+                    fullWidth variant="outlined"
+                    startIcon={<MenuBookIcon />}
+                    onClick={() => handleOpenCheckBook(0)}
+                    sx={{ py: 0.8, borderRadius: '10px', color: '#10b981', borderColor: 'rgba(16,185,129,0.4)', fontWeight: 700, textTransform: 'none', '&:hover': { borderColor: '#10b981', bgcolor: 'rgba(16,185,129,0.1)' } }}
+                  >
+                    Check Book Management
                   </Button>
 
                 </CardContent>
@@ -3777,6 +4079,15 @@ function DailySummaryTab({
         />
       </Dialog>
 
+      {/* ── Check Book Management Modal ── */}
+      <CheckBookModal
+        open={openCheckBookModal}
+        onClose={() => {
+          setOpenCheckBookModal(false);
+          fetchCheckBookBalance();
+        }}
+        initialTab={checkBookModalTab}
+      />
 
       {/* --- Snackbar alerts --- */}
       <Snackbar

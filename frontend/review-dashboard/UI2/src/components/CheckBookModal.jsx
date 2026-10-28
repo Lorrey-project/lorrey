@@ -46,19 +46,64 @@ import { io } from 'socket.io-client';
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
 
+function toInputDateFormat(val) {
+  if (!val) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+  const dmyMatch = String(val).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, '0');
+    const month = dmyMatch[2].padStart(2, '0');
+    const year = dmyMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return val;
+}
+
+function formatDateDisplay(val) {
+  if (!val) return '—';
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) return val;
+  const ymdMatch = String(val).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (ymdMatch) {
+    return `${ymdMatch[3]}/${ymdMatch[2]}/${ymdMatch[1]}`;
+  }
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+  return String(val);
+}
+
 function createEmptyRow() {
   return {
     id: Date.now() + Math.random(),
+    checkDate: '',
     checkNumber: '',
     checkAmount: '',
+    receivingDate: '',
     file: null,
     remarks: '',
     error: '',
   };
 }
 
-export default function CheckBookModal({ open, onClose }) {
-  const [tabValue, setTabValue] = useState(0); // 0 = List, 1 = Add Checks
+export default function CheckBookModal({ open, onClose, initialTab = 0 }) {
+  const [tabValue, setTabValue] = useState(initialTab); // 0 = List, 1 = Add Checks
+
+  useEffect(() => {
+    if (open) {
+      setTabValue(initialTab);
+    }
+  }, [open, initialTab]);
   const [checks, setChecks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -74,8 +119,10 @@ export default function CheckBookModal({ open, onClose }) {
   const [editModal, setEditModal] = useState({
     open: false,
     check: null,
+    checkDate: '',
     checkNumber: '',
     checkAmount: '',
+    receivingDate: '',
     remarks: '',
     file: null,
     saving: false,
@@ -140,6 +187,8 @@ export default function CheckBookModal({ open, onClose }) {
     return checks.filter(
       (c) =>
         String(c.checkNumber || '').toLowerCase().includes(q) ||
+        String(c.checkDate || '').toLowerCase().includes(q) ||
+        String(c.receivingDate || '').toLowerCase().includes(q) ||
         String(c.documentName || '').toLowerCase().includes(q) ||
         String(c.remarks || '').toLowerCase().includes(q)
     );
@@ -202,9 +251,17 @@ export default function CheckBookModal({ open, onClose }) {
 
     for (let i = 0; i < updatedRows.length; i++) {
       const r = updatedRows[i];
+      const checkDate = String(r.checkDate || '').trim();
       const checkNo = String(r.checkNumber || '').trim();
       const rawAmt = r.checkAmount;
       const parsedAmt = parseFloat(String(rawAmt || '').replace(/,/g, ''));
+      const receivingDate = String(r.receivingDate || '').trim();
+
+      if (!checkDate) {
+        updatedRows[i].error = 'Check Date is required.';
+        hasError = true;
+        continue;
+      }
 
       if (!checkNo) {
         updatedRows[i].error = 'Check Number is required.';
@@ -251,8 +308,10 @@ export default function CheckBookModal({ open, onClose }) {
       const formData = new FormData();
 
       const metadata = updatedRows.map((r, i) => ({
+        checkDate: String(r.checkDate || '').trim(),
         checkNumber: String(r.checkNumber).trim(), // preserve leading zeros as string
         checkAmount: parseFloat(r.checkAmount),
+        receivingDate: String(r.receivingDate || '').trim(),
         fileField: `file_${i}`,
         fileIndex: i,
         remarks: (r.remarks || '').trim(),
@@ -301,8 +360,10 @@ export default function CheckBookModal({ open, onClose }) {
     setEditModal({
       open: true,
       check,
+      checkDate: check.checkDate || '',
       checkNumber: String(check.checkNumber || ''),
       checkAmount: String(check.checkAmount || ''),
+      receivingDate: check.receivingDate || '',
       remarks: check.remarks || '',
       file: null,
       saving: false,
@@ -311,9 +372,15 @@ export default function CheckBookModal({ open, onClose }) {
   };
 
   const handleSaveEdit = async () => {
+    const cleanDate = String(editModal.checkDate || '').trim();
     const cleanNo = String(editModal.checkNumber || '').trim();
     const parsedAmt = parseFloat(String(editModal.checkAmount || '').replace(/,/g, ''));
+    const cleanRecDate = String(editModal.receivingDate || '').trim();
 
+    if (!cleanDate) {
+      setEditModal((prev) => ({ ...prev, error: 'Check Date is required.' }));
+      return;
+    }
     if (!cleanNo) {
       setEditModal((prev) => ({ ...prev, error: 'Check Number is required.' }));
       return;
@@ -322,13 +389,19 @@ export default function CheckBookModal({ open, onClose }) {
       setEditModal((prev) => ({ ...prev, error: 'Valid positive amount is required.' }));
       return;
     }
+    if (!cleanRecDate) {
+      setEditModal((prev) => ({ ...prev, error: 'Receiving Date is required.' }));
+      return;
+    }
 
     setEditModal((prev) => ({ ...prev, saving: true, error: '' }));
     try {
       const token = localStorage.getItem('token');
       const formData = new FormData();
+      formData.append('checkDate', cleanDate);
       formData.append('checkNumber', cleanNo);
       formData.append('checkAmount', parsedAmt);
+      formData.append('receivingDate', cleanRecDate);
       formData.append('remarks', (editModal.remarks || '').trim());
       if (editModal.file) {
         formData.append('file', editModal.file);
@@ -347,7 +420,7 @@ export default function CheckBookModal({ open, onClose }) {
           message: `Check #${cleanNo} updated successfully!`,
           severity: 'success',
         });
-        setEditModal({ open: false, check: null, checkNumber: '', checkAmount: '', remarks: '', file: null, saving: false, error: '' });
+        setEditModal({ open: false, check: null, checkDate: '', checkNumber: '', checkAmount: '', receivingDate: '', remarks: '', file: null, saving: false, error: '' });
         await fetchChecks();
       }
     } catch (err) {
@@ -583,22 +656,24 @@ export default function CheckBookModal({ open, onClose }) {
 
               {/* Table */}
               <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 2 }}>
-                <Table size="small" sx={{ minWidth: 700 }}>
+                <Table size="small" sx={{ minWidth: 850 }}>
                   <TableHead sx={{ bgcolor: '#f1f5f9' }}>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 60, textAlign: 'center', py: 1.5 }}>SL NO</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 140 }}>CHECK NUMBER</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 140, textAlign: 'right' }}>CHECK AMOUNT</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#334155', minWidth: 200 }}>CHECK DOCUMENT</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 170 }}>CREATED DATE</TableCell>
-                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 120, textAlign: 'center' }}>ACTIONS</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 50, textAlign: 'center', py: 1.5 }}>SL NO</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 120 }}>CHECK DATE</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 130 }}>CHECK NUMBER</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 130, textAlign: 'right' }}>CHECK AMOUNT</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 130 }}>RECEIVING DATE</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#334155', minWidth: 180 }}>CHECK DOCUMENT</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 150 }}>CREATED DATE</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#334155', width: 100, textAlign: 'center' }}>ACTIONS</TableCell>
                     </TableRow>
                   </TableHead>
 
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={6} sx={{ textAlign: 'center', py: 6 }}>
+                        <TableCell colSpan={8} sx={{ textAlign: 'center', py: 6 }}>
                           <CircularProgress size={32} sx={{ color: '#0f766e', mb: 1 }} />
                           <Typography variant="body2" color="text.secondary" fontWeight={600}>
                             Loading Check Book records…
@@ -607,7 +682,7 @@ export default function CheckBookModal({ open, onClose }) {
                       </TableRow>
                     ) : filteredChecks.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} sx={{ textAlign: 'center', py: 6 }}>
+                        <TableCell colSpan={8} sx={{ textAlign: 'center', py: 6 }}>
                           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                             <MenuBookIcon sx={{ fontSize: 48, color: '#cbd5e1' }} />
                             <Typography variant="subtitle1" fontWeight={700} color="#475569">
@@ -658,12 +733,34 @@ export default function CheckBookModal({ open, onClose }) {
                               {idx + 1}
                             </TableCell>
 
+                            <TableCell sx={{ fontWeight: 600, color: '#334155', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
+                              {formatDateDisplay(row.checkDate)}
+                            </TableCell>
+
                             <TableCell sx={{ fontWeight: 800, fontFamily: 'monospace', fontSize: '0.9rem', color: '#0f172a' }}>
                               {row.checkNumber}
                             </TableCell>
 
-                            <TableCell sx={{ textAlign: 'right', fontWeight: 800, color: '#047857', fontSize: '0.9rem' }}>
-                              ₹{Number(row.checkAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            <TableCell sx={{ fontWeight: 600, color: '#334155', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
+                              {row.receivingDate ? (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  <CheckCircleOutlineIcon sx={{ color: '#059669', fontSize: 16 }} />
+                                  <span>{formatDateDisplay(row.receivingDate)}</span>
+                                </Box>
+                              ) : (
+                                <Chip
+                                  label="Pending"
+                                  size="small"
+                                  sx={{
+                                    bgcolor: '#fef3c7',
+                                    color: '#92400e',
+                                    fontWeight: 800,
+                                    fontSize: 11,
+                                    height: 22,
+                                    borderRadius: '6px'
+                                  }}
+                                />
+                              )}
                             </TableCell>
 
                             <TableCell>
@@ -829,12 +926,35 @@ export default function CheckBookModal({ open, onClose }) {
                       <Box
                         sx={{
                           display: 'grid',
-                          gridTemplateColumns: { xs: '1fr', sm: '1.2fr 1.2fr 2fr' },
+                          gridTemplateColumns: {
+                            xs: '1fr',
+                            sm: '1fr 1fr',
+                            md: '1.2fr 1.2fr 1.2fr 1.2fr 2fr',
+                          },
                           gap: 2,
                           alignItems: 'start',
                         }}
                       >
-                        {/* Check Number */}
+                        {/* 1. CHECK DATE */}
+                        <Box>
+                          <Typography variant="caption" fontWeight={700} color="#334155" sx={{ mb: 0.5, display: 'block' }}>
+                            CHECK DATE <span style={{ color: '#dc2626' }}>*</span>
+                          </Typography>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            type="date"
+                            value={toInputDateFormat(row.checkDate)}
+                            onChange={(e) => handleRowChange(idx, 'checkDate', e.target.value)}
+                            InputLabelProps={{ shrink: true }}
+                            sx={{
+                              bgcolor: '#fff',
+                              '& .MuiOutlinedInput-root': { borderRadius: 2 },
+                            }}
+                          />
+                        </Box>
+
+                        {/* 2. CHECK NUMBER */}
                         <Box>
                           <Typography variant="caption" fontWeight={700} color="#334155" sx={{ mb: 0.5, display: 'block' }}>
                             CHECK NUMBER <span style={{ color: '#dc2626' }}>*</span>
@@ -855,7 +975,7 @@ export default function CheckBookModal({ open, onClose }) {
                           />
                         </Box>
 
-                        {/* Check Amount */}
+                        {/* 3. CHECK AMOUNT */}
                         <Box>
                           <Typography variant="caption" fontWeight={700} color="#334155" sx={{ mb: 0.5, display: 'block' }}>
                             CHECK AMOUNT <span style={{ color: '#dc2626' }}>*</span>
@@ -878,7 +998,31 @@ export default function CheckBookModal({ open, onClose }) {
                           />
                         </Box>
 
-                        {/* Check Document Attachment */}
+                        {/* 4. RECEIVING DATE */}
+                        <Box>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                            <Typography variant="caption" fontWeight={700} color="#334155">
+                              RECEIVING DATE
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: '#64748b', fontSize: 10 }}>
+                              (Optional / Pending)
+                            </Typography>
+                          </Box>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            type="date"
+                            value={toInputDateFormat(row.receivingDate)}
+                            onChange={(e) => handleRowChange(idx, 'receivingDate', e.target.value)}
+                            InputLabelProps={{ shrink: true }}
+                            sx={{
+                              bgcolor: '#fff',
+                              '& .MuiOutlinedInput-root': { borderRadius: 2 },
+                            }}
+                          />
+                        </Box>
+
+                        {/* 5. UPLOAD DOCUMENT */}
                         <Box>
                           <Typography variant="caption" fontWeight={700} color="#334155" sx={{ mb: 0.5, display: 'block' }}>
                             UPLOAD DOCUMENT (JPEG / JPG / PNG / PDF) <span style={{ color: '#dc2626' }}>*</span>
@@ -1129,6 +1273,20 @@ export default function CheckBookModal({ open, onClose }) {
 
           <Box>
             <Typography variant="caption" fontWeight={700} color="#334155" sx={{ mb: 0.5, display: 'block' }}>
+              CHECK DATE <span style={{ color: '#dc2626' }}>*</span>
+            </Typography>
+            <TextField
+              size="small"
+              fullWidth
+              type="date"
+              value={toInputDateFormat(editModal.checkDate)}
+              onChange={(e) => setEditModal((prev) => ({ ...prev, checkDate: e.target.value, error: '' }))}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Box>
+
+          <Box>
+            <Typography variant="caption" fontWeight={700} color="#334155" sx={{ mb: 0.5, display: 'block' }}>
               CHECK NUMBER <span style={{ color: '#dc2626' }}>*</span>
             </Typography>
             <TextField
@@ -1151,6 +1309,20 @@ export default function CheckBookModal({ open, onClose }) {
               value={editModal.checkAmount}
               onChange={(e) => setEditModal((prev) => ({ ...prev, checkAmount: e.target.value, error: '' }))}
               InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+            />
+          </Box>
+
+          <Box>
+            <Typography variant="caption" fontWeight={700} color="#334155" sx={{ mb: 0.5, display: 'block' }}>
+              RECEIVING DATE <span style={{ color: '#dc2626' }}>*</span>
+            </Typography>
+            <TextField
+              size="small"
+              fullWidth
+              type="date"
+              value={toInputDateFormat(editModal.receivingDate)}
+              onChange={(e) => setEditModal((prev) => ({ ...prev, receivingDate: e.target.value, error: '' }))}
+              InputLabelProps={{ shrink: true }}
             />
           </Box>
 
@@ -1198,7 +1370,7 @@ export default function CheckBookModal({ open, onClose }) {
         </DialogContent>
         <DialogActions sx={{ p: 2, px: 2.5, bgcolor: '#f8fafc' }}>
           <Button
-            onClick={() => setEditModal({ open: false, check: null, checkNumber: '', checkAmount: '', remarks: '', file: null, saving: false, error: '' })}
+            onClick={() => setEditModal({ open: false, check: null, checkDate: '', checkNumber: '', checkAmount: '', receivingDate: '', remarks: '', file: null, saving: false, error: '' })}
             disabled={editModal.saving}
             sx={{ textTransform: 'none', fontWeight: 600 }}
           >

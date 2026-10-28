@@ -5,6 +5,7 @@ const auth = require("../middleware/authMiddleware");
 const router = express.Router();
 const Invoice = require("../models/Invoice");
 const { getBillRegisterData, parseDate, normalizeSite, MONTH_NAMES } = require("../utils/billRegisterHelper");
+const { getCheckBookBalance } = require("../utils/checkBookHelper");
 
 function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
@@ -353,10 +354,26 @@ router.get("/alerts-ytd", auth, async (req, res) => {
         all: stampNonBilledAll.sort(sortFn),
         freight: stampNonBilledFreight.sort(sortFn),
         unloading: stampNonBilledUnloading.sort(sortFn)
-      }
+      },
+      checkBook: await getCheckBookBalance()
     });
   } catch (err) {
     console.error("[DailySummary] alerts-ytd error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── GET /daily-summary/check-book-balance ────────────────────────────────────
+// Real-time Check Book available vs used balance and alert status
+router.get("/check-book-balance", auth, async (req, res) => {
+  try {
+    const balance = await getCheckBookBalance();
+    res.json({
+      success: true,
+      ...balance
+    });
+  } catch (err) {
+    console.error("[DailySummary] check-book-balance error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 
 const checkBookSchema = new mongoose.Schema(
   {
+    checkDate: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     checkNumber: {
       type: String,
       required: true,
@@ -11,6 +16,11 @@ const checkBookSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 0.01,
+    },
+    receivingDate: {
+      type: String,
+      default: '',
+      trim: true,
     },
     documentUrl: {
       type: String,
@@ -25,6 +35,11 @@ const checkBookSchema = new mongoose.Schema(
       default: '',
     },
     remarks: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    bankBookRowId: {
       type: String,
       default: '',
       trim: true,

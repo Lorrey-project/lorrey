@@ -421,6 +421,11 @@ router.post('/bulk', async (req, res) => {
         setFields.nvclIncentive = Number(record.nvclIncentive);
         setFields.extra10WIncentive = Number(record.nvclIncentive);
       }
+      if (record.extra6WIncentive !== undefined) {
+        setFields.extra6WIncentive = Number(record.extra6WIncentive);
+      } else if (record['15% Extra 6WH Incentive'] !== undefined) {
+        setFields.extra6WIncentive = Number(record['15% Extra 6WH Incentive']);
+      }
       if (record.dedicatedIncentive !== undefined) {
         if (record.dedicatedIncentive === '' || record.dedicatedIncentive === null) {
           setFields.dedicatedIncentive = null;
@@ -862,11 +867,14 @@ router.get('/full-year', async (req, res) => {
           'GPS TRIP CHARGE': 0,
           'GPS DEVICE': 0,
           'NET AMOUNT': 0,
+          'DEDICATED INCENTIVE': 0,
           '10WH Extra 8.5% Incentive': 0,
           '10WH EXTRA 8.5% INCENTIVE': 0,
+          '15% Extra 6WH Incentive': 0,
+          '15% EXTRA 6WH INCENTIVE': 0,
+          'extra6WIncentive': 0,
           'NVCL INCENTIVE': 0,
           '8.5% NVCL': 0,
-          'DEDICATED INCENTIVE': 0,
           'RAFTER': 0,
           'EXTRA U/L': 0,
           'TOLL UP': 0,
@@ -914,11 +922,14 @@ router.get('/full-year', async (req, res) => {
           'GPS TRIP CHARGE': 0,
           'GPS DEVICE': 0,
           'NET AMOUNT': 0,
+          'DEDICATED INCENTIVE': 0,
           '10WH Extra 8.5% Incentive': 0,
           '10WH EXTRA 8.5% INCENTIVE': 0,
+          '15% Extra 6WH Incentive': 0,
+          '15% EXTRA 6WH INCENTIVE': 0,
+          'extra6WIncentive': 0,
           'NVCL INCENTIVE': 0,
           '8.5% NVCL': 0,
-          'DEDICATED INCENTIVE': 0,
           'RAFTER': 0,
           'EXTRA U/L': 0,
           'TOLL UP': 0,
@@ -1041,8 +1052,25 @@ router.get('/full-year', async (req, res) => {
         }
       }
 
+      // Authoritative 15% Extra 6WH Incentive from Incentive Entry
+      let extra6WIncentive = 0;
+      if (saved.extra6WIncentive !== undefined && saved.extra6WIncentive !== null) {
+        extra6WIncentive = Number(saved.extra6WIncentive);
+      } else if (hasActivity && monthTrips.length > 0) {
+        try {
+          const eligRes = await evaluateVehicleIncentiveEligibility(normTargetVeh, m, y);
+          if (eligRes?.extra6WheelIncentive?.amount !== undefined) {
+            extra6WIncentive = eligRes.extra6WheelIncentive.amount || 0;
+          } else if (eligRes?.extra6W !== undefined) {
+            extra6WIncentive = eligRes.extra6W || 0;
+          }
+        } catch (err) {
+          console.warn(`[partyPayment] Error evaluating 6WH incentive for ${normTargetVeh} ${m}/${y}:`, err.message);
+        }
+      }
+
       // Total Freight
-      const incentiveSum = nvclIncentive + dedicatedIncentive + extraUl + tollUp + tollDown;
+      const incentiveSum = dedicatedIncentive + nvclIncentive + extra6WIncentive + extraUl + tollUp + tollDown;
       const totalFreight = round2(netAmount + incentiveSum - tdsOnIncentive);
 
       // ── Authoritative GST FCM resolution from Party Payment Details / Freight Creditor GST ──
@@ -1122,11 +1150,14 @@ router.get('/full-year', async (req, res) => {
         'GPS TRIP CHARGE': gpsTripCharge,
         'GPS DEVICE': gpsDevice,
         'NET AMOUNT': netAmount,
+        'DEDICATED INCENTIVE': dedicatedIncentive,
         '10WH Extra 8.5% Incentive': nvclIncentive,
         '10WH EXTRA 8.5% INCENTIVE': nvclIncentive,
+        '15% Extra 6WH Incentive': extra6WIncentive,
+        '15% EXTRA 6WH INCENTIVE': extra6WIncentive,
+        'extra6WIncentive': extra6WIncentive,
         'NVCL INCENTIVE': nvclIncentive,
         '8.5% NVCL': nvclIncentive,
-        'DEDICATED INCENTIVE': dedicatedIncentive,
         'RAFTER': rafter,
         'EXTRA U/L': extraUl,
         'TOLL UP': tollUp,
@@ -1154,7 +1185,7 @@ router.get('/full-year', async (req, res) => {
     const flowKeys = [
       'GROSS FREIGHT', 'LOADING ADVANCE', 'FUEL', 'TDS', 'TRAVELLING EXP',
       'DAMAGE RECOVERY', 'CASH_BANK_OTHERS', 'OTHER DEDUCTION', 'GPS TRIP CHARGE',
-      'GPS DEVICE', 'NET AMOUNT', '10WH Extra 8.5% Incentive', '10WH EXTRA 8.5% INCENTIVE', 'NVCL INCENTIVE', '8.5% NVCL', 'DEDICATED INCENTIVE', 'RAFTER',
+      'GPS DEVICE', 'NET AMOUNT', 'DEDICATED INCENTIVE', '10WH Extra 8.5% Incentive', '10WH EXTRA 8.5% INCENTIVE', '15% Extra 6WH Incentive', '15% EXTRA 6WH INCENTIVE', 'extra6WIncentive', 'NVCL INCENTIVE', '8.5% NVCL', 'RAFTER',
       'EXTRA U/L', 'TOLL UP', 'TOLL DOWN', 'TDS ON INCENTIVE', 'TOTAL FREIGHT',
       'WITHHOLD AMOUNT', 'RECOVERED TO DAC', 'CREDIT REFUND', 'PAID TO PARTY'
     ];

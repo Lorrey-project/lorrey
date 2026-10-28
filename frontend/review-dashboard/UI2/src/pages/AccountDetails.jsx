@@ -27,10 +27,12 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CloseIcon from '@mui/icons-material/Close';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { exportToCsv } from '../utils/exportCsv';
 import CheckBookModal from '../components/CheckBookModal';
+import CheckSelectionModal from '../components/CheckSelectionModal';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_IO_URL || import.meta.env.VITE_API_URL;
@@ -57,6 +59,12 @@ const getPrintingStationaryMonths = () => {
 const isCreditorLedger = (ledger) => {
   const norm = String(ledger || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   return norm === 'brindashyam' || norm === 'jeetpanja';
+};
+
+const isMainCash = (ledger) => {
+  if (!ledger) return false;
+  const norm = String(ledger).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return norm === 'maincash' || norm === 'maincashbook';
 };
 
 const getCreditorAllowedMonths = () => {
@@ -138,6 +146,7 @@ export const LEDGER_OPTIONS = [
   "JEET PANJA",
   "LATE FEES ON TDS",
   "MAIN CASH",
+  "MAIN CASH BOOK",
   "MANOJ BANDHAN",
   "MISC EXPENSES",
   "OFFICE EXPENSES",
@@ -381,6 +390,13 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [openCheckBook, setOpenCheckBook] = useState(false);
+  const [checkSelectionModal, setCheckSelectionModal] = useState({
+    open: false,
+    rowId: '',
+    checkNumber: '',
+    matchingChecks: [],
+    defaultReceivingDate: '',
+  });
   const [uploading, setUploading] = useState(false);
   const [snack, setSnack] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1188,6 +1204,119 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
     setLocalData(prev => ({ ...prev, [rowId]: { ...(prev[rowId] || {}), [field]: cleanVal } }));
   }, []);
 
+  const handleCheckLookup = async (rowId, checkNo) => {
+    const cleanNo = String(checkNo || '').trim();
+    if (!cleanNo) {
+      setSnack({ severity: 'info', msg: 'Please enter a check number to lookup in Check Book.' });
+      return;
+    }
+
+    try {
+      const res = await axios.get(`${API_URL}/check-book/by-number/${encodeURIComponent(cleanNo)}`);
+      if (res.data?.success && res.data.checks && res.data.checks.length > 0) {
+        const currentRow = localData[rowId] || entries.find(e => e._id === rowId) || {};
+        const rowDate = currentRow['Transaction Date'] || currentRow.transactionDate || '';
+        setCheckSelectionModal({
+          open: true,
+          rowId,
+          checkNumber: cleanNo,
+          matchingChecks: res.data.checks,
+          defaultReceivingDate: rowDate,
+        });
+      } else {
+        setSnack({
+          severity: 'warning',
+          msg: 'No saved check found for this check number.'
+        });
+      }
+    } catch (err) {
+      console.error('Check lookup error:', err);
+      setSnack({
+        severity: 'error',
+        msg: 'Failed to verify check number in Check Book.'
+      });
+    }
+  };
+
+  const handleConfirmCheckSelection = async (selectedCheck, confirmedReceivingDate) => {
+    const rowId = checkSelectionModal.rowId;
+    if (!rowId || !selectedCheck) return;
+
+    const currentRow = localData[rowId] || entries.find(e => e._id === rowId) || {};
+    const rowMonth = currentRow['Month'] || currentRow.selectedMonth || currentRow.month || '';
+    let finalTxDate = confirmedReceivingDate || currentRow['Transaction Date'] || '';
+
+    // If row has an explicit Month (e.g. Previous Month 'September'), ensure finalTxDate month matches
+    if (rowMonth && finalTxDate) {
+      const mIdx = MONTHS.findIndex(m => m.toLowerCase() === String(rowMonth).toLowerCase());
+      if (mIdx !== -1) {
+        const expectedMonthNum = mIdx + 1;
+        const dateParts = finalTxDate.split(/[-\/\.]/);
+        if (dateParts.length === 3) {
+          if (dateParts[0].length === 4) {
+            // YYYY-MM-DD
+            const y = parseInt(dateParts[0], 10);
+            const curM = parseInt(dateParts[1], 10);
+            if (curM !== expectedMonthNum) {
+              const d = Math.min(parseInt(dateParts[2], 10) || 1, new Date(y, expectedMonthNum, 0).getDate());
+              finalTxDate = `${y}-${String(expectedMonthNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            }
+          } else {
+            // DD-MM-YYYY
+            let y = parseInt(dateParts[2], 10);
+            if (y < 100) y += 2000;
+            const curM = parseInt(dateParts[1], 10);
+            if (curM !== expectedMonthNum) {
+              const d = Math.min(parseInt(dateParts[0], 10) || 1, new Date(y, expectedMonthNum, 0).getDate());
+              finalTxDate = `${String(d).padStart(2, '0')}-${String(expectedMonthNum).padStart(2, '0')}-${y}`;
+            }
+          }
+        }
+      }
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      await axios.patch(
+        `${API_URL}/check-book/${selectedCheck._id}/confirm-receive`,
+        {
+          receivingDate: finalTxDate,
+          bankBookRowId: rowId.startsWith('new_') ? '' : rowId,
+        },
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }
+      );
+    } catch (patchErr) {
+      console.warn('Could not patch receivingDate directly, continuing:', patchErr);
+    }
+
+    setLocalData((prev) => ({
+      ...prev,
+      [rowId]: {
+        ...(prev[rowId] || {}),
+        'Cheque No': String(selectedCheck.checkNumber),
+        'Deposit': String(selectedCheck.checkAmount),
+        'Transaction Date': finalTxDate,
+        'checkBookId': selectedCheck._id,
+        _checkBookRecord: {
+          checkId: selectedCheck._id,
+          checkNumber: selectedCheck.checkNumber,
+          checkAmount: selectedCheck.checkAmount,
+          checkDate: selectedCheck.checkDate,
+          receivingDate: finalTxDate,
+          documentUrl: selectedCheck.documentUrl,
+          documentName: selectedCheck.documentName,
+        },
+      },
+    }));
+
+    setSnack({
+      severity: 'success',
+      msg: `Check #${selectedCheck.checkNumber} confirmed! DEPOSIT set to ₹${Number(selectedCheck.checkAmount).toLocaleString('en-IN')}`,
+    });
+  };
+
   const handleAddRow = () => {
     const newId = 'new_' + Date.now();
     const mIdx = MONTHS.findIndex(m => m.toLowerCase() === (displayMonth || '').toLowerCase());
@@ -1214,10 +1343,10 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
       const token = localStorage.getItem('token');
       const ids = [...selectedIds].filter(id => !id.startsWith('new_'));
       if (ids.length > 0) {
-        // Clear main cashbook for each deleted 'Main cash' row
+        // Clear main cashbook for each deleted 'Main cash' or 'Main Cash Book' row
         for (const id of ids) {
           const row = entries.find(e => e._id === id);
-          if (row && row['Ledger Name'] && row['Ledger Name'].toLowerCase() === 'main cash') {
+          if (row && row['Ledger Name'] && isMainCash(row['Ledger Name'])) {
             const transactionDate = row['Transaction Date'] || row.transactionDate;
             if (transactionDate) {
               try {
@@ -1285,11 +1414,12 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
           }
         }
 
-        if (ledger === 'main cash') {
+        if (isMainCash(ledger)) {
           const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
+          const d = parseFloat(String(mergedRow['Deposit'] || '').replace(/,/g, ''));
 
-          if (isNaN(w) || w <= 0) {
-            setSnack({ severity: 'error', msg: 'Main Cash requires a valid Withdraw Amount > 0.' });
+          if ((isNaN(w) || w <= 0) && (isNaN(d) || d <= 0)) {
+            setSnack({ severity: 'error', msg: `${mergedRow['Ledger Name'] || 'Main Cash'} requires a valid Withdraw or Deposit Amount > 0.` });
             setSaving(false);
             return;
           }
@@ -1365,11 +1495,12 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
           }
         }
 
-        if (ledger === 'main cash') {
+        if (isMainCash(ledger)) {
           const w = parseFloat(String(mergedRow['Withdraw'] || '').replace(/,/g, ''));
+          const d = parseFloat(String(mergedRow['Deposit'] || '').replace(/,/g, ''));
 
-          if (isNaN(w) || w <= 0) {
-            setSnack({ severity: 'error', msg: 'Main Cash requires a valid Withdraw Amount > 0.' });
+          if ((isNaN(w) || w <= 0) && (isNaN(d) || d <= 0)) {
+            setSnack({ severity: 'error', msg: `${mergedRow['Ledger Name'] || 'Main Cash'} requires a valid Withdraw or Deposit Amount > 0.` });
             setSaving(false);
             return;
           }
@@ -1423,16 +1554,26 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
         const transactionDate = changes['Transaction Date'] ?? originalEntry?.['Transaction Date'] ?? originalEntry?.transactionDate ?? '';
 
         if (!transactionDate) continue;
-        const newIsMainCash = typeof newLedger === 'string' && newLedger.toLowerCase() === 'main cash';
-        const oldWasMainCash = typeof oldLedger === 'string' && oldLedger.toLowerCase() === 'main cash';
+        const newIsMainCash = isMainCash(newLedger);
+        const oldWasMainCash = isMainCash(oldLedger);
 
         if (newIsMainCash) {
           const withdraw = changes['Withdraw'] !== undefined ? changes['Withdraw'] : (originalEntry?.['Withdraw'] || originalEntry?.withdraw || '');
-          if (!withdraw || parseFloat(withdraw) <= 0) continue;
+          const deposit = changes['Deposit'] !== undefined ? changes['Deposit'] : (originalEntry?.['Deposit'] || originalEntry?.deposit || '');
+          const wNum = parseFloat(String(withdraw || '').replace(/,/g, '')) || 0;
+          const dNum = parseFloat(String(deposit || '').replace(/,/g, '')) || 0;
+          const txAmt = dNum > 0 ? dNum : wNum;
+
+          if (txAmt <= 0) continue;
+
+          const rowMonth = changes['Month'] || originalEntry?.['Month'] || '';
           try {
             await axios.post(`${API_URL}/account-details/sync-main-cash`, {
               transactionDate,
-              withdrawAmount: parseFloat(withdraw)
+              amount: txAmt,
+              depositAmount: dNum,
+              withdrawAmount: wNum,
+              month: rowMonth
             }, { headers: { Authorization: `Bearer ${token}` } });
           } catch (syncErr) {
             syncErrors.push(syncErr.response?.data?.error || `Sync failed for ${transactionDate}: ${syncErr.message}`);
@@ -2068,6 +2209,9 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                                   if (isCreditor) {
                                     return getCreditorAllowedMonths();
                                   }
+                                  if (isMainCash(rowLedger)) {
+                                    return getCreditorAllowedMonths();
+                                  }
                                   if (isPrintingAndStationary(rowLedger)) {
                                     return getPrintingStationaryMonths();
                                   }
@@ -2081,8 +2225,8 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                                       ? getUniqueUpperOptions(LEDGER_OPTIONS)
                                       : ((rowLedger?.toLowerCase().includes('payment') && rowLedger?.toLowerCase().includes('receiv'))
                                         ? ['NVL', 'NVCL']
-                                        : (rowLedger?.toLowerCase() === 'main cash'
-                                          ? ['MAIN CASH', ...getUniqueUpperOptions(NAMES_OPTIONS, Object.keys(ownerVehicleMap)).filter(n => n !== 'MAIN CASH')]
+                                        : (isMainCash(rowLedger)
+                                          ? ['MAIN CASH BOOK', 'MAIN CASH', ...getUniqueUpperOptions(NAMES_OPTIONS, Object.keys(ownerVehicleMap)).filter(n => n !== 'MAIN CASH' && n !== 'MAIN CASH BOOK')]
                                           : getUniqueUpperOptions(NAMES_OPTIONS, Object.keys(ownerVehicleMap))))
                             }
                             value={
@@ -2211,14 +2355,15 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                                   }));
                                 }
 
-                                // ── MAIN CASH: default Names to 'Main Cash' without restricting Month or Date ──
-                                if (currentLedgerLower === 'main cash' && col.key === 'Ledger Name') {
+                                // ── MAIN CASH: default Names to 'Main Cash' or 'MAIN CASH BOOK' without restricting Month or Date ──
+                                if (isMainCash(currentLedger) && col.key === 'Ledger Name') {
+                                  const defaultName = String(currentLedger).toUpperCase() === 'MAIN CASH BOOK' ? 'MAIN CASH BOOK' : 'MAIN CASH';
                                   setLocalData(prev => ({
                                     ...prev,
                                     [row._id]: {
                                       ...prev[row._id],
                                       'Ledger Name': currentLedger,
-                                      'Names': prev[row._id]?.['Names'] || row['Names'] || 'Main Cash',
+                                      'Names': prev[row._id]?.['Names'] || row['Names'] || defaultName,
                                     }
                                   }));
                                 }
@@ -2388,6 +2533,70 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
                               transition: 'all 0.2s', boxSizing: 'border-box'
                             }}
                           />
+                        );
+                      })() : col.key === 'Cheque No' ? (() => {
+                        const rowLedger = String(localData[row._id]?.['Ledger Name'] || row['Ledger Name'] || '').trim();
+                        const isMainCashRow = isMainCash(rowLedger);
+                        const isLinked = !!(localData[row._id]?._checkBookRecord || (row.checkBookId && !localData[row._id]?.['Cheque No']));
+
+                        return (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.5, width: '100%', height: '100%' }}>
+                            <input
+                              className="erp-input"
+                              type="text"
+                              value={val}
+                              placeholder={isMainCashRow ? "Check No (Enter to search)..." : ""}
+                              onChange={(e) => handleCellEdit(row._id, col.key, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleCheckLookup(row._id, e.target.value);
+                                }
+                              }}
+                              onBlur={(e) => {
+                                const typedVal = e.target.value?.trim();
+                                if (
+                                  isMainCashRow &&
+                                  typedVal &&
+                                  !checkSelectionModal.open &&
+                                  (!row['Cheque No'] || typedVal !== String(row['Cheque No']).trim()) &&
+                                  localData[row._id]?._checkBookRecord?.checkNumber !== typedVal
+                                ) {
+                                  handleCheckLookup(row._id, typedVal);
+                                }
+                              }}
+                              style={{
+                                flex: 1, minWidth: 60, height: '100%', border: '1px solid transparent', padding: '6px 6px',
+                                background: 'transparent', outline: 'none', fontSize: '12px', color: cellColor, fontWeight: cellFontWeight,
+                                transition: 'all 0.2s', boxSizing: 'border-box'
+                              }}
+                            />
+                            {isLinked && (
+                              <Tooltip title="Check verified & linked from Check Book">
+                                <CheckCircleIcon sx={{ fontSize: 16, color: '#10b981', flexShrink: 0 }} />
+                              </Tooltip>
+                            )}
+                            {(isMainCashRow || !!val) && (
+                              <Tooltip title="Lookup Check in Check Book (or press Enter)">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleCheckLookup(row._id, val)}
+                                  sx={{
+                                    p: '3px',
+                                    flexShrink: 0,
+                                    bgcolor: val ? '#eff6ff' : '#f8fafc',
+                                    color: val ? '#2563eb' : '#94a3b8',
+                                    border: '1px solid',
+                                    borderColor: val ? '#bfdbfe' : '#e2e8f0',
+                                    borderRadius: '6px',
+                                    '&:hover': { bgcolor: '#dbeafe', color: '#1d4ed8' }
+                                  }}
+                                >
+                                  <SearchIcon sx={{ fontSize: 14 }} />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
                         );
                       })() : (
                         <input
@@ -3600,6 +3809,16 @@ export default function AccountDetails({ onBack, onOpenPrintingStationary }) {
       <CheckBookModal
         open={openCheckBook}
         onClose={() => setOpenCheckBook(false)}
+      />
+
+      {/* ── Check Selection Modal (Bank Book Check Lookup) ── */}
+      <CheckSelectionModal
+        open={checkSelectionModal.open}
+        onClose={() => setCheckSelectionModal(prev => ({ ...prev, open: false }))}
+        checkNumber={checkSelectionModal.checkNumber}
+        matchingChecks={checkSelectionModal.matchingChecks}
+        defaultReceivingDate={checkSelectionModal.defaultReceivingDate}
+        onConfirm={handleConfirmCheckSelection}
       />
 
     </Box>

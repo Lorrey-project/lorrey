@@ -12,7 +12,7 @@ export function exportToCsv(filename, rows) {
     if (!rows || rows.length === 0) return;
 
     // 1. Clean the data: Filter out internal MongoDB / private keys
-    const SKIP_KEYS = new Set(['_id', '__v', '_invoiceId', '_cementId', '_tds_percent', '_is_ato', '_source', '_auto_updated_at', 'NVCL INCENTIVE', '8.5% NVCL', '10WH EXTRA 8.5% INCENTIVE']);
+    const SKIP_KEYS = new Set(['_id', '__v', '_invoiceId', '_cementId', '_tds_percent', '_is_ato', '_source', '_auto_updated_at', 'NVCL INCENTIVE', '8.5% NVCL', '10WH EXTRA 8.5% INCENTIVE', '15% EXTRA 6WH INCENTIVE', 'extra6WIncentive', 'RAFTER', 'manualOtherDeduction', 'cementOtherDeduction', 'tds_manual', 'dedicatedIncentive_manual', '_tds_rate']);
     
     const cleanedRows = rows.map(originalRow => {
         const cleaned = {};

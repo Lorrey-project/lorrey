@@ -317,6 +317,7 @@ function AppContent() {
           onOpenPumpPaymentRegister={() => handleViewChange('pumpPaymentRegister')}
           onOpenPieChart={(subTab) => handleViewChange('pieChart', subTab)}
           onOpenVehicleMktAssoc={() => handleViewChange('pieChart', 'vehicleMktAssoc')}
+          onOpenBankBook={() => handleViewChange('accountDetails')}
         />
       );
     }

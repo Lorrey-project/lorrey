@@ -224,9 +224,9 @@ const COLUMNS = [
   // ⑬ Net Amount  (calculated)
   { key: 'NET AMOUNT', label: 'Net Amount', width: 100, calc: true, highlight: '#dcfce7' },
   // ⑭–⑲ Incentives from Cement Register
-  { key: '10WH Extra 8.5% Incentive', label: '10WH Extra\n8.5% Incentive', width: 110, calc: true, bg: '#e0f2fe' },
   { key: 'DEDICATED INCENTIVE', label: 'Dedicated\nIncentive', width: 110, editable: true, bg: '#e0f2fe' },
-  { key: 'RAFTER', label: 'Others', width: 80, calc: true, bg: '#e0f2fe' },
+  { key: '10WH Extra 8.5% Incentive', label: '10WH Extra\n8.5% Incentive', width: 110, calc: true, bg: '#e0f2fe' },
+  { key: '15% Extra 6WH Incentive', label: '15% Extra\n6WH Incentive', width: 110, calc: true, bg: '#e0f2fe' },
   { key: 'EXTRA U/L', label: 'Extra U/L', width: 80, calc: true, bg: '#e0f2fe' },
   { key: 'TOLL UP', label: 'Toll UP', width: 80, calc: true, bg: '#fef08a' },
   { key: 'TOLL DOWN', label: 'Toll Down', width: 80, calc: true, bg: '#fef08a' },
@@ -292,7 +292,7 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
       const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
       // ── High Performance: Fetch all independent data in parallel via Promise.all ──
-      const [truckRes, deductionRes, cementRes, manualRes, freightCreditorGstRes, voucherRes, prevDuesRes] = await Promise.all([
+      const [truckRes, deductionRes, cementRes, manualRes, freightCreditorGstRes, voucherRes, prevDuesRes, eligRes] = await Promise.all([
         axios.get(`${API_URL}/truck-contacts`),
         axios.get(`${API_URL}/settings/projected-deductions`, { headers: authHeaders }).catch(() => ({ data: {} })),
         axios.get(`${API_URL}/party-payment/cement-data`, { params: { month: selMonth, year: calendarYear } }),
@@ -302,7 +302,8 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
           return { data: { vehicleTotals: {} } };
         }),
         axios.get(`${API_URL}/voucher`, { params: { voucherType: 'CREDIT' } }).catch(() => ({ data: { vouchers: [] } })),
-        axios.get(`${API_URL}/party-payment/previous-month-dues`, { params: { month: selMonth, year: calendarYear } }).catch(() => ({ data: { previousMonthDues: {} } }))
+        axios.get(`${API_URL}/party-payment/previous-month-dues`, { params: { month: selMonth, year: calendarYear } }).catch(() => ({ data: { previousMonthDues: {} } })),
+        axios.get(`${API_URL}/cement-register/incentive-eligibilities`, { params: { month: selMonth, year: calendarYear }, headers: authHeaders }).catch(() => ({ data: { eligibilities: {} } }))
       ]);
 
       const trucksData = truckRes.data?.contacts || [];
@@ -311,6 +312,7 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
       const gstVehicleTotals = freightCreditorGstRes.data?.vehicleTotals || {};
       const allVouchers = voucherRes.data?.vouchers || [];
       const prevMonthDuesByVeh = prevDuesRes.data?.previousMonthDues || {};
+      const eligMap = eligRes?.data?.eligibilities || {};
       const gpsTripChargeSetting = (deductionRes.data?.success && deductionRes.data?.data)
         ? num(deductionRes.data.data.gpsTripCharge)
         : 0;
@@ -365,21 +367,27 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
         }
       });
 
-      // 2. Compute exact Vehicle-Wise Incentive Calculation Sheet -> TOTAL (Projected) & 10WH Extra 8.5% Incentive
+      // 2. Compute exact Vehicle-Wise Incentive Calculation Sheet -> TOTAL (Projected), 10WH Extra 8.5% Incentive & 15% Extra 6WH Incentive
       const incentiveList = buildIncentiveData(entries, calendarYear, selMonth - 1, trucksData);
       const vehicleProjectedIncentiveMap = {};
       const vehicle10WExtraIncentiveMap = {};
       const ownerVehicle10WExtraIncentiveMap = {};
+      const vehicle6WExtraIncentiveMap = {};
+      const ownerVehicle6WExtraIncentiveMap = {};
       incentiveList.forEach(item => {
         const vKey = normVeh(item.truckNo);
         const ownerKey = (item.ownerName || '').trim().toUpperCase();
         // Authoritative 10WH Extra 8.5% Incentive = Projected / Dedicated -> 10WH Extra 8.5% Incentive (item.extra10W)
         const extra10WAmt = item.extra10W !== undefined && item.extra10W !== null ? (num(item.extra10W) || 0) : 0;
+        // Authoritative 15% Extra 6WH Incentive = Projected / Dedicated -> 6WH Extra Incentive (item.extra6W)
+        const extra6WAmt = item.extra6W !== undefined && item.extra6W !== null ? (num(item.extra6W) || 0) : 0;
         if (vKey) {
           vehicleProjectedIncentiveMap[vKey] = item.totalFinal || 0;
           vehicle10WExtraIncentiveMap[vKey] = extra10WAmt;
+          vehicle6WExtraIncentiveMap[vKey] = extra6WAmt;
           if (ownerKey) {
             ownerVehicle10WExtraIncentiveMap[`${ownerKey}_${vKey}`] = extra10WAmt;
+            ownerVehicle6WExtraIncentiveMap[`${ownerKey}_${vKey}`] = extra6WAmt;
           }
         }
       });
@@ -409,11 +417,15 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
             'OTHER DEDUCTION': 0,   // = SUM of "OTHERS DEDUCTION"
             'GPS TRIP CHARGE': 0,   // Populated once per party per month below
             'GPS DEVICE': 0,   // = SUM of "GPS DEVICE"
+            'DEDICATED INCENTIVE': 0,
             '10WH Extra 8.5% Incentive': 0,
             '10WH EXTRA 8.5% INCENTIVE': 0,
+            '15% Extra 6WH Incentive': 0,
+            '15% EXTRA 6WH INCENTIVE': 0,
+            'extra6WIncentive': 0,
             'NVCL INCENTIVE': 0,
             '8.5% NVCL': 0,
-            'RAFTER': 0,   // = SUM of "RAFTER"
+            'RAFTER': 0,   // = SUM of "RAFTER" (kept for compatibility)
             'EXTRA U/L': 0,   // = SUM of "EXTRA UNLOADING"
             'TOLL UP': 0,   // = SUM of "UP TOLL"
             'TOLL DOWN': 0,   // = SUM of "DOWN TOLL"
@@ -516,8 +528,12 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
             'OTHER DEDUCTION': 0,
             'GPS TRIP CHARGE': 0,
             'GPS DEVICE': 0,
+            'DEDICATED INCENTIVE': 0,
             '10WH Extra 8.5% Incentive': 0,
             '10WH EXTRA 8.5% INCENTIVE': 0,
+            '15% Extra 6WH Incentive': 0,
+            '15% EXTRA 6WH INCENTIVE': 0,
+            'extra6WIncentive': 0,
             'NVCL INCENTIVE': 0,
             '8.5% NVCL': 0,
             'RAFTER': 0,
@@ -546,8 +562,12 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
             'OTHER DEDUCTION': 0,
             'GPS TRIP CHARGE': 0,
             'GPS DEVICE': 0,
+            'DEDICATED INCENTIVE': 0,
             '10WH Extra 8.5% Incentive': 0,
             '10WH EXTRA 8.5% INCENTIVE': 0,
+            '15% Extra 6WH Incentive': 0,
+            '15% EXTRA 6WH INCENTIVE': 0,
+            'extra6WIncentive': 0,
             'NVCL INCENTIVE': 0,
             '8.5% NVCL': 0,
             'RAFTER': 0,
@@ -617,6 +637,21 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
           auth10WExtraIncentive = num(saved.extra10WIncentive);
         } else if (saved.nvclIncentive !== undefined && saved.nvclIncentive !== null) {
           auth10WExtraIncentive = num(saved.nvclIncentive);
+        } else if (eligMap[vKey]?.extra10WheelIncentive?.amount !== undefined) {
+          auth10WExtraIncentive = num(eligMap[vKey].extra10WheelIncentive.amount);
+        }
+
+        // ── Primary Source: Incentive Calculation Sheet PROJECTED / DEDICATED -> 6WH Extra Incentive (15%) ──
+        // Authoritative mapping from Incentive Entry (Projected / Dedicated -> 6WH Extra Incentive)
+        let auth6WExtraIncentive = 0;
+        if (ownerVehicle6WExtraIncentiveMap[ownerVehKey] !== undefined) {
+          auth6WExtraIncentive = ownerVehicle6WExtraIncentiveMap[ownerVehKey];
+        } else if (vehicle6WExtraIncentiveMap[vKey] !== undefined) {
+          auth6WExtraIncentive = vehicle6WExtraIncentiveMap[vKey];
+        } else if (saved.extra6WIncentive !== undefined && saved.extra6WIncentive !== null) {
+          auth6WExtraIncentive = num(saved.extra6WIncentive);
+        } else if (eligMap[vKey]?.extra6WheelIncentive?.amount !== undefined) {
+          auth6WExtraIncentive = num(eligMap[vKey].extra6WheelIncentive.amount);
         }
 
         // ── Primary Source: Incentive Calculation Sheet TOTAL (Projected) vehicle-wise ──
@@ -635,18 +670,22 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
 
         return {
           ...ag,
+          'DEDICATED INCENTIVE': dedicatedIncentiveVal,
+          'dedicatedIncentive_manual': isDedicatedIncentiveManual,
           '10WH Extra 8.5% Incentive': auth10WExtraIncentive,
           '10WH EXTRA 8.5% INCENTIVE': auth10WExtraIncentive,
+          '15% Extra 6WH Incentive': auth6WExtraIncentive,
+          '15% EXTRA 6WH INCENTIVE': auth6WExtraIncentive,
+          'extra6WIncentive': auth6WExtraIncentive,
           'NVCL INCENTIVE': auth10WExtraIncentive,
           '8.5% NVCL': auth10WExtraIncentive,
+          'RAFTER': auth6WExtraIncentive,
           'OTHER DEDUCTION': totalOtherDeduction,
           'manualOtherDeduction': manualOtherDeduction,
           'cementOtherDeduction': ag['cementOtherDeduction'] || ag['OTHER DEDUCTION'] || 0,
           'TDS': tdsVal,
           'tds_manual': isTdsManual,
           '_tds_rate': tdsRate,
-          'DEDICATED INCENTIVE': dedicatedIncentiveVal,
-          'dedicatedIncentive_manual': isDedicatedIncentiveManual,
           'GST FCM': (authoritativeGstFcm !== null && !isNaN(authoritativeGstFcm)) ? authoritativeGstFcm : null,
           'WITHHOLD AMOUNT': num(saved.withholdAmount),
           'WITHHOLD REASON': saved.withholdReason || '',
@@ -761,19 +800,30 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
       // ⑳ TDS on Incentive = (Dedicated Incentive + Extra U/L) × 1% (or vehicle TDS rate)
       r['TDS ON INCENTIVE'] = round2((num(r['DEDICATED INCENTIVE']) + num(r['EXTRA U/L'])) * (base._tds_rate !== undefined ? num(base._tds_rate) : 0.01));
 
-      // ㉑ Total Freight = Net Amount + (10WH Extra 8.5% Incentive + Dedicated + Extra UL + Toll UP + Toll Down) − TDS on Incentive
+      // ㉑ Total Freight = Net Amount + (Dedicated + 10WH Extra 8.5% Incentive + 15% Extra 6WH Incentive + Extra UL + Toll UP + Toll Down) − TDS on Incentive
       const extra10Val = num(
         r['10WH Extra 8.5% Incentive'] !== undefined
           ? r['10WH Extra 8.5% Incentive']
           : (r['10WH EXTRA 8.5% INCENTIVE'] !== undefined ? r['10WH EXTRA 8.5% INCENTIVE'] : (r['NVCL INCENTIVE'] !== undefined ? r['NVCL INCENTIVE'] : r['8.5% NVCL']))
       );
+      const extra6Val = num(
+        r['15% Extra 6WH Incentive'] !== undefined
+          ? r['15% Extra 6WH Incentive']
+          : (r['15% EXTRA 6WH INCENTIVE'] !== undefined ? r['15% EXTRA 6WH INCENTIVE'] : (r['extra6WIncentive'] !== undefined ? r['extra6WIncentive'] : r['RAFTER']))
+      );
       r['10WH Extra 8.5% Incentive'] = extra10Val;
       r['10WH EXTRA 8.5% INCENTIVE'] = extra10Val;
       r['NVCL INCENTIVE'] = extra10Val;
       r['8.5% NVCL'] = extra10Val;
+      r['15% Extra 6WH Incentive'] = extra6Val;
+      r['15% EXTRA 6WH INCENTIVE'] = extra6Val;
+      r['extra6WIncentive'] = extra6Val;
+      r['RAFTER'] = extra6Val;
+
       const incentiveSum =
-        extra10Val +
         num(r['DEDICATED INCENTIVE']) +
+        extra10Val +
+        extra6Val +
         num(r['EXTRA U/L']) +
         num(r['TOLL UP']) +
         num(r['TOLL DOWN']);
@@ -867,6 +917,7 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
           gstFcm: num(cr['GST FCM']),
           extra10WIncentive: num(cr['10WH Extra 8.5% Incentive'] !== undefined ? cr['10WH Extra 8.5% Incentive'] : (cr['10WH EXTRA 8.5% INCENTIVE'] !== undefined ? cr['10WH EXTRA 8.5% INCENTIVE'] : cr['NVCL INCENTIVE'])),
           nvclIncentive: num(cr['10WH Extra 8.5% Incentive'] !== undefined ? cr['10WH Extra 8.5% Incentive'] : (cr['10WH EXTRA 8.5% INCENTIVE'] !== undefined ? cr['10WH EXTRA 8.5% INCENTIVE'] : cr['NVCL INCENTIVE'])),
+          extra6WIncentive: num(cr['15% Extra 6WH Incentive'] !== undefined ? cr['15% Extra 6WH Incentive'] : (cr['15% EXTRA 6WH INCENTIVE'] !== undefined ? cr['15% EXTRA 6WH INCENTIVE'] : cr['extra6WIncentive'])),
           withholdAmount: num(cr['WITHHOLD AMOUNT']),
           withholdReason: cr['WITHHOLD REASON'] || '',
           otherReason: cr['OTHER REASON'] || '',
@@ -1093,7 +1144,13 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
                     </td>
 
                     {COLUMNS.map(col => {
-                      const val = row[col.key] !== undefined ? row[col.key] : (col.key === '10WH Extra 8.5% Incentive' ? (row['NVCL INCENTIVE'] !== undefined ? row['NVCL INCENTIVE'] : row['8.5% NVCL']) : undefined);
+                      const val = row[col.key] !== undefined
+                        ? row[col.key]
+                        : (col.key === '10WH Extra 8.5% Incentive'
+                            ? (row['NVCL INCENTIVE'] !== undefined ? row['NVCL INCENTIVE'] : row['8.5% NVCL'])
+                            : (col.key === '15% Extra 6WH Incentive'
+                                ? (row['extra6WIncentive'] !== undefined ? row['extra6WIncentive'] : (row['15% EXTRA 6WH INCENTIVE'] !== undefined ? row['15% EXTRA 6WH INCENTIVE'] : row['RAFTER']))
+                                : undefined));
                       const isDirty = localEdits[ri]?.[col.key] !== undefined;
                       const isSticky = col.key === 'OWNER NAME' || col.key === 'VEHICLE NO';
                       const leftPx = isSticky ? stickyLeft[col.key] : undefined;
