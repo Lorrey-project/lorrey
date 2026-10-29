@@ -43,6 +43,24 @@ function normVeh(val) {
   return String(val).toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+export function matchVehicleRegistration(v1, v2) {
+  if (!v1 || !v2) return false;
+  const c1 = String(v1).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const c2 = String(v2).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!c1 || !c2) return false;
+  if (c1 === c2) return true;
+  if (c1.length >= 4 && c2.length >= 4) {
+    return c1.endsWith(c2) || c2.endsWith(c1);
+  }
+  return false;
+}
+
+export function findCanonicalSystemTruck(excelTruck, systemTrucks = []) {
+  if (!excelTruck || !systemTrucks) return excelTruck;
+  const match = systemTrucks.find(st => matchVehicleRegistration(st.truckNo || st['Truck No'], excelTruck));
+  return match ? (match.truckNo || match['Truck No']) : excelTruck;
+}
+
 function parseExcelNum(val) {
   if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return isNaN(val) ? 0 : val;
@@ -456,7 +474,8 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
     const sumW10 = (hasW10Nvl ? actW10Nvl : 0) + (hasW10Nvcl ? actW10Nvcl : 0);
     const sumW6 = (hasW6Nvl ? actW6Nvl : 0) + (hasW6Nvcl ? actW6Nvcl : 0);
 
-    actuals[t] = {
+    const canonicalKey = findCanonicalSystemTruck(t, systemTrucks);
+    const entryData = {
       nvl: hasNvl ? String(actNvl) : '0',
       nvcl: hasNvcl ? String(actNvcl) : '0',
       w10_nvl: hasW10Nvl ? String(actW10Nvl) : '0',
@@ -468,15 +487,17 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
       difference: totalDiff,
       diffBreakdown: bds
     };
+    actuals[t] = entryData;
+    if (canonicalKey && canonicalKey !== t) {
+      actuals[canonicalKey] = entryData;
+    }
   }
 
   // Zero Value Rule: Pre-populate system vehicles that had no entries in Excel with '0'
   (systemTrucks || []).forEach(st => {
     const rawNo = st.truckNo || st['Truck No'];
-    const norm = normVeh(rawNo);
-    const canonical = systemTruckMap.get(norm) || rawNo;
-    if (canonical && !actuals[canonical]) {
-      actuals[canonical] = {
+    if (rawNo && !actuals[rawNo]) {
+      actuals[rawNo] = {
         nvl: '0',
         nvcl: '0',
         w10_nvl: '0',
@@ -492,11 +513,11 @@ export function parseIncentiveSheetData(aoa, systemTrucks = []) {
   });
 
   const uniqueTruckList = Object.keys(truckDiffs);
-  const matchedTrucks = systemTruckSet.size > 0
-    ? uniqueTruckList.filter(t => systemTruckSet.has(normVeh(t)))
+  const matchedTrucks = (systemTrucks && systemTrucks.length > 0)
+    ? uniqueTruckList.filter(t => systemTrucks.some(st => matchVehicleRegistration(st.truckNo || st['Truck No'], t)))
     : uniqueTruckList;
-  const unmatchedTrucks = systemTruckSet.size > 0
-    ? uniqueTruckList.filter(t => !systemTruckSet.has(normVeh(t)))
+  const unmatchedTrucks = (systemTrucks && systemTrucks.length > 0)
+    ? uniqueTruckList.filter(t => !systemTrucks.some(st => matchVehicleRegistration(st.truckNo || st['Truck No'], t)))
     : [];
 
   const unmatchedTruckDetails = unmatchedTrucks.map(t => ({

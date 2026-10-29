@@ -353,22 +353,23 @@ export function findContactForRecord(ownerName, vehicleNo, contactsList = [], re
     matched = contactsList.find(c => c && (String(c._id) === targetId || String(c.id) === targetId));
   }
 
-  // 2. Exact Owner Name + Vehicle Number
+  // 2. Exact Owner Name + Vehicle Number (supports full registration and 4-digit suffix)
   if (!matched && cleanOwner && cleanVeh) {
     matched = contactsList.find(c => {
       if (!c) return false;
       const cVeh = String(c["Truck No "] || c["Truck No"] || c["Truck No."] || c["Truck No. "] || c.truck_no || c.truckNo || c.vehicleNo || c["Vehicle No"] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
       const cOwner = String(c["Owner Name "] || c["Owner Name"] || c.owner_name || c.ownerName || '').trim().toLowerCase();
-      return cVeh === cleanVeh && cOwner === cleanOwner;
+      const vehMatches = cVeh === cleanVeh || (cleanVeh.length >= 4 && cVeh.length >= 4 && (cVeh.endsWith(cleanVeh) || cleanVeh.endsWith(cVeh)));
+      return vehMatches && (cOwner === cleanOwner || cOwner.includes(cleanOwner) || cleanOwner.includes(cOwner));
     });
   }
 
-  // 3. Vehicle Number alone (unique vehicle registration)
+  // 3. Vehicle Number alone (unique vehicle registration, exact or 4-digit suffix)
   if (!matched && cleanVeh) {
     matched = contactsList.find(c => {
       if (!c) return false;
       const cVeh = String(c["Truck No "] || c["Truck No"] || c["Truck No."] || c["Truck No. "] || c.truck_no || c.truckNo || c.vehicleNo || c["Vehicle No"] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      return cVeh === cleanVeh;
+      return cVeh === cleanVeh || (cleanVeh.length >= 4 && cVeh.length >= 4 && (cVeh.endsWith(cleanVeh) || cleanVeh.endsWith(cVeh)));
     });
   }
 

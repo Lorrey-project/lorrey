@@ -29,7 +29,7 @@ async function setupMongo() {
 
 async function runTests() {
   console.log('========================================================================');
-  console.log('STARTING INCENTIVE CALCULATION SHEET ACCEPTANCE TEST SUITE (15 TESTS)');
+  console.log('STARTING INCENTIVE CALCULATION SHEET ACCEPTANCE TEST SUITE (16 TESTS)');
   console.log('========================================================================\n');
 
   await setupMongo();
@@ -556,8 +556,60 @@ async function runTests() {
     assert(actualsCount >= 0, 'Actuals collection must be intact');
     console.log(`✅ PASSED Test 15: Historical actuals and settlement records remain untouched (${actualsCount} documents found)\n`);
 
+    // -------------------------------------------------------------------------
+    // TEST 16: Vehicle number normalization — 4-digit vehicle numbers in cement register
+    // match full registrations in Party Master and calculate standard incentives without zeroing out
+    // -------------------------------------------------------------------------
+    console.log('Test 16: 4-digit vehicle numbers in cement_register match full registration in Party Master');
+    const vehFull16 = 'WB39B9988';
+    const vehShort16 = '9988';
+    await ownerCol.deleteMany({ "Truck No": { $in: [vehFull16, vehShort16] } });
+    await entriesCol.deleteMany({ "VEHICLE NUMBER": { $in: [vehFull16, vehShort16] }, month: TEST_MONTH, year: TEST_YEAR });
+
+    await ownerCol.insertOne({
+      "Truck No": vehFull16,
+      "Owner Name": "Norm Test Owner",
+      "Type of vehicle": "12WH",
+      "TYPE OF CUSTOMER ": "ATOA",
+      "Dedicated Type": "Dedicated"
+    });
+    createdOwners.push(vehFull16);
+    createdOwners.push(vehShort16);
+
+    // 6 trips entered under 4-digit vehicle number '9988'
+    for (let i = 1; i <= 6; i++) {
+      const e = {
+        "VEHICLE NUMBER": vehShort16,
+        "INVOICE NO": `INV-T16-${i}`,
+        "LOADING DT": `0${i}-06-2026`,
+        month: TEST_MONTH,
+        year: TEST_YEAR,
+        "MT": 10,
+        "BILLING": 100, // 10 * 100 = 1000
+        "SITE": "NVL",
+        "Bill Type": "NT"
+      };
+      await entriesCol.insertOne(e);
+      createdEntries.push(e);
+    }
+
+    // A: Evaluation via 4-digit truck number (as queried by cement_register aggregation)
+    const res16Short = await evaluateVehicleIncentiveEligibility(vehShort16, TEST_MONTH, TEST_YEAR);
+    assert.strictEqual(res16Short.isDedicated, true, '4-digit vehicle must be recognized as Dedicated via full registration in Party Master');
+    assert.strictEqual(res16Short.qualifyingTripsCount, 6, 'Qualifying trips count for 4-digit vehicle must be 6');
+    assert.strictEqual(res16Short.standardIncentive.eligible, true, 'Standard incentive must be eligible');
+    assert.strictEqual(res16Short.standardIncentive.amount, 570, 'Standard incentive amount must be 570 (9.5% of 6000)');
+
+    // B: Evaluation via full registration (as queried when starting from Party Master)
+    const res16Full = await evaluateVehicleIncentiveEligibility(vehFull16, TEST_MONTH, TEST_YEAR);
+    assert.strictEqual(res16Full.isDedicated, true, 'Full registration must find trips logged with 4-digit vehicle in cement register');
+    assert.strictEqual(res16Full.qualifyingTripsCount, 6, 'Qualifying trips count for full registration must find all 6 trips');
+    assert.strictEqual(res16Full.standardIncentive.eligible, true, 'Standard incentive must be eligible');
+    assert.strictEqual(res16Full.standardIncentive.amount, 570, 'Standard incentive amount must be 570');
+    console.log('✅ PASSED Test 16: Bidirectional 4-digit/full registration matching operates accurately\n');
+
     console.log('========================================================================');
-    console.log('ALL 15 INCENTIVE CALCULATION SHEET ACCEPTANCE TESTS PASSED SUCCESSFULLY!');
+    console.log('ALL 16 INCENTIVE CALCULATION SHEET ACCEPTANCE TESTS PASSED SUCCESSFULLY!');
     console.log('========================================================================\n');
 
   } finally {

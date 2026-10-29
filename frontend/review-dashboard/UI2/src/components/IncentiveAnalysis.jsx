@@ -246,6 +246,57 @@ function truckDisplayType(row) {
   return cat === 'NVL' ? 'ATOA' : 'MKT';
 }
 
+// Universal vehicle number matcher (handles full registration e.g. WB39B8879 and short suffix 8879)
+export function matchVehicleRegistration(v1, v2) {
+  if (!v1 || !v2) return false;
+  const c1 = String(v1).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const c2 = String(v2).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!c1 || !c2) return false;
+  if (c1 === c2) return true;
+  if (c1.length >= 4 && c2.length >= 4) {
+    return c1.endsWith(c2) || c2.endsWith(c1);
+  }
+  return false;
+}
+
+// Find contact info from Party Master contacts list, matching exact or 4-digit suffix
+export function findMatchingContact(truck, rowOwner, truckContacts = []) {
+  if (!truck || !truckContacts || truckContacts.length === 0) return null;
+  const normT = String(truck).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!normT) return null;
+
+  const cleanRowOwner = String(rowOwner || '').trim().toLowerCase();
+
+  // 1. Exact registration match
+  const exact = truckContacts.find(c => {
+    const rawNo = c['Truck No '] || c['Truck No'] || c.truck_no || c.vehicleNo || c['Vehicle No'] || '';
+    const dbNo = String(rawNo).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    return dbNo === normT;
+  });
+  if (exact) return exact;
+
+  // 2. Suffix / 4-digit match
+  const matches = truckContacts.filter(c => {
+    const rawNo = c['Truck No '] || c['Truck No'] || c.truck_no || c.vehicleNo || c['Vehicle No'] || '';
+    const dbNo = String(rawNo).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    if (!dbNo || !normT) return false;
+    if (dbNo.length >= 4 && normT.length >= 4) {
+      return dbNo.endsWith(normT) || normT.endsWith(dbNo);
+    }
+    return false;
+  });
+
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1 && cleanRowOwner) {
+    const ownerMatch = matches.find(c => {
+      const cOwner = String(c['Owner Name '] || c['Owner Name'] || c.owner_name || '').trim().toLowerCase();
+      return cOwner === cleanRowOwner || cOwner.includes(cleanRowOwner) || cleanRowOwner.includes(cOwner);
+    });
+    if (ownerMatch) return ownerMatch;
+  }
+  return matches[0] || null;
+}
+
 // ─── Core aggregation ─────────────────────────────────────────────────────────
 // Logic per user spec:
 //   Sum of Inv Qty  = Σ MT  (all monthly trips for this truck, per NVL/NVCL)
@@ -269,13 +320,8 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
     if (!truck) continue;
 
     if (!byTruck[truck]) {
-      // Find contact info from MongoDB using normalized vehicle registration
-      const normT = (truck || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      const contact = truckContacts.find(c => {
-        const rawNo = c['Truck No '] || c['Truck No'] || c.truck_no || c.vehicleNo || c['Vehicle No'] || '';
-        const dbNo = String(rawNo).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        return dbNo === normT;
-      });
+      // Find contact info from MongoDB using normalized vehicle registration (exact or 4-digit suffix)
+      const contact = findMatchingContact(truck, row['OWNER NAME'] || row['PARTY NAME'], truckContacts);
 
       // 1. WHEEL must come from Party Master (do NOT manually calculate or infer)
       const dbWheel = contact ? (
@@ -1129,10 +1175,10 @@ export function parseIncentiveWorkbook(wb, systemTrucks = []) {
   }
 
   // System trucks matching comparison
-  const systemTruckSet = new Set((systemTrucks || []).map(st => extractTruckNo(st.truckNo)).filter(Boolean));
+  const systemTruckList = (systemTrucks || []).map(st => st.truckNo || st['Truck No']).filter(Boolean);
   const uniqueExcelTrucks = Array.from(new Set(normalizedRecords.map(r => r.truckNo)));
-  const matchedTrucks = uniqueExcelTrucks.filter(t => systemTruckSet.has(t));
-  const unmatchedTrucks = uniqueExcelTrucks.filter(t => !systemTruckSet.has(t));
+  const matchedTrucks = uniqueExcelTrucks.filter(t => systemTruckList.some(st => matchVehicleRegistration(st, t)));
+  const unmatchedTrucks = uniqueExcelTrucks.filter(t => !systemTruckList.some(st => matchVehicleRegistration(st, t)));
   const totalAmount = normalizedRecords.reduce((sum, r) => sum + r.amount, 0);
 
   return {
@@ -1505,9 +1551,8 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
 
     if (colMap.leftTruckCol !== -1 && colMap.leftTruckCol < row.length) {
       const cell = row[colMap.leftTruckCol];
-      const cleaned = extractTruckNo(cell);
-      if (cleaned) {
-        matchedData = data.find(t => normalize(t.truckNo) === cleaned);
+      if (cell) {
+        matchedData = data.find(t => matchVehicleRegistration(t.truckNo, cell));
         if (matchedData) {
           foundTruckNo = matchedData.truckNo;
         }
@@ -1517,13 +1562,10 @@ function buildComparisonData(data, year, month, actuals = {}, uploadedExcelData 
     if (!matchedData) {
       for (let c = 0; c < mailMaxCol; c++) {
         if (row[c] !== undefined && row[c] !== null && row[c] !== '') {
-          const cleaned = extractTruckNo(row[c]);
-          if (cleaned) {
-            matchedData = data.find(t => normalize(t.truckNo) === cleaned);
-            if (matchedData) {
-              foundTruckNo = matchedData.truckNo;
-              break;
-            }
+          matchedData = data.find(t => matchVehicleRegistration(t.truckNo, row[c]));
+          if (matchedData) {
+            foundTruckNo = matchedData.truckNo;
+            break;
           }
         }
       }

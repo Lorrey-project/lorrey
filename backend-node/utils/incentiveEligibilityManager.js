@@ -213,7 +213,9 @@ async function findPartyMasterContact(vehicleNumber, recordDate = null) {
   const truckCol = getInvoiceDb().collection('Truck Contact Number');
 
   const regexStr = targetVeh.split('').join('[^a-zA-Z0-9]*');
-  const vRegex = new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
+  const vRegex = targetVeh.length === 4
+    ? new RegExp(`${regexStr}[^a-zA-Z0-9]*$`, 'i')
+    : new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
 
   const vQuery = {
     $or: [
@@ -278,19 +280,25 @@ async function getVehicleMonthlyTripsData(vehicleNumber, targetMonth, targetYear
 
   const entriesCol = getCementDb().collection('entries');
 
-  const regexStr = targetVeh.split('').join('[^a-zA-Z0-9]*');
-  const vRegex = new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
+  const regexList = [];
+  const fullStr = targetVeh.split('').join('[^a-zA-Z0-9]*');
+  regexList.push(new RegExp(`${fullStr}$`, 'i'));
+  if (targetVeh.length > 4) {
+    const last4 = targetVeh.slice(-4);
+    const last4Str = last4.split('').join('[^a-zA-Z0-9]*');
+    regexList.push(new RegExp(`^[^a-zA-Z0-9]*${last4Str}[^a-zA-Z0-9]*$`, 'i'));
+  }
 
   const query = {
-    $or: [
-      { "VEHICLE NUMBER": vRegex },
-      { "VEHICLE NO": vRegex },
-      { "VEHICLE NO.": vRegex },
-      { vehicleNumber: vRegex },
-      { "Truck No": vRegex },
-      { "Truck No ": vRegex },
-      { truck_no: vRegex }
-    ]
+    $or: regexList.flatMap(r => [
+      { "VEHICLE NUMBER": r },
+      { "VEHICLE NO": r },
+      { "VEHICLE NO.": r },
+      { vehicleNumber: r },
+      { "Truck No": r },
+      { "Truck No ": r },
+      { truck_no: r }
+    ])
   };
 
   const docs = await entriesCol.find(query).toArray();
@@ -305,10 +313,11 @@ async function getVehicleMonthlyTripsData(vehicleNumber, targetMonth, targetYear
     if (seenDocIds.has(docId)) continue;
     seenDocIds.add(docId);
 
-    // 1. Strict vehicle match
+    // 1. Vehicle match (exact or 4-digit suffix)
     const rowVehRaw = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || row.vehicleNumber || row["Truck No"] || row["Truck No "] || row.truck_no;
     const rowVeh = normVeh(rowVehRaw);
-    if (rowVeh !== targetVeh) continue;
+    const vehMatches = rowVeh === targetVeh || (rowVeh.length >= 4 && targetVeh.length >= 4 && (rowVeh.endsWith(targetVeh) || targetVeh.endsWith(rowVeh)));
+    if (!vehMatches) continue;
 
     // 2. Resolve calendar month and year
     const dateRaw = row["LOADING DT"] || row["LOADING DATE"] || row["BILL DATE"] || row["RECEIVING DATE"] || row["INVOICE DATE"] || row.date;
