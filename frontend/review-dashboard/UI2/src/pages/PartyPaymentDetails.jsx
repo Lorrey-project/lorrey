@@ -635,8 +635,6 @@ export default function PartyPaymentDetails({ onBack, onOpenPartyFullYear }) {
           auth10WExtraIncentive = vehicle10WExtraIncentiveMap[vKey];
         } else if (saved.extra10WIncentive !== undefined && saved.extra10WIncentive !== null) {
           auth10WExtraIncentive = num(saved.extra10WIncentive);
-        } else if (saved.nvclIncentive !== undefined && saved.nvclIncentive !== null) {
-          auth10WExtraIncentive = num(saved.nvclIncentive);
         } else if (eligMap[vKey]?.extra10WheelIncentive?.amount !== undefined) {
           auth10WExtraIncentive = num(eligMap[vKey].extra10WheelIncentive.amount);
         }

@@ -1596,20 +1596,29 @@ router.get("/vehicle-mkt-association", async (req, res) => {
     ]);
 
     const partyMasterMap = new Map();
+    const suffixMap = new Map();
     // Primary: owner details
     for (const doc of ownerDocs) {
       const rawNo = (doc["Truck No"] || doc["Truck No "] || doc.truck_no || doc._id.toString()).toString().trim().toUpperCase();
       const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
-      if (normKey && normKey.length >= 5) {
+      if (normKey && normKey.length >= 3) {
         partyMasterMap.set(normKey, doc);
+        if (normKey.length >= 4) {
+          const sfx = normKey.slice(-4);
+          if (!suffixMap.has(sfx)) suffixMap.set(sfx, doc);
+        }
       }
     }
     // Secondary: Truck Contact Number
     for (const doc of truckDocs) {
       const rawNo = (doc.truck_no || doc["Truck No "] || doc["Truck No"] || doc._id.toString()).toString().trim().toUpperCase();
       const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
-      if (normKey && normKey.length >= 5 && !partyMasterMap.has(normKey)) {
+      if (normKey && normKey.length >= 3 && !partyMasterMap.has(normKey)) {
         partyMasterMap.set(normKey, doc);
+        if (normKey.length >= 4) {
+          const sfx = normKey.slice(-4);
+          if (!suffixMap.has(sfx)) suffixMap.set(sfx, doc);
+        }
       }
     }
 
@@ -1647,7 +1656,7 @@ router.get("/vehicle-mkt-association", async (req, res) => {
 
       const rawVeh = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "";
       const normKey = String(rawVeh).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (!normKey || normKey.length < 5) return;
+      if (!normKey || normKey.length < 3) return;
 
       const mtVal = parseNumVal(row["MT"] ?? row["TONNAGE"] ?? row["TOTAL MT"]);
       const billAmt = parseNumVal(row["Billing Amount"] ?? row["BILLING AMOUNT"] ?? row["AMOUNT"]);
@@ -1658,7 +1667,7 @@ router.get("/vehicle-mkt-association", async (req, res) => {
       if (mtVal <= 0) return;
 
       // Match Party Master with effective date resolution
-      const rawContact = partyMasterMap.get(normKey);
+      const rawContact = partyMasterMap.get(normKey) || (normKey.length >= 4 ? suffixMap.get(normKey.slice(-4)) : null);
       let effectiveContact = rawContact;
       if (rawContact && typeof getEffectivePartyMaster === 'function') {
         effectiveContact = getEffectivePartyMaster(rawContact, isoDate) || rawContact;

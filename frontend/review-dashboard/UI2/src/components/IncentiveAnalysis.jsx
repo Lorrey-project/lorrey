@@ -161,6 +161,52 @@ function extractTruckNo(val) {
   return '';
 }
 
+// Canonical 4-digit truck number extractor - standardizes full registrations and short numbers
+export function getCanonicalTruckNo(val) {
+  if (val === undefined || val === null) return '';
+  const rawStr = String(val).trim();
+  const str = rawStr.toUpperCase();
+  const clean = str.replace(/[^A-Z0-9]/g, '');
+  if (!clean) return rawStr;
+
+  // 1. Pure 3 or 4 digit truck number (e.g. "6016", "0800", "0034", "9375")
+  if (/^\d{3,4}$/.test(clean)) {
+    return clean;
+  }
+
+  // 2. Standard Indian vehicle registration (e.g. "WB33C6016", "WB-39-B-8879", "NL01K2373", "KA32D2548", "JH10BY9023")
+  const regMatch = clean.match(/^[A-Z]{2}\d{1,2}[A-Z]{0,3}(\d{1,4})$/);
+  if (regMatch) {
+    const digits = regMatch[1];
+    return digits.length < 4 ? digits.padStart(4, '0') : digits;
+  }
+
+  // 3. Fallback: if string ends with 4 digits and has leading alphanumeric plate pattern
+  const end4Match = clean.match(/^[A-Z0-9]+?(\d{4})$/);
+  if (end4Match && clean.length <= 12) {
+    return end4Match[1];
+  }
+
+  return rawStr;
+}
+
+// Resolves actuals entry for a truck, supporting exact 4-digit key or full registration key
+export function resolveActualEntry(actuals, truckNo) {
+  if (!actuals || !truckNo) return null;
+  if (actuals[truckNo] !== undefined) return actuals[truckNo];
+  const cleanT = String(truckNo).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const canonT = getCanonicalTruckNo(truckNo);
+  for (const key of Object.keys(actuals)) {
+    if (key === canonT) return actuals[key];
+    const cleanK = String(key).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const canonK = getCanonicalTruckNo(key);
+    if (canonK === canonT || matchVehicleRegistration(cleanK, cleanT)) {
+      return actuals[key];
+    }
+  }
+  return null;
+}
+
 // Robust date parser — handles DD-MM-YYYY, DD/MM/YYYY and ISO strings
 // LOADING DT from the server is stored as "DD-MM-YYYY" (e.g. "13-04-2026")
 function parseLoadingDate(str) {
@@ -305,23 +351,38 @@ export function findMatchingContact(truck, rowOwner, truckContacts = []) {
 //   Total           = NVL Sum of Amt + NVCL Sum of Amt
 //   Final TOTAL     = Total + 10W Extra 8.5%
 export function buildIncentiveData(rows, year, month, truckContacts = []) {
-  // 1. Filter to selected month (by LOADING DT / LOADING DATE / BILL DATE)
+  // 1. Filter to selected month (by LOADING DT / LOADING DATE / BILL DATE / RECEIVING DATE / INVOICE DATE)
   const filtered = rows.filter(row => {
-    const ld = row['LOADING DT'] || row['LOADING DATE'] || row['BILL DATE'] || row.date || row.Date;
+    const ld = row['LOADING DT'] || row['LOADING DATE'] || row['BILL DATE'] || row['RECEIVING DATE'] || row['INVOICE DATE'] || row.date || row.Date;
     const d = parseLoadingDate(ld);
-    if (!d) return false;
+    if (!d) {
+      if (row.month !== undefined && row.year !== undefined) {
+        const rM = parseInt(row.month, 10);
+        const rY = parseInt(row.year, 10);
+        return rM === (month + 1) && (rY === year || rY === (year % 100));
+      }
+      return false;
+    }
+    const now = new Date();
+    const isOngoing = (year === now.getFullYear() && month === now.getMonth());
+    if (isOngoing && d.getDate() > now.getDate()) {
+      return false;
+    }
     return d.getFullYear() === year && d.getMonth() === month;
   });
 
-  // 2. Group by VEHICLE NUMBER (truck)
+  // 2. Group by canonical VEHICLE NUMBER (truck)
   const byTruck = {};
   for (const row of filtered) {
-    const truck = (row['VEHICLE NUMBER'] || '').trim().toUpperCase();
+    const rawTruck = (row['VEHICLE NUMBER'] || row['VEHICLE NO'] || row['VEHICLE NO.'] || row.vehicleNumber || row['Truck No'] || '').trim().toUpperCase();
+    if (!rawTruck) continue;
+    const truck = getCanonicalTruckNo(rawTruck);
     if (!truck) continue;
 
     if (!byTruck[truck]) {
       // Find contact info from MongoDB using normalized vehicle registration (exact or 4-digit suffix)
-      const contact = findMatchingContact(truck, row['OWNER NAME'] || row['PARTY NAME'], truckContacts);
+      const contact = findMatchingContact(rawTruck, row['OWNER NAME'] || row['PARTY NAME'], truckContacts) ||
+                      findMatchingContact(truck, row['OWNER NAME'] || row['PARTY NAME'], truckContacts);
 
       // 1. WHEEL must come from Party Master (do NOT manually calculate or infer)
       const dbWheel = contact ? (
@@ -405,10 +466,10 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
 
       let normWheel = 'OTHER';
       const wheelRaw = String(displayWheel).toUpperCase();
-      if (wheelRaw.includes('6')) normWheel = '6WH';
-      else if (wheelRaw.includes('10')) normWheel = '10WH';
+      if (wheelRaw.includes('14')) normWheel = '14WH';
       else if (wheelRaw.includes('12')) normWheel = '12WH';
-      else if (wheelRaw.includes('14')) normWheel = '14WH';
+      else if (wheelRaw.includes('10')) normWheel = '10WH';
+      else if (wheelRaw.includes('6')) normWheel = '6WH';
 
       // Capacity according to vehicle-wise trip summary: 14W -> 30 MT, 12W -> 25 MT, 10W -> 19 MT, 6W -> 13 MT
       let standardCap = 0;
@@ -433,15 +494,43 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
         dailyMT: {},
         totalMT: 0,
         seenInvoices: new Set(),
-        nvl: { invQty: 0, orgBillingAmt: 0, orgFreight: 0, amt: 0, sourceAmt: 0, extra10W: 0, extra6WPotential: 0, extra6W: 0 },
-        nvcl: { invQty: 0, orgBillingAmt: 0, orgFreight: 0, amt: 0, sourceAmt: 0, extra10W: 0, extra6WPotential: 0, extra6W: 0 },
+        nvl: { invQty: 0, orgBillingAmt: 0, orgFreight: 0, amt: 0, sourceAmt: 0, extra10W: 0, extra10WBase: 0, extra6WPotential: 0, extra6W: 0, extra6WBase: 0 },
+        nvcl: { invQty: 0, orgBillingAmt: 0, orgFreight: 0, amt: 0, sourceAmt: 0, extra10W: 0, extra10WBase: 0, extra6WPotential: 0, extra6W: 0, extra6WBase: 0 },
         extra10W: 0,
+        extra10WBase: 0,
+        qualifying10WTripCount: 0,
         extra6WPotential: 0,
         extra6W: 0,
+        extra6WBase: 0,
         commission: 0,
         hasComm: String(commApp).toUpperCase().includes('YES'),
         commRate: num(commValue, 0.05)
       };
+    } else {
+      const entry = byTruck[truck];
+      if (!entry.contact) {
+        const contact = findMatchingContact(rawTruck, row['OWNER NAME'] || row['PARTY NAME'], truckContacts) ||
+                        findMatchingContact(truck, row['OWNER NAME'] || row['PARTY NAME'], truckContacts);
+        if (contact) {
+          entry.contact = contact;
+          const dbOwner = contact['Owner Name '] || contact['Owner Name'] || contact.owner_name || contact.owner || '';
+          if (dbOwner) entry.ownerName = dbOwner.trim();
+          const dbWheel = contact['Wheel Type '] || contact['Wheel Type'] || contact.wheelType || contact.wheel_type || contact['Type of vehicle '] || contact['Type of vehicle'] || '';
+          if (dbWheel) {
+            let dw = dbWheel;
+            const upW = String(dw).toUpperCase();
+            if (upW.includes('14')) dw = '14W';
+            else if (upW.includes('12')) dw = '12W';
+            else if (upW.includes('10')) dw = '10W';
+            else if (upW.includes('6')) dw = '6W';
+            entry.wheel = dw;
+            if (upW.includes('14')) { entry.normWheel = '14WH'; entry.standardCap = 30; }
+            else if (upW.includes('12')) { entry.normWheel = '12WH'; entry.standardCap = 25; }
+            else if (upW.includes('10')) { entry.normWheel = '10WH'; entry.standardCap = 19; }
+            else if (upW.includes('6')) { entry.normWheel = '6WH'; entry.standardCap = 13; }
+          }
+        }
+      }
     }
 
     const entry = byTruck[truck];
@@ -537,51 +626,44 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
       }
     }
 
-    // Rule 2: 10-Wheel Extra Incentive from first qualifying trip (SO + NT, STO disallowed)
+    // Rule 2: 10-Wheel Extra Incentive from first qualifying trip (Eligible Bill Types: SO and NT only, STO disallowed)
     const bType = String(row['Bill Type'] || row['BILL TYPE'] || row.billType || row.invoice_type || '').trim().toUpperCase();
     const isSto = bType === 'STO' || bType.includes('STOCK');
     const isSo = !isSto && (bType === 'SO' || bType.includes('SALES'));
+    const isNtBill = !isSto && (bType === 'NT' || bType.includes('NON-TRADE') || bType.includes('NON TRADE'));
+    const isExplicitNonSoNt = bType === 'FREIGHT' || bType === 'TAX INVOICE' || bType === 'TAX';
     const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
     const hasUnloadingCharges = Boolean(
       (row.nt_details && (row.nt_details.unloading_charges || row.nt_details.unloadingCharges)) ||
       (row['EXTRA UNLOADING'] && parseExcelNum(row['EXTRA UNLOADING']) > 0)
     );
-    const stored10WExtraVal = num(
-      row['10W EXTRA 8.5%'] ??
-      (row['10W EXTRA 8'] ? (row['10W EXTRA 8']['5%'] ?? row['10W EXTRA 8']['5']) : 0)
-    );
-    const isNt = row._is_nt_invoice === true || row._is_nt_invoice === 'true' ||
+    const isNtSecondary = !isSto && !isExplicitNonSoNt && (
+      row._is_nt_invoice === true || row._is_nt_invoice === 'true' ||
       row._source_nt_unloading === true || row._source_nt_unloading === 'true' ||
       hasUnloadingCharges ||
-      stored10WExtraVal > 0 ||
       ntWordRegex.test(String(row.classification || row.category || row.invoice_type_classification || '')) ||
-      ntWordRegex.test(String(row['UNLOADING STATUS NOTE'] || row['UNLOADING STATUS'] || row.notes || ''));
-    const isSoAndNt = isSo && isNt;
+      ntWordRegex.test(String(row['UNLOADING STATUS NOTE'] || row['UNLOADING STATUS'] || row.notes || ''))
+    );
+    const isQualifying10WTrip = !isSto && (isSo || isNtBill || isNtSecondary);
 
-    // Rule 2: 10-Wheel Extra Incentive (qualifying SO + NT, STO disallowed)
-    // ATOA: 8.5% on Sum of Original Billing Amount | MKT: 8.5% on Sum of Original Freight
-    const isQualifying10W = entry.normWheel === '10WH' && !isSto && (isSoAndNt || stored10WExtraVal > 0);
-    if (isQualifying10W) {
+    if (entry.normWheel === '10WH' && isQualifying10WTrip) {
       const extra10Base = entry.isAtoa ? orgBillingAmt : partyFreight;
-      const trip10W = extra10Base * 0.085;
-      entry.extra10W += trip10W;
+      entry.qualifying10WTripCount = (entry.qualifying10WTripCount || 0) + 1;
       if (cat === 'NVL') {
-        entry.nvl.extra10W = (entry.nvl.extra10W || 0) + trip10W;
+        entry.nvl.extra10WBase = (entry.nvl.extra10WBase || 0) + extra10Base;
       } else {
-        entry.nvcl.extra10W = (entry.nvcl.extra10W || 0) + trip10W;
+        entry.nvcl.extra10WBase = (entry.nvcl.extra10WBase || 0) + extra10Base;
       }
     }
 
-    // Rule 3: 6-Wheel Extra Incentive (15% if 6WH, requires >= 6 completed trips)
-    // ATOA: 15% on Sum of Original Billing Amount | MKT: 15% on Sum of Original Freight
+    // Rule 3: 6-Wheel Extra Incentive (All qualifying 6WH trips contribute, minimum 6 trips threshold)
+    // ATOA: on Sum of Original Billing Amount | MKT: on Sum of Original Freight
     if (entry.normWheel === '6WH') {
       const extra6Base = entry.isAtoa ? orgBillingAmt : partyFreight;
-      const trip6W = extra6Base * 0.15;
-      entry.extra6WPotential += trip6W;
       if (cat === 'NVL') {
-        entry.nvl.extra6WPotential = (entry.nvl.extra6WPotential || 0) + trip6W;
+        entry.nvl.extra6WBase = (entry.nvl.extra6WBase || 0) + extra6Base;
       } else {
-        entry.nvcl.extra6WPotential = (entry.nvcl.extra6WPotential || 0) + trip6W;
+        entry.nvcl.extra6WBase = (entry.nvcl.extra6WBase || 0) + extra6Base;
       }
     }
   }
@@ -608,53 +690,81 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
 
     // Rule 1: Dedicated Incentive Calculation (PROJECTED / DEDICATED)
     // Dedicated Type in Party Master MUST be DEDICATED (Non-Dedicated vehicles are NOT eligible for Dedicated Incentive)
-    if (t.isDedicated) {
+    // Achievement criteria:
+    // - 14W, 12W, 10W: minimum 6 completed trips
+    // - 6WH: minimum 10 completed trips
+    const reqStandardTrips = (t.normWheel === '6WH') ? 10 : ((t.normWheel === '10WH' || t.normWheel === '12WH' || t.normWheel === '14WH') ? 6 : null);
+    const isStandardEligible = Boolean(t.isAtoaOrMkt && t.isDedicated && reqStandardTrips !== null && tripsCount >= reqStandardTrips);
+    t.standardEligible = isStandardEligible;
+    t.reqTrips = reqStandardTrips || 0;
+
+    let standardRatePercent = 0;
+    if (isStandardEligible) {
       if (t.isAtoa) {
-        // ATOA: 9.5% on SUM OF ORIGINAL BILLING AMOUNT
-        t.nvl.amt = t.nvl.orgBillingAmt > 0 ? Math.round(t.nvl.orgBillingAmt * 0.095) : (t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0);
-        t.nvcl.amt = t.nvcl.orgBillingAmt > 0 ? Math.round(t.nvcl.orgBillingAmt * 0.095) : (t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0);
+        // Section 1: ATOA (14W, 12W, 10W, 6WH):
+        // Commission = 0% on SUM OF ORIGINAL BILLING AMOUNT
+        // Sum of Amt = SUM OF ORG Billing Amt (0% deduction, 100% retained)
+        standardRatePercent = 0;
+        t.nvl.amt = t.nvl.orgBillingAmt > 0 ? Math.round(t.nvl.orgBillingAmt * 1.0) : (t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0);
+        t.nvcl.amt = t.nvcl.orgBillingAmt > 0 ? Math.round(t.nvcl.orgBillingAmt * 1.0) : (t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0);
       } else {
-        // MKT / OWN:
-        // 14W & 12W: 9.5% on SUM OF ORIGINAL FREIGHT (Party Freight)
-        // 10W & 6W: 8.5% on SUM OF ORIGINAL FREIGHT (Party Freight)
+        // MKT / MKTA / OWN:
+        // Section 2: 14W and 12W -> Commission = 9.5% on SUM OF ORIGINAL FREIGHT -> Sum of Amt = SUM OF ORG FREIGHT * 9.5 / 100
+        // Section 3: 10WH -> Commission = 8.5% on SUM OF ORIGINAL FREIGHT -> Sum of Amt = SUM OF ORG FREIGHT * 8.5 / 100
+        // Section 4: 6WH -> Commission = 8.5% on SUM OF ORIGINAL FREIGHT -> Sum of Amt = SUM OF ORG FREIGHT * 8.5 / 100
         let mktRate = 0.095;
-        if (t.normWheel === '6WH' || t.normWheel === '10WH') {
+        standardRatePercent = 9.5;
+        if (t.normWheel === '10WH' || t.normWheel === '6WH') {
           mktRate = 0.085;
+          standardRatePercent = 8.5;
         }
-        t.nvl.amt = t.nvl.orgFreight > 0 ? Math.round(t.nvl.orgFreight * mktRate) : (t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt) : 0);
-        t.nvcl.amt = t.nvcl.orgFreight > 0 ? Math.round(t.nvcl.orgFreight * mktRate) : (t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt) : 0);
+        t.nvl.amt = t.nvl.orgFreight > 0 ? Math.round(t.nvl.orgFreight * mktRate) : (t.nvl.sourceAmt > 0 ? Math.round(t.nvl.sourceAmt * mktRate) : 0);
+        t.nvcl.amt = t.nvcl.orgFreight > 0 ? Math.round(t.nvcl.orgFreight * mktRate) : (t.nvcl.sourceAmt > 0 ? Math.round(t.nvcl.sourceAmt * mktRate) : 0);
       }
     } else {
-      // Ineligible Non-Dedicated vehicles MUST have incentive amounts = 0!
+      // Ineligible vehicles (non-dedicated or below trip threshold) MUST have incentive amounts = 0!
       t.nvl.amt = 0;
       t.nvcl.amt = 0;
     }
+    t.standardRatePercent = standardRatePercent;
 
     // Total = NVL Sum of Amt + NVCL Sum of Amt
     const nvlNvclTotal = t.nvl.amt + t.nvcl.amt;
 
-    // Rule 2: 10-Wheel Extra Incentive (starts from 1st trip on qualifying SO+NT invoices, regardless of Dedicated status)
-    const extra10WEligible = t.normWheel === '10WH' && t.extra10W > 0;
-    if (!extra10WEligible) {
+    // Rule 2: 10-Wheel Extra Incentive (Achievement Criteria: 10W >= 1 qualifying SO/NT trip)
+    // Formula: Combine NVL and NVCL source amounts first, then calculate 8.5%
+    const extra10WEligible = Boolean(t.isAtoaOrMkt && t.normWheel === '10WH' && (t.qualifying10WTripCount || 0) >= 1);
+    if (extra10WEligible) {
+      const nvlBase = t.isAtoa ? (t.nvl.orgBillingAmt || 0) : (t.nvl.orgFreight || 0);
+      const nvclBase = t.isAtoa ? (t.nvcl.orgBillingAmt || 0) : (t.nvcl.orgFreight || 0);
+      const combined10WBase = nvlBase + nvclBase;
+      t.extra10W = Math.round(combined10WBase * 0.085);
+      t.nvl.extra10W = Math.round(nvlBase * 0.085);
+      t.nvcl.extra10W = t.extra10W - t.nvl.extra10W;
+      t.extra10WRatePercent = 8.5;
+    } else {
       t.extra10W = 0;
       t.nvl.extra10W = 0;
       t.nvcl.extra10W = 0;
-    } else {
-      t.extra10W = Math.round(t.extra10W);
-      t.nvl.extra10W = Math.round(t.nvl.extra10W || 0);
-      t.nvcl.extra10W = Math.round(t.nvcl.extra10W || 0);
+      t.extra10WRatePercent = 0;
     }
 
-    // Rule 3: 6-Wheel Extra Incentive (requires >= 6 trips, regardless of Dedicated status)
-    const extra6WEligible = t.normWheel === '6WH' && t.tripsCount >= 6;
+    // Rule 3: 6-Wheel Extra Incentive (Achievement Criteria: minimum 6 completed qualifying trips)
+    // Formula: Combine NVL and NVCL source amounts first, then calculate 15%
+    const extra6WEligible = Boolean(t.isAtoaOrMkt && t.normWheel === '6WH' && t.tripsCount >= 6);
     if (extra6WEligible) {
-      t.extra6W = Math.round(t.extra6WPotential);
-      t.nvl.extra6W = Math.round(t.nvl.extra6WPotential || 0);
-      t.nvcl.extra6W = Math.round(t.nvcl.extra6WPotential || 0);
+      const nvlBase = t.isAtoa ? (t.nvl.orgBillingAmt || 0) : (t.nvl.orgFreight || 0);
+      const nvclBase = t.isAtoa ? (t.nvcl.orgBillingAmt || 0) : (t.nvcl.orgFreight || 0);
+      const combined6WBase = nvlBase + nvclBase;
+      t.extra6W = Math.round(combined6WBase * 0.15);
+      t.nvl.extra6W = Math.round(nvlBase * 0.15);
+      t.nvcl.extra6W = t.extra6W - t.nvl.extra6W;
+      t.extra6WRatePercent = 15;
     } else {
       t.extra6W = 0;
       t.nvl.extra6W = 0;
       t.nvcl.extra6W = 0;
+      t.extra6WRatePercent = 0;
     }
 
     // Total (Projected) = standard incentive + 10W extra + 6W extra
@@ -667,7 +777,7 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
       t.commission = 0;
     }
 
-    const standardEligible = t.isDedicated;
+    const standardEligible = t.standardEligible;
 
     return {
       ...t,
@@ -677,7 +787,9 @@ export function buildIncentiveData(rows, year, month, truckContacts = []) {
       total: nvlNvclTotal,
       totalFinal
     };
-  }).sort((a, b) => a.type.localeCompare(b.type) || a.ownerName.localeCompare(b.ownerName));
+  })
+  .filter(t => t.standardEligible || t.extra10WEligible || t.extra6WEligible)
+  .sort((a, b) => a.type.localeCompare(b.type) || a.ownerName.localeCompare(b.ownerName));
 }
 
 // Helper to parse Excel cells as numbers, handling commas and formatting
@@ -1316,7 +1428,11 @@ function mapExcelToActuals(excelData, systemTrucks) {
     if (rawExcelMapped[normSys] !== undefined) {
       mapped[t.truckNo] = rawExcelMapped[normSys];
     } else {
-      const match = Object.keys(rawExcelMapped).find(k => k === normSys || normSys.includes(k) || k.includes(normSys));
+      const match = Object.keys(rawExcelMapped).find(k => 
+        k === normSys || 
+        getCanonicalTruckNo(k) === getCanonicalTruckNo(normSys) ||
+        matchVehicleRegistration(k, normSys)
+      );
       if (match) {
         mapped[t.truckNo] = rawExcelMapped[match];
       }
@@ -1952,7 +2068,7 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
 
   // Data rows
   for (const t of data) {
-    const rawAct = actuals[t.truckNo];
+    const rawAct = resolveActualEntry(actuals, t.truckNo);
     const actNVL = (typeof rawAct === 'object' && rawAct !== null) ? num(rawAct.nvl) : 0;
     const actNVCL = (typeof rawAct === 'object' && rawAct !== null) ? num(rawAct.nvcl) : (parseFloat(rawAct) || 0);
     const sumAc = actNVL + actNVCL;
@@ -2025,7 +2141,7 @@ function exportIncentiveExcel(data, year, month, actuals = {}) {
     acc.w6 += t.extra6W;
     acc.grand += t.totalFinal;
 
-    const rawAct = actuals[t.truckNo];
+    const rawAct = resolveActualEntry(actuals, t.truckNo);
     const actNVL = (typeof rawAct === 'object' && rawAct !== null) ? num(rawAct.nvl) : 0;
     const actNVCL = (typeof rawAct === 'object' && rawAct !== null) ? num(rawAct.nvcl) : (parseFloat(rawAct) || 0);
     const sumAc = actNVL + actNVCL;
@@ -2643,10 +2759,13 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
       .then(res => {
         if (res.data?.success) {
           // Format dates to DD.MM.YY to match the same format as computedRows
-          const entries = (res.data.entries || []).map(row => ({
-            ...row,
-            'LOADING DT': formatLoadingDate(row['LOADING DT'] || row['LOADING DATE'] || '')
-          }));
+          const entries = (res.data.entries || []).map(row => {
+            const rawDt = row['LOADING DT'] || row['LOADING DATE'] || row['BILL DATE'] || row['RECEIVING DATE'] || row['INVOICE DATE'] || row.date;
+            return {
+              ...row,
+              'LOADING DT': rawDt ? formatLoadingDate(rawDt) : (row['LOADING DT'] || '')
+            };
+          });
           setFetchedRows(entries);
         }
       })
@@ -2770,8 +2889,10 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
     });
   }, [comparisonViewDef]);
 
+  const resolveActual = (truckNo) => resolveActualEntry(actuals, truckNo);
+
   const getActualNVL = (truckNo) => {
-    const act = actuals[truckNo];
+    const act = resolveActual(truckNo);
     if (typeof act === 'object' && act !== null) {
       if (act.nvl !== undefined && act.nvl !== null && act.nvl !== '') return act.nvl;
       if (uploadedExcelName) return '0';
@@ -2782,19 +2903,19 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   const getActualNVCL = (truckNo) => {
-    const act = actuals[truckNo];
+    const act = resolveActual(truckNo);
     if (typeof act === 'object' && act !== null) {
       if (act.nvcl !== undefined && act.nvcl !== null && act.nvcl !== '') return act.nvcl;
       if (uploadedExcelName) return '0';
       return '';
     }
-    if (typeof act !== 'undefined') return act;
+    if (typeof act !== 'undefined' && act !== null) return act;
     if (uploadedExcelName) return '0';
     return '';
   };
 
   const getActual10WH = (truckNo) => {
-    const act = actuals[truckNo];
+    const act = resolveActual(truckNo);
     if (typeof act === 'object' && act !== null) {
       if (act.w10_nvl || act.w10_nvcl) {
         return (num(act.w10_nvl) + num(act.w10_nvcl)) || '';
@@ -2805,7 +2926,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   const getActual6WH = (truckNo) => {
-    const act = actuals[truckNo];
+    const act = resolveActual(truckNo);
     if (typeof act === 'object' && act !== null) {
       if (act.w6_nvl || act.w6_nvcl) {
         return (num(act.w6_nvl) + num(act.w6_nvcl)) || '';
@@ -2816,7 +2937,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   const getActual10WH_NVL = (truckNo, truckData) => {
-    const act = actuals[truckNo];
+    const act = resolveActual(truckNo);
     if (typeof act === 'object' && act !== null) {
       if (act.w10_nvl !== undefined && act.w10_nvl !== null && act.w10_nvl !== '') return act.w10_nvl;
       if (Array.isArray(act.diffBreakdown)) {
@@ -2835,7 +2956,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   const getActual10WH_NVCL = (truckNo, truckData) => {
-    const act = actuals[truckNo];
+    const act = resolveActual(truckNo);
     if (typeof act === 'object' && act !== null) {
       if (act.w10_nvcl !== undefined && act.w10_nvcl !== null && act.w10_nvcl !== '') return act.w10_nvcl;
       if (Array.isArray(act.diffBreakdown)) {
@@ -2854,7 +2975,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   const getActual6WH_NVL = (truckNo, truckData) => {
-    const act = actuals[truckNo];
+    const act = resolveActual(truckNo);
     if (typeof act === 'object' && act !== null) {
       if (act.w6_nvl !== undefined && act.w6_nvl !== null && act.w6_nvl !== '') return act.w6_nvl;
       if (Array.isArray(act.diffBreakdown)) {
@@ -2873,7 +2994,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
   };
 
   const getActual6WH_NVCL = (truckNo, truckData) => {
-    const act = actuals[truckNo];
+    const act = resolveActual(truckNo);
     if (typeof act === 'object' && act !== null) {
       if (act.w6_nvcl !== undefined && act.w6_nvcl !== null && act.w6_nvcl !== '') return act.w6_nvcl;
       if (Array.isArray(act.diffBreakdown)) {
@@ -3547,7 +3668,7 @@ export default function IncentiveAnalysis({ rows, initialMonth, initialYear, onP
                   <td style={{ ...tdBase, textAlign: 'left', fontWeight: 600 }}>{t.ownerName}</td>
                   <td style={{ ...tdBase, textAlign: 'center', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{t.truckNo}</td>
                   <td style={{ ...tdBase, textAlign: 'center', fontWeight: 600, color: '#374151' }}>{t.wheel}</td>
-                  <td style={{ ...tdBase, textAlign: 'center', fontWeight: 800, color: t.tripsCount >= 6 ? '#16a34a' : '#dc2626' }}>{t.tripsCount}</td>
+                  <td style={{ ...tdBase, textAlign: 'center', fontWeight: 800, color: t.tripsCount >= (t.normWheel === '6WH' ? 10 : 6) ? '#16a34a' : '#dc2626' }}>{t.tripsCount}</td>
 
                   {/* NVL */}
                   <td style={{ ...tdBase, background: 'rgba(237,233,254,0.3)' }}>{t.nvl.invQty ? Math.round(t.nvl.invQty) : ''}</td>

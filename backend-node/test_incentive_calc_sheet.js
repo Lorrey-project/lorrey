@@ -85,9 +85,10 @@ async function runTests() {
     console.log('✅ PASSED Test 1: Standard incentive is zero (trips 3/6)\n');
 
     // -------------------------------------------------------------------------
-    // TEST 2: ATOA Dedicated 12W vehicle with 6 qualifying trips: standard incentive is 9.5% of qualifying Bill Freight.
+    // TEST 2: ATOA Dedicated 12W vehicle with 6 qualifying trips: Commission = 0% on Bill Freight
+    // SUM OF AMOUNT = SUM OF ORIGINAL BILLING AMOUNT * (1 - 0%) = 6,000
     // -------------------------------------------------------------------------
-    console.log('Test 2: ATOA Dedicated 12W with 6 qualifying trips -> standard incentive is 9.5% of qualifying Bill Freight');
+    console.log('Test 2: ATOA Dedicated 12W with 6 qualifying trips -> 0% commission, Sum of Amount = 6,000');
     // Add 3 more trips to veh1 (total 6 trips, total Bill Freight = 6,000)
     for (let i = 4; i <= 6; i++) {
       const e = {
@@ -107,9 +108,9 @@ async function runTests() {
 
     const res2 = await evaluateVehicleIncentiveEligibility(veh1, TEST_MONTH, TEST_YEAR);
     assert.strictEqual(res2.standardIncentive.eligible, true, 'Should be eligible for standard incentive with 6 trips');
-    // Total Bill Freight = 6000. 9.5% of 6000 = 570
-    assert.strictEqual(res2.standardIncentive.amount, 570, 'Standard incentive amount must be exactly 9.5% of Bill Freight (570)');
-    console.log('✅ PASSED Test 2: Standard incentive is 570 (9.5% of 6,000)\n');
+    assert.strictEqual(res2.standardIncentive.commissionRate, 0, 'ATOA commission rate must be 0%');
+    assert.strictEqual(res2.standardIncentive.amount, 6000, 'Standard incentive amount must be exactly 100% of Bill Freight (6,000)');
+    console.log('✅ PASSED Test 2: Standard incentive is 6,000 (0% commission on 6,000 Bill Freight)\n');
 
     // -------------------------------------------------------------------------
     // TEST 3: ATOA Dedicated 6W vehicle with 9 trips: standard incentive is zero.
@@ -150,9 +151,10 @@ async function runTests() {
     console.log('✅ PASSED Test 3: Standard incentive is zero (trips 9/10)\n');
 
     // -------------------------------------------------------------------------
-    // TEST 4: ATOA Dedicated 6W vehicle with 10 qualifying trips: standard incentive is 9.5% of qualifying Bill Freight.
+    // TEST 4: ATOA Dedicated 6W vehicle with 10 qualifying trips: Commission = 0% on Bill Freight
+    // SUM OF AMOUNT = SUM OF ORIGINAL BILLING AMOUNT * (1 - 0%) = 10,000
     // -------------------------------------------------------------------------
-    console.log('Test 4: ATOA Dedicated 6W vehicle with 10 qualifying trips -> standard incentive is 9.5% of Bill Freight');
+    console.log('Test 4: ATOA Dedicated 6W vehicle with 10 qualifying trips -> 0% commission, Sum of Amount = 10,000');
     // Add 10th trip (total Bill Freight = 10,000)
     const e10 = {
       "VEHICLE NUMBER": veh3,
@@ -170,14 +172,15 @@ async function runTests() {
 
     const res4 = await evaluateVehicleIncentiveEligibility(veh3, TEST_MONTH, TEST_YEAR);
     assert.strictEqual(res4.standardIncentive.eligible, true, 'Should be eligible with 10 trips');
-    // 9.5% of 10,000 = 950
-    assert.strictEqual(res4.standardIncentive.amount, 950, 'Standard incentive must be 9.5% of Bill Freight (950)');
-    console.log('✅ PASSED Test 4: Standard incentive is 950 (9.5% of 10,000)\n');
+    assert.strictEqual(res4.standardIncentive.commissionRate, 0, 'ATOA commission rate must be 0%');
+    assert.strictEqual(res4.standardIncentive.amount, 10000, 'Standard incentive must be 100% of Bill Freight (10,000)');
+    console.log('✅ PASSED Test 4: Standard incentive is 10,000 (0% commission on 10,000)\n');
 
     // -------------------------------------------------------------------------
-    // TEST 5: MKT Dedicated 12W vehicle with 6 qualifying trips: standard incentive is 9.5% of qualifying Party Rate.
+    // TEST 5: MKT Dedicated 12W vehicle with 6 qualifying trips: Commission = 9.5% on Party Rate
+    // SUM OF AMOUNT = SUM OF ORIGINAL FREIGHT * (1 - 0.095) = 5,700 * 0.905 = 5,159
     // -------------------------------------------------------------------------
-    console.log('Test 5: MKT Dedicated 12W with 6 qualifying trips -> standard incentive is 9.5% of Party Rate');
+    console.log('Test 5: MKT Dedicated 12W with 6 qualifying trips -> 9.5% commission on Party Rate, Sum of Amount = 5,159');
     const veh5 = 'TEST12WMKT';
     await ownerCol.deleteMany({ "Truck No": veh5 });
     await entriesCol.deleteMany({ "VEHICLE NUMBER": veh5, month: TEST_MONTH, year: TEST_YEAR });
@@ -211,14 +214,16 @@ async function runTests() {
 
     const res5 = await evaluateVehicleIncentiveEligibility(veh5, TEST_MONTH, TEST_YEAR);
     assert.strictEqual(res5.standardIncentive.eligible, true, 'Should be eligible');
-    // Total Party Rate = 6 * 950 = 5700. 9.5% of 5700 = 541.5 -> rounded to 542 (or 541.5)
-    assert.strictEqual(res5.standardIncentive.amount, 542, 'Standard incentive must be 9.5% of Party Rate (542)');
-    console.log('✅ PASSED Test 5: Standard incentive is 542 (9.5% of Party Rate 5,700)\n');
+    assert.strictEqual(res5.standardIncentive.commissionRate, 0.095, 'Commission rate must be 9.5%');
+    // Total Party Rate = 6 * 950 = 5700. 5700 * 0.095 = 541.5 -> rounded to 542
+    assert.strictEqual(res5.standardIncentive.amount, 542, 'Standard incentive must be Party Rate * 0.095 (542)');
+    console.log('✅ PASSED Test 5: Standard incentive is 542 (9.5% commission on Party Rate 5,700)\n');
 
     // -------------------------------------------------------------------------
-    // TEST 6: MKT Dedicated 6W vehicle with 10 qualifying trips: standard incentive is 8.5% of qualifying Party Rate.
+    // TEST 6: MKT Dedicated 6W vehicle with 10 qualifying trips: Commission = 8.5% on Party Rate
+    // SUM OF AMOUNT = SUM OF ORIGINAL FREIGHT * (1 - 0.085) = 9,500 * 0.915 = 8,693
     // -------------------------------------------------------------------------
-    console.log('Test 6: MKT Dedicated 6W with 10 qualifying trips -> standard incentive is 8.5% of Party Rate');
+    console.log('Test 6: MKT Dedicated 6W with 10 qualifying trips -> 8.5% commission on Party Rate, Sum of Amount = 8,693');
     const veh6 = 'TEST6WMKT06';
     await ownerCol.deleteMany({ "Truck No": veh6 });
     await entriesCol.deleteMany({ "VEHICLE NUMBER": veh6, month: TEST_MONTH, year: TEST_YEAR });
@@ -252,15 +257,16 @@ async function runTests() {
 
     const res6 = await evaluateVehicleIncentiveEligibility(veh6, TEST_MONTH, TEST_YEAR);
     assert.strictEqual(res6.standardIncentive.eligible, true, 'Should be eligible with 10 trips');
-    // 8.5% of 9,500 = 807.5 -> rounded to 808
-    assert.strictEqual(res6.standardIncentive.rate, 0.085, 'Rate must be 8.5% for MKT 6W');
-    assert.strictEqual(res6.standardIncentive.amount, 808, 'Standard incentive must be 8.5% of Party Rate (808)');
-    console.log('✅ PASSED Test 6: Standard incentive is 808 (8.5% of Party Rate 9,500)\n');
+    assert.strictEqual(res6.standardIncentive.commissionRate, 0.085, 'Commission rate must be 8.5% for MKT 6W');
+    // 9,500 * 0.085 = 807.5 -> rounded to 808
+    assert.strictEqual(res6.standardIncentive.amount, 808, 'Standard incentive must be Party Rate * 0.085 (808)');
+    console.log('✅ PASSED Test 6: Standard incentive is 808 (8.5% commission on Party Rate 9,500)\n');
 
     // -------------------------------------------------------------------------
-    // TEST 6B: MKT Dedicated 10W with 6 qualifying trips: standard incentive is 8.5% of Party Freight
+    // TEST 6B: MKT Dedicated 10W with 6 qualifying trips: Commission = 8.5% on Party Freight
+    // SUM OF AMOUNT = SUM OF ORIGINAL FREIGHT * 8.5% = 11,400 * 0.085 = 969
     // -------------------------------------------------------------------------
-    console.log('Test 6B: MKT Dedicated 10W with 6 qualifying trips -> standard incentive is 8.5% of Party Freight');
+    console.log('Test 6B: MKT Dedicated 10W with 6 qualifying trips -> 8.5% commission on Party Freight, Sum of Amount = 969');
     const veh6B = 'TEST10WMKT6B';
     await ownerCol.deleteMany({ "Truck No": veh6B });
     await entriesCol.deleteMany({ "VEHICLE NUMBER": veh6B, month: TEST_MONTH, year: TEST_YEAR });
@@ -293,10 +299,10 @@ async function runTests() {
 
     const res6B = await evaluateVehicleIncentiveEligibility(veh6B, TEST_MONTH, TEST_YEAR);
     assert.strictEqual(res6B.standardIncentive.eligible, true, 'Should be eligible with 6 trips for 10W');
-    assert.strictEqual(res6B.standardIncentive.rate, 0.085, 'Rate must be 8.5% for MKT 10W');
-    // Total Party Freight = 6 * 1900 = 11,400. 8.5% of 11,400 = 969
-    assert.strictEqual(res6B.standardIncentive.amount, 969, 'Standard incentive must be 8.5% of Party Freight (969)');
-    console.log('✅ PASSED Test 6B: Standard incentive is 969 (8.5% of Party Freight 11,400)\n');
+    assert.strictEqual(res6B.standardIncentive.commissionRate, 0.085, 'Commission rate must be 8.5% for MKT 10W');
+    // Total Party Freight = 6 * 1900 = 11,400. 11,400 * 0.085 = 969
+    assert.strictEqual(res6B.standardIncentive.amount, 969, 'Standard incentive must be Party Freight * 0.085 (969)');
+    console.log('✅ PASSED Test 6B: Standard incentive is 969 (8.5% commission on Party Freight 11,400)\n');
 
     // -------------------------------------------------------------------------
     // TEST 6C: Split invoices on same day for 10W vehicle (12 MT + 7 MT = 19 MT) -> evaluated as 1 trip, NOT 2 trips
@@ -483,8 +489,8 @@ async function runTests() {
     // TEST 11: 10W extra and 6W extra amounts are not added to the standard incentive column
     // -------------------------------------------------------------------------
     console.log('Test 11: 10W extra and 6W extra are NOT added to standard incentive column');
-    // For veh3 (ATOA 6W, 10 trips): standard is 950, 6W extra is 1500
-    assert.strictEqual(res4.standardIncentive.amount, 950, 'Standard amount must not contain 6W extra');
+    // For veh3 (ATOA 6W, 10 trips): standard is 10000, 6W extra is 1500
+    assert.strictEqual(res4.standardIncentive.amount, 10000, 'Standard amount must not contain 6W extra');
     // For veh6 (MKT 6W, 10 trips): standard is 808, 6W extra is 1425
     assert.strictEqual(res6.standardIncentive.amount, 808, 'Standard amount must not contain 6W extra');
     // For veh7 (10W extra 170): standard is 0
@@ -495,14 +501,14 @@ async function runTests() {
     // TEST 12: Total (Projected) column equals the sum of applicable category payouts
     // -------------------------------------------------------------------------
     console.log('Test 12: Total (Projected) column equals sum of applicable category payouts');
-    // veh3: 950 (standard) + 0 (10W) + 1500 (6W extra) = 2450
-    assert.strictEqual(res4.totalProjectedIncentive, 950 + 1500, 'Total projected must equal standard + 6W extra');
+    // veh3: 10000 (standard) + 0 (10W) + 1500 (6W extra) = 11500
+    assert.strictEqual(res4.totalProjectedIncentive, 10000 + 1500, 'Total projected must equal standard + 6W extra');
     // veh6: 808 (standard) + 0 (10W) + 1425 (6W extra) = 2233
     assert.strictEqual(res6.totalProjectedIncentive, 808 + 1425, 'Total projected must equal standard + 6W extra');
     // veh7: 0 (standard) + 170 (10W extra) + 0 = 170
     assert.strictEqual(res7.totalProjectedIncentive, 170, 'Total projected must equal 10W extra');
-    // veh1: 570 (standard) + 0 + 0 = 570
-    assert.strictEqual(res2.totalProjectedIncentive, 570, 'Total projected must equal standard');
+    // veh1: 6000 (standard) + 0 + 0 = 6000
+    assert.strictEqual(res2.totalProjectedIncentive, 6000, 'Total projected must equal standard');
     console.log('✅ PASSED Test 12: Total (Projected) accurately sums only eligible categories\n');
 
     // -------------------------------------------------------------------------
@@ -526,7 +532,7 @@ async function runTests() {
 
     const res13 = await evaluateVehicleIncentiveEligibility(veh1, TEST_MONTH, TEST_YEAR);
     assert.strictEqual(res13.qualifyingTripsCount, 6, 'Qualifying trips count must remain 6 despite duplicate entry');
-    assert.strictEqual(res13.standardIncentive.amount, 570, 'Standard incentive must remain 570, not double-counted to 665');
+    assert.strictEqual(res13.standardIncentive.amount, 6000, 'Standard incentive must remain 6000, not double-counted to 7000');
     console.log('✅ PASSED Test 13: Duplicate invoice references do not double-count trips or amounts\n');
 
     // -------------------------------------------------------------------------
@@ -544,7 +550,7 @@ async function runTests() {
     await ownerCol.updateOne({ "Truck No": veh1 }, { $set: { "Dedicated Type": "Dedicated" } });
     const res14b = await evaluateVehicleIncentiveEligibility(veh1, TEST_MONTH, TEST_YEAR);
     assert.strictEqual(res14b.standardIncentive.eligible, true, 'Must become eligible again when re-marked Dedicated');
-    assert.strictEqual(res14b.standardIncentive.amount, 570, 'Standard incentive must return to 570');
+    assert.strictEqual(res14b.standardIncentive.amount, 6000, 'Standard incentive must return to 6000');
     console.log('✅ PASSED Test 14: Dynamic recalculation operates correctly upon master data edit\n');
 
     // -------------------------------------------------------------------------
@@ -598,14 +604,14 @@ async function runTests() {
     assert.strictEqual(res16Short.isDedicated, true, '4-digit vehicle must be recognized as Dedicated via full registration in Party Master');
     assert.strictEqual(res16Short.qualifyingTripsCount, 6, 'Qualifying trips count for 4-digit vehicle must be 6');
     assert.strictEqual(res16Short.standardIncentive.eligible, true, 'Standard incentive must be eligible');
-    assert.strictEqual(res16Short.standardIncentive.amount, 570, 'Standard incentive amount must be 570 (9.5% of 6000)');
+    assert.strictEqual(res16Short.standardIncentive.amount, 6000, 'Standard incentive amount must be 6000 (100% of 6000 Bill Freight)');
 
     // B: Evaluation via full registration (as queried when starting from Party Master)
     const res16Full = await evaluateVehicleIncentiveEligibility(vehFull16, TEST_MONTH, TEST_YEAR);
     assert.strictEqual(res16Full.isDedicated, true, 'Full registration must find trips logged with 4-digit vehicle in cement register');
     assert.strictEqual(res16Full.qualifyingTripsCount, 6, 'Qualifying trips count for full registration must find all 6 trips');
     assert.strictEqual(res16Full.standardIncentive.eligible, true, 'Standard incentive must be eligible');
-    assert.strictEqual(res16Full.standardIncentive.amount, 570, 'Standard incentive amount must be 570');
+    assert.strictEqual(res16Full.standardIncentive.amount, 6000, 'Standard incentive amount must be 6000');
     console.log('✅ PASSED Test 16: Bidirectional 4-digit/full registration matching operates accurately\n');
 
     console.log('========================================================================');

@@ -364,6 +364,12 @@ router.get('/previous-month-dues', async (req, res) => {
       }
 
       previousMonthDues[vKey] = balanceDue;
+      if (vKey.length >= 4) {
+        const s4 = vKey.slice(-4);
+        if (previousMonthDues[s4] === undefined) {
+          previousMonthDues[s4] = balanceDue;
+        }
+      }
     });
 
     res.json({
@@ -602,17 +608,29 @@ router.get('/full-year', async (req, res) => {
     const { getCreditorKeyForVehicleOrParty } = require('./freightCreditorGstRoutes');
     const { evaluateVehicleIncentiveEligibility } = require('../utils/incentiveEligibilityManager');
 
+    const targetVehList = [normTargetVeh];
+    if (normTargetVeh.length >= 4) {
+      targetVehList.push(normTargetVeh.slice(-4));
+    }
+
+    const vRegexList = [new RegExp(`^\\s*${normTargetVeh}\\s*$`, 'i')];
+    if (normTargetVeh.length >= 4) {
+      const s4 = normTargetVeh.slice(-4);
+      vRegexList.push(new RegExp(`^\\s*${s4}\\s*$`, 'i'));
+      vRegexList.push(new RegExp(`${s4}\\s*$`, 'i'));
+    }
+
     // 1. Fetch contacts, settings, saved manual entries, breakdown, credit vouchers, and bank book freight payments in parallel
     const [allOwnerDocs, allTruckDocs, savedPartyPayments, settingsDoc, savedGstBreakdowns, creditVoucherDocs, allFreightDocs] = await Promise.all([
       ownerCol.find({}).toArray(),
       truckCol.find({}).toArray(),
       PartyPayment.find({
-        vehicleNo: normTargetVeh,
+        vehicleNo: { $in: targetVehList },
         year: { $in: [startYear, endYear] }
       }).lean(),
       settingsCol.findOne({ key: 'projected_deductions' }),
       FreightCreditorGstBreakdown.find({
-        vehicleNo: { $regex: new RegExp(`^\\s*${normTargetVeh}\\s*$`, 'i') },
+        vehicleNo: { $in: vRegexList },
         $or: [
           { fy: fyStr },
           { fy: fullFy },
@@ -621,7 +639,7 @@ router.get('/full-year', async (req, res) => {
       }).lean(),
       Voucher.find({
         voucherType: 'CREDIT',
-        vehicleNumber: { $regex: new RegExp(`^\\s*${normTargetVeh}\\s*$`, 'i') }
+        vehicleNumber: { $in: vRegexList }
       }).lean().catch(() => []),
       AccountDetail.find({
         ledgerName: { $regex: /^freight payment$/i }
@@ -635,7 +653,8 @@ router.get('/full-year', async (req, res) => {
     const findContact = (docs) => {
       for (const d of docs) {
         const v = String(d['Truck No'] || d['Truck No '] || d.truck_no || '').trim().toUpperCase().replace(/\s+/g, '');
-        if (v === normTargetVeh) {
+        const vehMatches = v === normTargetVeh || (v.length >= 4 && normTargetVeh.length >= 4 && (v.endsWith(normTargetVeh) || normTargetVeh.endsWith(v)));
+        if (vehMatches) {
           if (!resolvedOwnerName) {
             resolvedOwnerName = (d['Owner Name'] || d['Owner Name '] || d.owner_name || '').trim();
           }
@@ -676,17 +695,29 @@ router.get('/full-year', async (req, res) => {
     const vRegexStr = strippedVeh.split('').join('[^a-zA-Z0-9]*');
     const vehRegex = new RegExp(`^[^a-zA-Z0-9]*${vRegexStr}[^a-zA-Z0-9]*$`, 'i');
 
-    const cementDocs = await cementCol.find({
-      $or: [
-        { 'VEHICLE NUMBER': vehRegex },
-        { 'VEHICLE NO': vehRegex },
-        { 'VEHICLE NO.': vehRegex },
-        { 'vehicleNumber': vehRegex },
-        { 'Truck No': vehRegex },
-        { 'TRUCK NO': vehRegex },
-        { 'truck_no': vehRegex }
-      ]
-    }).toArray();
+    const vFields = [
+      'VEHICLE NUMBER',
+      'VEHICLE NO',
+      'VEHICLE NO.',
+      'vehicleNumber',
+      'Truck No',
+      'TRUCK NO',
+      'truck_no'
+    ];
+
+    const vOrs = vFields.map(f => ({ [f]: vehRegex }));
+
+    if (strippedVeh.length >= 4) {
+      const s4 = strippedVeh.slice(-4);
+      const s4RegexStr = s4.split('').join('[^a-zA-Z0-9]*');
+      const pure4Regex = new RegExp(`^[^a-zA-Z0-9]*${s4RegexStr}[^a-zA-Z0-9]*$`, 'i');
+      const end4Regex = new RegExp(`${s4RegexStr}[^a-zA-Z0-9]*$`, 'i');
+      [pure4Regex, end4Regex].forEach(r => {
+        vFields.forEach(f => vOrs.push({ [f]: r }));
+      });
+    }
+
+    const cementDocs = await cementCol.find({ $or: vOrs }).toArray();
 
     // Group cement register entries by month & year matching FY_MONTH_DEFS
     const tripsByMonthYear = {};
@@ -807,7 +838,8 @@ router.get('/full-year', async (req, res) => {
           const fdOwner = String(fd.names || '').trim().toUpperCase();
           const targetOwner = String(resolvedOwnerName || '').trim().toUpperCase();
 
-          if (fdVeh && fdVeh === normTargetVeh) {
+          const fdVehMatches = fdVeh === normTargetVeh || (fdVeh.length >= 4 && normTargetVeh.length >= 4 && (fdVeh.endsWith(normTargetVeh) || normTargetVeh.endsWith(fdVeh)));
+          if (fdVeh && fdVehMatches) {
             authoritativePaidToParty += num(fd.withdraw);
           } else if (!fdVeh && targetOwner && fdOwner && (fdOwner === targetOwner || fdOwner.includes(targetOwner) || targetOwner.includes(fdOwner))) {
             authoritativePaidToParty += num(fd.withdraw);
@@ -822,7 +854,8 @@ router.get('/full-year', async (req, res) => {
         if (cvDate) {
           if (cvDate.getMonth() + 1 === m && cvDate.getFullYear() === y) {
             const cvVeh = String(cv.vehicleNumber || '').trim().toUpperCase().replace(/\s+/g, '');
-            if (cvVeh === normTargetVeh) {
+            const cvVehMatches = cvVeh === normTargetVeh || (cvVeh.length >= 4 && normTargetVeh.length >= 4 && (cvVeh.endsWith(normTargetVeh) || normTargetVeh.endsWith(cvVeh)));
+            if (cvVehMatches) {
               authoritativeCreditRefund += num(cv.amount);
             }
           }
@@ -1035,17 +1068,15 @@ router.get('/full-year', async (req, res) => {
       let nvclIncentive = 0;
       if (saved.extra10WIncentive !== undefined && saved.extra10WIncentive !== null) {
         nvclIncentive = Number(saved.extra10WIncentive);
-      } else if (saved.nvclIncentive !== undefined && saved.nvclIncentive !== null) {
-        nvclIncentive = Number(saved.nvclIncentive);
       } else if (hasActivity && monthTrips.length > 0) {
         try {
           const eligRes = await evaluateVehicleIncentiveEligibility(normTargetVeh, m, y);
-          if (eligRes?.extra10WheelIncentive?.amount !== undefined) {
+          if (eligRes?.wheelType === '10WH' && eligRes?.extra10WheelIncentive?.amount !== undefined) {
             nvclIncentive = eligRes.extra10WheelIncentive.amount || 0;
-          } else if (eligRes?.extra10W !== undefined) {
+          } else if (eligRes?.wheelType === '10WH' && eligRes?.extra10W !== undefined) {
             nvclIncentive = eligRes.extra10W || 0;
-          } else if (eligRes?.standardIncentive?.nvclAmount) {
-            nvclIncentive = eligRes.standardIncentive.nvclAmount;
+          } else {
+            nvclIncentive = 0;
           }
         } catch (err) {
           console.warn(`[partyPayment] Error evaluating incentive for ${normTargetVeh} ${m}/${y}:`, err.message);

@@ -8,7 +8,8 @@ const {
   normalizeWheelType,
   getStandardTripThreshold,
   getBillFreight,
-  getPartyFreight
+  getPartyFreight,
+  getCanonicalTruckNo
 } = require('../utils/incentiveEligibilityManager');
 
 function num(v) {
@@ -19,7 +20,7 @@ function num(v) {
 
 function normVeh(v) {
   if (!v) return '';
-  return String(v).replace(/\s+/g, '').toUpperCase();
+  return getCanonicalTruckNo(v);
 }
 
 function parseDate(val) {
@@ -217,9 +218,13 @@ async function computeCandidateIncentives(candidateMonths, cementCol, incStateCo
       const partyFreight = getPartyFreight(row, entry.contact);
       const sourceFreight = entry.isAtoa ? billFreight : partyFreight;
 
-      let standardRate = 0.095;
-      if (!entry.isAtoa && (entry.wheelNorm === '6WH' || entry.wheelNorm === '10WH')) {
-        standardRate = 0.085;
+      let standardRate = 1.0;
+      if (!entry.isAtoa) {
+        if (entry.wheelNorm === '6WH' || entry.wheelNorm === '10WH') {
+          standardRate = 0.085;
+        } else {
+          standardRate = 0.095;
+        }
       }
       const tripStandardIncentive = sourceFreight * standardRate;
 
@@ -230,12 +235,11 @@ async function computeCandidateIncentives(candidateMonths, cementCol, incStateCo
       }
 
       // Rule 2: 10W Extra Incentive (from 1st qualifying trip if 10WH + ATOA/MKT + SO + NT, STO disallowed)
-      const manualW10 = num(row['10W EXTRA 8.5%']);
       const isSto = String(row['Bill Type'] || row.billType || '').trim().toUpperCase() === 'STO';
-      if (entry.wheelNorm === '10WH' && entry.isEligibleRel && !isSto && (isInvoiceSoAndNt(row) || manualW10 > 0)) {
-        const extra10Base = entry.isAtoa ? billFreight : partyFreight;
-        entry.extra10W += extra10Base * 0.085;
+      if (entry.wheelNorm === '10WH' && entry.isEligibleRel && !isSto && isInvoiceSoAndNt(row)) {
+        entry.qualifying10WTripCount = (entry.qualifying10WTripCount || 0) + 1;
       }
+      entry.totalBase = (entry.totalBase || 0) + sourceFreight;
 
       // Rule 3: 6W Extra Incentive (15% if 6WH + ATOA/MKT, checked against >= 6 trips threshold)
       if (entry.wheelNorm === '6WH' && entry.isEligibleRel) {
@@ -263,9 +267,14 @@ async function computeCandidateIncentives(candidateMonths, cementCol, incStateCo
       }
 
       // Rule 2: 10-Wheel Extra Incentive requires NO minimum trip threshold (eligible from trip 1)
+      if (t.wheelNorm === '10WH' && (t.qualifying10WTripCount || 0) >= 1) {
+        t.extra10W = Math.round((t.totalBase || 0) * 0.085);
+      } else {
+        t.extra10W = 0;
+      }
 
       const nvlNvclTotal = Math.round(t.nvl.amt) + Math.round(t.nvcl.amt);
-      const totalFinal = nvlNvclTotal + Math.round(t.extra10W) + Math.round(t.extra6W);
+      const totalFinal = nvlNvclTotal + t.extra10W + Math.round(t.extra6W);
       const tNo = normVeh(t.truckNo);
       if (tNo) {
         projectedMap[tNo] = totalFinal;
@@ -582,7 +591,8 @@ router.get('/party-tds', async (req, res) => {
         const owner = contact ? (contact['Owner Name '] || contact['Owner Name'] || contact.owner_name || '') : '';
         const normW = normalizeWheelType(row['WHEEL'] || dbWheel || '');
         const isDed = isDedicatedVehicle(contact);
-        const isEligibleRel = isAtoaOrMkt(contact);
+        const rawCust = contact ? (contact['TYPE OF CUSTOMER '] || contact.custType || contact.type_of_customer || '') : '';
+        const isAtoa = String(rawCust).trim().toUpperCase().startsWith('ATO');
 
         byTruck[truck] = {
           ownerName: (row['OWNER NAME'] || owner || vehToOwner[truck] || '').trim(),
@@ -591,11 +601,14 @@ router.get('/party-tds', async (req, res) => {
           wheelNorm: normW,
           isDedicated: isDed,
           isEligibleRel,
+          isAtoa,
+          contact,
           tripsCount: 0,
           seenInvoices: new Set(),
           nvl: { amt: 0 },
           nvcl: { amt: 0 },
           extra10W: 0,
+          extra6WPotential: 0,
           extra6W: 0
         };
       }
@@ -611,29 +624,36 @@ router.get('/party-tds', async (req, res) => {
       }
 
       const cat = classifyCementRow(row);
-      const mt = num(row['MT']);
-      const billing = num(row['BILLING']);
-      const orgFreight = billing * mt;
-      const baseIncentive = orgFreight * 0.095;
+      const billFreight = getBillFreight(row);
+      const partyFreight = getPartyFreight(row, entry.contact);
+      const sourceFreight = entry.isAtoa ? billFreight : partyFreight;
+
+      let standardRate = 1.0;
+      if (!entry.isAtoa) {
+        if (entry.wheelNorm === '6WH' || entry.wheelNorm === '10WH') {
+          standardRate = 0.085;
+        } else {
+          standardRate = 0.095;
+        }
+      }
+      const tripStandardIncentive = sourceFreight * standardRate;
 
       if (cat === 'NVL') {
-        entry.nvl.amt += baseIncentive;
+        entry.nvl.amt += tripStandardIncentive;
       } else {
-        entry.nvcl.amt += baseIncentive;
+        entry.nvcl.amt += tripStandardIncentive;
       }
 
       // Rule 2: 10W Extra Incentive (from 1st qualifying trip if 10WH + ATOA/MKT + SO + NT, STO disallowed)
-      const manualW10 = num(row['10W EXTRA 8.5%']);
       const isSto = String(row['Bill Type'] || row.billType || '').trim().toUpperCase() === 'STO';
-      if (entry.wheelNorm === '10WH' && entry.isEligibleRel && !isSto && (isInvoiceSoAndNt(row) || manualW10 > 0)) {
-        const extra10Base = entry.isAtoa ? orgFreight : (entry.partyFreight || (orgFreight * 0.95));
-        entry.extra10W += extra10Base * 0.085;
+      entry.totalBase = (entry.totalBase || 0) + sourceFreight;
+      if (entry.wheelNorm === '10WH' && entry.isEligibleRel && !isSto && isInvoiceSoAndNt(row)) {
+        entry.qualifying10WTripCount = (entry.qualifying10WTripCount || 0) + 1;
       }
 
       // Rule 3: 6W Extra Incentive (15% if 6WH + ATOA/MKT, checked against >= 6 trips threshold)
       if (entry.wheelNorm === '6WH' && entry.isEligibleRel) {
-        const extra6Base = entry.isAtoa ? orgFreight : (entry.partyFreight || (orgFreight * 0.95));
-        entry.extra6W += extra6Base * 0.15;
+        entry.extra6WPotential = (entry.extra6WPotential || 0) + sourceFreight * 0.15;
       }
     }
 
@@ -650,14 +670,21 @@ router.get('/party-tds', async (req, res) => {
 
       // Rule 3: 6-Wheel Extra Incentive requires >= 6 trips
       const is6WEligible = t.wheelNorm === '6WH' && t.isEligibleRel && t.tripsCount >= 6;
-      if (!is6WEligible) {
+      if (is6WEligible) {
+        t.extra6W = Math.round(t.extra6WPotential || 0);
+      } else {
         t.extra6W = 0;
       }
 
       // Rule 2: 10-Wheel Extra Incentive requires NO minimum trip threshold (eligible from trip 1)
+      if (t.wheelNorm === '10WH' && (t.qualifying10WTripCount || 0) >= 1) {
+        t.extra10W = Math.round((t.totalBase || 0) * 0.085);
+      } else {
+        t.extra10W = 0;
+      }
 
       const nvlNvclTotal = Math.round(t.nvl.amt) + Math.round(t.nvcl.amt);
-      const totalFinal = nvlNvclTotal + Math.round(t.extra10W) + Math.round(t.extra6W);
+      const totalFinal = nvlNvclTotal + t.extra10W + Math.round(t.extra6W);
       const tNo = normVeh(t.truckNo);
       if (tNo) {
         vehicleIncentives[tNo] = (vehicleIncentives[tNo] || 0) + totalFinal;

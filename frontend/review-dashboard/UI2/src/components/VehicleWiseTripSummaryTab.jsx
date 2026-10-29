@@ -178,14 +178,16 @@ export default function VehicleWiseTripSummaryTab({
     fetchReportData();
   }, [fetchReportData]);
 
-  // Real-time synchronization on Cement Register and Cashbook updates
+  // Real-time synchronization on Cement Register, Cashbook, and Trip Summary updates
   useEffect(() => {
     const handler = () => fetchReportData();
     socket.on('cementUpdates', handler);
     socket.on('mainCashbookUpdates', handler);
+    socket.on('tripSummaryUpdated', handler);
     return () => {
       socket.off('cementUpdates', handler);
       socket.off('mainCashbookUpdates', handler);
+      socket.off('tripSummaryUpdated', handler);
     };
   }, [fetchReportData]);
 

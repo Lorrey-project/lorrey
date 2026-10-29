@@ -197,8 +197,24 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
 
   // 1. Fetch live cement_register entries to calculate Basic (Curr M) = Gross Freight (95% Payable)
   const cementCol = mongoose.connection.useDb('cement_register').collection('entries');
+  const vRegexList = [];
+  vehicles.forEach(v => {
+    const stripped = v.replace(/[^a-zA-Z0-9]/g, '');
+    const regStr = stripped.split('').join('[^a-zA-Z0-9]*');
+    vRegexList.push(new RegExp(`^[^a-zA-Z0-9]*${regStr}[^a-zA-Z0-9]*$`, 'i'));
+    if (stripped.length >= 4) {
+      const s4 = stripped.slice(-4);
+      const s4Str = s4.split('').join('[^a-zA-Z0-9]*');
+      vRegexList.push(new RegExp(`^[^a-zA-Z0-9]*${s4Str}[^a-zA-Z0-9]*$`, 'i'));
+    }
+  });
+
   const cementDocs = await cementCol.find({
-    'VEHICLE NUMBER': { $in: vehicles }
+    $or: [
+      { 'VEHICLE NUMBER': { $in: vRegexList } },
+      { 'VEHICLE NO': { $in: vRegexList } },
+      { 'vehicleNumber': { $in: vRegexList } }
+    ]
   }).toArray();
 
   const filteredEntries = cementDocs.filter(e => {
@@ -219,8 +235,13 @@ async function computeCreditorBreakdown(creditorKey, m, y, rawFy) {
   });
 
   filteredEntries.forEach(row => {
-    const v = (row['VEHICLE NUMBER'] || '').trim().toUpperCase().replace(/\s+/g, '');
-    if (vehicleGrossFreightMap[v] === undefined) return;
+    const rawV = (row['VEHICLE NUMBER'] || row['VEHICLE NO'] || '').trim().toUpperCase().replace(/[^a-zA-Z0-9]/g, '');
+    const matchedVeh = vehicles.find(v => {
+      const cleanV = v.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      return cleanV === rawV || (cleanV.length >= 4 && rawV.length >= 4 && (cleanV.endsWith(rawV) || rawV.endsWith(cleanV)));
+    });
+    if (!matchedVeh) return;
+    const v = matchedVeh;
 
     const amt = parseFloat(row['BILLING @ 95% (PARTY PAYABLE)']) ||
                 parseFloat(row['BILLING ER 95%']) ||
@@ -602,7 +623,7 @@ async function getCreditorKeyForVehicleOrParty(vehicleNo, partyOwnerName) {
   if (normVeh) {
     for (const cKey of creditorKeys) {
       const vehicles = await getVehiclesForCreditor(cKey);
-      if (vehicles.includes(normVeh)) {
+      if (vehicles.some(v => v === normVeh || (v.length >= 4 && normVeh.length >= 4 && (v.endsWith(normVeh) || normVeh.endsWith(v))))) {
         return cKey;
       }
     }

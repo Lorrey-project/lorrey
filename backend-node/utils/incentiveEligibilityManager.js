@@ -29,6 +29,34 @@ function normVeh(v) {
   return String(v).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 }
 
+function getCanonicalTruckNo(val) {
+  if (val === undefined || val === null) return '';
+  const rawStr = String(val).trim();
+  const str = rawStr.toUpperCase();
+  const clean = str.replace(/[^A-Z0-9]/g, '');
+  if (!clean) return rawStr;
+
+  // 1. Pure 3 or 4 digit truck number (e.g. "6016", "0800", "0034", "9375")
+  if (/^\d{3,4}$/.test(clean)) {
+    return clean;
+  }
+
+  // 2. Standard Indian vehicle registration (e.g. "WB33C6016", "WB-39-B-8879", "NL01K2373", "KA32D2548", "JH10BY9023")
+  const regMatch = clean.match(/^[A-Z]{2}\d{1,2}[A-Z]{0,3}(\d{1,4})$/);
+  if (regMatch) {
+    const digits = regMatch[1];
+    return digits.length < 4 ? digits.padStart(4, '0') : digits;
+  }
+
+  // 3. Fallback: if string ends with 4 digits and has leading alphanumeric plate pattern
+  const end4Match = clean.match(/^[A-Z0-9]+?(\d{4})$/);
+  if (end4Match && clean.length <= 12) {
+    return end4Match[1];
+  }
+
+  return rawStr;
+}
+
 const MONTH_NAMES = [
   'january', 'february', 'march', 'april', 'may', 'june',
   'july', 'august', 'september', 'october', 'november', 'december'
@@ -129,14 +157,13 @@ function isAtoaOrMkt(doc) {
 }
 
 /**
- * Checks whether an invoice entry satisfies BOTH:
- * 1. Invoice Type = SO (not STO, not Freight, etc.)
- * 2. Invoice Type classification = NT
+ * Checks whether an invoice entry qualifies for 10WH Extra incentive:
+ * 1. Eligible Bill Types: SO and NT only, as recorded in Cement Register.
+ * 2. STO trips must NEVER qualify for 10WH Extra.
  */
-function isInvoiceSoAndNt(entry) {
+function isInvoiceSoOrNt(entry) {
   if (!entry) return false;
 
-  // 1. Check Invoice Type = SO
   const rawBillType = String(
     entry["Bill Type"] ??
     entry["BILL TYPE"] ??
@@ -146,15 +173,32 @@ function isInvoiceSoAndNt(entry) {
     ""
   ).trim().toUpperCase();
 
-  // STO is explicitly disallowed
+  // STO is explicitly disallowed - must NEVER qualify
   if (rawBillType === "STO" || rawBillType.includes("STOCK")) {
     return false;
   }
-  if (rawBillType !== "SO" && !rawBillType.includes("SALES")) {
+
+  // Check if Bill Type is SO or NT
+  if (
+    rawBillType === "SO" ||
+    rawBillType.includes("SALES") ||
+    rawBillType === "NT" ||
+    rawBillType.includes("NON-TRADE") ||
+    rawBillType.includes("NON TRADE")
+  ) {
+    return true;
+  }
+
+  // Explicit non-SO/NT bill types in Cement Register must NEVER qualify
+  if (
+    rawBillType === "FREIGHT" ||
+    rawBillType === "TAX INVOICE" ||
+    rawBillType === "TAX"
+  ) {
     return false;
   }
 
-  // 2. Check NT classification
+  // Secondary checks ONLY if Bill Type was not specified
   const isNtFlag = entry._is_nt_invoice === true || entry._is_nt_invoice === "true";
   const sourceNtFlag = entry._source_nt_unloading === true || entry._source_nt_unloading === "true";
 
@@ -172,21 +216,21 @@ function isInvoiceSoAndNt(entry) {
   }
 
   const hasNtDetails = Boolean(
-    (entry.nt_details && (entry.nt_details.unloading_charges || entry.nt_details.unloadingCharges)) ||
-    (entry['10W EXTRA 8.5%'] && parseFloat(String(entry['10W EXTRA 8.5%'])) > 0) ||
-    (entry['10W EXTRA 8'] && (entry['10W EXTRA 8']['5%'] || entry['10W EXTRA 8']['5']))
+    entry.nt_details && (entry.nt_details.unloading_charges || entry.nt_details.unloadingCharges)
   );
 
-  // Word boundary regex for NT / Non-Trade to avoid false positives on words like "CEMENT", "ENTERPRISE", "PAYMENT", etc.
   const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
   const classStr = String(entry.classification || entry.category || entry.invoice_type_classification || "").trim();
   const isClassNt = ntWordRegex.test(classStr);
+  const isClassSo = /\bSO\b|\bSALES\b/i.test(classStr);
 
   const unloadingNote = String(entry["UNLOADING STATUS NOTE"] || entry["UNLOADING STATUS"] || entry.notes || "").trim();
   const isNoteNt = ntWordRegex.test(unloadingNote);
 
-  return isNtFlag || sourceNtFlag || hasNtDetails || isClassNt || hasExtraUl || isNoteNt;
+  return isNtFlag || sourceNtFlag || hasNtDetails || isClassNt || isClassSo || hasExtraUl || isNoteNt;
 }
+
+const isInvoiceSoAndNt = isInvoiceSoOrNt;
 
 /**
  * Required qualifying completed trips for standard incentive by wheel type:
@@ -347,6 +391,12 @@ async function getVehicleMonthlyTripsData(vehicleNumber, targetMonth, targetYear
     }
 
     if (rowMonth !== targetMonth || rowYear !== targetYear) continue;
+
+    const now = new Date();
+    const isOngoing = (targetMonth === (now.getMonth() + 1) && targetYear === now.getFullYear());
+    if (isOngoing && cal && cal.day > now.getDate()) {
+      continue;
+    }
 
     // 3. Exclude incomplete, dummy, or invalid records
     if (row.isDummy === true || row._isDummy === true || row._source === 'auto_dummy') continue;
@@ -623,23 +673,61 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
   let extra6WNvlAmount = 0;
   let extra6WNvclAmount = 0;
 
-  // Standard rate:
-  // ATOA: 9.5% on Bill Freight
-  // MKT: 12W/14W: 9.5% on Party Rate | 6W/10W: 8.5% on Party Rate
-  let standardRate = 0.095;
-  if (!isAtoa && (normWheel === '6WH' || normWheel === '10WH')) {
-    standardRate = 0.085;
+  // Authoritative standard incentive calculation rules (Sections 1 - 4):
+  // 1. ATOA (14W, 12W, 10W, 6WH):
+  //    Commission = 0%
+  //    Sum of Amt = SUM OF ORG Billing Amt (100% of Bill Freight)
+  // 2. MKT / MKTA / OWN (14W and 12W):
+  //    Commission = 9.5%
+  //    Sum of Amt = SUM OF ORG FREIGHT * 9.5 / 100 (9.5% of Party Freight)
+  // 3. MKT / MKTA / OWN (10WH):
+  //    Commission = 8.5%
+  //    Sum of Amt = SUM OF ORG FREIGHT * 8.5 / 100 (8.5% of Party Freight)
+  // 4. MKT / MKTA / OWN (6WH):
+  //    Commission = 8.5%
+  //    Sum of Amt = SUM OF ORG FREIGHT * 8.5 / 100 (8.5% of Party Freight)
+  let standardRate = 0;
+  let standardCommissionRate = 0;
+  if (isAtoa) {
+    standardRate = 1.0;
+    standardCommissionRate = 0;
+  } else {
+    // MKT / MKTA / OWN
+    if (normWheel === '10WH' || normWheel === '6WH') {
+      standardRate = 0.085;
+      standardCommissionRate = 0.085;
+    } else {
+      // 14W, 12W and other MKT
+      standardRate = 0.095;
+      standardCommissionRate = 0.095;
+    }
   }
+
+  let totalNvlBase = 0;
+  let totalNvclBase = 0;
 
   for (const trip of qualifyingTrips) {
     const tripBillFreight = getBillFreight(trip);
     const tripPartyFreight = getPartyFreight(trip, contact);
     const sourceFreight = isAtoa ? tripBillFreight : tripPartyFreight;
-    const site = String(trip["SITE"] || trip.site || "").toUpperCase();
-    const billType = String(trip["Bill Type"] || trip.billType || "").toUpperCase();
-    const isAtoTrip = trip._is_ato === true || trip._is_ato === 'true' || site === 'NVL' || billType === 'NT';
+    const site = String(trip["SITE"] || trip.site || "").toUpperCase().trim();
+    const billType = String(trip["Bill Type"] || trip.billType || "").toUpperCase().trim();
+    let isAtoTrip = false;
+    if (site === 'NVL') isAtoTrip = true;
+    else if (site === 'NVCL') isAtoTrip = false;
+    else if (trip._is_ato === true || trip._is_ato === 'true') isAtoTrip = true;
+    else if (trip._is_ato === false || trip._is_ato === 'false') isAtoTrip = false;
+    else if (billType === 'NT') isAtoTrip = true;
+    else if (billType === 'STO' || billType === 'SO') isAtoTrip = false;
+    else isAtoTrip = isAtoa;
 
-    // Standard incentive calculation (only if eligible)
+    if (isAtoTrip) {
+      totalNvlBase += sourceFreight;
+    } else {
+      totalNvclBase += sourceFreight;
+    }
+
+    // Standard incentive calculation (only if eligible: dedicated + trips >= threshold)
     if (standardEligible) {
       const tripAmt = sourceFreight * standardRate;
       if (isAtoTrip) {
@@ -649,43 +737,36 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
       }
       standardIncentiveAmount += tripAmt;
     }
+  }
 
-    // 10W Extra incentive: 8.5% of Bill Freight (ATOA) or Party Rate (MKT)
-    // Only qualifying SO+NT trips contribute
-    if (extra10WEligible && isInvoiceSoAndNt(trip)) {
-      const extra10Base = isAtoa ? tripBillFreight : tripPartyFreight;
-      const trip10WAmt = extra10Base * 0.085;
-      extra10WAmount += trip10WAmt;
-      if (isAtoTrip) {
-        extra10WNvlAmount += trip10WAmt;
-      } else {
-        extra10WNvclAmount += trip10WAmt;
-      }
-    }
+  // Authoritative Calculation Formulas:
+  // 10WH Extra: Combine NVL and NVCL source amounts first, then calculate 8.5%
+  // Eligibility: normWheel === '10WH' && qualifyingSoNtTripsCount >= 1
+  if (extra10WEligible) {
+    const combined10WBase = totalNvlBase + totalNvclBase;
+    extra10WAmount = Math.round(combined10WBase * 0.085);
+    extra10WNvlAmount = Math.round(totalNvlBase * 0.085);
+    extra10WNvclAmount = extra10WAmount - extra10WNvlAmount;
+  } else {
+    extra10WAmount = 0;
+    extra10WNvlAmount = 0;
+    extra10WNvclAmount = 0;
+  }
 
-    // 6W Extra incentive: 15% of Bill Freight (ATOA) or Party Rate (MKT)
-    // Requires >= 6 qualifying trips
-    if (extra6WEligible) {
-      const extra6Base = isAtoa ? tripBillFreight : tripPartyFreight;
-      const trip6WAmt = extra6Base * 0.15;
-      extra6WAmount += trip6WAmt;
-      if (isAtoTrip) {
-        extra6WNvlAmount += trip6WAmt;
-      } else {
-        extra6WNvclAmount += trip6WAmt;
-      }
-    }
+  if (extra6WEligible) {
+    const combined6WBase = totalNvlBase + totalNvclBase;
+    extra6WAmount = Math.round(combined6WBase * 0.15);
+    extra6WNvlAmount = Math.round(totalNvlBase * 0.15);
+    extra6WNvclAmount = extra6WAmount - extra6WNvlAmount;
+  } else {
+    extra6WAmount = 0;
+    extra6WNvlAmount = 0;
+    extra6WNvclAmount = 0;
   }
 
   standardIncentiveAmount = Math.round(standardIncentiveAmount);
   standardNvlAmount = Math.round(standardNvlAmount);
   standardNvclAmount = Math.round(standardNvclAmount);
-  extra10WAmount = Math.round(extra10WAmount);
-  extra10WNvlAmount = Math.round(extra10WNvlAmount);
-  extra10WNvclAmount = Math.round(extra10WNvclAmount);
-  extra6WAmount = Math.round(extra6WAmount);
-  extra6WNvlAmount = Math.round(extra6WNvlAmount);
-  extra6WNvclAmount = Math.round(extra6WNvclAmount);
 
   const totalProjected = standardIncentiveAmount + extra10WAmount + extra6WAmount;
 
@@ -707,6 +788,8 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
       completedTrips: calculatedTripCount,
       isDedicated,
       rate: standardRate,
+      commissionRate: standardCommissionRate,
+      baseFreightType: isAtoa ? 'Original Billing Amount' : 'Original Freight',
       amount: standardIncentiveAmount,
       nvlAmount: standardNvlAmount,
       nvclAmount: standardNvclAmount,
@@ -724,13 +807,14 @@ async function evaluateVehicleIncentiveEligibility(vehicleNumber, monthInput, ye
     extra6WheelIncentive: {
       eligible: extra6WEligible,
       requiredTrips: 6,
-      completedTrips: qualifyingCount,
+      completedTrips: calculatedTripCount,
       rate: 0.15,
       amount: extra6WAmount,
       nvlAmount: extra6WNvlAmount,
       nvclAmount: extra6WNvclAmount,
       reason: extra6WReason
     },
+    isEligible: Boolean(standardEligible || extra10WEligible || extra6WEligible),
     totalProjectedIncentive: totalProjected,
     evaluatedAt: new Date()
   };
@@ -767,12 +851,14 @@ async function getMonthlyIncentiveEligibilities(monthInput, yearInput) {
 
   const allVehs = new Set();
   ownerDocs.forEach(d => {
-    const v = normVeh(d["Truck No"] || d["Truck No "] || d.truck_no);
-    if (v && v.length >= 4) allVehs.add(v);
+    const rawV = d["Truck No"] || d["Truck No "] || d.truck_no;
+    const v = getCanonicalTruckNo(rawV) || normVeh(rawV);
+    if (v && v.length >= 3) allVehs.add(v);
   });
   truckDocs.forEach(d => {
-    const v = normVeh(d["Truck No"] || d["Truck No "] || d.truck_no);
-    if (v && v.length >= 4) allVehs.add(v);
+    const rawV = d["Truck No"] || d["Truck No "] || d.truck_no;
+    const v = getCanonicalTruckNo(rawV) || normVeh(rawV);
+    if (v && v.length >= 3) allVehs.add(v);
   });
 
   const activeEntries = await entriesCol.find({
@@ -785,8 +871,9 @@ async function getMonthlyIncentiveEligibilities(monthInput, yearInput) {
   }).toArray();
 
   activeEntries.forEach(e => {
-    const v = normVeh(e["VEHICLE NUMBER"] || e["VEHICLE NO"] || e["VEHICLE NO."] || e.vehicleNumber || e["Truck No"]);
-    if (v && v.length >= 4) allVehs.add(v);
+    const rawV = e["VEHICLE NUMBER"] || e["VEHICLE NO"] || e["VEHICLE NO."] || e.vehicleNumber || e["Truck No"];
+    const v = getCanonicalTruckNo(rawV) || normVeh(rawV);
+    if (v && v.length >= 3) allVehs.add(v);
   });
 
   const resultMap = {};
@@ -857,6 +944,7 @@ module.exports = {
   isDedicatedVehicle,
   isAtoaOrMkt,
   isInvoiceSoAndNt,
+  isInvoiceSoOrNt,
   getStandardTripThreshold,
   resolveMonthYear,
   findPartyMasterContact,
@@ -865,5 +953,6 @@ module.exports = {
   getMonthlyIncentiveEligibilities,
   hookCheckIncentiveEligibility,
   getBillFreight,
-  getPartyFreight
+  getPartyFreight,
+  getCanonicalTruckNo
 };

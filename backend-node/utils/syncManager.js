@@ -721,9 +721,26 @@ async function pushToRegister(invoiceId, overrides) {
     const tdsAmount = amount > 0 ? fmt2(amount * tdsPercent) : 0;
     const balance = fmt2(hsdLtr - fuelRequired);
     const pctAdv = amount > 0 ? fmt2(((advance + hsdAmount) / amount) * 100) : 0;
-    const dedicated = isATO ? fmt2(billingAmt * 0.095) : (effectiveComm !== null ? fmt2(billing * (1 - effectiveComm) * num(mt) * 0.085) : 0);
+    // Dedicated: ATOA = 100% of Billing Amount (0% commission deduction)
+    // Non-ATOA (MKT): 14W/12W = 9.5% on Party Freight; 10W/6W = 8.5% on Party Freight
+    let dedicatedRate = 0.095;
+    if (wheel.startsWith("10") || wheel.startsWith("6")) {
+      dedicatedRate = 0.085;
+    }
+    const dedicated = isATO ? fmt2(billingAmt * 1.0) : (amount > 0 ? fmt2(amount * dedicatedRate) : 0);
+
+    // 10WH Extra: Eligible Bill Types: SO and NT only. STO trips must NEVER qualify!
+    const upperBillType = String(billType || "").trim().toUpperCase();
+    const isStoTrip = upperBillType === "STO" || upperBillType.includes("STOCK") || hasStO;
+    const isSoOrNtTrip = !isStoTrip && (
+      upperBillType === "SO" ||
+      upperBillType.includes("SALES") ||
+      upperBillType === "NT" ||
+      upperBillType.includes("NON-TRADE") ||
+      upperBillType.includes("NON TRADE")
+    );
     const extra10Base = isATO ? billingAmt : amount;
-    const tenWExtra = (!hasStO && wheel.startsWith("10")) ? fmt2(extra10Base * 0.085) : 0;
+    const tenWExtra = (isSoOrNtTrip && wheel.startsWith("10")) ? fmt2(extra10Base * 0.085) : 0;
 
     // ── Deductions & Net Amount Calculation ──────────────────────────────
     const existingGpsDev = num(existing?.["GPS Deviation Charges"] || existing?.["GPS DEVIATION CHARGES"] || 0);

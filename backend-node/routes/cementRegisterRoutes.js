@@ -9,6 +9,7 @@ const {
   evaluateVehicleIncentiveEligibility,
   getMonthlyIncentiveEligibilities
 } = require("../utils/incentiveEligibilityManager");
+const { hookSyncVehicleTripSummary } = require("../utils/vehicleTripSummaryManager");
 const mongoose = require("mongoose");
 const { ObjectId } = require("mongodb");
 const auth = require("../middleware/authMiddleware");
@@ -180,17 +181,30 @@ router.get("/", async (req, res) => {
       const stripped = req.query.vehicle.replace(/[^a-zA-Z0-9]/g, '');
       const regexStr = stripped.split('').join('[^a-zA-Z0-9]*');
       const vRegex = new RegExp(`^[^a-zA-Z0-9]*${regexStr}[^a-zA-Z0-9]*$`, 'i');
-      andConditions.push({
-        $or: [
-          { "VEHICLE NUMBER": vRegex },
-          { "VEHICLE NO": vRegex },
-          { "VEHICLE NO.": vRegex },
-          { "vehicleNumber": vRegex },
-          { "Truck No": vRegex },
-          { "TRUCK NO": vRegex },
-          { "truck_no": vRegex }
-        ]
-      });
+
+      const vFields = [
+        "VEHICLE NUMBER",
+        "VEHICLE NO",
+        "VEHICLE NO.",
+        "vehicleNumber",
+        "Truck No",
+        "TRUCK NO",
+        "truck_no"
+      ];
+
+      const vOrs = vFields.map(f => ({ [f]: vRegex }));
+
+      if (stripped.length >= 4) {
+        const s4 = stripped.slice(-4);
+        const s4RegexStr = s4.split('').join('[^a-zA-Z0-9]*');
+        const pure4Regex = new RegExp(`^[^a-zA-Z0-9]*${s4RegexStr}[^a-zA-Z0-9]*$`, 'i');
+        const end4Regex = new RegExp(`${s4RegexStr}[^a-zA-Z0-9]*$`, 'i');
+        [pure4Regex, end4Regex].forEach(r => {
+          vFields.forEach(f => vOrs.push({ [f]: r }));
+        });
+      }
+
+      andConditions.push({ $or: vOrs });
     }
 
     if (req.query.owner && !req.query.vehicle) {
@@ -317,24 +331,31 @@ router.get("/", async (req, res) => {
       const o = String(entry["OWNER NAME"] || entry["PARTY NAME"] || "").trim().toUpperCase();
 
       // Find raw contact doc: 1. Exact Owner + Vehicle, 2. Vehicle alone, 3. Owner alone
+      const isVehMatch = (cv, targetV) => {
+        if (!cv || !targetV) return false;
+        if (cv === targetV) return true;
+        if (cv.length >= 4 && targetV.length >= 4 && (cv.endsWith(targetV) || targetV.endsWith(cv))) return true;
+        return false;
+      };
+
       let matchedDoc = null;
       if (o && v) {
         matchedDoc = combinedContacts.find(c => {
           const cv = normVeh(c['Truck No'] || c['Truck No '] || c.truck_no || c.vehicleNo || c['Vehicle No'] || c['Vehicle Number'] || c['Contact No.(Truck No.)'] || c['Contact No\\.(Truck No\\.)']);
           const co = (c['Owner Name'] || c['Owner Name '] || c.owner_name || c.ownerName || '').trim().toUpperCase();
-          return cv === v && co === o;
+          return isVehMatch(cv, v) && (co === o || co.includes(o) || o.includes(co));
         });
       }
       if (!matchedDoc && v) {
         matchedDoc = combinedContacts.find(c => {
           const cv = normVeh(c['Truck No'] || c['Truck No '] || c.truck_no || c.vehicleNo || c['Vehicle No'] || c['Vehicle Number'] || c['Contact No.(Truck No.)'] || c['Contact No\\.(Truck No\\.)']);
-          return cv === v;
+          return isVehMatch(cv, v);
         });
       }
       if (!matchedDoc && o) {
         matchedDoc = combinedContacts.find(c => {
           const co = (c['Owner Name'] || c['Owner Name '] || c.owner_name || c.ownerName || '').trim().toUpperCase();
-          return co === o;
+          return co === o || co.includes(o) || o.includes(co);
         });
       }
 
@@ -939,6 +960,7 @@ router.post("/", auth, cementValidationRules, validateCement, async (req, res) =
     io.emit('cementUpdates', { action: 'create', entry: { _id: result.insertedId, ...req.body } });
     hookCheckMktTripsFromEntry(req.body).catch(e => console.warn('[mktCommission] Hook error:', e.message));
     hookCheckIncentiveEligibility(req.body).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
+    hookSyncVehicleTripSummary(req.body).catch(e => console.warn('[vehicleTripSummary] Hook error:', e.message));
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -959,6 +981,7 @@ router.post("/bulk", auth, async (req, res) => {
     io.emit('cementUpdates', { action: 'bulkCreate', count: result.insertedCount });
     hookCheckMktTripsFromEntry(docs).catch(e => console.warn('[mktCommission] Hook error:', e.message));
     hookCheckIncentiveEligibility(docs).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
+    hookSyncVehicleTripSummary(docs).catch(e => console.warn('[vehicleTripSummary] Hook error:', e.message));
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -1031,6 +1054,7 @@ router.put("/bulk-update", auth, async (req, res) => {
     const changedDocs = updates.map(u => u.changes);
     hookCheckMktTripsFromEntry(changedDocs).catch(e => console.warn('[mktCommission] Hook error:', e.message));
     hookCheckIncentiveEligibility(changedDocs).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
+    hookSyncVehicleTripSummary(changedDocs).catch(e => console.warn('[vehicleTripSummary] Hook error:', e.message));
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1192,6 +1216,8 @@ router.delete("/by-period", auth, async (req, res) => {
     const io = getIO();
     io.emit("cementUpdates", { action: "bulkDeleteByPeriod", month, year });
 
+    hookSyncVehicleTripSummary({ month, year }).catch(e => console.warn('[vehicleTripSummary] Hook error:', e.message));
+
     res.json({ success: true, deletedCount: result.deletedCount });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1234,6 +1260,7 @@ router.delete("/bulk-delete", auth, async (req, res) => {
     if (toDeleteDocs && toDeleteDocs.length > 0) {
       hookCheckMktTripsFromEntry(toDeleteDocs).catch(e => console.warn('[mktCommission] Hook error:', e.message));
       hookCheckIncentiveEligibility(toDeleteDocs).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
+      hookSyncVehicleTripSummary(toDeleteDocs).catch(e => console.warn('[vehicleTripSummary] Hook error:', e.message));
     }
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1293,6 +1320,7 @@ router.put("/:id", auth, cementValidationRules, validateCement, async (req, res)
     io.emit('cementUpdates', { action: 'update', entry: result });
     hookCheckMktTripsFromEntry(result).catch(e => console.warn('[mktCommission] Hook error:', e.message));
     hookCheckIncentiveEligibility(result).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
+    hookSyncVehicleTripSummary(result).catch(e => console.warn('[vehicleTripSummary] Hook error:', e.message));
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -1313,6 +1341,7 @@ router.delete("/:id", auth, adminOnly, async (req, res) => {
     if (existingDoc) {
       hookCheckMktTripsFromEntry(existingDoc).catch(e => console.warn('[mktCommission] Hook error:', e.message));
       hookCheckIncentiveEligibility(existingDoc).catch(e => console.warn('[incentiveEligibility] Hook error:', e.message));
+      hookSyncVehicleTripSummary(existingDoc).catch(e => console.warn('[vehicleTripSummary] Hook error:', e.message));
     }
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

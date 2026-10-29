@@ -6,6 +6,12 @@ const router = express.Router();
 const Invoice = require("../models/Invoice");
 const { getBillRegisterData, parseDate, normalizeSite, MONTH_NAMES } = require("../utils/billRegisterHelper");
 const { getCheckBookBalance } = require("../utils/checkBookHelper");
+const {
+  calculateAndPersistVehicleTripSummary,
+  getAllRegisteredVehiclesDirectory,
+  findMatchingContact,
+  getCanonicalTruckNo
+} = require("../utils/vehicleTripSummaryManager");
 
 function getCementCol() {
   return mongoose.connection.useDb("cement_register").collection("entries");
@@ -671,344 +677,11 @@ router.all("/extend-eway-validity", auth, async (req, res) => {
 });
 
 // ── GET /daily-summary/vehicle-trip-summary ──────────────────────────────────────────
-// Single Source of Truth: Cement Register (cement_register.entries)
+// Single Source of Truth: Cement Register & MongoDB Persistence
 router.get("/vehicle-trip-summary", auth, async (req, res) => {
   try {
-    const { date, fy, month } = req.query;
-
-    // 1. Determine Financial Year bounds
-    let startYear = 2026;
-    if (fy && fy !== "ALL") {
-      const parts = String(fy).replace(/^FY\s*/i, "").split("-");
-      let sy = parseInt(parts[0], 10);
-      if (sy < 100) sy += 2000;
-      if (!isNaN(sy)) startYear = sy;
-    } else if (date && date !== "ALL") {
-      const dParts = String(date).split(/[\/\-\.]/);
-      if (dParts.length === 3) {
-        let yr = parseInt(dParts[0], 10);
-        let mo = parseInt(dParts[1], 10);
-        if (dParts[0].length <= 2 && dParts[2].length >= 4) {
-          yr = parseInt(dParts[2], 10);
-          mo = parseInt(dParts[1], 10);
-        }
-        startYear = mo >= 4 ? yr : yr - 1;
-      }
-    }
-
-    const monthNamesArray = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    let targetMonthName = month && month !== "ALL" ? month : "September";
-    let mIdx = monthNamesArray.findIndex(m => m.toLowerCase() === String(targetMonthName).toLowerCase());
-    if (mIdx === -1) mIdx = 8; // default September
-    const monthInt = mIdx + 1; // 1-12
-    const targetYear = mIdx < 3 ? startYear + 1 : startYear;
-    const daysInMonth = new Date(targetYear, monthInt, 0).getDate();
-
-    // 2. Build filter for Cement Register
-    let cementFilter = {};
-    if (date && date !== "ALL") {
-      const patterns = getDatePatterns(date);
-      if (monthInt && targetYear) {
-        cementFilter = {
-          $and: [
-            {
-              $or: [
-                { "LOADING DT": { $in: patterns } },
-                { "LOADING DATE": { $in: patterns } }
-              ]
-            },
-            {
-              $or: [
-                { month: { $in: [monthInt, String(monthInt)] }, year: { $in: [targetYear, String(targetYear)] } },
-                { month: { $exists: false } },
-                { month: null }
-              ]
-            }
-          ]
-        };
-      } else {
-        cementFilter = {
-          $or: [
-            { "LOADING DT": { $in: patterns } },
-            { "LOADING DATE": { $in: patterns } }
-          ]
-        };
-      }
-    } else {
-      cementFilter = {
-        $or: [
-          { month: monthInt, year: targetYear },
-          { month: String(monthInt), year: String(targetYear) }
-        ]
-      };
-    }
-
-    const col = getCementCol();
-    const rawDocs = await col.find(cementFilter).toArray();
-
-    // 3. Authoritative Party Master Registered Vehicles Directory
-    const registeredVehicles = await getAllRegisteredVehicles();
-    const totalRegisteredVehicles = registeredVehicles.length;
-
-    const truckContactMap = {};
-    registeredVehicles.forEach(c => {
-      truckContactMap[c.normKey] = {
-        vehType: c.wheel || "",
-        custType: c.custType || "",
-        owner: c.ownerName || "",
-        dedicatedType: c.dedicatedType || ""
-      };
-    });
-
-    // 4. Process and deduplicate records strictly by unique MongoDB _id
-    const now = new Date();
-    const isCurrentMonth = (targetYear === now.getFullYear() && monthInt === (now.getMonth() + 1));
-    const maxDayAllowed = isCurrentMonth ? now.getDate() : daysInMonth;
-
-    const seenTripIds = new Set();
-    const vehMap = {};
-    const daysArray = [];
-    for (let i = 1; i <= daysInMonth; i++) {
-      daysArray.push(String(i).padStart(2, "0"));
-    }
-
-    rawDocs.forEach(row => {
-      const id = String(row._id);
-      if (seenTripIds.has(id)) return;
-      seenTripIds.add(id);
-
-      const rawVeh = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "";
-      const vehClean = String(rawVeh).trim().toUpperCase();
-      const normKey = vehClean.replace(/[^A-Z0-9]/g, "");
-      // Skip empty or dummy rows (e.g. non-vehicle strings < 5 characters)
-      if (!normKey || normKey.length < 5) return;
-
-      const loadDateRaw = row["LOADING DT"] || row["LOADING DATE"] || "";
-      let dayNum = null;
-      if (loadDateRaw) {
-        const parts = String(loadDateRaw).trim().split(/[\/\-\.]/);
-        if (parts.length === 3) {
-          if (parts[0].length === 4) {
-            dayNum = parseInt(parts[2], 10);
-          } else {
-            dayNum = parseInt(parts[0], 10);
-          }
-        }
-      }
-
-      // If current month, do not include future days
-      if (isCurrentMonth && dayNum !== null && dayNum > maxDayAllowed) return;
-
-      const mtVal = parseNum(row["MT"]);
-      const billAmt = parseNum(row["Billing Amount"] || row["BILLING AMOUNT"] || row["AMOUNT"]);
-      const invNo = String(row["INVOICE NO"] || row["INVOICE NO."] || "").trim();
-      const advVal = parseNum(row["ADVANCE"] || row["LOADING ADVANCE"]);
-      const hsdLtr = parseNum(row["HSD (LTR)"] || row["QTY (LTR)"]);
-      const hsdAmt = parseNum(row["HSD AMOUNT"]);
-
-      // Exclude pure adjustment / diesel deduction rows with no MT, no amount, and no invoice
-      if (mtVal === 0 && billAmt === 0 && !invNo) return;
-
-      if (!vehMap[normKey]) {
-        const contact = truckContactMap[normKey] || {};
-        let rawWheel = String(row["WHEEL"] || contact.vehType || "").trim().toUpperCase();
-        let wheelKey = "OTHER";
-        if (rawWheel.includes("10")) wheelKey = "10W";
-        else if (rawWheel.includes("12")) wheelKey = "12W";
-        else if (rawWheel.includes("14")) wheelKey = "14W";
-        else if (rawWheel.includes("6")) wheelKey = "6W";
-
-        const rawDedicated = String(row["DEDICATED"] || "").trim();
-        const hasDedicatedAmt = rawDedicated && rawDedicated !== "-" && parseNum(rawDedicated) > 0;
-        const isDedicatedParty = String(contact.dedicatedType || "").trim().toLowerCase() === "dedicated";
-
-        // Standard MT capacity mapping: 6W -> 13 MT, 10W -> 19 MT, 12W -> 25 MT, 14W -> 30 MT
-        let standardCapMT = 0;
-        let formattedWheelType = rawWheel || "OTHER";
-        if (wheelKey === "6W" || rawWheel.includes("6")) {
-          standardCapMT = 13;
-          formattedWheelType = "6-Wheel";
-        } else if (wheelKey === "10W" || rawWheel.includes("10")) {
-          standardCapMT = 19;
-          formattedWheelType = "10-Wheel";
-        } else if (wheelKey === "12W" || rawWheel.includes("12")) {
-          standardCapMT = 25;
-          formattedWheelType = "12-Wheel";
-        } else if (wheelKey === "14W" || rawWheel.includes("14")) {
-          standardCapMT = 30;
-          formattedWheelType = "14-Wheel";
-        }
-
-        vehMap[normKey] = {
-          vehicleNo: vehClean,
-          normKey,
-          wheel: formattedWheelType,
-          wheelType: formattedWheelType,
-          wheelPattern: wheelKey,
-          capacityMT: standardCapMT,
-          capacity: standardCapMT > 0 ? `${standardCapMT} MT` : "-",
-          isDedicatedInitial: Boolean(hasDedicatedAmt || isDedicatedParty),
-          contactOwner: (row["OWNER NAME"] || contact.owner || "").trim(),
-          distinctMTs: new Set(),
-          dailyMT: {},
-          dailyTrips: {},
-          dailyTripDocs: {},
-          totalRawInvoices: 0,
-          totalMT: 0,
-          totalTrips: 0,
-          totalAdvance: 0,
-          totalBillingAmt: 0,
-          totalDieselLtr: 0,
-          totalDieselAmt: 0,
-          trips: []
-        };
-      }
-
-      const v = vehMap[normKey];
-      if (mtVal > 0) {
-        v.distinctMTs.add(mtVal);
-        v.totalMT += mtVal;
-      }
-      v.totalAdvance += advVal;
-      v.totalBillingAmt += billAmt;
-      v.totalDieselLtr += hsdLtr;
-      v.totalDieselAmt += hsdAmt;
-      v.trips.push(row);
-      v.totalRawInvoices += 1;
-
-      if (dayNum !== null && dayNum >= 1 && dayNum <= daysInMonth) {
-        const dayStr = String(dayNum).padStart(2, "0");
-        v.dailyMT[dayStr] = (v.dailyMT[dayStr] || 0) + mtVal;
-        if (!v.dailyTripDocs[dayStr]) v.dailyTripDocs[dayStr] = [];
-        v.dailyTripDocs[dayStr].push(row);
-      }
-    });
-
-    // 5. Finalize vehicle patterns, date-wise trip counts (Date MT / Capacity), and totals
-    const vehicleList = Object.values(vehMap).map(v => {
-      const mtArray = Array.from(v.distinctMTs).sort((a, b) => a - b);
-      let loadingPatternStr = "";
-      if (mtArray.length > 0) {
-        loadingPatternStr = mtArray.map(m => `${m}MT`).join(" / ");
-      } else {
-        if (v.wheelPattern === "10W") loadingPatternStr = "19MT";
-        else if (v.wheelPattern === "12W") loadingPatternStr = "25MT";
-        else if (v.wheelPattern === "14W") loadingPatternStr = "30MT";
-        else if (v.wheelPattern === "6W") loadingPatternStr = "13MT";
-        else loadingPatternStr = "-";
-      }
-
-      const standardCap = v.capacityMT > 0 ? v.capacityMT : 0;
-      const totalLoadedMT = Math.round(v.totalMT * 100) / 100;
-
-      // Date-Wise Trip Count Calculation: TRIP COUNT = TOTAL MT LOADED ON THAT DATE / VEHICLE MT CAPACITY
-      const computedDailyTrips = {};
-      const computedDailyMT = {};
-      daysArray.forEach(dayStr => {
-        const dayMT = Math.round((v.dailyMT[dayStr] || 0) * 100) / 100;
-        computedDailyMT[dayStr] = dayMT;
-        if (dayMT > 0) {
-          if (standardCap > 0) {
-            const rawTrips = dayMT / standardCap;
-            computedDailyTrips[dayStr] = Math.round(rawTrips * 100) / 100;
-          } else {
-            computedDailyTrips[dayStr] = (v.dailyTripDocs[dayStr] || []).length;
-          }
-        } else {
-          computedDailyTrips[dayStr] = 0;
-        }
-      });
-
-      // Overall Trip Count: Total MT / Capacity
-      let calculatedTotalTrips = 0;
-      if (standardCap > 0) {
-        const rawTotalTrips = totalLoadedMT / standardCap;
-        calculatedTotalTrips = Math.round(rawTotalTrips * 100) / 100;
-      } else {
-        calculatedTotalTrips = v.totalRawInvoices;
-      }
-
-      const meetsRaftarThreshold = (v.wheelPattern === "10W" && calculatedTotalTrips >= 8) ||
-        ((v.wheelPattern === "12W" || v.wheelPattern === "14W") && calculatedTotalTrips >= 6);
-      const isDedicated = v.isDedicatedInitial || meetsRaftarThreshold;
-
-      return {
-        ...v,
-        capacityMT: standardCap,
-        capacity: standardCap > 0 ? `${standardCap} MT` : "-",
-        distinctMTs: Array.from(v.distinctMTs),
-        totalMT: totalLoadedMT,
-        totalTrips: calculatedTotalTrips,
-        dailyMT: computedDailyMT,
-        dailyTrips: computedDailyTrips,
-        totalAdvance: Math.round(v.totalAdvance * 100) / 100,
-        totalBillingAmt: Math.round(v.totalBillingAmt * 100) / 100,
-        totalDieselLtr: Math.round(v.totalDieselLtr * 100) / 100,
-        totalDieselAmt: Math.round(v.totalDieselAmt * 100) / 100,
-        loadingPattern: loadingPatternStr,
-        isDedicated,
-        meetsRaftarThreshold,
-        classification: isDedicated ? "DEDICATED (Both Side)" : "SINGLE SIDE (Non-Dedicated)"
-      };
-    });
-
-    // Sort stably: 10W -> 12W -> 14W -> 6W -> OTHER, then alphabetical
-    const patternSortOrder = { "10W": 1, "12W": 2, "14W": 3, "6W": 4, "OTHER": 5 };
-    vehicleList.sort((a, b) => {
-      const pA = patternSortOrder[a.wheelPattern] || 99;
-      const pB = patternSortOrder[b.wheelPattern] || 99;
-      if (pA !== pB) return pA - pB;
-      return a.vehicleNo.localeCompare(b.vehicleNo);
-    });
-
-    const byPattern = { "10W": [], "12W": [], "14W": [], "6W": [], "OTHER": [] };
-    vehicleList.forEach(v => {
-      if (byPattern[v.wheelPattern]) byPattern[v.wheelPattern].push(v);
-      else byPattern["OTHER"].push(v);
-    });
-
-    const dayTotals = {};
-    const dayMTTotals = {};
-    daysArray.forEach(d => {
-      dayTotals[d] = 0;
-      dayMTTotals[d] = 0;
-    });
-    let grandTotalTrips = 0;
-    let grandTotalMT = 0;
-    let grandTotalAdvance = 0;
-
-    vehicleList.forEach(v => {
-      grandTotalTrips += v.totalTrips;
-      grandTotalMT += v.totalMT;
-      grandTotalAdvance += v.totalAdvance;
-      daysArray.forEach(d => {
-        dayTotals[d] = Math.round((dayTotals[d] + (v.dailyTrips[d] || 0)) * 100) / 100;
-        dayMTTotals[d] = Math.round((dayMTTotals[d] + (v.dailyMT[d] || 0)) * 100) / 100;
-      });
-    });
-
-    return res.json({
-      success: true,
-      fy: fy || `FY ${startYear}-${String(startYear + 1).slice(-2)}`,
-      month: targetMonthName,
-      year: targetYear,
-      totalDays: daysInMonth,
-      daysArray,
-      selectedDate: date || "ALL",
-      vehicles: vehicleList,
-      byPattern,
-      totals: {
-        totalVehicles: totalRegisteredVehicles,
-        totalRegisteredVehicles,
-        activeVehiclesCount: vehicleList.length,
-        totalTrips: Math.round(grandTotalTrips * 100) / 100,
-        totalMT: Math.round(grandTotalMT * 100) / 100,
-        totalAdvance: Math.round(grandTotalAdvance * 100) / 100,
-        dayTotals,
-        dayMTTotals
-      }
-    });
-
+    const result = await calculateAndPersistVehicleTripSummary(req.query);
+    return res.json(result);
   } catch (err) {
     console.error("[DailySummary] /vehicle-trip-summary error:", err);
     return res.status(500).json({ success: false, error: err.message || "Failed to generate vehicle trip summary" });
@@ -1017,70 +690,13 @@ router.get("/vehicle-trip-summary", auth, async (req, res) => {
 
 // Helper to fetch all registered vehicles from Owner Details MongoDB & Truck Contacts
 async function getAllRegisteredVehicles() {
-  const combinedMap = new Map();
   try {
-    const ownerCol = mongoose.connection.useDb("invoice_system").collection("owner details");
-    const truckCol = mongoose.connection.useDb("invoice_system").collection("Truck Contact Number");
-    const lorreyTruckCol = mongoose.connection.useDb("lorrey").collection("truck_contacts");
-
-    const ownerDocs = await ownerCol.find({}).toArray();
-    const truckDocs = await truckCol.find({}).toArray();
-    let lorreyDocs = [];
-    try {
-      lorreyDocs = await lorreyTruckCol.find({}).toArray();
-    } catch (e) {}
-
-    // 1. Primary: owner details
-    for (const doc of ownerDocs) {
-      const rawNo = (doc["Truck No"] || doc["Truck No "] || doc.truck_no || doc._id.toString()).toString().trim().toUpperCase();
-      const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
-      if (normKey && normKey.length >= 5) {
-        combinedMap.set(normKey, {
-          vehicleNo: rawNo,
-          normKey,
-          ownerName: (doc["Owner Name"] || doc["Owner Name "] || doc.owner_name || doc.owner || "").trim(),
-          wheel: (doc["Type of vehicle"] || doc["Type of vehicle "] || doc.veh_type || doc.wheel || "").trim(),
-          custType: (doc["TYPE OF CUSTOMER "] || doc["TYPE OF CUSTOMER"] || doc.custType || doc.type_of_customer || "").trim(),
-          dedicatedType: (doc["Dedicated Type"] || doc["Dedicated Type "] || doc.dedicated_type || doc.dedicatedType || "").trim()
-        });
-      }
-    }
-
-    // 2. Secondary: invoice_system "Truck Contact Number"
-    for (const doc of truckDocs) {
-      const rawNo = (doc.truck_no || doc["Truck No "] || doc["Truck No"] || doc._id.toString()).toString().trim().toUpperCase();
-      const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
-      if (normKey && normKey.length >= 5 && !combinedMap.has(normKey)) {
-        combinedMap.set(normKey, {
-          vehicleNo: rawNo,
-          normKey,
-          ownerName: (doc["Owner Name "] || doc["Owner Name"] || doc.owner_name || doc.owner || "").trim(),
-          wheel: (doc["Type of vehicle "] || doc["Type of vehicle"] || doc.veh_type || doc.wheel || "").trim(),
-          custType: (doc["TYPE OF CUSTOMER "] || doc["TYPE OF CUSTOMER"] || doc.custType || doc.type_of_customer || "").trim(),
-          dedicatedType: (doc["Dedicated Type"] || doc["Dedicated Type "] || doc.dedicated_type || doc.dedicatedType || "").trim()
-        });
-      }
-    }
-
-    // 3. Fallback: lorrey "truck_contacts"
-    for (const doc of lorreyDocs) {
-      const rawNo = (doc["Truck No "] || doc["Truck No"] || doc.truck_no || "").toString().trim().toUpperCase();
-      const normKey = rawNo.replace(/[^A-Z0-9]/g, "");
-      if (normKey && normKey.length >= 5 && !combinedMap.has(normKey)) {
-        combinedMap.set(normKey, {
-          vehicleNo: rawNo,
-          normKey,
-          ownerName: (doc["Owner Name "] || doc["Owner Name"] || doc.owner_name || doc.owner || "").trim(),
-          wheel: (doc["Type of vehicle "] || doc["Type of vehicle"] || doc.veh_type || doc.wheel || "").trim(),
-          custType: (doc["TYPE OF CUSTOMER "] || doc["TYPE OF CUSTOMER"] || doc.custType || doc.type_of_customer || "").trim(),
-          dedicatedType: (doc["Dedicated Type"] || doc["Dedicated Type "] || doc.dedicated_type || doc.dedicatedType || "").trim()
-        });
-      }
-    }
+    const dir = await getAllRegisteredVehiclesDirectory();
+    return dir.list;
   } catch (err) {
     console.error("[getAllRegisteredVehicles] Error:", err);
+    return [];
   }
-  return Array.from(combinedMap.values());
 }
 
 // ── GET /daily-summary/six-trip-alerts ───────────────────────────────────────
@@ -1140,8 +756,9 @@ router.get("/six-trip-alerts", auth, async (req, res) => {
       });
     }
 
-    // 1. Fetch registered vehicles
-    const registeredVehicles = await getAllRegisteredVehicles();
+    // 1. Fetch registered vehicles directory
+    const dir = await getAllRegisteredVehiclesDirectory();
+    const registeredVehicles = dir.list;
 
     // 2. Fetch cement register records
     const cementCol = getCementCol();
@@ -1165,7 +782,10 @@ router.get("/six-trip-alerts", auth, async (req, res) => {
 
       const rawVeh = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || "";
       const normKey = String(rawVeh).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (!normKey || normKey.length < 5) return;
+      if (!normKey || normKey.length < 3) return;
+
+      const matchedContact = findMatchingContact(normKey, dir, row["OWNER NAME"] || row["PARTY NAME"]);
+      const vehKey = matchedContact ? matchedContact.normKey : normKey;
 
       const mtVal = parseNum(row["MT"]);
       const billAmt = parseNum(row["Billing Amount"] || row["BILLING AMOUNT"] || row["AMOUNT"]);
@@ -1184,8 +804,8 @@ router.get("/six-trip-alerts", auth, async (req, res) => {
       // Strictly evaluate ONLY Day 1 through Day 25!
       if (dObj.day < 1 || dObj.day > 25) return;
 
-      if (!tripsByVeh[normKey]) {
-        tripsByVeh[normKey] = {
+      if (!tripsByVeh[vehKey]) {
+        tripsByVeh[vehKey] = {
           totalMT: 0,
           rawInvoices: 0,
           trips: []
@@ -1193,10 +813,10 @@ router.get("/six-trip-alerts", auth, async (req, res) => {
       }
 
       if (mtVal > 0) {
-        tripsByVeh[normKey].totalMT += mtVal;
+        tripsByVeh[vehKey].totalMT += mtVal;
       }
-      tripsByVeh[normKey].rawInvoices += 1;
-      tripsByVeh[normKey].trips.push(row);
+      tripsByVeh[vehKey].rawInvoices += 1;
+      tripsByVeh[vehKey].trips.push(row);
     });
 
     // 3. Evaluate each registered vehicle
@@ -1280,11 +900,8 @@ router.get("/six-trip-alerts", auth, async (req, res) => {
 //    - Days since eligible: difference in calendar days from waitingPeriodEndDate to TODAY.
 router.get("/vehicle-not-loaded-alerts", auth, async (req, res) => {
   try {
-    const registeredVehicles = await getAllRegisteredVehicles();
-    const regVehMap = new Map();
-    registeredVehicles.forEach(v => {
-      regVehMap.set(v.normKey, v);
-    });
+    const dir = await getAllRegisteredVehiclesDirectory();
+    const regVehMap = dir.byNormKey;
 
     const cementCol = getCementCol();
     const allEntries = await cementCol.find({}, {
@@ -1365,19 +982,22 @@ router.get("/vehicle-not-loaded-alerts", auth, async (req, res) => {
     for (const row of allEntries) {
       const rawVeh = row["VEHICLE NUMBER"] || row["VEHICLE NO"] || row["VEHICLE NO."] || row.vehicleNo || "";
       const normKey = String(rawVeh).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (!normKey || normKey.length < 5) continue;
+      if (!normKey || normKey.length < 3) continue;
 
-      if (!recordsByVeh.has(normKey)) {
-        const reg = regVehMap.get(normKey);
-        recordsByVeh.set(normKey, {
+      const matchedContact = findMatchingContact(normKey, dir, row["OWNER NAME"] || row["PARTY NAME"]);
+      const vehKey = matchedContact ? matchedContact.normKey : normKey;
+
+      if (!recordsByVeh.has(vehKey)) {
+        const reg = matchedContact || regVehMap.get(vehKey);
+        recordsByVeh.set(vehKey, {
           vehicleNo: reg?.vehicleNo || String(rawVeh).trim().toUpperCase(),
-          normKey,
+          normKey: vehKey,
           ownerName: reg?.ownerName || (row["OWNER NAME"] || row["PARTY NAME"] || "").trim(),
           records: []
         });
       }
 
-      const vehGroup = recordsByVeh.get(normKey);
+      const vehGroup = recordsByVeh.get(vehKey);
       if (!vehGroup.ownerName && (row["OWNER NAME"] || row["PARTY NAME"])) {
         vehGroup.ownerName = (row["OWNER NAME"] || row["PARTY NAME"]).trim();
       }

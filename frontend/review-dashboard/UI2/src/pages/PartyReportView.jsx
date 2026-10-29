@@ -675,7 +675,15 @@ export default function PartyReportView({
 
     // ── Wheel-type-specific incentive calculations ───────────────────────────
     const vehicleKey = selectedVehicle || originalRow['VEHICLE NUMBER'] || '';
-    const wheelFromMap = vehicleWheelMap[vehicleKey] || '';
+    const cleanVehKey = String(vehicleKey).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    let wheelFromMap = vehicleWheelMap[vehicleKey] || '';
+    if (!wheelFromMap && cleanVehKey.length >= 4) {
+      const matchedKey = Object.keys(vehicleWheelMap).find(k => {
+        const cleanK = String(k).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+        return cleanK === cleanVehKey || (cleanK.length >= 4 && (cleanK.endsWith(cleanVehKey) || cleanVehKey.endsWith(cleanK)));
+      });
+      if (matchedKey) wheelFromMap = vehicleWheelMap[matchedKey];
+    }
     const wheelFromRow = String(originalRow['WHEEL'] || '').trim();
     const effectiveWheel = (wheelFromMap || wheelFromRow).toUpperCase();
 
@@ -685,10 +693,19 @@ export default function PartyReportView({
     // Count qualifying completed trips in this dataset
     let qualifyingTripCount = 0;
     const seenInvs = new Set();
+    const isVehMatch = (v1, v2) => {
+      if (!v1 || !v2) return false;
+      const c1 = String(v1).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const c2 = String(v2).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      if (c1 === c2) return true;
+      if (c1.length >= 4 && c2.length >= 4 && (c1.endsWith(c2) || c2.endsWith(c1))) return true;
+      return false;
+    };
+
     data.forEach(r => {
       if (r.isDummy === true || r._isDummy === true) return;
       const rVeh = String(r['VEHICLE NUMBER'] || r['VEHICLE NO'] || selectedVehicle || '').trim().toUpperCase();
-      if (vehicleKey && rVeh !== vehicleKey.toUpperCase()) return;
+      if (vehicleKey && !isVehMatch(rVeh, vehicleKey)) return;
       const rInv = String(r['INVOICE NO'] || r['INVOICE NO.'] || '').trim().toUpperCase().replace(/\s+/g, '');
       if (rInv) {
         if (!seenInvs.has(rInv)) {
@@ -744,17 +761,20 @@ export default function PartyReportView({
     // Rule 2: 10-Wheel Extra Incentive (from 1st qualifying trip if 10W + ATOA/MKT + SO + NT, STO disallowed)
     let incentive10WH = 0;
     if (rowIs10Wheel && isAtoaOrMkt) {
-      const stored10W = parseNum(originalRow['10W EXTRA 8.5%'] || originalRow['10WH EXTRA 8.5%'] || originalRow['10W EXTRA 8']);
       const bType = String(originalRow['Bill Type'] || originalRow['BILL TYPE'] || '').trim().toUpperCase();
       const isSto = bType === 'STO' || bType.includes('STOCK');
       const isSo = !isSto && (bType === 'SO' || bType.includes('SALES'));
+      const isNtBill = !isSto && (bType === 'NT' || bType.includes('NON-TRADE') || bType.includes('NON TRADE'));
+      const isExplicitNonSoNt = bType === 'FREIGHT' || bType === 'TAX INVOICE' || bType === 'TAX';
       const ntWordRegex = /\bNT\b|\bNON[-\s]?TRADE\b/i;
-      const isNt = originalRow._is_nt_invoice === true || originalRow._is_nt_invoice === 'true' ||
-                   originalRow._source_nt_unloading === true ||
-                   ntWordRegex.test(String(originalRow.classification || '')) ||
-                   (originalRow['EXTRA UNLOADING'] && parseNum(originalRow['EXTRA UNLOADING']) > 0) ||
-                   ntWordRegex.test(String(originalRow['UNLOADING STATUS NOTE'] || originalRow['UNLOADING STATUS'] || ''));
-      if (!isSto && ((isSo && isNt) || stored10W > 0)) {
+      const isNt = !isSto && !isExplicitNonSoNt && (
+        originalRow._is_nt_invoice === true || originalRow._is_nt_invoice === 'true' ||
+        originalRow._source_nt_unloading === true ||
+        ntWordRegex.test(String(originalRow.classification || '')) ||
+        (originalRow['EXTRA UNLOADING'] && parseNum(originalRow['EXTRA UNLOADING']) > 0) ||
+        ntWordRegex.test(String(originalRow['UNLOADING STATUS NOTE'] || originalRow['UNLOADING STATUS'] || ''))
+      );
+      if (!isSto && (isSo || isNtBill || isNt)) {
         incentive10WH = incentiveBase > 0 ? round2(incentiveBase * 0.085) : 0;
       }
     }
